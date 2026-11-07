@@ -247,8 +247,10 @@ export class PathRecorder {
       else if (radii.length === 3) values = [radii[0], radii[1], radii[2], radii[1]];
       else values = [radii[0], radii[1], radii[2], radii[3]];
     }
-    const max = Math.min(Math.abs(w), Math.abs(h)) / 2;
-    const r = values.map((value) => clamp(value, 0, max));
+    // Scale the specified radii by one factor, as Canvas does; clamping each
+    // radius to half the shorter side first would under-size an asymmetric
+    // corner (a 40 radius on a 20-tall box becomes 20, not 10).
+    const r = values.map((value) => Math.max(0, value));
     const width = Math.abs(w);
     const height = Math.abs(h);
     const scale = Math.min(

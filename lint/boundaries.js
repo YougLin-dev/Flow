@@ -76,15 +76,20 @@ export const noUpwardImport = defineRule({
       upward: "A {{section}} module may not import a {{target}} module ({{source}}).",
       unknown:
         "An import resolved to an unclassified module ({{source}}); classify it in LAYERS and layerOf before importing it.",
+      unclassified:
+        "This source module is not classified in LAYERS; it may not import {{source}} until it is.",
     },
   },
   create(context) {
     const file = toProjectPath(context.cwd, context.filename);
     if (file.endsWith(".test.ts") || file.endsWith(".test.tsx")) return {};
 
+    // Only the app's own modules participate in the layer map; tooling files
+    // outside src/ (vite.config.ts, scripts, lint) do not.
+    if (!file.startsWith("src/")) return {};
+
     const section = layerOf(file);
     const allowed = LAYERS[section];
-    if (!allowed) return {};
 
     /** Reports a relative import that points at a disallowed layer. */
     const check = (node) => {
@@ -101,6 +106,16 @@ export const noUpwardImport = defineRule({
         context.report({
           node: source,
           messageId: "unknown",
+          data: { source: specifier },
+        });
+        return;
+      }
+      // A source module missing from LAYERS may import nothing; otherwise it
+      // would be an unchecked hole in the direction rule.
+      if (!allowed) {
+        context.report({
+          node: source,
+          messageId: "unclassified",
           data: { source: specifier },
         });
         return;

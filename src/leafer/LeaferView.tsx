@@ -305,7 +305,12 @@ export function LeaferView(props: LeaferViewProps) {
 
   const onLeave = (): void => {
     if (!app) return;
-    if (activePointer === "leafer") app.interaction?.pointerCancel();
+    if (activePointer === "leafer") {
+      app.interaction?.pointerCancel();
+      // Leafer does not revert a drag it cancels; persist whatever moved
+      // before the pointer left so the next snapshot cannot snap it back.
+      props.onCommit?.();
+    }
     activePointer = null;
     panning = false;
     pinching = false;
@@ -428,8 +433,10 @@ export function LeaferView(props: LeaferViewProps) {
     suppressPressUntil = Date.now() + 500;
     pinching = false;
     panning = false;
+    const wasEditing = activePointer === "leafer";
     activePointer = null;
     app.interaction?.pointerCancel();
+    if (wasEditing) props.onCommit?.();
   };
 
   // -- drawing ---------------------------------------------------------------

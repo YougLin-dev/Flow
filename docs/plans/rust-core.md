@@ -401,10 +401,12 @@ as the outer table. With a plain `INNER JOIN`, SQLite scanned the document
 index and re-ran the FTS match per node; a 10k-node search took 26 seconds
 instead of 10 milliseconds. Keep the `CROSS JOIN` and its regression test.
 
-The 100k build and all reads are within the targets. Common-term search is
-comfortably inside the interactive range and will still be debounced. File
-open timing at 100k is still to be measured; the reopen test covers
-persistence and schema creation with a small document.
+The 100k build, viewport, scene and bounds reads are within their targets.
+Common-term search sits at roughly 210–270 ms p95 and therefore sometimes
+crosses the 250 ms target; it is debounced, and selective and CJK queries are
+well inside it. File-open, 1,000-node commit and undo timings at 100k are not
+printed by the benchmark yet; the reopen test covers persistence and schema
+creation with a small document.
 
 ## Phases
 
@@ -503,19 +505,26 @@ Windows-host screenshot of the palette and its results. P2 is done.
 
 ## Testing and tooling
 
-- Rust unit tests use temporary directories and a fresh SQLite file per test.
-- Migration tests open an old schema, migrate and verify data/search.
-- Search fixtures include English, Chinese and mixed text; assert 1–2 character
-  CJK behavior explicitly.
-- Mutation tests cover insert, move, bounds, text, delete, edges, undo, redo,
-  nested transactions and large batches.
-- `flow/scene.test.ts` covers viewport diffing, edge reconciliation, the
-  low-zoom card cap and selected-card pinning; `App.test.tsx` covers add,
-  delete, drag-commit and undo through the real keymap.
+- Rust unit tests use `:memory:` databases; the reopen, path-with-spaces and
+  benchmark-seed tests use real files. Every test gets a fresh database.
+- There is no full migration-from-old-schema test yet; `check_legacy_schema`
+  runs on every open and a test proves it rejects a pre-`seq` database even
+  when the old database recorded migration 1.
+- Search fixtures include English, Chinese and mixed text; they assert the
+  1–2 character LIKE fallback, per-term matching for mixed short/long queries,
+  the trigram path, kind filters and a zero limit.
+- Mutation tests cover insert, move, bounds, text and its FTS update, delete
+  with edges, undo, redo and index restoration. Nested transactions and
+  1,000-node batches still lack Rust tests.
+- `flow/scene.test.ts` covers viewport diffing, the low-zoom card cap,
+  selected-card pinning, change-set card creation, pinned connectors and
+  transform-free commits; `App.test.tsx` covers add, delete (through search),
+  selection, panning, zooming and the search palette.
 - The 100k benchmark is an ignored Rust test; `bun run test:bench` runs it and
-  reports open, viewport, search, commit and undo timings. `bun run test:100k`
-  seeds 100k nodes and drives the real desktop host through pan, zoom, search,
-  reveal and Fit, with screenshots under `.nsh/bench/`.
+  reports build, viewport, scene, bounds, selective/common/CJK search timings.
+  It does not print open, commit or undo timings. `bun run test:100k` seeds 100k
+  nodes and drives the real desktop host through pan, zoom, search, reveal and
+  Fit, saving screenshots under `.nsh/bench/` for manual review.
 - TSX integration tests use `nsh test` with the Rust registry; `cargo test`
   covers the native side. `nsh test` runs both the Rust unit tests and the TSX
   tests. `bun run test:host` runs each test file in its own host process and
@@ -557,6 +566,19 @@ Windows-host screenshot of the palette and its results. P2 is done.
 - Whether low-zoom aggregation needs a separate cluster table or can be
   computed from viewport summaries.
 - Whether one writer connection is enough under real editing/search load.
+- SQLite's RTree stores 32-bit floats while nodes use f64. Very large
+  infinite-canvas coordinates will round; decide on a scaled/integer index or
+  another spatial scheme before coordinates approach that precision limit.
+- `node_assets` links are cascaded away with a deleted node but are not part of
+  the undo payload. Capture and restore them when P3 adds asset mutations.
+- The Leafer adapter's snapshot replay is not isolated inside a temporary
+  surface, so alpha masks, erasers, blend copies, pattern gaps and grayscale
+  masks are unsupported until those node types need them (see the adoption
+  debt in `docs/standards.md`).
+- Seeding writes nodes and edges in two transactions. A crash between them
+  leaves a partial demo that is not reseeded because the document is non-empty.
+- Database failures currently reach only `console.error`; surface an error
+  state to the user before release.
 
 ## Rollback
 

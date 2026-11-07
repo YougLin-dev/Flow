@@ -27,6 +27,10 @@ const VIRTUAL_TABLES: &[&str] = &[
 
 pub fn migrate(conn: &DatabaseConnection) -> Result<(), String> {
     create_table(conn, schema_migrations::Entity).map_err(|error| error.to_string())?;
+    // Check on every open, not only while applying migration 1: a P0 database
+    // may already record version 1 and would otherwise pass the version guard
+    // and fail later with a missing `seq` or virtual table.
+    check_legacy_schema(conn).map_err(|error| error.to_string())?;
 
     let applied = schema_migrations::Entity::find()
         .all(conn)
@@ -75,7 +79,6 @@ fn migration_1<C>(conn: &C) -> Result<(), DbErr>
 where
     C: ConnectionTrait,
 {
-    check_legacy_schema(conn)?;
     create_document_tables(conn)?;
     create_virtual_tables(conn)?;
     create_indexes(conn)?;
@@ -189,5 +192,29 @@ where
         Err(DbErr::Custom(
             "the database was created by an older Flow build; delete it and reopen".to_owned(),
         ))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use sea_orm::{ConnectionTrait, Database};
+
+    #[test]
+    fn rejects_a_legacy_nodes_table_even_with_a_version_row() {
+        let conn = Database::connect("sqlite::memory:").expect("open memory database");
+        conn.execute_unprepared(
+            "CREATE TABLE schema_migrations (version INTEGER PRIMARY KEY, applied_at INTEGER NOT NULL)",
+        )
+        .expect("create migrations");
+        conn.execute_unprepared(
+            "INSERT INTO schema_migrations (version, applied_at) VALUES (1, 0)",
+        )
+        .expect("record version");
+        conn.execute_unprepared("CREATE TABLE nodes (id TEXT PRIMARY KEY)")
+            .expect("create legacy nodes");
+
+        let error = migrate(&conn).expect_err("legacy schema must be rejected");
+        assert!(error.contains("older Flow build"), "{error}");
     }
 }

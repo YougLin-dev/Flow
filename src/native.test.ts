@@ -55,6 +55,30 @@ test("stores, searches and undoes nodes through the Rust core", async () => {
   document.dispose();
 });
 
+test("clears seeded history so undo cannot remove the demo", async () => {
+  const document = await Document.open(":memory:");
+  await document.insertNodes([
+    {
+      id: "seed",
+      kind: "panel",
+      title: "Seed",
+      body: "",
+      tags: [],
+      x: 0,
+      y: 0,
+      width: 200,
+      height: 84,
+      z: 0,
+    },
+  ]);
+  await document.clearHistory();
+
+  const changes = await document.undo();
+  expect(changes.changed.length).toBe(0);
+  expect(await document.count()).toBe(1);
+  document.dispose();
+});
+
 test("searches short Chinese queries through the Rust boundary", async () => {
   const document = await Document.open(":memory:");
   await document.insertNodes([

@@ -162,7 +162,7 @@ fn empty_bounds() -> Viewport {
     Viewport {
         x: 0.0,
         y: 0.0,
-        width: 1.0,
-        height: 1.0,
+        width: 0.0,
+        height: 0.0,
     }
 }

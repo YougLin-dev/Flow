@@ -52,7 +52,9 @@ editor, camera and input.
 - Database work runs on NSH's blocking pool, then through a handle to one
   dedicated database worker thread. That thread owns the connection, which
   keeps the single-writer design and avoids sending SeaORM's sync Rusqlite
-  connection across threads.
+  connection across threads. The in-memory undo/redo history lives in the same
+  worker and is updated inside each command's job, so history order always
+  matches write order.
 - `FlowPage` opens the document at `host.params.databasePath`, then
   `FLOW_DB_PATH`, then `process.dataDir/flow.db`, falling back to `:memory:`
   in headless tests. `bun run dev` sets `FLOW_DB_PATH` to `.nsh/dev/flow.db`,
@@ -60,6 +62,9 @@ editor, camera and input.
   one environment variable. An empty document is seeded from the demo flow.
 - `FlowScene` is driven from `scene(rect, margin)` snapshots. Drag/resize,
   add, delete and connect each send one command; undo/redo return change sets.
+  The editor disables rotation, skew and flip because a node is stored as an
+  axis-aligned box; gesture commits read that logical box, never transformed
+  bounds.
 - Viewport reads are throttled to 80 ms and capped at low zoom (300/800/2000
   cards); selected cards stay in the scene when they leave the viewport.
   Nodes inside `rect` sort before margin-only nodes so prefetching cannot
@@ -210,10 +215,11 @@ code runs in the headless test engine.
 
 `src/nsh.json` declares `capabilities.network.hosts: []`: the app reads its
 own bundled assets (`asset:` is always allowed) but may reach no remote host.
-NSH denies every capability not listed, so a new integration that fetches or
-loads a remote image must add that host deliberately. Adding the
-`capabilities` key is what changes the app from unrestricted to allow-list;
-keep it in place.
+Its `capabilities.process.env` allow-list contains only `FLOW_DB_PATH`, the
+development and smoke-test database override. NSH denies every capability not
+listed, so a new integration that fetches or loads a remote image must add that
+host deliberately. Adding the `capabilities` key is what changes the app from
+unrestricted to allow-list; keep it in place.
 
 ## Extending
 

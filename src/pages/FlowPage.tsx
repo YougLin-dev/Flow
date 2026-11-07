@@ -61,6 +61,8 @@ export function FlowPage() {
   let zoomFrame = 0;
   let viewportTimer: ReturnType<typeof setTimeout> | null = null;
   let viewportGeneration = 0;
+  let viewportDeferred = false;
+  let cameraGeneration = 0;
   let disposed = false;
   let opening = false;
   let committing = false;
@@ -75,9 +77,15 @@ export function FlowPage() {
 
   // The first fit happens after the document opens; NSH does not take signal
   // writes made inside a draw call, so publish the label on the next frame.
+  // A later zoom publishes its own label directly; this frame must not
+  // overwrite it with the scale it captured earlier.
   const publishZoom = (scale: number): void => {
     cancelAnimationFrame(zoomFrame);
-    zoomFrame = requestAnimationFrame(() => setZoomPercent(Math.round(scale * 100)));
+    const percent = Math.round(scale * 100);
+    zoomFrame = requestAnimationFrame(() => {
+      if (disposed) return;
+      if (Math.round((camera?.scale ?? scale) * 100) === percent) setZoomPercent(percent);
+    });
   };
 
   // The edit box lives in the editor (sky) layer and is positioned from the
@@ -116,46 +124,65 @@ export function FlowPage() {
   const refreshViewport = async (): Promise<void> => {
     const doc = document;
     if (!doc || !scene || disposed) return;
-    // Do not overwrite a card while the editor is dragging it.
-    if (app?.interaction?.dragging) return;
+    // Do not overwrite a card while the editor is dragging it. Remember to
+    // read again when the gesture commits; otherwise the timer is consumed
+    // and newly exposed cards stay missing until the camera moves again.
+    if (app?.interaction?.dragging) {
+      viewportDeferred = true;
+      return;
+    }
 
     const generation = ++viewportGeneration;
     const { rect, margin } = visibleRect();
     try {
       const snapshot = await doc.scene(rect, margin);
       if (disposed || generation !== viewportGeneration || !scene) return;
-      if (app?.interaction?.dragging || snapshot.rev < lastRev) return;
+      if (app?.interaction?.dragging) {
+        viewportDeferred = true;
+        return;
+      }
+      if (snapshot.rev < lastRev) return;
       lastRev = snapshot.rev;
       // At low zoom the viewport can cover tens of thousands of nodes. Keep
       // the card count bounded; selected cards survive the cap.
       const scale = camera?.scale ?? 1;
       const maxCards = scale < 0.15 ? 300 : scale < 0.4 ? 800 : 2_000;
       scene.apply(snapshot, { maxCards });
+      viewportDeferred = false;
       refreshEditor();
     } catch (error) {
       console.error("Flow could not read the viewport", error);
     }
   };
 
-  const fitToDocument = async (announce = true): Promise<void> => {
+  const drainDeferredViewport = (): void => {
+    if (!viewportDeferred || disposed) return;
+    viewportDeferred = false;
+    scheduleViewport();
+  };
+
+  const fitToDocument = async (announce = true, schedule = true): Promise<void> => {
     const doc = document;
     if (!doc || !camera || disposed) return;
+    const generation = cameraGeneration;
     let bounds: Viewport = CONTENT;
     try {
       const documentBounds = await doc.bounds();
-      if (documentBounds.width > 1 || documentBounds.height > 1) {
+      if (documentBounds.width > 0 || documentBounds.height > 0) {
         bounds = documentBounds;
       }
     } catch (error) {
       console.error("Flow could not read the document bounds", error);
     }
-    if (disposed || !camera) return;
+    // A pan or zoom during the bounds read is the newer intent; do not
+    // override it (or re-enable auto-fit) with this stale result.
+    if (disposed || !camera || generation !== cameraGeneration) return;
 
     userCamera = false;
     const scale = camera.fit(bounds, { width: stageWidth, height: stageHeight });
     if (announce) publishZoom(scale);
     refreshEditor();
-    scheduleViewport();
+    if (schedule) scheduleViewport();
   };
 
   const revealNode = async (id: string): Promise<void> => {
@@ -164,6 +191,7 @@ export function FlowPage() {
     try {
       const node = await doc.getNode(id);
       if (!node || disposed || !camera) return;
+      cameraGeneration += 1;
       userCamera = true;
       const scale = camera.fit(
         { x: node.x, y: node.y, width: node.width, height: node.height },
@@ -173,11 +201,23 @@ export function FlowPage() {
       refreshEditor();
       // The viewport moved: wait for the new snapshot before selecting its card.
       await refreshViewport();
-      const card = scene?.card(id);
+      if (disposed || !scene) return;
+      // A newer scheduled read can supersede the awaited one; ensure the hit
+      // exists before selecting so the reveal never depends on that race.
+      if (!scene.card(id)) {
+        scene.applyChangeSet({
+          changed: [node],
+          removed: [],
+          edgesChanged: [],
+          edgesRemoved: [],
+        });
+      }
+      const card = scene.card(id);
       if (!card || disposed) return;
       app?.editor.select([card]);
       syncSelection();
       refreshEditor();
+      scheduleViewport();
     } catch (error) {
       console.error("Flow could not reveal the search result", error);
     }
@@ -213,11 +253,14 @@ export function FlowPage() {
       if ((await opened.count()) === 0 && (await opened.edgeCount()) === 0) {
         await opened.insertNodes(seedNodes());
         await opened.insertEdges(seedEdges());
+        // The demo was not a user action; keep Ctrl+Z for real edits.
+        await opened.clearHistory();
       }
 
       // Fit without publishing the zoom label: tests and users wait on that
-      // label, so it must not appear before the first cards do.
-      await fitToDocument(false);
+      // label, so it must not appear before the first cards do. Skip the
+      // scheduled read too; the direct read below is the first snapshot.
+      await fitToDocument(false, false);
       await refreshViewport();
       if (!disposed) publishZoom(camera?.scale ?? 1);
     } catch (error) {
@@ -232,6 +275,7 @@ export function FlowPage() {
   };
 
   const commitGesture = (): void => {
+    drainDeferredViewport();
     const doc = document;
     if (!doc || !scene || disposed) return;
 
@@ -269,9 +313,11 @@ export function FlowPage() {
 
   const zoomAround = (factor: number, cx: number, cy: number): void => {
     if (!camera) return;
+    cameraGeneration += 1;
     userCamera = true;
     if (camera.zoomAround(factor, cx, cy)) {
       refreshEditor();
+      cancelAnimationFrame(zoomFrame);
       setZoomPercent(Math.round(camera.scale * 100));
       scheduleViewport();
     }
@@ -283,6 +329,7 @@ export function FlowPage() {
 
   const panBy = (dx: number, dy: number): void => {
     if (!camera || searchOpen()) return;
+    cameraGeneration += 1;
     userCamera = true;
     camera.panBy(dx, dy);
     refreshEditor();
@@ -316,14 +363,14 @@ export function FlowPage() {
       try {
         const changes = await doc.insertNodes([input]);
         if (disposed) return;
+        // `applyChanges` creates the card from the change set, so the panel
+        // is selectable even when a capped viewport read would omit it.
         applyChanges(changes);
-        // The new card was not in the viewport snapshot yet, so read it back
-        // before selecting it.
-        await refreshViewport();
         const card = scene?.card(id);
         if (card) app?.editor.select([card]);
         syncSelection();
         refreshEditor();
+        scheduleViewport();
       } catch (error) {
         console.error("Flow could not add a panel", error);
       }
@@ -376,10 +423,12 @@ export function FlowPage() {
       const changes = direction === "undo" ? await doc.undo() : await doc.redo();
       if (disposed) return;
       if (changes.removed.length > 0) app?.editor.cancel();
+      // The change set already restores or removes the affected cards; the
+      // scheduled read only reconciles the rest of the viewport.
       applyChanges(changes);
-      await refreshViewport();
       syncSelection();
       refreshEditor();
+      scheduleViewport();
     } catch (error) {
       console.error(`Flow could not ${direction}`, error);
     }
@@ -447,8 +496,13 @@ export function FlowPage() {
           recolor = flow.recolor.bind(flow);
           editor = nextApp.editor;
           // The flow's cards have no inner text editor; a double click should
-          // not open a group or clear the selection.
+          // not open a group or clear the selection. The document stores only
+          // an axis-aligned box, so rotation, skew and flip must not become
+          // reachable editor gestures: their geometry cannot be persisted.
           delete editor.config.openInner;
+          editor.config.rotateable = false;
+          editor.config.skewable = false;
+          editor.config.flipable = false;
           editor.on("editor.select", syncSelection);
           // Keep the scene at the demo bounds while the document opens; the
           // zoom label is published only after the first real fit.

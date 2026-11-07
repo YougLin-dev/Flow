@@ -61,6 +61,12 @@ test("fails closed on an unclassified target", () => {
   expect(reports[0].messageId).toBe("unknown");
 });
 
+test("fails closed when the importing module is unclassified", () => {
+  const reports = reportsFor("src/unclassified/module.ts", "../components/TitleBar");
+  expect(reports).toHaveLength(1);
+  expect(reports[0].messageId).toBe("unclassified");
+});
+
 test("does not report an allowed import", () => {
   expect(reportsFor("src/pages/FlowPage.tsx", "../components/TitleBar")).toEqual([]);
   expect(reportsFor("src/pages/FlowPage.tsx", "../components")).toEqual([]);

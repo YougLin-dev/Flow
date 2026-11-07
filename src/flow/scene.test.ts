@@ -108,6 +108,67 @@ test("caps a low-zoom snapshot and keeps a selected card", () => {
   app.destroy();
 });
 
+test("does not persist editor transforms the document cannot store", () => {
+  const { app, scene } = appWithScene();
+  scene.apply(snapshot([node("a", 40, 40)]));
+  app.tree.updateLayout();
+
+  const card = scene.card("a");
+  if (!(card instanceof Box)) throw new Error("The card was not built.");
+  card.rotation = 30;
+  card.scaleX = -1;
+  card.skewX = 10;
+  app.tree.updateLayout();
+
+  // Rotation, skew and negative scale are not in the document model; the
+  // committed geometry must stay the card's logical box, not its AABB.
+  expect(scene.commitBounds()).toEqual([]);
+
+  app.destroy();
+});
+
+test("creates a card from a change set the viewport cap did not include", () => {
+  const { app, scene } = appWithScene();
+  scene.apply(snapshot([node("a", 40, 40)]));
+  expect(scene.card("new")).toBeNull();
+
+  scene.applyChangeSet({
+    changed: [node("new", 360, 40)],
+    removed: [],
+    edgesChanged: [],
+    edgesRemoved: [],
+  });
+
+  expect(scene.card("new") instanceof Box).toBe(true);
+  app.destroy();
+});
+
+test("keeps a connector while both endpoints stay selected", () => {
+  const { app, scene } = appWithScene();
+  scene.apply(snapshot([node("a", 40, 40), node("b", 360, 40)], [edge("a-b", "a", "b")]));
+  app.tree.updateLayout();
+
+  const a = scene.card("a");
+  const b = scene.card("b");
+  if (!(a instanceof Box) || !(b instanceof Box)) throw new Error("Cards were not built.");
+  app.editor.select([a, b]);
+
+  // Both cards are pinned even though the snapshot returns neither; their
+  // connector must survive too.
+  scene.apply(snapshot([]));
+  app.tree.updateLayout();
+  expect(scene.card("a") === a).toBe(true);
+  expect(scene.card("b") === b).toBe(true);
+  expect(scene.edgeCount()).toBe(1);
+
+  app.editor.cancel();
+  scene.apply(snapshot([]));
+  app.tree.updateLayout();
+  expect(scene.edgeCount()).toBe(0);
+
+  app.destroy();
+});
+
 test("caps a large viewport snapshot instead of building every card", () => {
   const { app, scene } = appWithScene();
   const nodes = Array.from({ length: 1_000 }, (_, index) => node(`n${index}`, index * 220, 0));

@@ -142,6 +142,22 @@ test("roundRect without radii has square hit corners", () => {
   expect(ctx.isPointInPath(12, 12)).toBe(true);
 });
 
+test("roundRect scales asymmetric radii by one factor", () => {
+  const canvas = new NshCanvasSurface(200, 100, true);
+  const ctx = canvas.context;
+  ctx.hitOnly = true;
+
+  // The 40 radius cannot fit a 20-tall box, so Canvas halves every radius to
+  // 20; a point just inside a 10 radius (which pre-clamping would produce)
+  // must stay outside the 20 radius.
+  ctx.beginPath();
+  ctx.roundRect(10, 10, 100, 20, [40, 0, 0, 0]);
+  ctx.fill();
+
+  expect(ctx.isPointInPath(15, 15)).toBe(false);
+  expect(ctx.isPointInPath(30, 25)).toBe(true);
+});
+
 test("measures text with the context's font", () => {
   const canvas = new NshCanvasSurface(100, 100, false);
   const seen: string[] = [];

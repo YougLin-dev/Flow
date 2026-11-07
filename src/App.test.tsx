@@ -64,6 +64,7 @@ const expectArrowPan = async (arrow: Arrow): Promise<void> => {
 test("shows the flow canvas", async () => {
   const app = await open("./App.tsx");
   await app.waitUntil(() => percentOf(app.texts()) > 0);
+  expect(app.shows("id:flow-canvas")).toBe(true);
   const texts = app.texts();
   expect(texts).toContain("Flow");
   expect(texts).toContain("Leafer engine · NSH");
@@ -95,21 +96,14 @@ test("adds a panel with N and deletes it with Backspace", async () => {
   await app.keyboard.press("backspace");
   await app.waitUntil(() => !app.texts().some((text) => text.includes("card selected")));
   expect(app.texts().some((text) => text.includes("card selected"))).toBe(false);
-});
 
-test("drags a new panel and undoes the move", async () => {
-  const app = await open("./App.tsx");
-  await app.waitUntil(() => percentOf(app.texts()) > 0);
-
-  await app.keyboard.press("n");
-  await app.waitUntil(() => app.texts().some((text) => text.includes("1 card selected")));
-
-  // The new panel is at the canvas centre, so this drag lands on it. Undo
-  // should reverse the move, not the insert: the panel stays selected.
-  await app.drag("id:flow-canvas", { x: 30, y: 20 });
-  await app.keyboard.press("mod+z");
-  await app.waitUntil(() => app.texts().some((text) => text.includes("1 card selected")));
-  expect(app.texts().some((text) => text.includes("1 card selected"))).toBe(true);
+  // The badge clearing only proves the selection reset; search proves the
+  // node is gone from the document and its full-text index.
+  await app.keyboard.press("mod+k");
+  await app.waitUntil(() => app.shows("id:search-input"));
+  await app.type("id:search-input", "New panel");
+  await app.waitUntil(() => app.texts().includes("No cards match"));
+  expect(app.texts()).toContain("No cards match");
 });
 
 test("clears the selection with Escape", async () => {
@@ -283,21 +277,22 @@ test("closes the search palette with Escape", async () => {
 });
 
 test("shows the desktop title bar instead of the brand card", async () => {
-  // Headless iOS has no window; opening as a desktop mounts the title bar.
-  // A browser host keeps its own window, where the brand card stands in.
+  // Headless iOS has no window; the desktop targets mount the title bar. The
+  // Linux host has a title bar too, but no pin control (NSH cannot set a
+  // window level there), so branch on the bar itself, not the pin label.
   const app = await open("./App.tsx", { platform: "windows" });
   await app.waitUntil(() => percentOf(app.texts()) > 0);
 
-  if (app.shows("label:Pin window on top")) {
+  if (app.shows("id:title-bar")) {
     expect(app.shows("id:brand-card")).toBe(false);
     // One wordmark: the title bar replaced the floating brand card.
     expect(app.count("text:Flow")).toBe(1);
 
     // The bar survives the narrowest phone-sized and a wide desktop window.
     await app.setViewport(360, 640);
-    expect(app.shows("label:Pin window on top")).toBe(true);
+    expect(app.shows("id:title-bar")).toBe(true);
     await app.setViewport(1200, 800);
-    expect(app.shows("label:Pin window on top")).toBe(true);
+    expect(app.shows("id:title-bar")).toBe(true);
   } else {
     expect(app.shows("id:brand-card")).toBe(true);
   }
@@ -319,7 +314,7 @@ test("pins and unpins the desktop window", async () => {
   await app.waitUntil(() => app.shows(pin));
 });
 
-test("follows the system appearance", async () => {
+test("repaints when the system appearance changes", async () => {
   const app = await open("./App.tsx");
   await app.waitUntil(() => percentOf(app.texts()) > 0);
 

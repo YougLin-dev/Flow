@@ -39,22 +39,23 @@ same limitation.
 `bun run test:100k` is a real-host smoke, not part of `bun run test`: it seeds
 100,000 nodes into `.nsh/bench/flow-100k.db` through an ignored Rust test,
 points the app at it with `FLOW_DB_PATH`, then pans, zooms, searches for the
-last node, reveals and selects it, fits the document and takes screenshots
-(`flow-100k-reveal.png`, `flow-100k-overview.png`). It proves the whole path
-— RTree viewport reads, card budget, hash sampling and search — against the
-real window; its artifacts are git-ignored. At the Fit scale (~5%) Leafer
-renders no cards because each is only a few pixels tall; the smoke checks the
-6% overview, where sampled cards are visible, instead. A minimum-size or
-cluster representation at very low zoom is still to be designed.
+last node, reveals and selects it, fits the document and saves screenshots
+(`flow-100k-reveal.png`, `flow-100k-overview.png`). It exercises the whole
+path — RTree viewport reads, card budget, hash sampling and search — against
+the real window; review the screenshots manually and treat their artifacts as
+git-ignored evidence. At the Fit scale (~5%) Leafer renders no cards because
+each is only a few pixels tall; the smoke checks the 6% overview, where
+sampled cards are visible, instead. A minimum-size or cluster representation
+at very low zoom is still to be designed.
 
 ## The test levels
 
-| Level       | Where                                                                                                             | What it proves                                                         |
-| ----------- | ----------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------- |
-| Unit        | `leafer/camera.test.ts`, `leafer/nsh-platform.test.ts`, `flow/grid.test.ts`, `flow/data.test.ts`, `store.test.ts` | Pure logic, the canvas adapter and data invariants, no NSH app.        |
-| Native      | `native.test.ts`, Rust tests in `db.rs`, `search.rs`, `viewport.rs`, `scene.rs`                                   | SeaORM schema/persistence, FTS5/RTree plans, commands, edges and undo. |
-| Integration | `leafer/editor.test.ts`, `leafer/culling.test.ts`, `flow/scene.test.ts`                                           | Leafer's real editor and the viewport-driven card/edge reconciliation. |
-| End-to-end  | `App.test.tsx`                                                                                                    | The mounted app: text, presses, drags, keyboard.                       |
+| Level       | Where                                                                                                                                           | What it proves                                                           |
+| ----------- | ----------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------ |
+| Unit        | `leafer/camera.test.ts`, `leafer/nsh-platform.test.ts`, `flow/grid.test.ts`, `flow/data.test.ts`, `flow/database-path.test.ts`, `store.test.ts` | Pure logic, the canvas adapter, path/data invariants and store actions.  |
+| Native      | `native.test.ts`, Rust tests in `db.rs`, `search.rs`, `viewport.rs`                                                                             | SeaORM schema/persistence, FTS5/RTree plans, commands, history and undo. |
+| Integration | `leafer/editor.test.ts`, `leafer/culling.test.ts`, `flow/scene.test.ts`                                                                         | Leafer's real editor and the viewport-driven card/edge reconciliation.   |
+| End-to-end  | `App.test.tsx`                                                                                                                                  | The mounted app: text, presses, drags, keyboard.                         |
 
 Prefer the lowest level that can catch the bug. The adapter tests construct a
 `NshCanvasSurface` directly and inspect recorded ops or replay effects; the
@@ -94,7 +95,7 @@ test("clears the selection with Escape", async () => {
 The canvas is a single NSH element (`testID="flow-canvas"`); its contents are
 not in the view tree. To test scene behaviour, either:
 
-- test the scene and camera directly (`buildScene`, `CanvasCamera`), or
+- test the scene and camera directly (`FlowScene`, `CanvasCamera`), or
 - drive Leafer's editor through the adapter in an integration test, or
 - assert on the app's overlays — selection count, zoom percentage, tool state —
   which reflect the canvas state in the native view tree.
@@ -129,8 +130,11 @@ for drags.
 - `pages/FlowPage.tsx`: through `App.test.tsx` for interaction flows, not
   through unit tests of its closures.
 - `components/SearchPalette.tsx`: through `App.test.tsx` — opening by shortcut
-  and button, typing, filters, clicking a result, Enter, Escape and the camera
-  fit/selection that follows a hit.
+  and button, typing, switching filters, choosing a result by click or Enter,
+  Escape and the selection that follows a hit. Kind filtering itself is
+  asserted through the Rust search tests; the palette's arrow bindings are
+  wired to the visible active row but are not asserted through the native view
+  tree. The real-host 100k smoke exercises the camera reveal.
 - `store.ts`: readers and actions directly in `store.test.ts`, and their page
   wiring through `App.test.tsx`; the signals stay private by design.
 - `lint/boundaries.js`: `lint/boundaries.test.js` covers layer classification,

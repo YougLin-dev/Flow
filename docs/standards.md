@@ -481,12 +481,13 @@ Review)
 
 ## 9. Testing and verification
 
-| Level       | Files                                                                                                                                 | Proves                                                               |
-| ----------- | ------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------- |
-| Unit        | `src/leafer/camera.test.ts`, `src/leafer/nsh-platform.test.ts`, `src/flow/data.test.ts`, `src/flow/grid.test.ts`, `src/store.test.ts` | Pure logic, the adapter, data and store behavior                     |
-| Lint rule   | `lint/boundaries.test.js`                                                                                                             | Layer classification and the rule's upward/unknown reports           |
-| Integration | `src/leafer/editor.test.ts`, `src/leafer/culling.test.ts`, `src/flow/scene.test.ts`                                                   | Leafer editor/culling and the built scene against `NshCanvasSurface` |
-| End-to-end  | `src/App.test.tsx`                                                                                                                    | The mounted app: text, presses, drags, keyboard                      |
+| Level       | Files                                                                                                                                                                   | Proves                                                               |
+| ----------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------- |
+| Unit        | `src/leafer/camera.test.ts`, `src/leafer/nsh-platform.test.ts`, `src/flow/data.test.ts`, `src/flow/database-path.test.ts`, `src/flow/grid.test.ts`, `src/store.test.ts` | Pure logic, the adapter, data, path resolution and store behavior    |
+| Native      | `src/native.test.ts`, Rust tests in `src/native/src/db.rs`, `search.rs`, `viewport.rs`                                                                                  | SeaORM persistence, FTS5/RTree plans, commands, history and search   |
+| Lint rule   | `lint/boundaries.test.js`                                                                                                                                               | Layer classification and the rule's upward/unknown reports           |
+| Integration | `src/leafer/editor.test.ts`, `src/leafer/culling.test.ts`, `src/flow/scene.test.ts`                                                                                     | Leafer editor/culling and the built scene against `NshCanvasSurface` |
+| End-to-end  | `src/App.test.tsx`                                                                                                                                                      | The mounted app: text, presses, drags, keyboard                      |
 
 Tests under `src/` MUST sit beside the subject, import from `nsh/test`, and use
 the lowest level that catches the bug. Tooling tests such as
@@ -652,12 +653,24 @@ be fixed when its file is touched:
 - `src/leafer/platform/recording-context.ts` treats any offscreen `clearRect`
   as a full reset; partial clears are not emulated. Leafer currently clears
   whole offscreen canvases, so this is not observable yet.
+- Snapshot replay applies its recorded `globalCompositeOperation` directly to
+  the destination. Content inside a Leafer temporary canvas (alpha masks,
+  blend copies, erasers) is therefore not isolated from the destination until
+  those features are needed; add a temporary-surface replay before using them.
+- Pattern gap tiles are drawn as the stretched image Leafer supplies, not
+  padded with transparency; `getImageData` on a render canvas, patterned
+  strokes/text and grayscale masks are not implemented. The current scene uses
+  none of them.
 - The workflows still use mutable action tags and pipe NSH installers to a
   shell; the tag/version check is now in `release.yml`. Vendor or checksum the
   installer scripts when CI security is next reviewed.
-- `scripts/package.mjs` builds and uploads installers but no CI job installs,
-  hashes or launches them; packaging changes need a manual smoke test on the
-  target OS, and Linux resource placement in cargo-packager is still unverified.
+- `SearchPalette`'s loading, failure and result-count text is visual only;
+  NSH's desktop hosts expose no live-region API, so a screen reader does not
+  hear search status changes. Revisit when NSH adds one.
+- `scripts/package.mjs` builds installers; the release workflow uploads them
+  and no CI job installs, hashes or launches them. Packaging changes need a
+  manual smoke test on the target OS, and Linux resource placement in
+  cargo-packager is still unverified.
 - macOS signing on CI is incomplete: `FLOW_MACOS_SIGNING_IDENTITY` names an
   identity, but a clean `macos-latest` runner has no certificate installed. A
   release that must be signed needs an import step and notarization

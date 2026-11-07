@@ -53,6 +53,11 @@ repository root.
 | `bun run check:fix`  | Same, applying every automatic fix.                                       |
 | `bun run package`    | Builds the native installer for this OS (`docs/packaging.md`).            |
 
+`bun run test:host` runs each test file in its own native host process;
+`src/native.test.ts` stays in the headless suite because the host cannot load
+`@flow/native` before an app registers it. `bun run test:100k` is a real-host
+smoke and writes screenshots under `.nsh/bench/` for manual review.
+
 `bun run check` is what CI runs. `vp check` (Vite+) drives the formatter,
 Oxlint (type-aware, with full type checking) and the TypeScript check, and then
 `bun run test:lint` proves the boundary rule itself can fail; warnings fail the

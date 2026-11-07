@@ -27,9 +27,11 @@ implementation into `src/leafer/platform/`, one responsibility per module:
   NSH/Leafer runtime boundary
 
 The facade re-exports the same public names, including the `Point` and `Matrix`
-types. Consumers (the view, pages and tests) continue to import the facade.
-Internal modules import one another directly; the dependency graph stays
-acyclic.
+types. Consumers (the view and pages) continue to import the facade. The
+adapter's own tests import the implementation modules directly, because they
+exercise internal recording and measurement helpers that are not part of the
+public surface. Internal modules import one another directly; the dependency
+graph stays acyclic.
 
 ## Consequences
 

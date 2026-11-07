@@ -145,4 +145,9 @@ impl History {
             self.undo.remove(0);
         }
     }
+
+    pub fn clear(&mut self) {
+        self.undo.clear();
+        self.redo.clear();
+    }
 }

@@ -8,6 +8,14 @@ All notable changes to Flow are recorded here. The format follows
 
 ### Added
 
+- Moved the document core to Rust: a mixed NSH crate owns SQLite with WAL,
+  SeaORM entities and SeaQuery, FTS5 search and RTree viewport reads. The
+  canvas reads only the viewport, sends one command per gesture, and keeps
+  selected cards pinned through low-zoom card caps.
+- Undo/redo history with add, delete, move, resize, text and edge commands;
+  deleting a node also records its edges so undo restores them.
+- The `N`, `L`, Delete/Backspace and undo/redo keyboard paths, backed by the
+  Rust change sets.
 - A command palette (`⌘K` / `Ctrl+K`, or the Search button) backed by the Rust
   FTS5 index: debounced search over titles, bodies and tags, snippets and type
   filters, and opening a result fits the camera to and selects its card.
@@ -16,21 +24,40 @@ All notable changes to Flow are recorded here. The format follows
   variable declared in `src/nsh.json`.
 - `bun run test:100k` seeds 100,000 nodes and drives the real desktop host
   through pan, zoom, search, reveal and Fit.
+- The engineering standard in `docs/standards.md`, an ADR template and this
+  changelog.
 
 ### Changed
 
 - `bun run test:host` runs each app test file in its own host process;
   `native.test.ts` stays in the headless suite because the host cannot load
   the native module from a test bundle.
-
 - Split Leafer's platform adapter into a public facade and focused modules
   under `src/leafer/platform/`; behavior and the facade's public names are
   preserved.
-- Added the engineering standard in `docs/standards.md`, an ADR template and
-  this changelog.
+- The boundary rule now fails closed when the importing module itself is
+  unclassified, not only when its target is.
 
 ### Fixed
 
+- Undo history is mutated inside the same serialized database worker job as
+  the write it describes; an undo can no longer pop an older entry while a
+  command is still in flight and wedge the history.
+- Short queries search every whitespace-separated term instead of one literal
+  string, so mixed queries such as `AI image` or `图像 生成` no longer miss
+  documents that contain the terms separately.
+- Relative database paths (including paths with spaces or a colon) resolve
+  against the working directory before becoming SQLite file URIs.
+- Editor rotation, skew and flip are disabled, and gesture commits read the
+  card's logical geometry, so an unsupported transform can no longer be
+  persisted as an oversized axis-aligned box.
+- A command's change set creates cards for newly inserted or restored nodes,
+  and connectors stay while both endpoint cards remain selected, so a capped
+  low-zoom snapshot cannot make them disappear.
+- A viewport read skipped during a card drag is retried after the gesture, and
+  a fit-in-progress no longer overrides a newer pan or zoom.
+- The search palette clears stale rows as soon as the query or filter changes,
+  so Enter cannot open a result from the previous query.
 - Text measurement now uses the recording context's font instead of the
   frame's last font.
 - Offscreen composites preserve the layer's opacity and a snapshot's internal

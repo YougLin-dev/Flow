@@ -42,7 +42,9 @@ nothing; every other PascalCase file exports a value of the same name.
   bind store readers/actions to component props.
 - Module-level constants are `const`; mutable state lives inside its owner
   (`let` in a page, component, store closure or adapter class), never as a
-  mutable module-level binding.
+  mutable module-level binding. The platform adapter's guarded install and
+  measurement-context caches are the one exception: they are initialized once,
+  scoped to the adapter, and reset by installation or cleanup.
 - Split by responsibility, not by line count. The `max-lines` rule caps a
   module at 500 code lines (blank and comment lines excluded); treat that as a
   prompt to look for a seam, never as a target to fill or an arbitrary split.
@@ -59,10 +61,10 @@ nothing; every other PascalCase file exports a value of the same name.
   second Rust-backed import path. Keep SQLite and search code in Rust, and
   keep TSX/Leafer code out of the crate.
 - SeaORM entities are one file per table under `src/native/src/entity/`, named
-  after the table. Commands live in `mutation.rs`, reads in `search.rs` or
-  `viewport.rs`; `db.rs` owns the worker handle and startup, and `schema.rs`
-  owns table creation. Raw SQLITE SQL belongs only in `schema.rs`/`search.rs`
-  for virtual tables.
+  after the table. Commands live in `mutation.rs`, reads in `search.rs`,
+  `viewport.rs` or `scene.rs`; `db.rs` owns the worker handle, history and
+  startup, and `schema.rs` owns table creation. Raw SQLITE SQL belongs only in
+  `schema.rs`/`search.rs` for virtual tables.
 
 ## Imports
 

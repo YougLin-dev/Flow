@@ -5,7 +5,7 @@
 //! fragments below are unavoidable: `MATCH`, `snippet()`/`bm25()`, and the
 //! escaped `LIKE` fallback. Every value is still bound, never interpolated.
 
-use sea_orm::sea_query::{Alias, Expr, ExprTrait, Order, Query, SelectStatement};
+use sea_orm::sea_query::{Alias, Condition, Expr, ExprTrait, Order, Query, SelectStatement};
 use sea_orm::{ConnectionTrait, DatabaseConnection, FromQueryResult};
 
 use crate::constants::DOCUMENT_ID;
@@ -27,15 +27,16 @@ pub fn search(
     filters: SearchFilters,
     limit: u32,
 ) -> Result<Vec<SearchHit>, String> {
-    let limit = u64::from(limit.clamp(1, 200));
+    let limit = u64::from(if limit > 200 { 200 } else { limit });
     let kind = filters.kind;
     let query = query.trim();
-    if query.is_empty() {
+    if query.is_empty() || limit == 0 {
         return Ok(Vec::new());
     }
 
-    let shortest = query
-        .split_whitespace()
+    let terms: Vec<&str> = query.split_whitespace().collect();
+    let shortest = terms
+        .iter()
         .map(|term| term.chars().count())
         .min()
         .unwrap_or(0);
@@ -92,7 +93,18 @@ pub(crate) fn fts_statement(match_query: &str, kind: Option<&str>, limit: u64) -
 }
 
 fn like_statement(query: &str, kind: Option<&str>, limit: u64) -> SelectStatement {
-    let pattern = format!("%{}%", escape_like(query));
+    // Short terms cannot use the trigram index, but each term still has to
+    // match: a single pattern for the whole query would miss documents that
+    // contain the terms separately ("AI image" in "AI image generation").
+    let mut matches = Condition::all();
+    for term in query.split_whitespace() {
+        let pattern = format!("%{}%", escape_like(term));
+        matches = matches.add(Expr::cust_with_values(
+            "(nodes.title LIKE ? ESCAPE '\\' OR nodes.body LIKE ? ESCAPE '\\' \
+             OR nodes.tags_json LIKE ? ESCAPE '\\')",
+            [pattern.clone(), pattern.clone(), pattern],
+        ));
+    }
 
     let mut statement = Query::select();
     statement
@@ -106,11 +118,7 @@ fn like_statement(query: &str, kind: Option<&str>, limit: u64) -> SelectStatemen
         .expr_as(Expr::val(0.0), Alias::new("score"))
         .from(nodes::Entity)
         .and_where(Expr::col((nodes::Entity, nodes::Column::DocumentId)).eq(DOCUMENT_ID))
-        .and_where(Expr::cust_with_values(
-            "(nodes.title LIKE ? ESCAPE '\\' OR nodes.body LIKE ? ESCAPE '\\' \
-             OR nodes.tags_json LIKE ? ESCAPE '\\')",
-            [pattern.clone(), pattern.clone(), pattern],
-        ));
+        .and_where(matches.into());
 
     if let Some(kind) = kind {
         statement.and_where(Expr::col((nodes::Entity, nodes::Column::Kind)).eq(kind));

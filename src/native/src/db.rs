@@ -12,7 +12,9 @@ use crate::clock::now_ms;
 use crate::constants::DOCUMENT_ID;
 use crate::document;
 use crate::entity::{documents, edges, nodes};
+#[cfg(test)]
 use crate::history::HistoryOp;
+use crate::history::{History, HistoryEntry};
 use crate::mutation::{self, Mutation};
 use crate::scene;
 use crate::schema;
@@ -31,9 +33,14 @@ type Job = Box<dyn FnOnce(&DatabaseConnection) + Send + 'static>;
 /// non-`Send` metric callback), so the connection lives on one worker thread.
 /// This handle only carries jobs to it; it is cheap to clone and can move to
 /// NSH's blocking pool.
+///
+/// The undo history lives here too. It is mutated inside the same serialized
+/// jobs as the database writes, so an undo can never pop an entry before an
+/// earlier command has pushed its own.
 #[derive(Clone)]
 pub struct Database {
     tx: Arc<Mutex<Sender<Job>>>,
+    history: Arc<Mutex<History>>,
 }
 
 impl Database {
@@ -53,15 +60,16 @@ impl Database {
 
         Ok(Self {
             tx: Arc::new(Mutex::new(job_tx)),
+            history: Arc::new(Mutex::new(History::default())),
         })
     }
 
     pub fn insert_nodes(&self, nodes: Vec<NodeInput>) -> Result<Mutation, String> {
-        self.run(move |conn| mutation::insert_nodes(conn, nodes))
+        self.run_mutation(move |conn| mutation::insert_nodes(conn, nodes))
     }
 
     pub fn move_nodes(&self, ids: Vec<String>, dx: f64, dy: f64) -> Result<Mutation, String> {
-        self.run(move |conn| mutation::move_nodes(conn, ids, dx, dy))
+        self.run_mutation(move |conn| mutation::move_nodes(conn, ids, dx, dy))
     }
 
     pub fn set_node_text(
@@ -71,28 +79,81 @@ impl Database {
         body: String,
         tags: Vec<String>,
     ) -> Result<Mutation, String> {
-        self.run(move |conn| mutation::set_node_text(conn, id, title, body, tags))
+        self.run_mutation(move |conn| mutation::set_node_text(conn, id, title, body, tags))
     }
 
     pub fn delete_nodes(&self, ids: Vec<String>) -> Result<Mutation, String> {
-        self.run(move |conn| mutation::delete_nodes(conn, ids))
+        self.run_mutation(move |conn| mutation::delete_nodes(conn, ids))
     }
 
     pub fn set_node_bounds(&self, bounds: Vec<NodeBounds>) -> Result<Mutation, String> {
-        self.run(move |conn| mutation::set_node_bounds(conn, bounds))
+        self.run_mutation(move |conn| mutation::set_node_bounds(conn, bounds))
     }
 
     pub fn insert_edges(&self, edges: Vec<EdgeInput>) -> Result<Mutation, String> {
-        self.run(move |conn| mutation::insert_edges(conn, edges))
+        self.run_mutation(move |conn| mutation::insert_edges(conn, edges))
     }
 
     pub fn delete_edges(&self, ids: Vec<String>) -> Result<Mutation, String> {
-        self.run(move |conn| mutation::delete_edges(conn, ids))
+        self.run_mutation(move |conn| mutation::delete_edges(conn, ids))
     }
 
+    #[cfg(test)]
     pub fn apply_ops(&self, ops: &[HistoryOp]) -> Result<ChangeSet, String> {
         let ops = ops.to_vec();
         self.run(move |conn| mutation::apply_ops(conn, &ops))
+    }
+
+    /// Reverts the last command. The history entry is taken and returned in
+    /// the same worker job as the database writes.
+    pub fn undo(&self) -> Result<ChangeSet, String> {
+        let history = Arc::clone(&self.history);
+        self.run(move |conn| {
+            let mut history = lock_history(&history)?;
+            let Some(entry) = history.take_undo() else {
+                return empty_change(conn);
+            };
+            let mut ops = entry.inverse.clone();
+            ops.reverse();
+            match mutation::apply_ops(conn, &ops) {
+                Ok(changes) => {
+                    history.push_redo(entry);
+                    Ok(changes)
+                }
+                Err(error) => {
+                    history.restore_undo(entry);
+                    Err(error)
+                }
+            }
+        })
+    }
+
+    /// Reapplies the last undone command, on the same worker job.
+    pub fn redo(&self) -> Result<ChangeSet, String> {
+        let history = Arc::clone(&self.history);
+        self.run(move |conn| {
+            let mut history = lock_history(&history)?;
+            let Some(entry) = history.take_redo() else {
+                return empty_change(conn);
+            };
+            let ops = entry.forward.clone();
+            match mutation::apply_ops(conn, &ops) {
+                Ok(changes) => {
+                    history.push_undo_after_redo(entry);
+                    Ok(changes)
+                }
+                Err(error) => {
+                    history.push_redo(entry);
+                    Err(error)
+                }
+            }
+        })
+    }
+
+    /// Drops the undo and redo stacks; used after seeding demo data.
+    pub fn clear_history(&self) -> Result<(), String> {
+        lock_history(&self.history)?.clear();
+        Ok(())
     }
 
     pub fn viewport(&self, rect: Viewport, margin: f64) -> Result<Vec<NodeSummary>, String> {
@@ -128,15 +189,20 @@ impl Database {
         self.run(edge_count)
     }
 
-    pub fn empty_change(&self) -> Result<ChangeSet, String> {
-        self.run(|conn| {
-            Ok(ChangeSet {
-                rev: document::current_rev(conn).map_err(|error| error.to_string())? as f64,
-                changed: Vec::new(),
-                removed: Vec::new(),
-                edges_changed: Vec::new(),
-                edges_removed: Vec::new(),
-            })
+    /// Runs a document mutation and records its inverse in the same worker
+    /// job, so command order and history order can never diverge.
+    fn run_mutation<F>(&self, work: F) -> Result<Mutation, String>
+    where
+        F: FnOnce(&DatabaseConnection) -> Result<Mutation, String> + Send + 'static,
+    {
+        let history = Arc::clone(&self.history);
+        self.run(move |conn| {
+            let mutation = work(conn)?;
+            lock_history(&history)?.push(HistoryEntry {
+                forward: mutation.forward.clone(),
+                inverse: mutation.inverse.clone(),
+            });
+            Ok(mutation)
         })
     }
 
@@ -187,13 +253,31 @@ fn open_connection(path: &str) -> Result<DatabaseConnection, String> {
         fs::create_dir_all(parent).map_err(|error| error.to_string())?;
     }
 
-    let url = sqlite_url(path);
+    let url = sqlite_url(path)?;
     let conn = sea_orm::Database::connect(url.as_str()).map_err(|error| error.to_string())?;
     configure(&conn, path)?;
     schema::migrate(&conn)?;
     ensure_document(&conn)?;
 
     Ok(conn)
+}
+
+fn empty_change(conn: &DatabaseConnection) -> Result<ChangeSet, String> {
+    Ok(ChangeSet {
+        rev: document::current_rev(conn).map_err(|error| error.to_string())? as f64,
+        changed: Vec::new(),
+        removed: Vec::new(),
+        edges_changed: Vec::new(),
+        edges_removed: Vec::new(),
+    })
+}
+
+fn lock_history(
+    history: &Arc<Mutex<History>>,
+) -> Result<std::sync::MutexGuard<'_, History>, String> {
+    history
+        .lock()
+        .map_err(|_| "the undo history lock is poisoned".to_owned())
 }
 
 fn count(conn: &DatabaseConnection) -> Result<u32, String> {
@@ -212,21 +296,22 @@ fn edge_count(conn: &DatabaseConnection) -> Result<u32, String> {
         .map_err(|error| error.to_string())
 }
 
-fn sqlite_url(path: &str) -> String {
+fn sqlite_url(path: &str) -> Result<String, String> {
     if path == ":memory:" {
-        return "sqlite::memory:".to_owned();
+        return Ok("sqlite::memory:".to_owned());
     }
 
-    let normalized = path.replace('\\', "/");
-    if normalized.bytes().all(is_uri_path_byte) {
-        format!("sqlite://{normalized}")
+    // SQLite resolves `file:` URIs as absolute paths. Make relative overrides
+    // (`FLOW_DB_PATH=./flow.db`) absolute first so they open next to the
+    // caller rather than at the filesystem root, and so a colon in a file
+    // name cannot be read as a URL authority and port.
+    let absolute = std::path::absolute(path).map_err(|error| error.to_string())?;
+    let normalized = absolute.to_string_lossy().replace('\\', "/");
+    let encoded = encode_uri_path(&normalized);
+    if encoded.starts_with('/') {
+        Ok(format!("sqlite:file:{encoded}"))
     } else {
-        let encoded = encode_uri_path(&normalized);
-        if encoded.starts_with('/') {
-            format!("sqlite:file:{encoded}")
-        } else {
-            format!("sqlite:file:///{encoded}")
-        }
+        Ok(format!("sqlite:file:///{encoded}"))
     }
 }
 
@@ -405,6 +490,152 @@ mod tests {
         assert_eq!(db.count().expect("count after delete"), 1);
         db.apply_ops(&deleted.inverse).expect("undo delete");
         assert_eq!(db.count().expect("count after undo"), 2);
+    }
+
+    #[test]
+    fn empty_document_bounds_are_zero() {
+        let db = Database::open(":memory:").expect("open");
+        let bounds = db.bounds().expect("bounds");
+        assert_eq!(
+            (bounds.x, bounds.y, bounds.width, bounds.height),
+            (0.0, 0.0, 0.0, 0.0)
+        );
+    }
+
+    #[test]
+    fn short_terms_all_match_in_a_mixed_query() {
+        let db = Database::open(":memory:").expect("open");
+        db.insert_nodes(vec![
+            node(
+                "a",
+                "Generator",
+                "AI image generation",
+                &["image"],
+                0.0,
+                0.0,
+            ),
+            node("b", "图像生成器", "把文本变成图片", &["设计"], 300.0, 0.0),
+        ])
+        .expect("insert");
+
+        let english = db
+            .search("AI image".to_owned(), SearchFilters::default(), 20)
+            .expect("mixed short query");
+        assert_eq!(english.len(), 1);
+        assert_eq!(english[0].id, "a");
+
+        let chinese = db
+            .search("图像 生成".to_owned(), SearchFilters::default(), 20)
+            .expect("mixed CJK query");
+        assert_eq!(chinese.len(), 1);
+        assert_eq!(chinese[0].id, "b");
+
+        assert!(
+            db.search("AI missing".to_owned(), SearchFilters::default(), 20)
+                .expect("all terms required")
+                .is_empty()
+        );
+        assert!(
+            db.search("image".to_owned(), SearchFilters::default(), 0)
+                .expect("zero limit")
+                .is_empty()
+        );
+    }
+
+    #[test]
+    fn undo_restores_a_deleted_node_its_edges_and_indexes() {
+        let db = Database::open(":memory:").expect("open");
+        db.insert_nodes(vec![
+            node("a", "Generator", "Makes an image", &["image"], 0.0, 0.0),
+            node("b", "Text panel", "A text node", &["text"], 300.0, 0.0),
+        ])
+        .expect("insert nodes");
+        db.insert_edges(vec![EdgeInput {
+            id: "a-b".to_owned(),
+            from_id: "a".to_owned(),
+            to_id: "b".to_owned(),
+            from_port: None,
+            to_port: None,
+            kind: "flow".to_owned(),
+            data_json: None,
+        }])
+        .expect("insert edge");
+        assert_eq!(db.edge_count().expect("edge count"), 1);
+
+        let deleted = db.delete_nodes(vec!["a".to_owned()]).expect("delete");
+        assert_eq!(deleted.changes.edges_removed, vec!["a-b"]);
+        assert_eq!(db.edge_count().expect("edge count after delete"), 0);
+        assert!(
+            db.search("Generator".to_owned(), SearchFilters::default(), 20)
+                .expect("search after delete")
+                .is_empty()
+        );
+
+        let undone = db.undo().expect("undo delete");
+        assert!(undone.changed.iter().any(|node| node.id == "a"));
+        assert_eq!(db.count().expect("count after undo"), 2);
+        assert_eq!(db.edge_count().expect("edge count after undo"), 1);
+        assert_eq!(
+            db.search("Generator".to_owned(), SearchFilters::default(), 20)
+                .expect("search after undo")
+                .len(),
+            1
+        );
+
+        let redone = db.redo().expect("redo delete");
+        assert_eq!(redone.removed, vec!["a"]);
+        assert_eq!(db.count().expect("count after redo"), 1);
+        assert_eq!(db.edge_count().expect("edge count after redo"), 0);
+    }
+
+    #[test]
+    fn updates_searchable_text_and_undoes_the_index_change() {
+        let db = Database::open(":memory:").expect("open");
+        db.insert_nodes(vec![node("a", "Old title", "Old body", &["old"], 0.0, 0.0)])
+            .expect("insert");
+
+        let changed = db
+            .set_node_text(
+                "a".to_owned(),
+                "New title".to_owned(),
+                "New body".to_owned(),
+                vec!["new".to_owned()],
+            )
+            .expect("set text");
+        assert_eq!(changed.changes.changed[0].title, "New title");
+        assert_eq!(
+            db.search("New title".to_owned(), SearchFilters::default(), 20)
+                .expect("new search")
+                .len(),
+            1
+        );
+        assert!(
+            db.search("Old title".to_owned(), SearchFilters::default(), 20)
+                .expect("old search")
+                .is_empty()
+        );
+
+        db.undo().expect("undo text");
+        assert_eq!(
+            db.search("Old title".to_owned(), SearchFilters::default(), 20)
+                .expect("restored search")
+                .len(),
+            1
+        );
+        db.redo().expect("redo text");
+        assert!(
+            db.search("Old title".to_owned(), SearchFilters::default(), 20)
+                .expect("removed again")
+                .is_empty()
+        );
+    }
+
+    #[test]
+    fn sqlite_url_makes_a_relative_path_absolute() {
+        let url = sqlite_url("my data/notes:2024.db").expect("url");
+        assert!(url.starts_with("sqlite:file:"));
+        assert!(url.contains("my%20data/notes:2024.db"));
+        assert!(!url.contains("sqlite://my"));
     }
 
     #[test]
@@ -669,7 +900,10 @@ mod tests {
     #[test]
     #[ignore = "writes the 100k UI fixture; set FLOW_BENCH_DB=<path>"]
     fn seed_benchmark_database() {
-        let path = std::env::var("FLOW_BENCH_DB").expect("FLOW_BENCH_DB");
+        let Ok(path) = std::env::var("FLOW_BENCH_DB") else {
+            println!("FLOW_BENCH_DB is not set; skipping the 100k fixture");
+            return;
+        };
         if let Some(parent) = std::path::Path::new(&path).parent() {
             std::fs::create_dir_all(parent).expect("create parent directory");
         }

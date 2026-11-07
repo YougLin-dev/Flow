@@ -64,9 +64,11 @@ export function SearchPalette(props: SearchPaletteProps) {
     clearTimer();
     generation += 1;
     const trimmed = value.trim();
+    // Rows from the previous query or filter must not stay clickable while
+    // the next search is debouncing.
+    results.set([]);
+    active.set(0);
     if (trimmed === "") {
-      results.set([]);
-      active.set(0);
       loading.set(false);
       failed.set(false);
       return;
@@ -92,7 +94,7 @@ export function SearchPalette(props: SearchPaletteProps) {
   };
 
   const choose = (hit: SearchHit | undefined): void => {
-    if (!hit) return;
+    if (!hit || loading()) return;
     props.onSelect(hit);
   };
 

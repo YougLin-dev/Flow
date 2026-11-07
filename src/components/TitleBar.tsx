@@ -26,6 +26,7 @@ export function TitleBar(props: TitleBarProps) {
   const pinnable = platform.os !== "linux";
   return (
     <View
+      testID="title-bar"
       desktop={{ windowDrag: true }}
       class="shrink-0 flex-row items-center border-b border-border bg-card"
       style={{

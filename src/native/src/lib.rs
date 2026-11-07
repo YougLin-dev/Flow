@@ -3,8 +3,6 @@
 //! TSX never opens SQLite. It talks to this crate through the generated
 //! `@flow/native` module; Leafer stays on the TSX side.
 
-use std::sync::{Arc, Mutex};
-
 use nsh_core::prelude::*;
 
 mod clock;
@@ -21,8 +19,6 @@ mod types;
 mod viewport;
 
 use db::Database;
-use history::{History, HistoryEntry};
-use mutation::Mutation;
 use types::{
     ChangeSet, EdgeInput, NodeBounds, NodeInput, NodeSummary, SceneSnapshot, SearchFilters,
     SearchHit, Viewport,
@@ -35,7 +31,6 @@ use types::{
 #[class]
 pub struct Document {
     db: Database,
-    history: Arc<Mutex<History>>,
 }
 
 #[class]
@@ -43,10 +38,7 @@ impl Document {
     /// Opens `path`; creates the file and its schema when missing.
     pub async fn open(path: String) -> Result<Document, String> {
         let db = off_thread(move || Database::open(&path)).await?;
-        Ok(Document {
-            db,
-            history: Arc::new(Mutex::new(History::default())),
-        })
+        Ok(Document { db })
     }
 
     /// Inserts nodes; the returned change set contains their summaries.
@@ -55,9 +47,7 @@ impl Document {
         nodes: Vec<NodeInput>,
     ) -> Result<ChangeSet, String> {
         let db = this.with(|document| document.db.clone());
-        let history = this.with(|document| document.history.clone());
-        let mutation = off_thread(move || db.insert_nodes(nodes)).await?;
-        push_history(&history, mutation)
+        off_thread(move || db.insert_nodes(nodes).map(|mutation| mutation.changes)).await
     }
 
     /// Moves nodes by `dx`/`dy`; one drag is one call.
@@ -68,9 +58,7 @@ impl Document {
         dy: f64,
     ) -> Result<ChangeSet, String> {
         let db = this.with(|document| document.db.clone());
-        let history = this.with(|document| document.history.clone());
-        let mutation = off_thread(move || db.move_nodes(ids, dx, dy)).await?;
-        push_history(&history, mutation)
+        off_thread(move || db.move_nodes(ids, dx, dy).map(|mutation| mutation.changes)).await
     }
 
     /// Replaces a node's searchable text and tags.
@@ -82,17 +70,17 @@ impl Document {
         tags: Vec<String>,
     ) -> Result<ChangeSet, String> {
         let db = this.with(|document| document.db.clone());
-        let history = this.with(|document| document.history.clone());
-        let mutation = off_thread(move || db.set_node_text(id, title, body, tags)).await?;
-        push_history(&history, mutation)
+        off_thread(move || {
+            db.set_node_text(id, title, body, tags)
+                .map(|mutation| mutation.changes)
+        })
+        .await
     }
 
     /// Deletes nodes and their edges.
     pub async fn delete_nodes(this: Instance<Self>, ids: Vec<String>) -> Result<ChangeSet, String> {
         let db = this.with(|document| document.db.clone());
-        let history = this.with(|document| document.history.clone());
-        let mutation = off_thread(move || db.delete_nodes(ids)).await?;
-        push_history(&history, mutation)
+        off_thread(move || db.delete_nodes(ids).map(|mutation| mutation.changes)).await
     }
 
     /// Finishes a drag or resize: one call for every moved or resized node.
@@ -101,9 +89,7 @@ impl Document {
         nodes: Vec<NodeBounds>,
     ) -> Result<ChangeSet, String> {
         let db = this.with(|document| document.db.clone());
-        let history = this.with(|document| document.history.clone());
-        let mutation = off_thread(move || db.set_node_bounds(nodes)).await?;
-        push_history(&history, mutation)
+        off_thread(move || db.set_node_bounds(nodes).map(|mutation| mutation.changes)).await
     }
 
     /// Inserts edges whose endpoints already exist.
@@ -112,17 +98,13 @@ impl Document {
         edges: Vec<EdgeInput>,
     ) -> Result<ChangeSet, String> {
         let db = this.with(|document| document.db.clone());
-        let history = this.with(|document| document.history.clone());
-        let mutation = off_thread(move || db.insert_edges(edges)).await?;
-        push_history(&history, mutation)
+        off_thread(move || db.insert_edges(edges).map(|mutation| mutation.changes)).await
     }
 
     /// Deletes edges by id.
     pub async fn delete_edges(this: Instance<Self>, ids: Vec<String>) -> Result<ChangeSet, String> {
         let db = this.with(|document| document.db.clone());
-        let history = this.with(|document| document.history.clone());
-        let mutation = off_thread(move || db.delete_edges(ids)).await?;
-        push_history(&history, mutation)
+        off_thread(move || db.delete_edges(ids).map(|mutation| mutation.changes)).await
     }
 
     /// Nodes intersecting `rect`, with `margin` world units added around it.
@@ -183,74 +165,25 @@ impl Document {
     /// Reverts the last command.
     pub async fn undo(this: Instance<Self>) -> Result<ChangeSet, String> {
         let db = this.with(|document| document.db.clone());
-        let history = this.with(|document| document.history.clone());
-        let entry = {
-            let mut history = lock_history(&history)?;
-            history.take_undo()
-        };
-        let Some(entry) = entry else {
-            return off_thread(move || db.empty_change()).await;
-        };
-
-        let mut ops = entry.inverse.clone();
-        ops.reverse();
-        match off_thread(move || db.apply_ops(&ops)).await {
-            Ok(changes) => {
-                lock_history(&history)?.push_redo(entry);
-                Ok(changes)
-            }
-            Err(error) => {
-                let _ = lock_history(&history).map(|mut history| history.restore_undo(entry));
-                Err(error)
-            }
-        }
+        off_thread(move || db.undo()).await
     }
 
     /// Reapplies the last undone command.
     pub async fn redo(this: Instance<Self>) -> Result<ChangeSet, String> {
         let db = this.with(|document| document.db.clone());
-        let history = this.with(|document| document.history.clone());
-        let entry = {
-            let mut history = lock_history(&history)?;
-            history.take_redo()
-        };
-        let Some(entry) = entry else {
-            return off_thread(move || db.empty_change()).await;
-        };
+        off_thread(move || db.redo()).await
+    }
 
-        let ops = entry.forward.clone();
-        match off_thread(move || db.apply_ops(&ops)).await {
-            Ok(changes) => {
-                lock_history(&history)?.push_undo_after_redo(entry);
-                Ok(changes)
-            }
-            Err(error) => {
-                let _ = lock_history(&history).map(|mut history| history.push_redo(entry));
-                Err(error)
-            }
-        }
+    /// Drops the in-memory undo/redo stacks (for example after seeding).
+    pub async fn clear_history(this: Instance<Self>) -> Result<(), String> {
+        let db = this.with(|document| document.db.clone());
+        off_thread(move || db.clear_history()).await
     }
 }
 
 #[native_module("@flow/native")]
 fn native(registry: &mut Registry) {
     registry.class::<Document>();
-}
-
-fn push_history(history: &Arc<Mutex<History>>, mutation: Mutation) -> Result<ChangeSet, String> {
-    lock_history(history)?.push(HistoryEntry {
-        forward: mutation.forward,
-        inverse: mutation.inverse,
-    });
-    Ok(mutation.changes)
-}
-
-fn lock_history(
-    history: &Arc<Mutex<History>>,
-) -> Result<std::sync::MutexGuard<'_, History>, String> {
-    history
-        .lock()
-        .map_err(|_| "the undo history lock is poisoned".to_owned())
 }
 
 /// Runs SQLite work on NSH's blocking pool, so the engine thread is free.

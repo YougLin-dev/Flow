@@ -126,6 +126,10 @@ export class FlowScene {
     for (const node of changes.changed) {
       const card = this.cards.get(node.id);
       if (card) this.updateCard(card, node);
+      // A command can introduce a node the viewport snapshot has not seen
+      // (a new panel, or an undone delete). Create it here instead of waiting
+      // for the next capped read, which might not include it.
+      else this.createCard(node);
     }
 
     for (const id of changes.removed) {
@@ -152,13 +156,16 @@ export class FlowScene {
   commitBounds(): NodeBounds[] {
     const changed: NodeBounds[] = [];
     for (const card of this.cards.values()) {
-      const bounds = card.box.getBounds("box", this.world);
+      // Read the card's own geometry, not `getBounds`: the latter returns the
+      // axis-aligned outer box of any rotation, skew or negative scale, which
+      // the document model cannot represent. The editor disables those
+      // gestures, so x/y/width/height are the authoritative world geometry.
       const next = {
         id: card.id,
-        x: bounds.x,
-        y: bounds.y,
-        width: bounds.width,
-        height: bounds.height,
+        x: card.box.x ?? card.applied.x,
+        y: card.box.y ?? card.applied.y,
+        width: card.box.width ?? card.applied.width,
+        height: card.box.height ?? card.applied.height,
       };
       if (
         Math.abs(next.x - card.applied.x) > 0.01 ||
@@ -224,6 +231,7 @@ export class FlowScene {
       y: node.y,
       width: node.width,
       height: node.height,
+      zIndex: node.z,
       cornerRadius: 16,
       fill: this.palette.card,
       stroke: this.palette.border,
@@ -309,6 +317,7 @@ export class FlowScene {
     card.box.y = node.y;
     card.box.width = node.width;
     card.box.height = node.height;
+    if (card.box.zIndex !== node.z) card.box.zIndex = node.z;
     card.applied = boundsOf(node);
 
     if (textChanged) {
@@ -339,12 +348,22 @@ export class FlowScene {
 
   private applyEdges(edges: EdgeSummary[]): void {
     const wanted = new Set(edges.map((edge) => edge.id));
-    for (const id of this.edges.keys()) {
-      if (!wanted.has(id)) this.removeEdge(id);
+    for (const [id, edge] of this.edges) {
+      // A pinned pair can leave both the viewport and Rust's node limit while
+      // remaining in the scene; keep their connector until one endpoint is
+      // deselected or removed. Deletions still arrive through the change set.
+      if (!wanted.has(id) && !(this.isPinned(edge.fromId) && this.isPinned(edge.toId))) {
+        this.removeEdge(id);
+      }
     }
     for (const edge of edges) {
       this.upsertEdge(edge);
     }
+  }
+
+  private isPinned(id: string): boolean {
+    const card = this.cards.get(id);
+    return card !== undefined && this.app.editor.list.includes(card.box);
   }
 
   private upsertEdge(edge: EdgeSummary): void {
