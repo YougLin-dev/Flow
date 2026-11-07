@@ -63,7 +63,25 @@ testing and box selection can start on empty canvas.
 
 ### The platform adapter
 
-`leafer/nsh-platform.ts` makes Leafer believe it runs in a browser:
+`leafer/nsh-platform.ts` makes Leafer believe it runs in a browser. The file
+is the adapter's public facade; `leafer/platform/` holds the implementation,
+split by responsibility:
+
+| Module                  | Responsibility                                              |
+| ----------------------- | ----------------------------------------------------------- |
+| `geometry.ts`           | points, matrices, clamping                                  |
+| `path.ts`               | path recording and curve flattening                         |
+| `hit-test.ts`           | winding/stroke tests and recorded hit regions               |
+| `paint.ts`              | gradient and pattern records                                |
+| `snapshot.ts`           | offscreen canvas snapshots                                  |
+| `replay.ts`             | replaying recorded operations onto NSH's context            |
+| `recording-context.ts`  | the Canvas 2D context Leafer draws through                  |
+| `canvas.ts`, `op.ts`    | context/gradient types and recorded-operation shape         |
+| `measure.ts`            | text measurement through the frame's native context         |
+| `surface.ts`            | the canvas element Leafer creates offscreen and on the view |
+| `host.ts`               | Platform/Creator installation, frame host and pointer data  |
+| `frame.ts`              | Leafer's hidden per-frame render-mark reset                 |
+| `image.ts`, `values.ts` | image URLs/density and narrowing helpers                    |
 
 - **Recording context.** `NshCanvasSurface` is a canvas whose 2D context
   records every call (`[0, property, value]` / `[1, method, ...args]`).
@@ -82,8 +100,8 @@ testing and box selection can start on empty canvas.
   points like the rest of the app.
 
 The recording is deliberately a subset: unsupported calls are skipped, never
-crashed. Anything new that Leafer starts calling has to be added here, with a
-test in `leafer/nsh-platform.test.ts`.
+crashed. Anything new that Leafer starts calling has to be added to the
+matching `platform/` module, with a test in `leafer/nsh-platform.test.ts`.
 
 ### Frames
 
@@ -122,8 +140,8 @@ with `pointerData()`:
 - **Select** — presses go to Leafer (selection, drag, resize, Shift multi-
   select, box select on empty canvas). Cursor state mirrors what Leafer
   would show (`grab`, `move`, resize handles).
-- **Hand** — presses pan the camera here; Leafer sees a pointer cancel, so no
-  accidental selection happens.
+- **Hand** — presses pan the camera here; Leafer never receives the press, so
+  no accidental selection happens.
 - **Touch** — one finger behaves like the current tool; two fingers pinch-zoom
   around their center and pan with it.
 - **Touch vs mouse** — platforms with both send mouse events alongside touch
@@ -162,6 +180,7 @@ keep it in place.
 - **A new control** — a component in `components/` that takes values and
   callbacks as props; the page binds them to the store.
 - **A new canvas feature** — first check whether Leafer supports it; then map
-  its platform needs in `leafer/nsh-platform.ts` and add a test. Keep
-  hand-written input minimal: extend the adapter and Leafer's editor instead
-  of drawing interactions by hand.
+  its platform needs into the matching `leafer/platform/` module (the facade
+  stays `leafer/nsh-platform.ts`) and add a test. Keep hand-written input
+  minimal: extend the adapter and Leafer's editor instead of drawing
+  interactions by hand.

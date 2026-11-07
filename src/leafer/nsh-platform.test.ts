@@ -1,7 +1,36 @@
 import { expect, test } from "nsh/test";
-import { Leafer, Rect } from "@leafer-ui/miniapp";
+import { App, Leafer, Rect } from "@leafer-ui/miniapp";
+import "@leafer-in/editor";
 import type { CanvasRenderingContext2D } from "nsh";
-import { installNshPlatform, NshCanvasSurface, pointerData } from "./nsh-platform";
+import {
+  clearRenderMarks,
+  installNshPlatform,
+  NshCanvasSurface,
+  pointerData,
+} from "./nsh-platform";
+import { setMeasureContext } from "./platform/measure";
+
+test("clears Leafer's hidden frame marks on every layer", () => {
+  installNshPlatform();
+  const view = new NshCanvasSurface(200, 100, false);
+  const app = new App({
+    view,
+    width: 200,
+    height: 100,
+    pixelRatio: 1,
+    start: false,
+    tree: {},
+    editor: {},
+  });
+  const hidden = (layer: { renderer: unknown }): { requestTime: number } =>
+    layer.renderer as { requestTime: number };
+
+  for (const layer of [app, app.tree, app.sky]) hidden(layer).requestTime = 1;
+  clearRenderMarks(app);
+  for (const layer of [app, app.tree, app.sky]) expect(hidden(layer).requestTime).toBe(0);
+
+  app.destroy();
+});
 
 test("answers hit tests from recorded paths", () => {
   const canvas = new NshCanvasSurface(100, 100, true);
@@ -40,6 +69,10 @@ test("composites an offscreen canvas as vectors", () => {
     save() {},
     restore() {},
     beginPath() {},
+    rect() {},
+    clip() {},
+    setTransform() {},
+    globalAlpha: 1,
     transform(a: number, b: number, c: number, d: number, e: number, f: number) {
       calls.push(`transform:${a},${b},${c},${d},${e},${f}`);
     },
@@ -51,6 +84,113 @@ test("composites an offscreen canvas as vectors", () => {
   ctx.replay(target);
   expect(calls).toContain("transform:2,0,0,2,10,20");
   expect(calls).toContain("fillRect:0,0,100,50");
+});
+
+test("roundRect without radii has square hit corners", () => {
+  const canvas = new NshCanvasSurface(100, 100, true);
+  const ctx = canvas.context;
+  ctx.hitOnly = true;
+
+  ctx.beginPath();
+  ctx.roundRect(10, 10, 80, 40);
+  ctx.fill();
+
+  // A radius-less roundRect is a rectangle: its corner must hit.
+  expect(ctx.isPointInPath(12, 12)).toBe(true);
+});
+
+test("measures text with the context's font", () => {
+  const canvas = new NshCanvasSurface(100, 100, false);
+  const seen: string[] = [];
+  let font = "12px sans-serif";
+  const native = {
+    get font() {
+      return font;
+    },
+    set font(value: string) {
+      font = value;
+    },
+    measureText(text: string) {
+      seen.push(font);
+      return { width: text.length * 10 };
+    },
+  } as unknown as CanvasRenderingContext2D;
+
+  setMeasureContext(native);
+  try {
+    canvas.context.font = "600 15px sans-serif";
+    expect(canvas.context.measureText("abc").width).toBe(30);
+    expect(seen).toEqual(["600 15px sans-serif"]);
+  } finally {
+    setMeasureContext(null);
+  }
+});
+
+test("multiplies an offscreen layer's alpha when replaying it", () => {
+  const offscreen = new NshCanvasSurface(10, 10, true);
+  offscreen.context.globalAlpha = 0.5;
+  offscreen.context.fillRect(0, 0, 10, 10);
+
+  const main = new NshCanvasSurface(10, 10, false);
+  main.context.beginFrame();
+  main.context.globalAlpha = 0.9;
+  main.context.drawImage(offscreen, 0, 0);
+
+  const alphas: number[] = [];
+  let alpha = 1;
+  const target = {
+    resetTransform() {},
+    setLineDash() {},
+    save() {},
+    restore() {},
+    beginPath() {},
+    rect() {},
+    clip() {},
+    setTransform() {},
+    transform() {},
+    fillRect() {},
+    get globalAlpha() {
+      return alpha;
+    },
+    set globalAlpha(value: number) {
+      alpha = value;
+      alphas.push(Math.round(value * 100));
+    },
+  } as unknown as CanvasRenderingContext2D;
+
+  main.context.replay(target);
+  expect(alphas).toContain(45);
+});
+
+test("composes a snapshot's transform with its placement", () => {
+  const offscreen = new NshCanvasSurface(10, 10, true);
+  offscreen.context.beginFrame();
+  offscreen.context.setTransform(2, 0, 0, 2, 0, 0);
+  offscreen.context.fillRect(0, 0, 10, 10);
+
+  const main = new NshCanvasSurface(20, 20, false);
+  main.context.beginFrame();
+  main.context.drawImage(offscreen, 5, 6);
+
+  const calls: string[] = [];
+  const target = {
+    resetTransform() {},
+    setLineDash() {},
+    save() {},
+    restore() {},
+    beginPath() {},
+    rect() {},
+    clip() {},
+    transform() {},
+    fillRect() {},
+    globalAlpha: 1,
+    setTransform(a: number, b: number, c: number, d: number, e: number, f: number) {
+      calls.push(`setTransform:${a},${b},${c},${d},${e},${f}`);
+    },
+  } as unknown as CanvasRenderingContext2D;
+
+  main.context.replay(target);
+  expect(calls).toContain("setTransform:2,0,0,2,5,6");
 });
 
 test("replays gradients", () => {
@@ -138,6 +278,12 @@ test("answers stroke hit tests", () => {
   expect(ctx.isPointInPath(50, 50)).toBe(false);
   expect(ctx.isPointInStroke(50, 51)).toBe(true);
   expect(ctx.isPointInStroke(50, 80)).toBe(false);
+  // The default lineCap is butt, so the stroke ends at the endpoint.
+  expect(ctx.isPointInStroke(9, 50)).toBe(false);
+
+  ctx.lineCap = "round";
+  ctx.stroke();
+  expect(ctx.isPointInStroke(9, 50)).toBe(true);
 });
 
 test("winds subpaths like the canvas", () => {
@@ -163,6 +309,17 @@ test("an offscreen clear starts a new drawing", () => {
   expect(ctx.ops.length).toBeGreaterThan(0);
 
   ctx.clearRect(0, 0, 100, 100);
+  expect(ctx.ops.length).toBe(0);
+});
+
+test("resizing a surface starts a new drawing", () => {
+  const canvas = new NshCanvasSurface(100, 100, true);
+  const ctx = canvas.context;
+  ctx.beginFrame();
+  ctx.fillRect(0, 0, 10, 10);
+  expect(ctx.ops.length).toBeGreaterThan(0);
+
+  canvas.width = 120;
   expect(ctx.ops.length).toBe(0);
 });
 
@@ -194,6 +351,49 @@ test("tiles a pattern fill", () => {
   ctx.replay(target);
   expect(images.length).toBeGreaterThan(1);
   expect(images[0][0]).toBe("asset:/tile.png");
+});
+
+test("keeps a pattern's own opacity inside the destination alpha", () => {
+  const canvas = new NshCanvasSurface(200, 100, false);
+  const ctx = canvas.context;
+  ctx.beginFrame();
+
+  // A zero-alpha destination (an invisible layer) stays invisible even when
+  // the pattern tile itself has opacity.
+  ctx.globalAlpha = 0;
+  const pattern = ctx.createPattern(
+    { url: "asset:/tile.png", width: 20, height: 20, opacity: 0.5 },
+    "repeat",
+  );
+  ctx.fillStyle = pattern;
+  ctx.beginPath();
+  ctx.rect(0, 0, 50, 50);
+  ctx.fill();
+
+  const alphas: number[] = [];
+  let layerAlpha = 1;
+  const target = {
+    get globalAlpha() {
+      return layerAlpha;
+    },
+    set globalAlpha(value: number) {
+      layerAlpha = value;
+    },
+    resetTransform() {},
+    setLineDash() {},
+    save() {},
+    restore() {},
+    beginPath() {},
+    clip() {},
+    transform() {},
+    drawImage() {
+      alphas.push(layerAlpha);
+    },
+  } as unknown as CanvasRenderingContext2D;
+
+  ctx.replay(target);
+  expect(alphas.length).toBeGreaterThan(1);
+  expect(alphas.every((alpha) => alpha === 0)).toBe(true);
 });
 
 test("leafer picks and drags elements", () => {

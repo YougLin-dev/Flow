@@ -44,3 +44,16 @@ test("clamps zoom and pans", () => {
   expect(camera.x).toBe(10);
   expect(camera.y).toBe(-5);
 });
+
+test("zooming out never crosses the fit floor upward", () => {
+  const camera = new CanvasCamera({ x: 0, y: 0, scale: 1 });
+  camera.fit({ x: 0, y: 0, width: 100000, height: 100000 }, { width: 400, height: 400 });
+  expect(camera.scale).toBe(0.05);
+
+  // Clamping a zoom-out to the shared floor must not enlarge the view.
+  expect(camera.zoomAround(1 / 1.2, 200, 200)).toBe(false);
+  expect(camera.scale).toBe(0.05);
+
+  expect(camera.zoomAround(1.2, 200, 200)).toBe(true);
+  expect(Math.round(camera.scale * 100)).toBe(6);
+});

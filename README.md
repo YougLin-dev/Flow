@@ -32,22 +32,28 @@ repository root.
 | ------------------- | ------------------------------------------------------------------------- |
 | `bun run dev`       | Runs the app on this machine (`nsh run src`).                             |
 | `bun run build`     | Builds the bundle for deployment (`nsh build src`, output in `.nsh/out`). |
-| `bun run test`      | Runs every `*.test.ts(x)` headless on a simulated engine.                 |
+| `bun run test`      | Runs every app test (`*.test.ts(x)`) headless on a simulated engine.      |
 | `bun run test:host` | Runs the tests on this machine's development host (real input).           |
 | `bun run test:web`  | Runs the tests in a headless browser host.                                |
+| `bun run test:lint` | Runs the dependency-boundary rule's tests (`bun test lint`).              |
 | `bun run typecheck` | Type-checks with NSH's compiler settings (`nsh check src`).               |
 | `bun run lint`      | Checks types, then lints with Oxlint; `lint:fix` applies fixes.           |
 | `bun run fmt`       | Formats with Oxfmt (`vp fmt`).                                            |
-| `bun run check`     | Format, lint and type-check (names and boundaries included).              |
+| `bun run check`     | Format, lint, type-check and boundary-rule tests.                         |
 | `bun run check:fix` | Same, applying every automatic fix.                                       |
 | `bun run package`   | Builds the native installer for this OS (`docs/packaging.md`).            |
 
 `bun run check` is what CI runs. `vp check` (Vite+) drives the formatter,
-Oxlint (type-aware, with full type checking) and the TypeScript check; warnings
-fail the gate (`--deny-warnings`). File names are part of lint
+Oxlint (type-aware, with full type checking) and the TypeScript check, and then
+`bun run test:lint` proves the boundary rule itself can fail; warnings fail the
+gate (`--deny-warnings`). File names are part of lint
 (`unicorn/filename-case`, configured per extension), and the one-way
 dependency rule is a project Oxlint JS plugin (`lint/boundaries.js`), so a
 single command enforces all of it.
+
+The normative engineering standard is [docs/standards.md](docs/standards.md):
+read it before changing architecture, the canvas adapter, state ownership or
+release tooling.
 
 ## Project layout
 
@@ -78,7 +84,8 @@ src/                   the NSH app: its root, entry, config and assets
     grid.ts            draws the dot-grid backdrop
   leafer/
     LeaferView.tsx     NSH <Canvas> hosting a Leafer App (input, frames)
-    nsh-platform.ts    Leafer's platform layer adapted to NSH's recording canvas
+    nsh-platform.ts    public facade of Leafer's platform layer on NSH
+    platform/          adapter modules, one responsibility per file
     camera.ts          infinite-canvas camera (pan, zoom, fit, culling bounds)
   lib/
     window-chrome.ts   hides the native title bar and reports its metrics
@@ -89,7 +96,8 @@ scripts/
   package.mjs          installer build
   test-host.mjs        native test host for this OS
 .github/workflows/     CI and installer builds
-docs/                  architecture, conventions, testing, packaging
+docs/                  standards, architecture, conventions, testing, packaging, ADRs
+CHANGELOG.md           Keep a Changelog history and unreleased changes
 ```
 
 `src/` is the NSH application root: `nsh.json`, `theme.json`, the entry

@@ -69,8 +69,8 @@ if (target === "windows") {
     installerIcon: join(root, "src", "assets", "icon.ico"),
   };
 } else if (target === "macos") {
-  // NSH lays the app out as <name>.app/Contents/{MacOS,Resources/nsh}.
-  const bundle = join(appDir, `${name}.app`);
+  // NSH writes <out>/<name>.app (not inside a <name>/ directory).
+  const bundle = join(out, `${name}.app`);
   const icns = join(bundle, "Contents", "Resources", "AppIcon.icns");
   config.binariesDir = join(bundle, "Contents", "MacOS");
   config.resources = [{ src: join(bundle, "Contents", "Resources", "nsh"), target: "nsh" }];
@@ -101,6 +101,12 @@ const configPath = join(out, `packager.${process.platform}.json`);
 mkdirSync(join(out, "installers"), { recursive: true });
 writeFileSync(configPath, `${JSON.stringify(config, null, 2)}\n`);
 
-run("bunx", ["packager", "--config", configPath]);
+// Run the installed, locked packager rather than resolving a fresh one from
+// npm; bun.lock already pins the exact version.
+run("bun", [
+  join(root, "node_modules", "@crabnebula", "packager", "packager.js"),
+  "--config",
+  configPath,
+]);
 
 console.log(`\nInstallers: ${join(out, "installers")}`);

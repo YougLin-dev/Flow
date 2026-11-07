@@ -7,7 +7,7 @@ that output in a native installer with
 | Host    | NSH output                       | Installer                                                 |
 | ------- | -------------------------------- | --------------------------------------------------------- |
 | Windows | `.nsh/out/Flow/` + `Flow.zip`    | `.nsh/out/installers/Flow_<version>_x64-setup.exe` (NSIS) |
-| macOS   | `.nsh/out/Flow/Flow.app`         | `.nsh/out/installers/Flow_<version>_<arch>.dmg`           |
+| macOS   | `.nsh/out/Flow.app`              | `.nsh/out/installers/Flow_<version>_<arch>.dmg`           |
 | Linux   | `.nsh/out/Flow/` + `Flow.tar.gz` | `.nsh/out/installers/*.deb` and `*.AppImage`              |
 
 The script reads the name, id and version from `src/nsh.json`, so those stay
@@ -61,6 +61,9 @@ PNG that NSH embeds.
 - **macOS:** the script ad-hoc signs the app, which is enough to launch it
   locally on Apple silicon. Before distributing it, set
   `FLOW_MACOS_SIGNING_IDENTITY="Developer ID Application: ..."` and notarize.
+  On a clean CI runner the identity alone is not enough: import the
+  certificate into a temporary keychain (and provide notarization
+  credentials) before running the package step.
 - **Linux:** `.deb` and AppImage are normally distributed unsigned.
 
 ## Before a release

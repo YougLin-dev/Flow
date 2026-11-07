@@ -7,8 +7,9 @@
   "scripts": {
     "dev": "nsh run src",
     "build": "nsh build src",
-    "check": "nsh check src && vp check --deny-warnings",
-    "check:fix": "nsh check src && vp check --fix --deny-warnings",
+    "check": "nsh check src && vp check --deny-warnings && bun run test:lint",
+    "check:fix": "nsh check src && vp check --fix --deny-warnings && bun run test:lint",
+    "test:lint": "bun test lint",
     "fmt": "vp fmt",
     "lint": "nsh check src && vp lint",
     "lint:fix": "nsh check src && vp lint --fix",

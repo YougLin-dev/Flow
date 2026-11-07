@@ -5,8 +5,10 @@ export interface HintBarProps {
   tool: Tool;
 }
 
+const modifier = platform.os === "macos" ? "⌘" : "Ctrl";
+
 const hints: Record<Tool, string> = {
-  hand: "Drag to pan · pinch or Ctrl/⌘ +/− to zoom · V to select",
+  hand: `Drag to pan · pinch or ${modifier} +/− to zoom · V to select`,
   select: "Drag a card · box-select empty space · Shift adds · H to pan",
 };
 
@@ -15,9 +17,17 @@ const touchHint = "Drag a card · box-select empty space · pinch to pan/zoom";
 /** The one-line interaction hint at the canvas' bottom-left corner. */
 export function HintBar(props: HintBarProps) {
   return (
-    <View class="absolute bottom-4 left-4 rounded-full border border-border bg-card px-3 py-1.5">
+    <View
+      classList={{
+        "absolute left-4 rounded-full border border-border bg-card px-3 py-1.5": true,
+        // On a phone the tool switch owns the bottom-right corner; sit above
+        // it instead of sharing the row.
+        "bottom-16": !platform.desktop,
+        "bottom-4": platform.desktop,
+      }}
+    >
       <Text class="text-xs text-muted-foreground">
-        {props.tool === "select" && !platform.desktop ? touchHint : hints[props.tool]}
+        {platform.desktop ? hints[props.tool] : touchHint}
       </Text>
     </View>
   );

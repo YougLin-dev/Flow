@@ -29,16 +29,30 @@ nothing; every other PascalCase file exports a value of the same name.
 
 ## Modules and exports
 
-- Use named exports. The only default exports are `vite.config.ts` and
-  `lint/boundaries.js` (an Oxlint plugin entry).
+- Use named exports. Default exports are allowed only where tooling needs one:
+  `vite.config.ts`, `lint/boundaries.js` (the Oxlint plugin entry) and files
+  under `scripts/**` (the `import/no-default-export` overrides in
+  `vite.config.ts`).
 - One component per `.tsx` file; small helpers that only it uses stay in the
   same file and are not exported.
 - Props are an exported `interface <Name>Props` with a doc comment per
   non-obvious field.
 - Components take values and callbacks; they do not import the store. Pages
   bind store readers/actions to component props.
-- Module-level constants are `const`; only page-local mutable state uses
-  `let` (the camera in `FlowPage`).
+- Module-level constants are `const`; mutable state lives inside its owner
+  (`let` in a page, component, store closure or adapter class), never as a
+  mutable module-level binding.
+- Split by responsibility, not by line count. The `max-lines` rule caps a
+  module at 500 code lines (blank and comment lines excluded); treat that as a
+  prompt to look for a seam, never as a target to fill or an arbitrary split.
+  Good seams are already in the code: types and their algorithms, recording
+  vs replay, geometry vs painting. Avoid a `utils.ts` grab bag; name a module
+  after the one job it does.
+- When internal modules need a stable surface, keep one facade module beside
+  the directory and export from there; consumers import the facade, while the
+  internal modules import each other directly. `leafer/nsh-platform.ts` is the
+  facade for `leafer/platform/`, and the same pattern keeps the dependency
+  graph acyclic.
 
 ## Imports
 
@@ -68,7 +82,8 @@ The compiler runs with `strict`, `verbatimModuleSyntax`,
   `no-unsafe-*` rules: a value that is `any` cannot be assigned, called,
   dereferenced, returned or passed as an argument. Third-party declarations
   that use `any` are handled at the boundary with `unknown` and type guards
-  (`isRecord`, `instanceof`, `in` checks), as in `leafer/nsh-platform.ts`.
+  (`isRecord`, `instanceof`, `in` checks), as in `leafer/platform/values.ts`
+  and the other adapter modules behind `leafer/nsh-platform.ts`.
   Plain `.js`/`.mjs` tooling (scripts and the lint plugin) is not
   type-checked, so those rules are off there.
 - Object shapes use `interface`; unions and aliases use `type`
@@ -130,16 +145,18 @@ run `bun run check:fix` before committing.
 
 ## Checks
 
-| Command             | Checks                                        |
-| ------------------- | --------------------------------------------- |
-| `bun run fmt`       | Formatting only                               |
-| `bun run lint`      | NSH check, then Oxlint (names and boundaries) |
-| `bun run typecheck` | NSH's TypeScript settings via `nsh check src` |
-| `bun run check`     | Formatting + lint + type check                |
-| `bun run test`      | Headless tests                                |
+| Command             | Checks                                          |
+| ------------------- | ----------------------------------------------- |
+| `bun run fmt`       | Formatting only                                 |
+| `bun run lint`      | NSH check, then Oxlint (names and boundaries)   |
+| `bun run typecheck` | NSH's TypeScript settings via `nsh check src`   |
+| `bun run check`     | Formatting + lint + type check + boundary tests |
+| `bun run test`      | Headless tests                                  |
+| `bun run test:lint` | Dependency-boundary rule tests (part of check)  |
 
 `bun run check` must pass before a commit, warnings included
-(`--deny-warnings`). `--fix` variants are for the working tree; CI runs the
+(`--deny-warnings`). It also runs `bun run test:lint`, the tests for the local
+boundary rule. `--fix` variants are for the working tree; CI runs the
 non-fix command. File names and dependency direction are both lint rules
 (`unicorn/filename-case` and the local `boundaries/no-upward-import` plugin),
 so there is no separate convention script to keep in sync.

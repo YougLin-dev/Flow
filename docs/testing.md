@@ -1,20 +1,22 @@
 # Testing
 
-Tests are `*.test.ts` / `*.test.tsx` files beside the code they test, run with
-`nsh test src` (the app root is `src/`). NSH opens each app on an engine of
-its own, headless by default, and `await`s the test callback, so tests can be
-`async`.
+Tests under `src/` are `*.test.ts` / `*.test.tsx` files beside the code they
+test, run with `nsh test src` (the app root is `src/`). NSH opens each app on an
+engine of its own, headless by default, and `await`s the test callback, so tests
+can be `async`. The local dependency-boundary rule has its own Bun test,
+`lint/boundaries.test.js`; it runs without NSH and proves the rule's reports.
 
 ```sh
-bun run test                       # every test, headless
+bun run test                       # every app test, headless
 bun run test -- --filter camera    # tests whose name contains "camera"
 nsh test src/leafer/camera.test.ts # one file
 bun run test:host                  # on this machine's real host (Windows, macOS or Linux)
 bun run test:web                   # in a headless browser host
+bun run test:lint                  # the boundary rule's tests (also part of check)
 bun run test:junit                 # also write src/.nsh/junit.xml for CI
 ```
 
-Test paths below are relative to `src/`.
+Test paths below are relative to `src/` unless stated otherwise.
 
 Headless is the default gate: fast, deterministic and identical on every OS.
 The host target runs the same steps through the platform's real input and
@@ -80,7 +82,10 @@ for drags.
 
 - One behaviour per test; the name says what the user does ("clears the
   selection with Escape"), not which function runs.
-- No sleeps, no retries, no shared mutable state between tests.
+- App tests use `app.waitUntil`, never a sleep; no retries, no shared mutable
+  state between tests. A real timer is allowed only where the behavior is
+  timer-based: `editor.test.ts` has one documented 200 ms double-click spacing
+  timer, and a new one needs the same comment and reviewer approval.
 - Destroy Leafer `App`s/`Leafer`s you create (`app.destroy()`), or the next
   test in the file may inherit timers.
 - Assert on outcomes (text, selection, position), not internal call counts,
@@ -91,11 +96,15 @@ for drags.
 
 ## Coverage expectations
 
-- `leafer/nsh-platform.ts`: every newly supported canvas feature gets a test
-  that records a call, replays it, and asserts the effect (patterns,
-  gradients, snapshots, hit tests).
+- `leafer/nsh-platform.test.ts` covers the `leafer/platform/` modules: every
+  newly supported canvas feature gets a test that records a call, replays it,
+  and asserts the effect (patterns, gradients, snapshots, hit tests).
 - `leafer/camera.ts`: pan/zoom/fit invariants (the point under the cursor
   stays put, content stays centered).
 - `pages/FlowPage.tsx`: through `App.test.tsx` for interaction flows, not
   through unit tests of its closures.
-- `store.ts`: through the page/overlays; the signals are private by design.
+- `store.ts`: readers and actions directly in `store.test.ts`, and their page
+  wiring through `App.test.tsx`; the signals stay private by design.
+- `lint/boundaries.js`: `lint/boundaries.test.js` covers layer classification,
+  bare-directory targets, upward reports and the fail-closed `unknown` report.
+  Extend it when adding a directory, facade or layer.

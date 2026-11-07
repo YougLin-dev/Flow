@@ -5,6 +5,9 @@ const generated = [".nsh/**", "src/.nsh/**", "target/**", "node_modules/**"];
 export default defineConfig({
   lint: {
     ignorePatterns: generated,
+    // Oxlint's built-in import plugin carries no-cycle/no-duplicates; it is
+    // not in the default plugin set, so enable it explicitly.
+    plugins: ["typescript", "unicorn", "import"],
     // Project rule: dependencies flow down (docs/architecture.md).
     jsPlugins: ["./lint/boundaries.js"],
     options: {
@@ -21,9 +24,9 @@ export default defineConfig({
     },
     rules: {
       // `any` erases the types of everything it touches: app code may not
-      // spell it. Leafer's own declarations use `any` internally;
-      // `src/leafer/nsh-platform.ts` is the one place that narrows them, with
-      // `unknown` and type guards.
+      // spell it. Leafer's own declarations use `any` internally; the
+      // `src/leafer/platform/` adapter is the one place that narrows them,
+      // with `unknown` and type guards.
       "typescript/no-explicit-any": "error",
       "typescript/no-unsafe-assignment": "error",
       "typescript/no-unsafe-member-access": "error",
@@ -48,11 +51,18 @@ export default defineConfig({
       "import/no-duplicates": "error",
       "import/no-self-import": "error",
       "import/no-default-export": "error",
+      // `@leafer-in/editor` and NSH modules register themselves on import.
+      "import/no-unassigned-import": "off",
 
       "no-console": ["error", { allow: ["error"] }],
       "no-debugger": "error",
       "no-shadow": "error",
       "no-implicit-coercion": "error",
+
+      // Modules are split by responsibility, not by an arbitrary line count;
+      // this ceiling only catches a file growing back into a monolith. 500
+      // code lines is a prompt to look for a seam, not a design target.
+      "max-lines": ["error", { max: 500, skipBlankLines: true, skipComments: true }],
       "import/first": "error",
       "import/newline-after-import": "error",
       "unicorn/prefer-number-properties": "error",

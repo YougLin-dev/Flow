@@ -1,13 +1,15 @@
 # Notes for coding agents
 
 Flow is a TSX app for Native Shell (NSH) with a Leafer canvas. Read
+[the engineering standard](docs/standards.md),
 [architecture](docs/architecture.md), [conventions](docs/conventions.md) and
 [testing](docs/testing.md) before changing code; this file is the short list.
 
 ## Gate
 
-Run `bun run check` (format + lint + type check; file names and dependency
-direction are lint rules) and `bun run test` before you finish.
+Run `bun run check` (format + lint + type check + boundary-rule tests; file
+names and dependency direction are lint rules) and `bun run test` before you
+finish.
 `bun run check:fix` applies safe fixes. `bun run test:host` also drives the
 real desktop host on this OS.
 
@@ -16,16 +18,20 @@ real desktop host on this OS.
 - **App code lives in `src/`:** the entry, `nsh.json`, `theme.json` and assets
   are the NSH app root; the repository root is tooling only.
 - **No `any`.** Narrow `unknown` with type guards. The only code allowed to
-  touch Leafer's untyped internals is `src/leafer/nsh-platform.ts`.
+  touch Leafer's untyped internals is `src/leafer/nsh-platform.ts` and the
+  implementation modules under `src/leafer/platform/`.
 - **Dependencies flow down.** `src/App.tsx → pages → components/store`.
   `components/` and foundations never import a page; foundations
   (`flow/`, `leafer/`, `lib/`, `tool.ts`) never import the store. The
   `boundaries/no-upward-import` rule (`lint/boundaries.js`) enforces it.
 - **Signals stay private in `src/store.ts`.** Export readers and actions;
   pages bind them to presentational components.
-- **The canvas is Leafer's.** Extend `src/leafer/nsh-platform.ts` (with a test
-  in `src/leafer/nsh-platform.test.ts`) instead of hand-drawing interactions;
+- **The canvas is Leafer's.** Extend the matching module in
+  `src/leafer/platform/` behind the `nsh-platform.ts` facade (with a test in
+  `src/leafer/nsh-platform.test.ts`) instead of hand-drawing interactions;
   use Leafer's editor for selection, dragging and resizing.
+- **Files stay focused.** The `max-lines` lint rule caps a module at 500 code
+  lines; treat that as a prompt to find a seam, not a target.
 - **Design tokens only.** No raw hex/rgba or palette classes in app code; add
   a semantic token to `src/theme.json` when a role is missing.
 - **The sandbox is declared.** `src/nsh.json` grants no remote hosts; add one

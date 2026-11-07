@@ -18,9 +18,10 @@ export function ToolSwitch(props: ToolSwitchProps) {
     <View class="absolute right-4 bottom-4 flex-row items-center gap-1 rounded-(--radius) border border-border bg-card p-1">
       {buttons.map(({ tool, label }) => (
         <Button
+          accessibilityLabel={label}
           selected={props.tool === tool}
           onPress={() => props.onChange(tool)}
-          class="rounded-md px-3 py-1.5 active:bg-muted selected:bg-muted"
+          class="rounded-md px-3 py-1.5 active:bg-muted selected:bg-muted focus:bg-accent"
         >
           <Text
             classList={{

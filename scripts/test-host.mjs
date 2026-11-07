@@ -15,6 +15,8 @@ if (!target) {
   process.exit(1);
 }
 
-const result = spawnSync("nsh", ["test", "src", "--target", target], { stdio: "inherit" });
+const result = spawnSync("nsh", ["test", "src", "--target", target, ...process.argv.slice(2)], {
+  stdio: "inherit",
+});
 if (result.error) throw result.error;
 process.exit(result.status ?? 1);

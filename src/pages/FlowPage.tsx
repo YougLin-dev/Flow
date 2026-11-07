@@ -8,7 +8,7 @@ import { ToolSwitch } from "../components/ToolSwitch";
 import { ZoomControls } from "../components/ZoomControls";
 import { CONTENT } from "../flow/data";
 import { drawGrid } from "../flow/grid";
-import { buildScene } from "../flow/scene";
+import { buildScene, type FlowScene } from "../flow/scene";
 import { CanvasCamera } from "../leafer/camera";
 import { LeaferView } from "../leafer/LeaferView";
 import {
@@ -28,6 +28,7 @@ import {
 export function FlowPage() {
   let camera: CanvasCamera | null = null;
   let editor: IEditorBase | null = null;
+  let scene: FlowScene | null = null;
   let stageWidth = 1;
   let stageHeight = 1;
   // Once the user moves the camera, a resize keeps it where it is.
@@ -49,7 +50,7 @@ export function FlowPage() {
   const zoomAround = (factor: number, cx: number, cy: number): void => {
     if (!camera) return;
     userCamera = true;
-    if (camera.zoomAround(factor, cx, cy, 0.35, 2.5)) {
+    if (camera.zoomAround(factor, cx, cy)) {
       setZoomPercent(Math.round(camera.scale * 100));
     }
   };
@@ -67,7 +68,10 @@ export function FlowPage() {
   const fit = (): void => {
     if (!camera) return;
     userCamera = false;
-    const next = camera.fit(CONTENT, { width: stageWidth, height: stageHeight });
+    const next = camera.fit(scene?.bounds() ?? CONTENT, {
+      width: stageWidth,
+      height: stageHeight,
+    });
     setZoomPercent(Math.round(next * 100));
   };
 
@@ -106,9 +110,10 @@ export function FlowPage() {
         setup={(app, size) => {
           stageWidth = size.width;
           stageHeight = size.height;
-          const scene = buildScene(app);
-          camera = new CanvasCamera(scene.world);
-          recolor = scene.recolor;
+          const built = buildScene(app);
+          scene = built;
+          camera = new CanvasCamera(built.world);
+          recolor = built.recolor;
           editor = app.editor;
           // The flow's cards have no inner text editor; a double click should
           // not open a group or clear the selection.
@@ -123,7 +128,9 @@ export function FlowPage() {
         onResize={(size) => {
           stageWidth = size.width;
           stageHeight = size.height;
-          if (camera && !userCamera) publishZoom(camera.fit(CONTENT, size));
+          if (camera && !userCamera) {
+            publishZoom(camera.fit(scene?.bounds() ?? CONTENT, size));
+          }
         }}
       />
 

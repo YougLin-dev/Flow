@@ -1,4 +1,4 @@
-import { signal } from "nsh";
+import { platform, signal } from "nsh";
 import { isAvailable, Window } from "nsh/desktop";
 import type { Tool } from "./tool";
 
@@ -38,7 +38,8 @@ export function setSelectedCount(value: number): void {
 
 /** Keeps the window above normal windows, or lets it back down. */
 export function togglePinned(): void {
-  if (!isAvailable) return;
+  // NSH sets a window level on macOS and Windows only.
+  if (!isAvailable || platform.os === "linux") return;
   const next = !pinned();
   pinned.set(next);
   Window.setLevel(next ? "floating" : "normal");

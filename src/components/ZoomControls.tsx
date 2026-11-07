@@ -9,7 +9,8 @@ export interface ZoomControlsProps {
   onFit: () => void;
 }
 
-const controlClass = "min-w-9 items-center justify-center rounded-md px-2 py-1.5 active:bg-muted";
+const controlClass =
+  "min-w-9 items-center justify-center rounded-md px-2 py-1.5 active:bg-muted focus:bg-accent";
 
 /** The zoom controls floating at the canvas' top-right corner. */
 export function ZoomControls(props: ZoomControlsProps) {
@@ -24,7 +25,7 @@ export function ZoomControls(props: ZoomControlsProps) {
       <Button accessibilityLabel="Zoom out" onPress={props.onZoomOut} class={controlClass}>
         <Text class="text-base text-card-foreground">−</Text>
       </Button>
-      <Button onPress={props.onFit} class="rounded-md px-3 py-1.5 active:bg-muted">
+      <Button onPress={props.onFit} class="rounded-md px-3 py-1.5 active:bg-muted focus:bg-accent">
         <Text class="text-sm text-card-foreground">Fit</Text>
       </Button>
     </View>

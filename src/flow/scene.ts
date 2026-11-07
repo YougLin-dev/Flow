@@ -10,6 +10,7 @@ import {
   Rect,
   Text as LeaferText,
 } from "@leafer-ui/miniapp";
+import type { CameraBounds } from "../leafer/camera";
 import nodeIcon from "../assets/node@2x.png";
 import { EDGES, NODE_HEIGHT, NODE_WIDTH, NODES, type FlowAccent } from "./data";
 
@@ -18,6 +19,8 @@ export interface FlowScene {
   readonly world: Group;
   /** Re-reads the theme tokens and repaints the scene (light/dark changes). */
   readonly recolor: () => void;
+  /** The current content bounds, including cards moved by the editor. */
+  readonly bounds: () => CameraBounds;
 }
 
 /**
@@ -32,7 +35,7 @@ export function buildScene(app: LeaferApp): FlowScene {
   const colors = () => ({
     card: token("card"),
     border: token("border"),
-    title: token("foreground"),
+    title: token("card-foreground"),
     muted: token("muted-foreground"),
     edge: token("border"),
     shadow: token("flow-shadow"),
@@ -64,6 +67,7 @@ export function buildScene(app: LeaferApp): FlowScene {
       shadow: { x: 0, y: 10, blur: 26, color: initial.shadow },
       draggable: true,
       editable: true,
+      resizeChildren: true,
       hoverStyle: { stroke: accent, strokeWidth: 1.5 },
     });
 
@@ -120,6 +124,16 @@ export function buildScene(app: LeaferApp): FlowScene {
   const edges = new Group({ opacity: 0.9 });
   world.add(edges);
   const connectors: { line: Line; arrow: Polygon }[] = [];
+  const updates: (() => void)[] = [];
+  let dirty = false;
+  const mark = (): void => {
+    dirty = true;
+  };
+  const flush = (): void => {
+    if (!dirty) return;
+    dirty = false;
+    for (const update of updates) update();
+  };
 
   for (const [fromIndex, toIndex] of EDGES) {
     const from = boxes[fromIndex];
@@ -187,11 +201,18 @@ export function buildScene(app: LeaferApp): FlowScene {
       arrow.rotation = (Math.atan2(y2 - y1, x2 - x1) * 180) / Math.PI;
     };
 
-    // Fires while cards are dragged and when the editor moves or resizes them.
-    from.on(PropertyEvent.CHANGE, update);
-    to.on(PropertyEvent.CHANGE, update);
+    // The editor moves and resizes cards under `lockLayout`, so bounds are
+    // stale inside PropertyEvent.CHANGE. Mark the connector dirty and read
+    // bounds after the layout that follows the gesture.
+    updates.push(update);
+    from.on(PropertyEvent.CHANGE, mark);
+    to.on(PropertyEvent.CHANGE, mark);
     update();
   }
+
+  app.tree.on("layout.end", flush);
+  app.on("layout.end", flush);
+  dirty = true;
 
   const recolor = (): void => {
     const next = colors();
@@ -211,5 +232,23 @@ export function buildScene(app: LeaferApp): FlowScene {
     }
   };
 
-  return { world, recolor };
+  const bounds = (): CameraBounds => {
+    let minX = Infinity;
+    let minY = Infinity;
+    let maxX = -Infinity;
+    let maxY = -Infinity;
+    for (const box of boxes) {
+      const b = box.getBounds("box", world);
+      minX = Math.min(minX, b.x);
+      minY = Math.min(minY, b.y);
+      maxX = Math.max(maxX, b.x + b.width);
+      maxY = Math.max(maxY, b.y + b.height);
+    }
+    if (!Number.isFinite(minX) || !Number.isFinite(minY)) {
+      return { x: 0, y: 0, width: 1, height: 1 };
+    }
+    return { x: minX, y: minY, width: Math.max(1, maxX - minX), height: Math.max(1, maxY - minY) };
+  };
+
+  return { world, recolor, bounds };
 }

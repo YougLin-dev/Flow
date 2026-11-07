@@ -22,11 +22,17 @@ import {
   type StyleProp,
   type ViewStyle,
 } from "nsh";
-import type { ILeaf, IRenderer } from "@leafer-ui/interface";
+import type { ILeaf } from "@leafer-ui/interface";
 import { App, RenderEvent } from "@leafer-ui/miniapp";
 import "@leafer-in/editor";
 import type { Tool } from "../tool";
-import { installNshPlatform, LeaferHost, pointerData, setDrawRequester } from "./nsh-platform";
+import {
+  addDrawRequester,
+  clearRenderMarks,
+  installNshPlatform,
+  LeaferHost,
+  pointerData,
+} from "./nsh-platform";
 
 installNshPlatform();
 
@@ -71,13 +77,7 @@ interface TouchPoint {
   pageY: number;
 }
 
-type FrameRenderer = IRenderer & { requestTime: number };
 type CursorStyle = NonNullable<ViewStyle["cursor"]>;
-
-/** Leafer's renderer keeps a `requestTime` of its own; its type hides it. */
-function isFrameRenderer(renderer: IRenderer): renderer is FrameRenderer {
-  return "requestTime" in renderer;
-}
 
 const handleCursors = [
   "nwse-resize",
@@ -100,11 +100,14 @@ export function LeaferView(props: LeaferViewProps) {
   let scheduled = false;
   let drawing = false;
   let disposed = false;
+  let frameId = 0;
 
   // Panning with the hand tool (a mouse press, or a finger on a phone).
   let panning = false;
   let panX = 0;
   let panY = 0;
+  // Who owns the active press: Leafer, or the hand-tool pan.
+  let activePointer: "leafer" | "pan" | null = null;
 
   // Two-finger zoom.
   let pinching = false;
@@ -132,18 +135,21 @@ export function LeaferView(props: LeaferViewProps) {
     // marks must not schedule another frame, or the canvas never goes idle.
     if (scheduled || drawing || disposed) return;
     scheduled = true;
-    requestAnimationFrame(() => {
+    frameId = requestAnimationFrame(() => {
       scheduled = false;
       if (!disposed) tick.update((n) => n + 1);
     });
   };
 
-  setDrawRequester(request);
+  const removeDrawRequester = addDrawRequester(request);
   cleanup(() => {
     disposed = true;
-    setDrawRequester(null);
+    cancelAnimationFrame(frameId);
+    removeDrawRequester();
     app?.destroy();
     app = null;
+    host?.dispose();
+    host = null;
   });
 
   const pan = (dx: number, dy: number): void => {
@@ -223,10 +229,11 @@ export function LeaferView(props: LeaferViewProps) {
     return Math.hypot(b.pageX - a.pageX, b.pageY - a.pageY);
   };
 
-  const touchCenter = (e: GestureResponderEvent): { x: number; y: number } => ({
-    x: (e.touches[0].pageX + e.touches[1].pageX) / 2,
-    y: (e.touches[0].pageY + e.touches[1].pageY) / 2,
-  });
+  const touchCenter = (e: GestureResponderEvent): { x: number; y: number } => {
+    const a = touchPoint(e.touches[0]);
+    const b = touchPoint(e.touches[1]);
+    return { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
+  };
 
   // -- desktop ---------------------------------------------------------------
 
@@ -234,12 +241,14 @@ export function LeaferView(props: LeaferViewProps) {
     const keys = rememberModifiers(e);
     if (!app || touchActive || Date.now() < suppressPressUntil) return;
     if (hand()) {
+      activePointer = "pan";
       panning = true;
       panX = e.position.x;
       panY = e.position.y;
       updateCursor();
       return;
     }
+    activePointer = "leafer";
     app.interaction?.pointerDown(pointerData(e.position.x, e.position.y, keys));
     updateCursor();
   };
@@ -247,7 +256,7 @@ export function LeaferView(props: LeaferViewProps) {
   const onMove = (e: NshMouseEvent): void => {
     rememberModifiers(e);
     if (!app || touchActive) return;
-    if (panning) {
+    if (activePointer === "pan") {
       pan(e.position.x - panX, e.position.y - panY);
       panX = e.position.x;
       panY = e.position.y;
@@ -261,9 +270,21 @@ export function LeaferView(props: LeaferViewProps) {
   const onUp = (e: PressEvent): void => {
     const keys = rememberModifiers(e);
     if (!app || touchActive || Date.now() < suppressPressUntil) return;
-    if (panning) {
+    if (activePointer === "pan") {
+      activePointer = null;
       panning = false;
-      if (!hand()) app.interaction?.pointerCancel();
+      updateCursor();
+      return;
+    }
+    if (activePointer === "leafer") {
+      activePointer = null;
+      app.interaction?.pointerUp(
+        pointerData(e.position.x, e.position.y, {
+          buttons: 0,
+          button: 0,
+          ...keys,
+        }),
+      );
       updateCursor();
       return;
     }
@@ -280,6 +301,10 @@ export function LeaferView(props: LeaferViewProps) {
 
   const onLeave = (): void => {
     if (!app) return;
+    if (activePointer === "leafer") app.interaction?.pointerCancel();
+    activePointer = null;
+    panning = false;
+    pinching = false;
     app.interaction?.cancelHover();
     cursor.set(hand() ? "grab" : "default");
   };
@@ -303,6 +328,8 @@ export function LeaferView(props: LeaferViewProps) {
     touchActive = true;
     if (e.touches.length > 1) {
       app.interaction?.pointerCancel();
+      activePointer = null;
+      panning = false;
       pinching = true;
       pinchDistance = touchDistance(e);
       const center = touchCenter(e);
@@ -310,13 +337,16 @@ export function LeaferView(props: LeaferViewProps) {
       pinchY = center.y;
       return;
     }
+    pinching = false;
     const point = touchPoint(e);
     if (hand()) {
+      activePointer = "pan";
       panning = true;
       panX = point.x;
       panY = point.y;
       return;
     }
+    activePointer = "leafer";
     app.interaction?.pointerDown(
       pointerData(point.x, point.y, {
         pointerType: "touch",
@@ -346,7 +376,7 @@ export function LeaferView(props: LeaferViewProps) {
       panY = point.y;
       return;
     }
-    if (hand()) return;
+    if (activePointer !== "leafer") return;
     const point = touchPoint(e);
     app.interaction?.pointerMove(
       pointerData(point.x, point.y, {
@@ -362,15 +392,20 @@ export function LeaferView(props: LeaferViewProps) {
     touchActive = false;
     suppressPressUntil = Date.now() + 500;
     if (pinching) {
-      if (e.touches.length < 2) pinching = false;
+      if (e.touches.length < 2) {
+        pinching = false;
+        panning = false;
+        activePointer = null;
+      }
       return;
     }
-    if (panning) {
+    if (activePointer === "pan") {
+      activePointer = null;
       panning = false;
-      if (!hand()) app.interaction?.pointerCancel();
       return;
     }
-    if (hand()) return;
+    if (activePointer !== "leafer") return;
+    activePointer = null;
     const point = touchPoint(e);
     app.interaction?.pointerUp(
       pointerData(point.x, point.y, {
@@ -388,6 +423,7 @@ export function LeaferView(props: LeaferViewProps) {
     suppressPressUntil = Date.now() + 500;
     pinching = false;
     panning = false;
+    activePointer = null;
     app.interaction?.pointerCancel();
   };
 
@@ -427,35 +463,33 @@ export function LeaferView(props: LeaferViewProps) {
     }
 
     const currentApp = app;
+    const drawingHost = host;
 
     drawing = true;
-    host.beginFrame(cx, w, h);
-    if (props.drawBackdrop) props.drawBackdrop(cx, { width: w, height: h });
-    else drawBackdrop(cx, w, h);
-    // Leafer's renderer keeps the time of the frame it asked for and refuses
-    // to ask for another until that frame runs. There is no browser loop
-    // here: every NSH frame draws a full frame, so clear that mark on every
-    // layer and let the next change schedule another one. Rendering marks the
-    // app changed again (a child's render ends), so clear the marks after the
-    // frame too, or the next change would never ask for one.
-    const clearRenderMarks = (): void => {
-      for (const layer of [currentApp, currentApp.tree, currentApp.sky]) {
-        const renderer = layer.renderer;
-        if (isFrameRenderer(renderer)) renderer.requestTime = 0;
-      }
-    };
-    clearRenderMarks();
-    // The tree and the sky render into their own canvases; the app copies
-    // both onto the view. Announcing the children's render the way Leafer's
-    // App renderer does lets the editor know the scene moved and update its
-    // box before the sky draws.
-    currentApp.emit(RenderEvent.CHILD_START, currentApp);
-    currentApp.forceRender(undefined, true);
-    currentApp.emit(RenderEvent.CHILD_END, currentApp);
-    currentApp.renderer.render();
-    clearRenderMarks();
-    drawing = false;
-    host.endFrame();
+    try {
+      drawingHost.beginFrame(cx, w, h);
+      if (props.drawBackdrop) props.drawBackdrop(cx, { width: w, height: h });
+      else drawBackdrop(cx, w, h);
+      // Leafer's renderer keeps the time of the frame it asked for and
+      // refuses to ask for another until that frame runs. There is no browser
+      // loop here: every NSH frame draws a full frame, so clear that mark on
+      // every layer and let the next change schedule another one. Rendering
+      // marks the app changed again (a child's render ends), so clear the
+      // marks after the frame too, or the next change would never ask for one.
+      clearRenderMarks(currentApp);
+      // The tree and the sky render into their own canvases; the app copies
+      // both onto the view. Announcing the children's render the way Leafer's
+      // App renderer does lets the editor know the scene moved and update its
+      // box before the sky draws.
+      currentApp.emit(RenderEvent.CHILD_START, currentApp);
+      currentApp.forceRender(undefined, true);
+      currentApp.emit(RenderEvent.CHILD_END, currentApp);
+      currentApp.renderer.render();
+      clearRenderMarks(currentApp);
+    } finally {
+      drawing = false;
+      drawingHost.endFrame();
+    }
   };
 
   // With `exactOptionalPropertyTypes`, pass optional props only when set.

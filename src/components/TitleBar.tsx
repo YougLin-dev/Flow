@@ -1,5 +1,5 @@
 import { Button } from "nsh/base";
-import { colorScheme, Image, Text, View } from "nsh";
+import { colorScheme, Image, platform, Text, View } from "nsh";
 import { titleBar } from "nsh/desktop";
 import { TITLEBAR_HEIGHT } from "../lib/window-chrome";
 import appIcon from "../assets/icons/32x32.png";
@@ -21,6 +21,9 @@ export interface TitleBarProps {
  * the window, and its pin button keeps the window above the others.
  */
 export function TitleBar(props: TitleBarProps) {
+  // NSH sets a window level on macOS and Windows, not on Linux; do not offer
+  // a control whose state the window manager would not honor.
+  const pinnable = platform.os !== "linux";
   return (
     <View
       desktop={{ windowDrag: true }}
@@ -34,25 +37,33 @@ export function TitleBar(props: TitleBarProps) {
         paddingRight: titleBar().right || 8,
       }}
     >
-      <Image src={appIcon} style={{ width: 18, height: 18 }} />
-      <Text class="ml-2 text-sm font-semibold text-card-foreground">Flow</Text>
-      <Text class="ml-2 text-xs text-muted-foreground">Leafer engine · NSH</Text>
-      <View class="flex-1" />
-      <Button
-        accessibilityLabel={props.pinned ? "Unpin window" : "Pin window on top"}
-        selected={props.pinned}
-        onPress={() => props.onTogglePinned()}
-        class="items-center justify-center hover:bg-titlebar-hover active:bg-titlebar-active"
-        classList={{ "bg-titlebar-pinned": props.pinned }}
-        // 46 points is the width of one Windows caption button, so the pin
-        // lane reads as part of the system controls.
-        style={{ width: 46, height: "100%" }}
-      >
-        <Image
-          src={props.pinned ? pinActive : colorScheme() === "dark" ? pinLight : pinDark}
-          style={{ width: 15, height: 13, objectFit: "contain", objectPosition: "center" }}
-        />
-      </Button>
+      <View class="min-w-0 flex-1 flex-row items-center overflow-hidden">
+        <Image class="shrink-0" src={appIcon} style={{ width: 18, height: 18 }} />
+        <Text class="ml-2 shrink-0 text-sm font-semibold text-card-foreground">Flow</Text>
+        <Text
+          class="ml-2 min-w-0 text-xs text-muted-foreground"
+          style={{ numberOfLines: 1, textOverflow: "ellipsis" }}
+        >
+          Leafer engine · NSH
+        </Text>
+      </View>
+      {pinnable && (
+        <Button
+          accessibilityLabel={props.pinned ? "Unpin window" : "Pin window on top"}
+          selected={props.pinned}
+          onPress={() => props.onTogglePinned()}
+          class="items-center justify-center hover:bg-titlebar-hover active:bg-titlebar-active focus:bg-accent"
+          classList={{ "bg-titlebar-pinned": props.pinned }}
+          // 46 points is the width of one Windows caption button, so the pin
+          // lane reads as part of the system controls.
+          style={{ width: 46, height: "100%" }}
+        >
+          <Image
+            src={props.pinned ? pinActive : colorScheme() === "dark" ? pinLight : pinDark}
+            style={{ width: 15, height: 13, objectFit: "contain", objectPosition: "center" }}
+          />
+        </Button>
+      )}
     </View>
   );
 }
