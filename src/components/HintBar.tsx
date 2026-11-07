@@ -9,7 +9,7 @@ const modifier = platform.os === "macos" ? "⌘" : "Ctrl";
 
 const hints: Record<Tool, string> = {
   hand: `Drag to pan · pinch or ${modifier} +/− to zoom · V to select`,
-  select: "Drag a card · box-select empty space · Shift adds · H to pan",
+  select: "Drag a card · N adds · L connects · Del removes · H to pan",
 };
 
 const touchHint = "Drag a card · box-select empty space · pinch to pan/zoom";

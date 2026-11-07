@@ -1,10 +1,11 @@
 import { expect, test } from "nsh/test";
-import { CONTENT, EDGES, NODE_HEIGHT, NODE_WIDTH, NODES } from "./data";
+import { CONTENT, EDGES, NODE_HEIGHT, NODE_WIDTH, NODES, seedEdges, seedNodes } from "./data";
 
 test("every edge connects two nodes", () => {
-  for (const [from, to] of EDGES) {
-    expect(NODES[from]).toBeDefined();
-    expect(NODES[to]).toBeDefined();
+  const ids = new Set(NODES.map((node) => node.id));
+  for (const edge of EDGES) {
+    expect(ids.has(edge.from)).toBe(true);
+    expect(ids.has(edge.to)).toBe(true);
   }
 });
 
@@ -18,4 +19,14 @@ test("the content bounds enclose every card", () => {
     expect(node.x + NODE_WIDTH).toBeLessThanOrEqual(CONTENT.x + CONTENT.width);
     expect(node.y + NODE_HEIGHT).toBeLessThanOrEqual(CONTENT.y + CONTENT.height);
   }
+});
+
+test("seeds nodes and edges with their ids", () => {
+  const nodes = seedNodes();
+  const edges = seedEdges();
+  expect(nodes.length).toBe(NODES.length);
+  expect(edges.length).toBe(EDGES.length);
+  expect(nodes[0]?.id).toBe("trigger");
+  expect(edges[0]?.fromId).toBe("trigger");
+  expect(edges[0]?.toId).toBe("validate");
 });

@@ -32,3 +32,31 @@ export function isSnapshotSource(value: unknown): value is SnapshotSource {
     typeof value.height === "number"
   );
 }
+
+/**
+ * A snapshot is a picture, so its save stack must be self-contained: an open
+ * `save()` (Leafer snapshots a layer while its own save is still open) would
+ * otherwise consume the replay's restore and leave the destination clipped to
+ * the snapshot rectangle. A `restore()` without an open save is a no-op.
+ */
+export function balancedOps(ops: Op[]): Op[] {
+  const balanced: Op[] = [];
+  let depth = 0;
+  for (const op of ops) {
+    if (op[0] === 1 && op[1] === "save") {
+      depth += 1;
+      balanced.push(op);
+    } else if (op[0] === 1 && op[1] === "restore") {
+      if (depth === 0) continue;
+      depth -= 1;
+      balanced.push(op);
+    } else {
+      balanced.push(op);
+    }
+  }
+  while (depth > 0) {
+    balanced.push([1, "restore"]);
+    depth -= 1;
+  }
+  return balanced;
+}

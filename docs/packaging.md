@@ -26,17 +26,21 @@ runtimes (`nsh-macos-app` and `nsh-linux-app` are host tools).
 
 To produce all three from one place, run the same command on a CI matrix
 (`windows-latest`, `macos-latest`, `ubuntu-24.04`) and upload
-`.nsh/out/installers` as the artifacts. Each runner needs Bun and NSH
-installed; no other packaging tool is required.
+`.nsh/out/installers` as the artifacts. Each runner needs Bun, NSH, a Rust
+toolchain and the platform build dependencies below; the mixed app's
+`src/native/` crate is compiled as part of `nsh package`.
 
 ## Requirements
 
-- **All hosts:** Bun and the `nsh` CLI.
-- **Windows:** nothing else. The packager downloads NSIS itself.
-- **macOS:** Xcode command line tools (for `codesign` and `hdiutil`).
-- **Linux:** `dpkg` tools and FUSE for AppImage; the app needs GTK 4.14+ and
-  WebKitGTK 6.0 at run time. The generated `.deb` declares
-  `libgtk-4-1` and `libwebkitgtk-6.0-4`.
+- **All hosts:** Bun, the `nsh` CLI and Rust/Cargo.
+- **Windows:** Visual Studio Build Tools with the C++ workload and the Windows
+  SDK (for the Rust runtime and bundled SQLite); the packager downloads NSIS
+  itself.
+- **macOS:** Xcode command line tools (for `codesign`, `hdiutil` and the Rust
+  native build).
+- **Linux:** a C/C++ toolchain for the Rust build, `dpkg` tools and FUSE for
+  AppImage; the app needs GTK 4.14+ and WebKitGTK 6.0 at run time. The
+  generated `.deb` declares `libgtk-4-1` and `libwebkitgtk-6.0-4`.
 
 ## Icons
 
@@ -76,15 +80,8 @@ PNG that NSH embeds.
 3. Bump `version` (and `build`) in `src/nsh.json`; the installer name follows
    it.
 
-## Mobile and web
+## Not shipped
 
-These come straight from NSH and do not use the packager:
-
-```sh
-nsh package --target android src                # .apk (debug key unless --keystore)
-nsh package --target ios --sign ... --profile ... src   # .ipa, macOS only
-nsh package --target web src                    # static site
-```
-
-`nsh package --target ios-simulator` makes a simulator `.app`, and
-`--target macos --run` opens the packaged Mac app.
+Web, iOS and Android are not release targets. The document core is a desktop
+Rust crate with SQLite, native files and WAL; Flow is packaged for macOS,
+Windows and Linux only.

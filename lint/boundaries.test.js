@@ -26,6 +26,8 @@ test("classifies files and bare directory imports", () => {
   expect(layerOf("src/tool.ts")).toBe("type");
   expect(layerOf("src/flow/scene.ts")).toBe("foundation");
   expect(layerOf("src/leafer/platform/host.ts")).toBe("foundation");
+  expect(layerOf("src/native")).toBe("foundation");
+  expect(layerOf("src/native/src/db.rs")).toBe("foundation");
   expect(layerOf("src/assets/icon.png")).toBe("asset");
   expect(layerOf("src/unclassified/module.ts")).toBe("other");
 });

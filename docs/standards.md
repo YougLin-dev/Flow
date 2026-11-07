@@ -32,10 +32,10 @@ and Leafer's ownership of the retained scene and editor.
 Feature specifications, copy and roadmap are out of scope.
 
 **The gate.** A change is verified only by `bun run check` (which runs
-`nsh check src && vp check --deny-warnings && bun run test:lint`) and
-`bun run test`. Warnings fail the gate. `bun run test:web` runs the same tests
-on the web target and is run by CI on Linux; `bun run test:host` adds real
-desktop input and window evidence; `bun run package` adds installer evidence
+`nsh check src && vp check --deny-warnings && bun run test:lint && bun run
+check:rust`) and `bun run test`. Warnings fail the gate. `bun run test:host`
+adds real desktop input and window evidence; `bun run test:bench` runs the
+ignored 100k SQLite/search benchmark; `bun run package` adds installer evidence
 on the target OS. These commands are the contract, not suggestions. Exception
 handling is defined in section 12.
 
@@ -78,16 +78,16 @@ root `.nsh/out` MUST NOT be edited or committed. Asset and theme paths in
 `boundaries/no-upward-import` in `lint/boundaries.js` enforces this table for
 relative imports. Tests are exempt because they may reach into any layer.
 
-| Layer        | Path                                   | MAY import                                           |
-| ------------ | -------------------------------------- | ---------------------------------------------------- |
-| Shell        | `src/App.tsx`                          | every layer                                          |
-| Page         | `src/pages/**`                         | pages, components, store, types, foundations, assets |
-| Component    | `src/components/**`                    | components, types, foundations, assets               |
-| Store        | `src/store.ts`                         | store, types, foundations, assets                    |
-| Types        | `src/tool.ts`                          | types only                                           |
-| Foundation   | `src/flow/`, `src/leafer/`, `src/lib/` | foundations, types, assets                           |
-| Asset        | `src/assets/**`                        | nothing                                              |
-| Unclassified | any other `src/` module                | nothing until classified                             |
+| Layer        | Path                                                  | MAY import                                           |
+| ------------ | ----------------------------------------------------- | ---------------------------------------------------- |
+| Shell        | `src/App.tsx`                                         | every layer                                          |
+| Page         | `src/pages/**`                                        | pages, components, store, types, foundations, assets |
+| Component    | `src/components/**`                                   | components, types, foundations, assets               |
+| Store        | `src/store.ts`                                        | store, types, foundations, assets                    |
+| Types        | `src/tool.ts`                                         | types only                                           |
+| Foundation   | `src/flow/`, `src/leafer/`, `src/lib/`, `src/native/` | foundations, types, assets                           |
+| Asset        | `src/assets/**`                                       | nothing                                              |
+| Unclassified | any other `src/` module                               | nothing until classified                             |
 
 Components, the store and foundations MUST NOT import a page or `src/App.tsx`.
 Foundations MUST NOT import the store. Cycles are forbidden. A page MAY import
@@ -98,6 +98,17 @@ state or internals; mutable state shared across pages goes through
 bare-directory spelling plus an allowed and a disallowed direction; an
 unexplained `other` classification is a review failure. (Lint, Lint test,
 Review)
+
+`src/native/` is a Rust foundation, not a second app layer. TSX imports only
+its generated `@flow/native` surface; Rust code owns SQLite, FTS5, RTree, undo
+history and asset metadata, and MUST NOT import TSX or Leafer. No TSX module
+may open SQLite or write SQL. Database calls cross the boundary in batches, not
+per node or per frame. (Review)
+
+Ordinary database work uses SeaORM entities and SeaQuery in `src/native/`;
+handwritten SQL is limited to the FTS5/RTree virtual-table adapter and
+migrations. Do not build query strings by interpolating values, and do not add
+a second database driver or ORM. (Review)
 
 ### 3.3 Facades and internals
 
@@ -326,6 +337,10 @@ vectors into the destination rectangle. `drawImage` MUST support the 2-, 4- and
 multiply the destination's current alpha, its `setTransform`/`resetTransform`
 MUST compose with the placement matrix, and its content MUST be clipped to the
 destination rectangle (and the source rectangle when `drawImage` supplies one).
+A snapshot's `save`/`restore` stack MUST be self-contained: Leafer can snapshot
+an offscreen layer while its own `save()` is still open, and replaying that
+unbalanced save would consume the destination's restore and clip every later
+sibling to the snapshot rectangle.
 A full offscreen `clearRect` starts a new recording; a partial clear is not
 emulated and MUST NOT be relied on. Pattern fills are emulated for `fill` and
 `fillRect`; patterned strokes and text are skipped as documented limitations.
@@ -437,13 +452,15 @@ image use. Clipboard, drop, picker, query strings and file names are untrusted.
 
 Dependencies MUST be declared in `package.json`, pinned exactly (no `^` or
 `~`), resolved by the committed `bun.lock`, and installed in CI with
-`bun install --frozen-lockfile`. `packageManager` MUST name an exact Bun
-version and `engines` the supported minimum. A new runtime dependency MUST have
-an ADR covering need, license, maintenance, runtime and bundle cost, and why
-the adapter or an existing package is insufficient. Lifecycle scripts and
-`trustedDependencies` require review. Removing a package MUST remove its
-imports, types, tests and docs. `bun audit --audit-level=high` SHOULD run
-before a release. (CI, Review)
+`bun install --frozen-lockfile`. Rust dependencies MUST be declared in
+`src/native/Cargo.toml`, resolved by the committed `src/native/Cargo.lock`, and
+covered by the same ADR rule for a new runtime dependency. `packageManager`
+MUST name an exact Bun version and `engines` the supported minimum. A new
+runtime dependency MUST have an ADR covering need, license, maintenance,
+runtime and bundle cost, and why the adapter or an existing package is
+insufficient. Lifecycle scripts and `trustedDependencies` require review.
+Removing a package MUST remove its imports, types, tests and docs. `bun audit
+--audit-level=high` SHOULD run before a release. (CI, Review)
 
 Workflows MUST declare `permissions: contents: read` and elevate per job only.
 Secret-bearing actions SHOULD be pinned to a full commit SHA. Secrets MUST be
@@ -497,8 +514,8 @@ before it and passes after. Every newly supported adapter feature MUST add a
 record, replay and effect/hit test in `src/leafer/nsh-platform.test.ts`.
 `bun run test:host` MUST be reported for desktop input, window chrome or
 window level changes; `bun run package` MUST be reported for packaging changes.
-CI runs the headless suite and the Linux web target; it does not run a native
-host job, so host evidence is a local/manual gate. The PR MUST separate
+CI runs the headless suite on Windows, macOS and Linux; it does not run a
+native host job, so host evidence is a local/manual gate. The PR MUST separate
 automated evidence from host/manual evidence. (Test, Host, CI)
 
 ## 10. Documentation and design records
@@ -609,7 +626,7 @@ formatting owned by Oxfmt is not a review topic. (Review)
 | Performance                                                   | Review; Manual profiling                                                             | A second loop, per-frame scene rebuild, `usePartRender` enabled without dirty-rect tests |
 | Sandbox                                                       | NSH build/package when run; Review                                                   | A missing `capabilities` key or an unjustified host                                      |
 | Dependencies                                                  | `bun install --frozen-lockfile`; Review; ADR                                         | A range, missing lockfile change, unreviewed install script                              |
-| Tests                                                         | `bun run test`, `test:web` on Linux CI, `test:host`                                  | A failing or missing test                                                                |
+| Tests                                                         | `bun run test`, `test:host`, `test:bench`                                            | A failing or missing test                                                                |
 | Release                                                       | `.github/workflows/release.yml` (check, test, tag/version); Review                   | A tag/version mismatch (CI); an unsigned installer or missing smoke test (Review)        |
 | Docs, ADR, changelog                                          | Review                                                                               | A missing update                                                                         |
 
@@ -645,12 +662,8 @@ be fixed when its file is touched:
   identity, but a clean `macos-latest` runner has no certificate installed. A
   release that must be signed needs an import step and notarization
   credentials; until then CI produces ad-hoc-signed builds.
-- The floating overlays use fixed 16-point insets and do not account for
-  mobile safe areas; check notched/home-indicator devices and add an inset
-  when NSH exposes one.
-- The app tests target the headless/desktop surface. They are not a phone
-  device matrix; use `test:host` with a phone target before claiming mobile
-  layout evidence.
+- Flow is desktop-only; the app tests target the headless/desktop surface and
+  do not cover web, iOS or Android. Those are not release targets.
 - The 4K dot grid records a large number of canvas operations per frame; it is
   a measured performance target, not a functional failure. Raise the spacing
   or cache the pattern when profiling shows a missed frame.

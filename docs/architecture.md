@@ -35,6 +35,48 @@ navigate, so the shell mounts `FlowPage` directly. If a second page appears
 render them through `<NavStack>`; the page files and the store stay as they
 are.
 
+## Native document core
+
+`src/native/` is a Rust crate in NSH's mixed-app mode. It owns the document
+database, commands and undo, full-text search, viewport queries and asset
+metadata. TSX imports its generated API from `@flow/native`; it must not open
+SQLite or write SQL. Leafer stays in TSX and continues to own the scene,
+editor, camera and input.
+
+- `src/nsh.json` declares `"rust": "native"`; `App.tsx` remains the app entry.
+- The database is SQLite with WAL, FTS5 (trigram tokenizer) and an RTree
+  viewport index. Node, FTS and RTree rows change in one transaction.
+- Ordinary tables are SeaORM entities; SeaQuery builds dynamic filters and
+  joins. Only the FTS5/RTree virtual-table adapter (`schema.rs`/`search.rs`)
+  contains static SQLite SQL.
+- Database work runs on NSH's blocking pool, then through a handle to one
+  dedicated database worker thread. That thread owns the connection, which
+  keeps the single-writer design and avoids sending SeaORM's sync Rusqlite
+  connection across threads.
+- `FlowPage` opens the document at `host.params.databasePath`, then
+  `FLOW_DB_PATH`, then `process.dataDir/flow.db`, falling back to `:memory:`
+  in headless tests. `bun run dev` sets `FLOW_DB_PATH` to `.nsh/dev/flow.db`,
+  so development data survives restarts; `src/nsh.json` grants exactly that
+  one environment variable. An empty document is seeded from the demo flow.
+- `FlowScene` is driven from `scene(rect, margin)` snapshots. Drag/resize,
+  add, delete and connect each send one command; undo/redo return change sets.
+- Viewport reads are throttled to 80 ms and capped at low zoom (300/800/2000
+  cards); selected cards stay in the scene when they leave the viewport.
+  Nodes inside `rect` sort before margin-only nodes so prefetching cannot
+  consume the budget, and a deterministic hash of the internal sequence
+  spreads a capped low-zoom sample across the rectangle instead of one
+  insertion strip. `bounds()` serves Fit without reading every node into TSX.
+- The search palette (`components/SearchPalette.tsx`) is mounted only while
+  open. It debounces input, calls `Document.search` with the selected kind
+  filter, and renders FTS snippets; opening a hit calls `getNode(id)`, fits
+  the camera to that card, reads the viewport and selects it. Its arrow-key
+  bindings live with the mounted palette, so canvas shortcuts return when it
+  closes.
+- The decision and the phased migration are recorded in
+  [ADR 0002](adr/0002-rust-document-core.md),
+  [ADR 0003](adr/0003-orm-seaorm.md) and
+  [the Rust core plan](plans/rust-core.md).
+
 ## State
 
 `store.ts` keeps its signals private and exports readers (`currentTool()`,
@@ -160,9 +202,9 @@ controls occupy through `titleBar()`, so the drag region and buttons never sit
 under the traffic lights or caption buttons. The pin button calls the store,
 which calls `Window.setLevel("floating" | "normal")`.
 
-Where `nsh/desktop` is unavailable (tests, mobile), the title bar is not
-mounted and `FlowPage` shows `BrandCard` instead, so the same app code runs
-everywhere.
+Where `nsh/desktop` is unavailable (tests and non-desktop hosts), the title
+bar is not mounted and `FlowPage` shows `BrandCard` instead, so the same app
+code runs in the headless test engine.
 
 ## Sandbox
 

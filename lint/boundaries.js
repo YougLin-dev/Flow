@@ -45,7 +45,9 @@ export function layerOf(file) {
     stem === "leafer" ||
     stem.startsWith("leafer/") ||
     stem === "lib" ||
-    stem.startsWith("lib/")
+    stem.startsWith("lib/") ||
+    stem === "native" ||
+    stem.startsWith("native/")
   ) {
     return "foundation";
   }

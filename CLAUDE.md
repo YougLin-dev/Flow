@@ -1,17 +1,18 @@
 # Notes for coding agents
 
-Flow is a TSX app for Native Shell (NSH) with a Leafer canvas. Read
-[the engineering standard](docs/standards.md),
+Flow is a TSX app for Native Shell (NSH) with a Rust document core and a
+Leafer canvas. Read [the engineering standard](docs/standards.md),
 [architecture](docs/architecture.md), [conventions](docs/conventions.md) and
 [testing](docs/testing.md) before changing code; this file is the short list.
 
 ## Gate
 
-Run `bun run check` (format + lint + type check + boundary-rule tests; file
-names and dependency direction are lint rules) and `bun run test` before you
-finish.
+Run `bun run check` (format + lint + type check + Rust format/clippy +
+boundary-rule tests; file names and dependency direction are lint rules) and
+`bun run test` (Rust unit tests plus TSX tests) before you finish.
 `bun run check:fix` applies safe fixes. `bun run test:host` also drives the
-real desktop host on this OS.
+real desktop host on this OS. `bun run test:bench` runs the ignored 100k
+SQLite/search benchmark.
 
 ## Invariants
 
@@ -24,12 +25,22 @@ real desktop host on this OS.
   `components/` and foundations never import a page; foundations
   (`flow/`, `leafer/`, `lib/`, `tool.ts`) never import the store. The
   `boundaries/no-upward-import` rule (`lint/boundaries.js`) enforces it.
+- **Database access is ORM-first.** Use the SeaORM entities and SeaQuery in
+  `src/native/`; handwritten SQL is limited to the FTS5/RTree virtual-table
+  adapter and migrations. Never interpolate values into a query.
 - **Signals stay private in `src/store.ts`.** Export readers and actions;
   pages bind them to presentational components.
 - **The canvas is Leafer's.** Extend the matching module in
   `src/leafer/platform/` behind the `nsh-platform.ts` facade (with a test in
   `src/leafer/nsh-platform.test.ts`) instead of hand-drawing interactions;
   use Leafer's editor for selection, dragging and resizing.
+- **The document core is Rust's.** `src/native/` is the mixed NSH Rust crate;
+  it owns SQLite, FTS5, RTree, undo history and asset metadata. TSX must not
+  open SQLite or write SQL. Leafer stays in TSX/QuickJS and is never moved into
+  Rust. Keep calls coarse-grained; no per-node or per-frame FFI.
+- **The scene is viewport-driven.** `FlowScene` reconciles only the nodes and
+  edges in `scene(rect, margin)`; keep the card budget, throttled reads and
+  selected-card pinning. Never instantiate the whole document in Leafer.
 - **Files stay focused.** The `max-lines` lint rule caps a module at 500 code
   lines; treat that as a prompt to find a seam, not a target.
 - **Design tokens only.** No raw hex/rgba or palette classes in app code; add

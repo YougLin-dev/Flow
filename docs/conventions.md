@@ -17,6 +17,7 @@ tooling (`package.json`, `vite.config.ts`, `tsconfig.json`, `scripts/`,
 | Module              | kebab-case                     | `nsh-platform.ts`, `camera.ts`   |
 | Module test         | `<module>.test.ts` beside it   | `nsh-platform.test.ts`           |
 | Build/check tooling | kebab-case `.mjs` / `.js`      | `test-host.mjs`, `boundaries.js` |
+| Rust module         | snake_case `.rs`               | `db.rs`, `history.rs`            |
 | Directory           | lowercase kebab-case           | `components/`, `leafer/`         |
 | Asset               | lowercase, `-` and `@2x`/`@3x` | `pin-active.png`, `node@2x.png`  |
 
@@ -53,6 +54,15 @@ nothing; every other PascalCase file exports a value of the same name.
   internal modules import each other directly. `leafer/nsh-platform.ts` is the
   facade for `leafer/platform/`, and the same pattern keeps the dependency
   graph acyclic.
+- The mixed Rust crate lives in `src/native/`. Its `#[native_module]` exports
+  are the only surface TSX sees, imported as `@flow/native`; do not add a
+  second Rust-backed import path. Keep SQLite and search code in Rust, and
+  keep TSX/Leafer code out of the crate.
+- SeaORM entities are one file per table under `src/native/src/entity/`, named
+  after the table. Commands live in `mutation.rs`, reads in `search.rs` or
+  `viewport.rs`; `db.rs` owns the worker handle and startup, and `schema.rs`
+  owns table creation. Raw SQLITE SQL belongs only in `schema.rs`/`search.rs`
+  for virtual tables.
 
 ## Imports
 

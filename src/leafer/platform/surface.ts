@@ -1,4 +1,5 @@
 import type { CanvasSnapshot } from "./snapshot";
+import { balancedOps } from "./snapshot";
 import { NshRecordingContext } from "./recording-context";
 
 /** The canvas element Leafer draws its scene into. */
@@ -47,7 +48,7 @@ export class NshCanvasSurface {
     return {
       width: Math.max(1, this.width),
       height: Math.max(1, this.height),
-      ops: this.context.ops.slice(),
+      ops: balancedOps(this.context.ops),
     };
   }
 

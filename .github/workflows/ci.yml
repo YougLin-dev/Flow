@@ -30,6 +30,13 @@ jobs:
       # setup-bun reads packageManager from package.json.
       - uses: oven-sh/setup-bun@v2
 
+      # The mixed app's src/native crate and the check gate need Cargo.
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src/native -> target
+
       - name: Install NSH (macOS and Linux)
         if: runner.os != 'Windows'
         run: |
@@ -50,7 +57,3 @@ jobs:
 
       # Headless, so the result does not depend on the runner's display.
       - run: bun run test
-
-      # The web backend in a headless browser (Chrome ships on the runner).
-      - if: runner.os == 'Linux'
-        run: bun run test:web

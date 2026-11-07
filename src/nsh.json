@@ -5,9 +5,13 @@
   "build": 1,
   "icon": "assets/icon.png",
   "theme": "theme.json",
+  "rust": "native",
   "capabilities": {
     "network": {
       "hosts": []
+    },
+    "process": {
+      "env": ["FLOW_DB_PATH"]
     }
   }
 }

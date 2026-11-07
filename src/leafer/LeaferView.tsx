@@ -45,6 +45,8 @@ export interface LeaferViewProps {
   onPan?: (dx: number, dy: number) => void;
   /** The user pinched: scale the scene around a point of the canvas. */
   onZoom?: (factor: number, x: number, y: number) => void;
+  /** The select tool finished a press: persist any moved or resized elements. */
+  onCommit?: () => void;
   /** Called when the canvas changes size (the second and later sizes). */
   onResize?: (size: CanvasSize) => void;
   /** Draws what is behind the scene; the default is a dot grid. */
@@ -286,6 +288,7 @@ export function LeaferView(props: LeaferViewProps) {
         }),
       );
       updateCursor();
+      props.onCommit?.();
       return;
     }
     if (hand()) return;
@@ -297,6 +300,7 @@ export function LeaferView(props: LeaferViewProps) {
       }),
     );
     updateCursor();
+    props.onCommit?.();
   };
 
   const onLeave = (): void => {
@@ -415,6 +419,7 @@ export function LeaferView(props: LeaferViewProps) {
         ...modifierState,
       }),
     );
+    props.onCommit?.();
   };
 
   const onTouchCancel = (): void => {

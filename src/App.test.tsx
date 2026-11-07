@@ -84,6 +84,34 @@ test("box-selects a card", async () => {
   expect(app.texts().some((text) => text.includes("1 card selected"))).toBe(true);
 });
 
+test("adds a panel with N and deletes it with Backspace", async () => {
+  const app = await open("./App.tsx");
+  await app.waitUntil(() => percentOf(app.texts()) > 0);
+
+  await app.keyboard.press("n");
+  await app.waitUntil(() => app.texts().some((text) => text.includes("1 card selected")));
+  expect(app.texts().some((text) => text.includes("1 card selected"))).toBe(true);
+
+  await app.keyboard.press("backspace");
+  await app.waitUntil(() => !app.texts().some((text) => text.includes("card selected")));
+  expect(app.texts().some((text) => text.includes("card selected"))).toBe(false);
+});
+
+test("drags a new panel and undoes the move", async () => {
+  const app = await open("./App.tsx");
+  await app.waitUntil(() => percentOf(app.texts()) > 0);
+
+  await app.keyboard.press("n");
+  await app.waitUntil(() => app.texts().some((text) => text.includes("1 card selected")));
+
+  // The new panel is at the canvas centre, so this drag lands on it. Undo
+  // should reverse the move, not the insert: the panel stays selected.
+  await app.drag("id:flow-canvas", { x: 30, y: 20 });
+  await app.keyboard.press("mod+z");
+  await app.waitUntil(() => app.texts().some((text) => text.includes("1 card selected")));
+  expect(app.texts().some((text) => text.includes("1 card selected"))).toBe(true);
+});
+
 test("clears the selection with Escape", async () => {
   const app = await open("./App.tsx");
   await app.waitUntil(() => percentOf(app.texts()) > 0);
@@ -205,6 +233,53 @@ test("pans up with the up arrow", async () => {
 
 test("pans down with the down arrow", async () => {
   await expectArrowPan("down");
+});
+
+test("searches cards and reveals the chosen one", async () => {
+  const app = await open("./App.tsx");
+  await app.waitUntil(() => percentOf(app.texts()) > 0);
+
+  // Move the flow off screen first: revealing the hit must pan back to it.
+  await app.press("Hand");
+  await app.drag("id:flow-canvas", { x: 600, y: 0 });
+
+  await app.keyboard.press("mod+k");
+  await app.waitUntil(() => app.shows("id:search-input"));
+  await app.type("id:search-input", "schema");
+  await app.waitUntil(() => app.shows("id:search-result-validate"));
+
+  await app.press("id:search-filter-panel");
+  await app.waitUntil(() => app.shows("id:search-result-validate"));
+
+  await app.press("id:search-result-validate");
+  await app.waitUntil(() => app.texts().some((text) => text.includes("1 card selected")));
+  expect(app.shows("id:search-input")).toBe(false);
+});
+
+test("opens a search result with Enter", async () => {
+  const app = await open("./App.tsx");
+  await app.waitUntil(() => percentOf(app.texts()) > 0);
+
+  await app.keyboard.press("mod+k");
+  await app.waitUntil(() => app.shows("id:search-input"));
+  await app.type("id:search-input", "deliver");
+  await app.waitUntil(() => app.shows("id:search-result-deliver"));
+
+  await app.submit("id:search-input");
+  await app.waitUntil(() => app.texts().some((text) => text.includes("1 card selected")));
+  expect(app.shows("id:search-input")).toBe(false);
+});
+
+test("closes the search palette with Escape", async () => {
+  const app = await open("./App.tsx");
+  await app.waitUntil(() => percentOf(app.texts()) > 0);
+
+  await app.press("id:search-button");
+  await app.waitUntil(() => app.shows("id:search-input"));
+
+  await app.keyboard.press("escape");
+  await app.waitUntil(() => !app.shows("id:search-input"));
+  expect(app.shows("id:search-input")).toBe(false);
 });
 
 test("shows the desktop title bar instead of the brand card", async () => {

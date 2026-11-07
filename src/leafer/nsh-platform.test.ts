@@ -86,6 +86,49 @@ test("composites an offscreen canvas as vectors", () => {
   expect(calls).toContain("fillRect:0,0,100,50");
 });
 
+test("keeps an open layer save from clipping later drawing", () => {
+  // Leafer snapshots an offscreen layer while the layer's own `save()` is
+  // still open. The snapshot must close it, or its replay consumes the
+  // destination's restore and leaves the clip rectangle on everything after.
+  const offscreen = new NshCanvasSurface(10, 10, true);
+  offscreen.context.save();
+  offscreen.context.fillRect(0, 0, 10, 10);
+
+  const main = new NshCanvasSurface(100, 100, false);
+  main.context.beginFrame();
+  main.context.drawImage(offscreen, 0, 0);
+  main.context.fillRect(20, 20, 10, 10);
+
+  let clip: string | null = null;
+  const stack: (string | null)[] = [];
+  const later: (string | null)[] = [];
+  const target = {
+    resetTransform() {},
+    setLineDash() {},
+    save() {
+      stack.push(clip);
+    },
+    restore() {
+      const previous = stack.pop();
+      if (previous !== undefined) clip = previous;
+    },
+    beginPath() {},
+    rect() {},
+    clip() {
+      clip = "snapshot";
+    },
+    setTransform() {},
+    transform() {},
+    globalAlpha: 1,
+    fillRect(x: number) {
+      if (x === 20) later.push(clip);
+    },
+  } as unknown as CanvasRenderingContext2D;
+
+  main.context.replay(target);
+  expect(later).toEqual([null]);
+});
+
 test("roundRect without radii has square hit corners", () => {
   const canvas = new NshCanvasSurface(100, 100, true);
   const ctx = canvas.context;

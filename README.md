@@ -3,7 +3,9 @@
 An infinite flow canvas built with [Leafer](https://www.leaferjs.com/) and
 [Native Shell](https://nsh.dev/) (NSH). The canvas is a Leafer scene rendered
 through NSH's native `Canvas`; the window chrome, controls and overlays are
-NSH views drawn around it.
+NSH views drawn around it. A mixed-app Rust crate in `src/native/` owns the
+document database, search and undo core; Leafer stays in TSX. `⌘K` / `Ctrl+K`
+(or the Search button) opens a command palette over the Rust full-text index.
 
 The app is sandboxed by `src/nsh.json`: it may read its own bundled assets but
 no remote host. An integration that fetches or loads remote images adds that
@@ -13,6 +15,7 @@ host to `capabilities.network` deliberately.
 
 - [Bun](https://bun.sh/) 1.4 or newer (`packageManager` pins the exact version)
 - The `nsh` CLI 0.4.0 or newer (CI pins `v0.4.0`)
+- A Rust toolchain with Cargo (for the `src/native/` mixed-app crate)
 
 ## Quick start
 
@@ -21,6 +24,12 @@ bun install
 bun run dev        # opens the app on this machine's development host
 ```
 
+`bun run dev` sets `FLOW_DB_PATH` to `.nsh/dev/flow.db`, so development data
+survives restarts; delete that file to start from the demo document again.
+Other runs open `host.params.databasePath`, then `FLOW_DB_PATH`, then
+`process.dataDir/flow.db`, falling back to an in-memory database. The
+`process.env` capability in `src/nsh.json` grants only `FLOW_DB_PATH`.
+
 The first `nsh` command writes `src/.nsh/types` (NSH's TypeScript
 declarations) and `src/.nsh/tsconfig.json`. They are generated, git-ignored and
 safe to delete. Build and installer output stay at `.nsh/out` in the
@@ -28,20 +37,21 @@ repository root.
 
 ## Commands
 
-| Command             | What it does                                                              |
-| ------------------- | ------------------------------------------------------------------------- |
-| `bun run dev`       | Runs the app on this machine (`nsh run src`).                             |
-| `bun run build`     | Builds the bundle for deployment (`nsh build src`, output in `.nsh/out`). |
-| `bun run test`      | Runs every app test (`*.test.ts(x)`) headless on a simulated engine.      |
-| `bun run test:host` | Runs the tests on this machine's development host (real input).           |
-| `bun run test:web`  | Runs the tests in a headless browser host.                                |
-| `bun run test:lint` | Runs the dependency-boundary rule's tests (`bun test lint`).              |
-| `bun run typecheck` | Type-checks with NSH's compiler settings (`nsh check src`).               |
-| `bun run lint`      | Checks types, then lints with Oxlint; `lint:fix` applies fixes.           |
-| `bun run fmt`       | Formats with Oxfmt (`vp fmt`).                                            |
-| `bun run check`     | Format, lint, type-check and boundary-rule tests.                         |
-| `bun run check:fix` | Same, applying every automatic fix.                                       |
-| `bun run package`   | Builds the native installer for this OS (`docs/packaging.md`).            |
+| Command              | What it does                                                              |
+| -------------------- | ------------------------------------------------------------------------- |
+| `bun run dev`        | Runs the app on this machine (`nsh run src`).                             |
+| `bun run build`      | Builds the bundle for deployment (`nsh build src`, output in `.nsh/out`). |
+| `bun run test`       | Runs Rust unit tests plus every app test (`*.test.ts(x)`) headless.       |
+| `bun run test:host`  | Runs the tests on this machine's development host (real input).           |
+| `bun run test:lint`  | Runs the dependency-boundary rule's tests (`bun test lint`).              |
+| `bun run test:bench` | Runs the ignored 100k SQLite/FTS5/RTree benchmark.                        |
+| `bun run test:100k`  | Seeds 100k nodes and drives the real host UI against them.                |
+| `bun run typecheck`  | Type-checks with NSH's compiler settings (`nsh check src`).               |
+| `bun run lint`       | Checks types, then lints with Oxlint; `lint:fix` applies fixes.           |
+| `bun run fmt`        | Formats with Oxfmt (`vp fmt`); `fmt:rust` formats the native crate.       |
+| `bun run check`      | Format, lint, type-check, Rust fmt/clippy and boundary-rule tests.        |
+| `bun run check:fix`  | Same, applying every automatic fix.                                       |
+| `bun run package`    | Builds the native installer for this OS (`docs/packaging.md`).            |
 
 `bun run check` is what CI runs. `vp check` (Vite+) drives the formatter,
 Oxlint (type-aware, with full type checking) and the TypeScript check, and then
@@ -74,14 +84,28 @@ src/                   the NSH app: its root, entry, config and assets
   components/
     TitleBar.tsx       custom title bar (pin, drag, native window controls)
     ZoomControls.tsx   zoom in / out / fit
+    SearchButton.tsx   floating search entry point
+    SearchPalette.tsx  debounced full-text search, filters and result navigation
     ToolSwitch.tsx     Select / Hand
     HintBar.tsx        shortcut hints
     SelectionBadge.tsx selection count
     BrandCard.tsx      branding shown where the desktop shell is absent
   flow/
-    data.ts            nodes and edges of the sample flow
-    scene.ts           builds the Leafer scene from the data
+    data.ts            the demo nodes/edges used to seed an empty document
+    database-path.ts   resolves the document path from host/env/data-dir
+    scene.ts           reconciles the Leafer cards with the viewport snapshot
     grid.ts            draws the dot-grid backdrop
+  native/              mixed NSH Rust crate (SQLite/FTS5/RTree document core)
+    Cargo.toml
+    src/lib.rs         exports the @flow/native Document class
+    src/db.rs          database handle, worker thread, WAL
+    src/entity/        SeaORM entities, one file per table
+    src/schema.rs      table creation and the virtual-table adapter
+    src/mutation.rs    transactional commands and undo payloads
+    src/search.rs      FTS5 search and the short-query fallback
+    src/viewport.rs    RTree viewport reads
+    src/scene.rs       visible nodes + edges, and document bounds
+    src/history.rs     reversible undo/redo operations
   leafer/
     LeaferView.tsx     NSH <Canvas> hosting a Leafer App (input, frames)
     nsh-platform.ts    public facade of Leafer's platform layer on NSH
@@ -94,7 +118,9 @@ lint/
   boundaries.js        Oxlint JS plugin: dependencies flow down
 scripts/
   package.mjs          installer build
+  dev.mjs              dev host launcher with a persistent FLOW_DB_PATH
   test-host.mjs        native test host for this OS
+  smoke-100k.mjs       100k-node seed + real-host UI smoke
 .github/workflows/     CI and installer builds
 docs/                  standards, architecture, conventions, testing, packaging, ADRs
 CHANGELOG.md           Keep a Changelog history and unreleased changes
