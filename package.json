@@ -1,0 +1,36 @@
+{
+  "name": "flow",
+  "private": true,
+  "description": "Flow — an infinite flow canvas built with Leafer and NSH.",
+  "license": "UNLICENSED",
+  "type": "module",
+  "scripts": {
+    "dev": "nsh run src",
+    "build": "nsh build src",
+    "check": "nsh check src && vp check --deny-warnings",
+    "check:fix": "nsh check src && vp check --fix --deny-warnings",
+    "fmt": "vp fmt",
+    "lint": "nsh check src && vp lint",
+    "lint:fix": "nsh check src && vp lint --fix",
+    "typecheck": "nsh check src",
+    "test": "nsh test src",
+    "test:host": "bun scripts/test-host.mjs",
+    "test:web": "nsh test src --target web",
+    "test:junit": "nsh test src --junit src/.nsh/junit.xml",
+    "package": "bun scripts/package.mjs"
+  },
+  "dependencies": {
+    "@leafer-in/editor": "2.3.3",
+    "@leafer-in/resize": "2.3.3",
+    "@leafer-ui/interface": "2.3.3",
+    "@leafer-ui/miniapp": "2.3.3"
+  },
+  "devDependencies": {
+    "@crabnebula/packager": "0.11.2",
+    "vite-plus": "1.5.0"
+  },
+  "engines": {
+    "bun": ">=1.4.0"
+  },
+  "packageManager": "bun@1.4.3"
+}

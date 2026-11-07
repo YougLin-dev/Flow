@@ -1,0 +1,15 @@
+{
+  "extends": "./.nsh/tsconfig.json",
+  "compilerOptions": {
+    // The NSH bundler strips types, so every type-only import must say so.
+    "verbatimModuleSyntax": true,
+    "forceConsistentCasingInFileNames": true,
+    "noFallthroughCasesInSwitch": true,
+    "noImplicitOverride": true,
+    "noImplicitReturns": true,
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
+    "exactOptionalPropertyTypes": true
+  },
+  "include": ["**/*.ts", "**/*.tsx"]
+}

@@ -1,0 +1,13 @@
+{
+  "name": "Flow",
+  "id": "studio.r4.flow",
+  "version": "1.0.0",
+  "build": 1,
+  "icon": "assets/icon.png",
+  "theme": "theme.json",
+  "capabilities": {
+    "network": {
+      "hosts": []
+    }
+  }
+}

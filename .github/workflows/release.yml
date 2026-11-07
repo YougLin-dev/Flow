@@ -1,0 +1,60 @@
+name: Installers
+
+# Native installers embed the target platform's runtime, so each OS builds
+# its own. Run manually, or push a tag such as v1.0.0.
+on:
+  workflow_dispatch:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: read
+
+env:
+  NSH_VERSION: v0.4.0
+
+jobs:
+  package:
+    name: Installer (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, macos-latest, ubuntu-24.04]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: oven-sh/setup-bun@v2
+
+      - name: Install NSH (macOS and Linux)
+        if: runner.os != 'Windows'
+        run: |
+          curl -fsSL https://nsh.dev/install.sh | sh
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+
+      - name: Install NSH (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          irm https://nsh.dev/install.ps1 | iex
+          "$env:LOCALAPPDATA\nsh\bin" | Out-File -FilePath $env:GITHUB_PATH -Append
+
+      - run: bun install --frozen-lockfile
+
+      # Never build an installer from a tree that fails the gate.
+      - run: bun run check
+      - run: bun run test
+
+      # Signing is optional: without the secret, macOS builds are ad hoc
+      # signed (see docs/packaging.md).
+      - run: bun run package
+        env:
+          FLOW_MACOS_SIGNING_IDENTITY: ${{ secrets.FLOW_MACOS_SIGNING_IDENTITY }}
+          # appimagetool is an AppImage itself; extract it instead of needing FUSE.
+          APPIMAGE_EXTRACT_AND_RUN: "1"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: flow-${{ matrix.os }}
+          path: .nsh/out/installers/*
+          if-no-files-found: error

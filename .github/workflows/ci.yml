@@ -1,0 +1,56 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  # Keep CI on the same NSH release the project is developed against.
+  NSH_VERSION: v0.4.0
+
+jobs:
+  check:
+    name: Check and test (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      # setup-bun reads packageManager from package.json.
+      - uses: oven-sh/setup-bun@v2
+
+      - name: Install NSH (macOS and Linux)
+        if: runner.os != 'Windows'
+        run: |
+          curl -fsSL https://nsh.dev/install.sh | sh
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+
+      - name: Install NSH (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          irm https://nsh.dev/install.ps1 | iex
+          "$env:LOCALAPPDATA\nsh\bin" | Out-File -FilePath $env:GITHUB_PATH -Append
+
+      - run: bun install --frozen-lockfile
+
+      # Format, lint, type-check and file names.
+      - run: bun run check
+
+      # Headless, so the result does not depend on the runner's display.
+      - run: bun run test
+
+      # The web backend in a headless browser (Chrome ships on the runner).
+      - if: runner.os == 'Linux'
+        run: bun run test:web
