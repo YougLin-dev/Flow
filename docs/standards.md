@@ -286,8 +286,12 @@ per resize and do not add a parallel cull walk. The dot grid is the only
 immediate-mode drawing: screen space, before replay, never hit-tested. Derived
 geometry such as connectors MUST be recomputed when its owner moves or resizes
 (the current `PropertyEvent.CHANGE` listeners in `flow/scene.ts` are the
-mechanism) and MUST be covered by a scene test after a drag or resize.
-(Test, Review)
+mechanism) and MUST be covered by a scene test after a drag or resize. Moving
+the camera changes the selected elements' world bounds without changing the
+elements, so pan, zoom and fit MUST refresh the editor box with
+`refreshEditBox` (`src/leafer/editor-box.ts`); `updateEditBox()` is required
+for multi-selection, whose box is built from a simulated element. (Test,
+Review)
 
 ### 7.3 Adapter confinement
 

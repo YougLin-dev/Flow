@@ -1,6 +1,7 @@
 import { expect, test } from "nsh/test";
-import { App, Rect, RenderEvent } from "@leafer-ui/miniapp";
+import { App, Group, Rect, RenderEvent } from "@leafer-ui/miniapp";
 import "@leafer-in/editor";
+import { refreshEditBox } from "./editor-box";
 import { installNshPlatform, NshCanvasSurface, pointerData } from "./nsh-platform";
 
 function appWithRect(): { app: App; view: NshCanvasSurface; rect: Rect } {
@@ -143,6 +144,108 @@ test("keeps the edit box on the element while it moves", () => {
   expect(Math.round(box.x)).toBe(Math.round(Number(rect.x)));
   expect(Math.round(box.y)).toBe(Math.round(Number(rect.y)));
 
+  app.destroy();
+});
+
+test("keeps the edit box on an element when its parent group moves", () => {
+  installNshPlatform();
+  const view = new NshCanvasSurface(400, 300, false);
+  const app = new App({
+    view,
+    width: 400,
+    height: 300,
+    pixelRatio: 1,
+    start: false,
+    usePartRender: false,
+    tree: {},
+    editor: {},
+  });
+  const world = new Group({ x: 0, y: 0 });
+  app.tree.add(world);
+  const rect = new Rect({
+    x: 50,
+    y: 50,
+    width: 100,
+    height: 60,
+    fill: "#ff5a5f",
+    draggable: true,
+    editable: true,
+  });
+  world.add(rect);
+  app.start();
+
+  const interaction = interactionOf(app);
+  interaction.pointerMove(pointerData(100, 80));
+  interaction.pointerDown(pointerData(100, 80));
+  interaction.pointerUp(pointerData(100, 80));
+
+  const frame = (): void => {
+    app.emit(RenderEvent.CHILD_START, app);
+    app.forceRender(undefined, true);
+    app.emit(RenderEvent.CHILD_END, app);
+    app.renderer.render();
+  };
+  frame();
+  const before = app.editor.editBox.rect.getBounds("box", app.sky);
+
+  world.x = -100;
+  refreshEditBox(app.editor, world);
+  const immediate = app.editor.editBox.rect.getBounds("box", app.sky);
+  expect(Math.round(immediate.x)).toBe(Math.round(before.x - 100));
+
+  frame();
+  const after = app.editor.editBox.rect.getBounds("box", app.sky);
+
+  expect(Math.round(after.x)).toBe(Math.round(before.x - 100));
+  app.destroy();
+});
+
+test("keeps a multi-selection box on its elements when the parent moves", () => {
+  installNshPlatform();
+  const view = new NshCanvasSurface(400, 300, false);
+  const app = new App({
+    view,
+    width: 400,
+    height: 300,
+    pixelRatio: 1,
+    start: false,
+    usePartRender: false,
+    tree: {},
+    editor: {},
+  });
+  const world = new Group({ x: 0, y: 0 });
+  app.tree.add(world);
+  const first = new Rect({
+    x: 40,
+    y: 40,
+    width: 100,
+    height: 60,
+    fill: "#ff5a5f",
+    draggable: true,
+    editable: true,
+  });
+  const second = new Rect({
+    x: 200,
+    y: 120,
+    width: 80,
+    height: 50,
+    fill: "#336699",
+    draggable: true,
+    editable: true,
+  });
+  world.add(first);
+  world.add(second);
+  app.start();
+
+  app.editor.select([first, second]);
+  refreshEditBox(app.editor, world);
+  const before = app.editor.editBox.rect.getBounds("box", app.sky);
+
+  world.x = -100;
+  refreshEditBox(app.editor, world);
+  const after = app.editor.editBox.rect.getBounds("box", app.sky);
+
+  expect(Math.round(after.x)).toBe(Math.round(before.x - 100));
   app.destroy();
 });
 

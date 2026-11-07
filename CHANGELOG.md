@@ -22,6 +22,8 @@ All notable changes to Flow are recorded here. The format follows
   transform; snapshots are clipped to their destination and source rectangles.
 - Connectors recompute after Leafer's layout instead of reading stale bounds
   during an editor drag or resize.
+- The editor's selection box follows the camera while panning or zooming,
+  including when several elements are selected.
 - Zoom-out no longer zooms in when the fitted scale is below the manual zoom
   floor; fitting and manual zoom share one scale range.
 - Touch pinch anchors at canvas coordinates, and touch/mouse gesture state is

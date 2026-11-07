@@ -10,6 +10,7 @@ import { CONTENT } from "../flow/data";
 import { drawGrid } from "../flow/grid";
 import { buildScene, type FlowScene } from "../flow/scene";
 import { CanvasCamera } from "../leafer/camera";
+import { refreshEditBox } from "../leafer/editor-box";
 import { LeaferView } from "../leafer/LeaferView";
 import {
   currentTool,
@@ -47,10 +48,17 @@ export function FlowPage() {
     zoomFrame = requestAnimationFrame(() => setZoomPercent(Math.round(scale * 100)));
   };
 
+  // The edit box lives in the editor (sky) layer and is positioned from the
+  // selected elements' world bounds. Moving the camera changes those bounds
+  // without changing the elements themselves, so Leafer does not refresh the
+  // box on its own; update the layout and the editor after every camera move.
+  const refreshEditor = (): void => refreshEditBox(editor, scene?.world ?? null);
+
   const zoomAround = (factor: number, cx: number, cy: number): void => {
     if (!camera) return;
     userCamera = true;
     if (camera.zoomAround(factor, cx, cy)) {
+      refreshEditor();
       setZoomPercent(Math.round(camera.scale * 100));
     }
   };
@@ -63,6 +71,7 @@ export function FlowPage() {
     if (!camera) return;
     userCamera = true;
     camera.panBy(dx, dy);
+    refreshEditor();
   };
 
   const fit = (): void => {
@@ -72,6 +81,7 @@ export function FlowPage() {
       width: stageWidth,
       height: stageHeight,
     });
+    refreshEditor();
     setZoomPercent(Math.round(next * 100));
   };
 
@@ -130,6 +140,7 @@ export function FlowPage() {
           stageHeight = size.height;
           if (camera && !userCamera) {
             publishZoom(camera.fit(scene?.bounds() ?? CONTENT, size));
+            refreshEditor();
           }
         }}
       />
