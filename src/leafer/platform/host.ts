@@ -143,8 +143,9 @@ export function installNshPlatform(): void {
     for (const requester of drawRequesters) requester();
   };
 
-  // A "resized canvas" is the same image under another size in points: the
-  // pattern code only uses its size, and drawing scales the picture.
+  // A "resized canvas" is the image inside a padded tile: the pattern code
+  // steps by the padded size (`width`/`height`) and draws the picture at its
+  // own size (`imageWidth`/`imageHeight`), keeping Leafer's gap transparent.
   Platform.image.resize = (
     view: unknown,
     width: number,
@@ -158,10 +159,14 @@ export function installNshPlatform(): void {
     if (!view) return view;
     const url = imageSource(view);
     if (!url) return view;
+    const innerWidth = Math.max(1, Math.floor(width));
+    const innerHeight = Math.max(1, Math.floor(height));
     return {
       url,
       width: Math.max(1, Math.floor(width + (xGap ?? 0))),
       height: Math.max(1, Math.floor(height + (yGap ?? 0))),
+      imageWidth: innerWidth,
+      imageHeight: innerHeight,
       opacity,
     };
   };

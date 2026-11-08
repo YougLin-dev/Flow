@@ -26,6 +26,11 @@ All notable changes to Flow are recorded here. The format follows
   through pan, zoom, search, reveal and Fit.
 - The engineering standard in `docs/standards.md`, an ADR template and this
   changelog.
+- The Leafer adapter rasterizes offscreen layers whose compositing must stay
+  inside them — alpha masks, erasers, blend copies, group opacity, grayscale
+  masks, patterned strokes and text — as one self-contained SVG image, so each
+  effect composites once. Pattern tiles keep Leafer's gap. This path needs the
+  NSH build in `docs/nsh.md`; the plain scene stays vector.
 
 ### Changed
 
@@ -54,6 +59,10 @@ All notable changes to Flow are recorded here. The format follows
 - A command's change set creates cards for newly inserted or restored nodes,
   and connectors stay while both endpoint cards remain selected, so a capped
   low-zoom snapshot cannot make them disappear.
+- A full-canvas offscreen clear inside a save starts a new layer recording, so
+  Leafer's per-frame `tree`/`sky` layer renders stay vector instead of being
+  serialized to asynchronously loaded images; a hover or other repaint no
+  longer blanks the cards.
 - A viewport read skipped during a card drag is retried after the gesture, and
   a fit-in-progress no longer overrides a newer pan or zoom.
 - The search palette clears stale rows as soon as the query or filter changes,

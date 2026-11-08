@@ -9,6 +9,7 @@ import {
   pointerData,
 } from "./nsh-platform";
 import { setMeasureContext } from "./platform/measure";
+import { patternTile } from "./platform/pattern";
 
 test("clears Leafer's hidden frame marks on every layer", () => {
   installNshPlatform();
@@ -185,7 +186,9 @@ test("measures text with the context's font", () => {
   }
 });
 
-test("multiplies an offscreen layer's alpha when replaying it", () => {
+test("rasterizes an offscreen layer's alpha once, over its own drawing", () => {
+  // A layer's opacity applies to the layer's composited picture, not to each
+  // shape: the snapshot is drawn as one image, whose own alpha is 0.5.
   const offscreen = new NshCanvasSurface(10, 10, true);
   offscreen.context.globalAlpha = 0.5;
   offscreen.context.fillRect(0, 0, 10, 10);
@@ -197,6 +200,7 @@ test("multiplies an offscreen layer's alpha when replaying it", () => {
 
   const alphas: number[] = [];
   let alpha = 1;
+  let drawn = "";
   const target = {
     resetTransform() {},
     setLineDash() {},
@@ -208,6 +212,9 @@ test("multiplies an offscreen layer's alpha when replaying it", () => {
     setTransform() {},
     transform() {},
     fillRect() {},
+    drawImage(image: string) {
+      drawn = image;
+    },
     get globalAlpha() {
       return alpha;
     },
@@ -218,7 +225,8 @@ test("multiplies an offscreen layer's alpha when replaying it", () => {
   } as unknown as CanvasRenderingContext2D;
 
   main.context.replay(target);
-  expect(alphas).toContain(45);
+  expect(alphas).toContain(90);
+  expect(drawn.startsWith("data:image/svg+xml;base64,")).toBe(true);
 });
 
 test("composes a snapshot's transform with its placement", () => {
@@ -293,6 +301,8 @@ test("replays numeric style properties", () => {
   ctx.lineWidth = 2.5;
   ctx.shadowBlur = 8;
   ctx.shadowColor = "#123456";
+  ctx.imageSmoothingEnabled = false;
+  ctx.direction = "rtl";
 
   const seen: Record<string, unknown> = {};
   const target = {
@@ -310,16 +320,24 @@ test("replays numeric style properties", () => {
     set shadowColor(value: string) {
       seen.shadowColor = value;
     },
+    set imageSmoothingEnabled(value: boolean) {
+      seen.imageSmoothingEnabled = value;
+    },
+    set direction(value: string) {
+      seen.direction = value;
+    },
   } as unknown as CanvasRenderingContext2D;
 
   ctx.replay(target);
 
-  // These carry Leafer's leaf opacity, stroke width and shadows; treating them
-  // as paints used to drop every one of them.
+  // These carry Leafer's leaf opacity, stroke width, shadows and text
+  // settings; a whitelist that dropped them lost every one.
   expect(seen.globalAlpha).toBe(0.2);
   expect(seen.lineWidth).toBe(2.5);
   expect(seen.shadowBlur).toBe(8);
   expect(seen.shadowColor).toBe("#123456");
+  expect(seen.imageSmoothingEnabled).toBe(false);
+  expect(seen.direction).toBe("rtl");
 });
 
 test("answers stroke hit tests", () => {
@@ -371,6 +389,35 @@ test("an offscreen clear starts a new drawing", () => {
   expect(ctx.ops.length).toBe(0);
 });
 
+test("a leafer layer's full render stays vector", () => {
+  // Leafer renders each App layer into its own canvas and clears that canvas
+  // with save/clearRect/restore. That clear starts the layer over; recording
+  // it would serialize the whole scene to an asynchronously loaded image.
+  installNshPlatform();
+  const view = new NshCanvasSurface(200, 100, false);
+  const app = new App({
+    view,
+    width: 200,
+    height: 100,
+    pixelRatio: 1,
+    start: false,
+    usePartRender: false,
+    tree: {},
+    editor: {},
+  });
+  app.tree.add(new Rect({ x: 10, y: 10, width: 50, height: 30, fill: "#ff5a5f" }));
+  app.start();
+  app.forceRender(undefined, true);
+
+  const layer: unknown = app.tree.canvas.view;
+  if (!(layer instanceof NshCanvasSurface)) throw new Error("Leafer made no layer surface.");
+  const snapshot = layer.snapshot();
+  expect(snapshot.ops.length).toBeGreaterThan(0);
+  expect(snapshot.ops.some((op) => op[0] === 1 && op[1] === "clearRect")).toBe(false);
+
+  app.destroy();
+});
+
 test("resizing a surface starts a new drawing", () => {
   const canvas = new NshCanvasSurface(100, 100, true);
   const ctx = canvas.context;
@@ -410,6 +457,56 @@ test("tiles a pattern fill", () => {
   ctx.replay(target);
   expect(images.length).toBeGreaterThan(1);
   expect(images[0][0]).toBe("asset:/tile.png");
+});
+
+test("keeps a pattern's gap transparent when it tiles", () => {
+  const canvas = new NshCanvasSurface(80, 80, false);
+  const ctx = canvas.context;
+  ctx.beginFrame();
+  const pattern = ctx.createPattern(
+    { url: "asset:/tile.png", width: 40, height: 40, imageWidth: 20, imageHeight: 20 },
+    "repeat",
+  );
+  ctx.fillStyle = pattern;
+  ctx.fillRect(0, 0, 80, 80);
+
+  const images: unknown[][] = [];
+  const target = {
+    resetTransform() {},
+    setLineDash() {},
+    save() {},
+    restore() {},
+    beginPath() {},
+    rect() {},
+    clip() {},
+    transform() {},
+    drawImage(...args: unknown[]) {
+      images.push(args);
+    },
+  } as unknown as CanvasRenderingContext2D;
+
+  ctx.replay(target);
+  // Four 20x20 pictures on a 40x40 step: the picture keeps its own size and
+  // the tile's padding stays empty instead of stretching the picture.
+  expect(images.length).toBe(4);
+  expect(images[0].slice(1)).toEqual([0, 0, 20, 20]);
+  expect(images[3].slice(1)).toEqual([40, 40, 20, 20]);
+});
+
+test("copies a pattern's canvas when the pattern is made", () => {
+  // Leafer recycles the temporary canvas after making the pattern; the tile
+  // must keep what it held then, as a CanvasPattern does.
+  const tileCanvas = new NshCanvasSurface(10, 10, true);
+  tileCanvas.context.fillRect(0, 0, 10, 10);
+  const source = new NshCanvasSurface(20, 20, false);
+  const pattern = source.context.createPattern(tileCanvas, "no-repeat");
+
+  tileCanvas.context.clearRect(0, 0, 10, 10);
+
+  const tile = patternTile(pattern);
+  expect(tile?.kind).toBe("snapshot");
+  expect(tile?.repeat).toBe("no-repeat");
+  expect(tile?.snapshot?.ops.length).toBe(1);
 });
 
 test("keeps a pattern's own opacity inside the destination alpha", () => {

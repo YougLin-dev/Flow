@@ -12,8 +12,9 @@
  *   `isPointInStroke` and the hit canvas's `getImageData` are answered from
  *   geometry instead of pixels,
  * - offscreen canvases (groups with opacity, blend modes, masks, temporary
- *   composite layers) are copied when Leafer draws them, and replayed as
- *   vectors into the destination rectangle,
+ *   composite layers) are copied when Leafer draws them: plain layers replay
+ *   as vectors into the destination rectangle, and layers whose compositing
+ *   must stay inside them are serialized to one SVG image instead,
  * - the canvas has no patterns: a pattern fill clips to the path and tiles
  *   the image itself,
  * - `Platform.requestRender` asks the app for a new frame instead of a

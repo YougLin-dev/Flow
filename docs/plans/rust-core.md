@@ -571,10 +571,11 @@ Windows-host screenshot of the palette and its results. P2 is done.
   another spatial scheme before coordinates approach that precision limit.
 - `node_assets` links are cascaded away with a deleted node but are not part of
   the undo payload. Capture and restore them when P3 adds asset mutations.
-- The Leafer adapter's snapshot replay is not isolated inside a temporary
-  surface, so alpha masks, erasers, blend copies, pattern gaps and grayscale
-  masks are unsupported until those node types need them (see the adoption
-  debt in `docs/standards.md`).
+- The Leafer adapter rasterizes a layer whose compositing must stay inside it
+  as one SVG image; that path needs an NSH host whose canvas draws SVG (see
+  [../nsh.md](../nsh.md)). Images referenced by `asset:`/file/URL inside such
+  a layer are not embedded yet, and a layer containing patterned strokes or
+  text rasterizes whole: keep those out of very large layers.
 - Seeding writes nodes and edges in two transactions. A crash between them
   leaves a partial demo that is not reseeded because the document is non-empty.
 - Database failures currently reach only `console.error`; surface an error

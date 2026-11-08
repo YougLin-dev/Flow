@@ -332,7 +332,8 @@ properties MUST be recorded as data: `globalAlpha`, `lineWidth`,
 `globalCompositeOperation` and shadows pass through verbatim; only
 `fillStyle`/`strokeStyle` may hold paint records. Offscreen surfaces are
 ephemeral: snapshot before Leafer recycles, copy the ops array, and replay as
-vectors into the destination rectangle. `drawImage` MUST support the 2-, 4- and
+vectors into the destination rectangle, except for the layers that MUST be
+rasterized as one picture (below). `drawImage` MUST support the 2-, 4- and
 8-argument forms. A snapshot is a layer: its recorded `globalAlpha` values MUST
 multiply the destination's current alpha, its `setTransform`/`resetTransform`
 MUST compose with the placement matrix, and its content MUST be clipped to the
@@ -341,14 +342,52 @@ A snapshot's `save`/`restore` stack MUST be self-contained: Leafer can snapshot
 an offscreen layer while its own `save()` is still open, and replaying that
 unbalanced save would consume the destination's restore and clip every later
 sibling to the snapshot rectangle.
-A full offscreen `clearRect` starts a new recording; a partial clear is not
-emulated and MUST NOT be relied on. Pattern fills are emulated for `fill` and
-`fillRect`; patterned strokes and text are skipped as documented limitations.
-Replaying a snapshot or a patterned `fillRect` may replace the native current
-path; a caller that needs the path afterwards must rebuild it. Snapshot tile
-dimensions MUST be positive and finite. (Test: every newly supported operation
-gets a record, replay and effect test in `src/leafer/nsh-platform.test.ts`;
+A full offscreen `clearRect` with no clip in effect starts a new recording:
+Leafer clears a layer canvas before a full render (wrapped in a
+`save()`/`restore()`) and recycles a canvas at rest by clearing the area it
+used. A `clearRect` under a clip is recorded as one operation: it erases the
+layer's earlier content inside the clip (as Canvas clears the destination) and
+is a rasterization trigger. Pattern fills are emulated for `fill`
+and `fillRect`; a tile MUST step by its padded size and draw its picture at the
+picture's own size, so Leafer's gap stays transparent. Replaying a snapshot or
+a patterned `fillRect` may replace the native current path; a caller that needs
+the path afterwards must rebuild it. Snapshot tile dimensions MUST be positive
+and finite. (Test: every newly supported operation gets a record, replay and
+effect test in `src/leafer/nsh-platform.test.ts` or `src/leafer/svg.test.ts`;
 Review.)
+
+**Rasterized layers.** A layer MUST be rasterized as one SVG image
+(`src/leafer/platform/svg/`) when replaying it as vectors would let its
+operations combine with the destination, or with each other, differently from
+Canvas:
+
+- it contains any composite operation of its own (a
+  `destination-in`/`destination-out` mask, a blend mode or `copy`), a recorded
+  `clearRect`, a patterned `stroke`, `strokeRect`, `strokeText` or
+  `fillText`, or a grayscale mask;
+- it is drawn with `globalAlpha` other than 1 or a composite operation other
+  than `source-over`.
+
+A rasterized layer MUST be drawn exactly once. A recorded `clearRect` MUST
+erase the content drawn before it, clipped by every open clip, and leave the
+content drawn after it alone. The serializer MUST map `destination-in` to an
+alpha mask (a grayscale mask converts color to alpha with Leafer's Rec.601
+weights), `destination-out` to an alpha mask inverted through `feFlood` and
+`feComposite`, `copy` to a replaced layer and `destination-over` to content
+behind the earlier drawing; blend modes map to `mix-blend-mode`. Other
+Porter-Duff modes are approximated as `source-over` inside a rasterized layer
+and MUST be documented. Its paths MUST be painted under the transform in effect
+at paint time (Canvas bakes path points at command time), so strokes, dashes,
+gradients and patterns keep the space Canvas gives them; a conic gradient MUST
+be made in that space too. A shadow filter MUST sit on an untransformed wrapper
+so its region, offsets and blur stay in canvas space, and a stroke's bounds MUST
+include its joins and caps. Text MUST use the system fonts, preserve spaces
+(`xml:space`) and map `text-anchor` flow-relatively; inline raster `data:`
+images MUST be embedded. The SVG MUST carry the snapshot's size as its
+intrinsic size, a Canvas source rectangle MUST become its `viewBox` crop (the
+host's raster is larger than the intrinsic size), and it MUST be drawn into an
+explicit destination rectangle. The layer's alpha and composite operation MUST
+apply to the finished image, not to its shapes. (Test, Review.)
 
 ### 7.5 Geometry, coordinates and numeric robustness
 
@@ -650,17 +689,30 @@ be fixed when its file is touched:
 - `src/leafer/platform/values.ts` `numberArg` can return `NaN` or `Infinity`
   for a malformed recorded argument. Replay catches the resulting native error,
   but a finite-argument guard would make the skip explicit.
-- `src/leafer/platform/recording-context.ts` treats any offscreen `clearRect`
-  as a full reset; partial clears are not emulated. Leafer currently clears
-  whole offscreen canvases, so this is not observable yet.
-- Snapshot replay applies its recorded `globalCompositeOperation` directly to
-  the destination. Content inside a Leafer temporary canvas (alpha masks,
-  blend copies, erasers) is therefore not isolated from the destination until
-  those features are needed; add a temporary-surface replay before using them.
-- Pattern gap tiles are drawn as the stretched image Leafer supplies, not
-  padded with transparency; `getImageData` on a render canvas, patterned
-  strokes/text and grayscale masks are not implemented. The current scene uses
-  none of them.
+- Rasterized layers reference URL images by URL; NSH's SVG loader resolves
+  inline raster `data:` images only, so an `asset:`, file or remote image, or
+  a nested SVG document, inside a layer that must be rasterized is not drawn.
+  Keep plain images outside compositing layers until the loader resolves the
+  app's asset scheme.
+- A rasterized layer is decoded asynchronously: its first appearance can lag
+  the frame that changed it. Keep continuously changing layers vector.
+- A layer-wide composite (`destination-in`/`destination-out`) inside a clip
+  applies to the clip's container in the serializer, not to earlier content
+  outside it as Canvas does. Leafer's masks and blend copies do not enter a
+  clip, and a path eraser's `clearRect` is handled across the clip chain, but
+  a composite inside a clip is not; fix the serializer's clip model if that
+  becomes reachable.
+- Conic gradients inside a rasterized layer are 90 solid wedges when they
+  fill a path; a conic `stroke`, `strokeText` or `fillText` uses one color at
+  t=0.5 instead of the sweep. CSS `filter` properties are not replayed as SVG
+  filters; Porter-Duff modes other than `destination-in`, `destination-out`,
+  `copy` and `destination-over` are approximated as `source-over` there. The
+  current scene uses none of them.
+- The raster path needs an NSH host whose canvas draws SVG images; the
+  upstream changes are described in [nsh.md](nsh.md). The stock 0.4.0 host
+  refuses them, and the plain scene stays vector, so the app still runs there.
+- `getImageData` on a render canvas is synthetic, except for the get/put
+  handshake that marks a grayscale mask.
 - The workflows still use mutable action tags and pipe NSH installers to a
   shell; the tag/version check is now in `release.yml`. Vendor or checksum the
   installer scripts when CI security is next reviewed.

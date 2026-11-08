@@ -3,17 +3,11 @@ import { applyMatrix, clamp, identity, invert, multiply, type Matrix } from "./g
 import { imageSource } from "./image";
 import type { Op } from "./op";
 import { PatternRecord, resolvePaint } from "./paint";
-import { isSnapshotSource, SnapshotImage, type CanvasSnapshot } from "./snapshot";
-import { dimension, isRecord, numberArg, ruleArg, type PathRule } from "./values";
-
-interface Tile {
-  kind: "url" | "snapshot";
-  url?: string;
-  snapshot?: CanvasSnapshot;
-  width: number;
-  height: number;
-  opacity?: number;
-}
+import { patternTile } from "./pattern";
+import { needsRaster } from "./raster";
+import { SnapshotImage, type CanvasSnapshot } from "./snapshot";
+import { snapshotSvgUrl } from "./svg/serialize";
+import { numberArg, ruleArg, type PathRule } from "./values";
 
 interface ReplayState {
   ctm: Matrix;
@@ -21,6 +15,10 @@ interface ReplayState {
   strokePattern: PatternRecord | null;
   /** Outer layer alpha that every replayed globalAlpha is multiplied by. */
   alphaScale: number;
+  /** The ops' own `globalAlpha` at this point. */
+  alpha: number;
+  /** The ops' own `globalCompositeOperation` at this point. */
+  composite: string;
 }
 
 function finiteArgs(args: unknown[]): number[] | null {
@@ -35,30 +33,6 @@ function currentAlpha(ctx: ReplayContext): number {
   } catch {
     return 1;
   }
-}
-
-function patternTile(pattern: PatternRecord): Tile | null {
-  const image = pattern.image;
-  if (isSnapshotSource(image)) {
-    return {
-      kind: "snapshot",
-      snapshot: image.snapshot(),
-      width: image.width,
-      height: image.height,
-    };
-  }
-  const url = imageSource(image);
-  if (!url) return null;
-  const record = isRecord(image) ? image : {};
-  const size = isRecord(record.size) ? record.size : {};
-  const tile: Tile = {
-    kind: "url",
-    url,
-    width: dimension(record.width) ?? dimension(size.width) ?? 1,
-    height: dimension(record.height) ?? dimension(size.height) ?? 1,
-  };
-  if (typeof record.opacity === "number") tile.opacity = record.opacity;
-  return tile;
 }
 
 /** Replays a snapshot (an offscreen canvas' drawing) into `args`' rectangle. */
@@ -107,7 +81,14 @@ function drawSnapshot(
     replayOps(
       ctx,
       snapshot.ops,
-      { ctm: baseCtm, fillPattern: null, strokePattern: null, alphaScale },
+      {
+        ctm: baseCtm,
+        fillPattern: null,
+        strokePattern: null,
+        alphaScale,
+        alpha: 1,
+        composite: "source-over",
+      },
       width,
       height,
       baseCtm,
@@ -190,11 +171,95 @@ function fillWithPattern(
         if (tile.kind === "snapshot" && tile.snapshot) {
           drawSnapshot(ctx, tile.snapshot, [x, y, tw, th], width, height, tileCtm);
         } else if (tile.url) {
-          ctx.drawImage(tile.url, x, y, tw, th);
+          // The tile steps by its padded size; the picture keeps its own
+          // size at the tile's origin, so Leafer's gap stays transparent.
+          ctx.drawImage(tile.url, x, y, tile.innerWidth, tile.innerHeight);
         }
       }
     }
   } finally {
+    ctx.restore();
+  }
+}
+
+/**
+ * Draws an offscreen layer: as vectors where that is equivalent, as one
+ * rasterized SVG where the layer's own compositing must stay inside it.
+ */
+function drawLayer(
+  ctx: ReplayContext,
+  snapshot: CanvasSnapshot,
+  args: number[],
+  width: number,
+  height: number,
+  state: ReplayState,
+): void {
+  const alpha = clamp(state.alpha * state.alphaScale, 0, 1);
+  if (needsRaster(snapshot, alpha, state.composite)) {
+    drawRaster(ctx, snapshot, args, alpha);
+  } else {
+    drawSnapshot(ctx, snapshot, args, width, height, state.ctm);
+  }
+}
+
+/** Draws a snapshot as one SVG image, so its composites stay in the layer. */ function drawRaster(
+  ctx: ReplayContext,
+  snapshot: CanvasSnapshot,
+  args: number[],
+  alpha: number,
+): void {
+  let [sx, sy, sw, sh] = [0, 0, snapshot.width, snapshot.height];
+  let dx: number;
+  let dy: number;
+  let dw: number;
+  let dh: number;
+  if (args.length >= 8) {
+    [sx, sy, sw, sh, dx, dy, dw, dh] = args;
+  } else if (args.length >= 4) {
+    [dx, dy, dw, dh] = args;
+  } else if (args.length >= 2) {
+    dx = args[0];
+    dy = args[1];
+    dw = snapshot.width;
+    dh = snapshot.height;
+  } else {
+    return;
+  }
+  if (!sw || !sh || !dw || !dh) return;
+  ctx.save();
+  try {
+    ctx.beginPath();
+    ctx.rect(dx, dy, dw, dh);
+    ctx.clip();
+    try {
+      ctx.globalAlpha = alpha;
+    } catch {
+      // NSH's canvas does not take this value.
+    }
+    // The source rectangle is cropped in the document, and the document is
+    // drawn into an explicit destination: canvas source coordinates are in
+    // points, while the raster NSH makes may be larger.
+    if (args.length >= 8) {
+      ctx.drawImage(
+        snapshotSvgUrl(snapshot, { x: sx, y: sy, width: sw, height: sh }),
+        dx,
+        dy,
+        dw,
+        dh,
+      );
+    } else if (args.length >= 4) {
+      ctx.drawImage(snapshotSvgUrl(snapshot), dx, dy, dw, dh);
+    } else {
+      ctx.drawImage(snapshotSvgUrl(snapshot), dx, dy, snapshot.width, snapshot.height);
+    }
+  } catch {
+    // A canvas that cannot draw the generated image.
+  } finally {
+    try {
+      ctx.beginPath();
+    } catch {
+      // ignore
+    }
     ctx.restore();
   }
 }
@@ -240,13 +305,18 @@ export function replayOps(
         // vectors: its own alpha must multiply the destination layer's.
         const alpha = numberArg(value);
         if (Number.isFinite(alpha)) {
+          state.alpha = clamp(alpha, 0, 1);
           try {
-            Reflect.set(ctx, name, clamp(alpha, 0, 1) * state.alphaScale);
+            Reflect.set(ctx, name, state.alpha * state.alphaScale);
           } catch {
             // NSH's canvas does not take this value.
           }
         }
         continue;
+      }
+
+      if (name === "globalCompositeOperation" && typeof value === "string") {
+        state.composite = value;
       }
 
       try {
@@ -268,6 +338,8 @@ export function replayOps(
             fillPattern: state.fillPattern,
             strokePattern: state.strokePattern,
             alphaScale: state.alphaScale,
+            alpha: state.alpha,
+            composite: state.composite,
           });
           break;
         case "restore": {
@@ -277,6 +349,8 @@ export function replayOps(
             state.fillPattern = previous.fillPattern;
             state.strokePattern = previous.strokePattern;
             state.alphaScale = previous.alphaScale;
+            state.alpha = previous.alpha;
+            state.composite = previous.composite;
           }
           ctx.restore();
           break;
@@ -402,14 +476,7 @@ export function replayOps(
         case "drawImage": {
           const image = args[0];
           if (image instanceof SnapshotImage) {
-            drawSnapshot(
-              ctx,
-              image.snapshot,
-              args.slice(1).map(numberArg),
-              width,
-              height,
-              state.ctm,
-            );
+            drawLayer(ctx, image.snapshot, args.slice(1).map(numberArg), width, height, state);
           } else {
             const url = imageSource(image);
             if (url) ctx.drawImage(url, ...args.slice(1).map(numberArg));
@@ -448,4 +515,16 @@ const REPLAY_PROPS = new Set<string>([
   "fontVariantNumeric",
   "textAlign",
   "textBaseline",
+  // Recorded properties with no special translation; NSH takes what it
+  // supports and the try/catch drops the rest.
+  "filter",
+  "imageSmoothingEnabled",
+  "imageSmoothingQuality",
+  "direction",
+  "letterSpacing",
+  "wordSpacing",
+  "fontKerning",
+  "fontStretch",
+  "fontVariantCaps",
+  "textRendering",
 ]);

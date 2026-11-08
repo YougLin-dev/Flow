@@ -83,6 +83,22 @@ test("renders the viewport nodes and their edges", () => {
   app.destroy();
 });
 
+test("keeps connectors out of an offscreen group", () => {
+  const { app, scene } = appWithScene();
+  scene.apply(snapshot([node("a", 40, 40), node("b", 360, 40)], [edge("a-b", "a", "b")]));
+
+  // A group with opacity below 1 is composited offscreen, and NSH draws such
+  // a layer as an SVG image only once it has loaded: a card moving every
+  // frame would leave its connectors flickering or missing. The opacity
+  // belongs to each connector, which replays as one alpha.
+  const layer = scene.world.children[0];
+  if (!(layer instanceof Group)) throw new Error("The edge layer is not a group.");
+  expect(layer.opacity).toBe(1);
+  expect(connectorLine(scene).opacity).toBe(0.9);
+
+  app.destroy();
+});
+
 test("caps a low-zoom snapshot and keeps a selected card", () => {
   const { app, scene } = appWithScene();
   scene.apply(snapshot([node("a", 40, 40), node("b", 360, 40), node("c", 680, 40)]), {

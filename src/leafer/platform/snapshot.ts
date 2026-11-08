@@ -6,6 +6,12 @@ export interface CanvasSnapshot {
   width: number;
   height: number;
   ops: Op[];
+  /**
+   * Leafer's grayscale mask: the canvas read its own pixels back, replaced
+   * each pixel's alpha with its luminance and wrote them back. Replay uses the
+   * drawing as a luminance mask.
+   */
+  grayscale?: boolean;
 }
 
 /** A snapshot travelling through the operations as a drawable image. */

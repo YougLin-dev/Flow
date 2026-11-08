@@ -43,12 +43,13 @@ export class NshCanvasSurface {
     return this.context;
   }
 
-  /** What this offscreen canvas holds now, for replay as vectors. */
+  /** What this offscreen canvas holds now, for replay as a layer. */
   snapshot(): CanvasSnapshot {
     return {
       width: Math.max(1, this.width),
       height: Math.max(1, this.height),
       ops: balancedOps(this.context.ops),
+      ...(this.context.grayscale ? { grayscale: true } : {}),
     };
   }
 

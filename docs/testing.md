@@ -125,6 +125,13 @@ for drags.
 - `leafer/nsh-platform.test.ts` covers the `leafer/platform/` modules: every
   newly supported canvas feature gets a test that records a call, replays it,
   and asserts the effect (patterns, gradients, snapshots, hit tests).
+- `leafer/svg.test.ts` covers the rasterized-layer serializer: masks, erasers,
+  grayscale and blend isolation, pattern gaps and repeat modes, patterned
+  strokes and text, transforms (paths, conic paints, shadows), text spacing and
+  RTL anchors, shadows, negative and fractional rectangles, `clearRect` and
+  snapshot placement. Rendering those layers
+  needs the NSH build in [nsh.md](nsh.md); the tests assert the generated SVG
+  and the replay's `drawImage` call without needing it.
 - `leafer/camera.ts`: pan/zoom/fit invariants (the point under the cursor
   stays put, content stays centered).
 - `pages/FlowPage.tsx`: through `App.test.tsx` for interaction flows, not

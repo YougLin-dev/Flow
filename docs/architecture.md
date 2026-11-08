@@ -120,8 +120,11 @@ split by responsibility:
 | `path.ts`               | path recording and curve flattening                         |
 | `hit-test.ts`           | winding/stroke tests and recorded hit regions               |
 | `paint.ts`              | gradient and pattern records                                |
+| `pattern.ts`            | a pattern's tile size, inner image size and repeat mode     |
 | `snapshot.ts`           | offscreen canvas snapshots                                  |
+| `raster.ts`             | when a layer must be rasterized instead of replayed         |
 | `replay.ts`             | replaying recorded operations onto NSH's context            |
+| `svg/`                  | a layer as a self-contained SVG: paths, text, paints, masks |
 | `recording-context.ts`  | the Canvas 2D context Leafer draws through                  |
 | `canvas.ts`, `op.ts`    | context/gradient types and recorded-operation shape         |
 | `measure.ts`            | text measurement through the frame's native context         |
@@ -134,7 +137,17 @@ split by responsibility:
   records every call (`[0, property, value]` / `[1, method, ...args]`).
   `replayOps` replays them onto the real NSH context, translating the things
   NSH's canvas lacks: gradients, patterns (clipped and tiled by hand), and
-  offscreen canvases (snapshotted as vectors).
+  offscreen canvases (snapshotted and replayed as vectors when the layer
+  allows it).
+- **Rasterized layers.** An offscreen layer whose own compositing must stay
+  inside it is serialized to a self-contained SVG (`svg/`) and drawn as one
+  image: alpha masks and erasers, blend copies, group opacity, grayscale
+  masks, patterned strokes and text, and partial clears. NSH's image loader
+  rasterizes the document, so the layer's composite operations apply to the
+  layer alone, then the finished layer is composited once. Plain layers stay
+  vector; a layer drawn with a composite operation of its own is rasterized
+  and composited once. This path needs the NSH build described in
+  [nsh.md](nsh.md).
 - **Hit testing.** Hit canvases record path geometry in JS instead of pixels;
   `isPointInPath`, `isPointInStroke` and `getImageData` answer from that
   geometry (polygons, stroke distance, winding).

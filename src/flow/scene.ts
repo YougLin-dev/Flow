@@ -71,8 +71,11 @@ export class FlowScene {
     this.app = app;
     this.palette = readPalette();
     this.world = new Group({ x: 0, y: 0, scale: 1 });
-    // Connectors sit under the cards.
-    this.edgesLayer = new Group({ opacity: 0.9 });
+    // Connectors sit under the cards. Their opacity is per connector: a
+    // group's opacity would composite them offscreen, and NSH can only draw
+    // that layer as an SVG image once it has loaded, so a moving card would
+    // leave its connectors flickering or missing for the next frames.
+    this.edgesLayer = new Group();
     this.world.add(this.edgesLayer);
     app.tree.add(this.world);
 
@@ -379,11 +382,13 @@ export class FlowScene {
         stroke: this.palette.edge,
         strokeWidth: 1.5,
         strokeCap: "round",
+        opacity: 0.9,
         hittable: false,
       });
       const arrow = new Polygon({
         points: [0, 0, -10, -5, -10, 5],
         fill: this.palette.edge,
+        opacity: 0.9,
         hittable: false,
       });
       this.edgesLayer.add(line);

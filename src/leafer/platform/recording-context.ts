@@ -88,13 +88,18 @@ export class NshRecordingContext {
   readonly offscreen: boolean;
   /** A hit canvas keeps geometry for hit tests; a render canvas need not. */
   hitOnly = false;
+  /** The canvas read its pixels back and wrote them back (a grayscale mask). */
+  grayscale = false;
   ops: Op[] = [];
 
   private ctm: Matrix = identity();
   private stack: SavedState[] = [];
+  private clipped = false;
+  private clipStack: boolean[] = [];
   private path = new PathRecorder();
   private hits = new HitRegions();
   private props: Record<string, unknown> = { ...DEFAULT_STYLE };
+  private readPixels = false;
 
   constructor(canvas: RecordingCanvas, offscreen: boolean) {
     this.canvas = canvas;
@@ -124,9 +129,13 @@ export class NshRecordingContext {
     this.ops = [];
     this.ctm = identity();
     this.stack = [];
+    this.clipped = false;
+    this.clipStack = [];
     this.path.begin();
     this.hits.clear();
     this.props = { ...DEFAULT_STYLE };
+    this.readPixels = false;
+    this.grayscale = false;
   }
 
   replay(ctx: ReplayContext): void {
@@ -141,7 +150,14 @@ export class NshRecordingContext {
     replayOps(
       ctx,
       this.ops,
-      { ctm: identity(), fillPattern: null, strokePattern: null, alphaScale: 1 },
+      {
+        ctm: identity(),
+        fillPattern: null,
+        strokePattern: null,
+        alphaScale: 1,
+        alpha: 1,
+        composite: "source-over",
+      },
       this.canvas.width,
       this.canvas.height,
     );
@@ -154,6 +170,7 @@ export class NshRecordingContext {
       ctm: { ...this.ctm },
       props: { ...this.props },
     });
+    this.clipStack.push(this.clipped);
     this.call("save");
   }
 
@@ -163,6 +180,8 @@ export class NshRecordingContext {
       this.ctm = state.ctm;
       this.props = state.props;
     }
+    const clipped = this.clipStack.pop();
+    if (clipped !== undefined) this.clipped = clipped;
     this.call("restore");
   }
 
@@ -334,6 +353,7 @@ export class NshRecordingContext {
 
   clip(pathOrRule?: unknown, rule?: unknown): void {
     const winding = ruleArg(pathOrRule) ?? ruleArg(rule);
+    this.clipped = true;
     if (winding) this.call("clip", winding);
     else this.call("clip");
   }
@@ -363,11 +383,22 @@ export class NshRecordingContext {
     const { width, height } = this.canvas;
     const full = x <= 0 && y <= 0 && w >= width && h >= height;
     if (this.offscreen) {
-      // Leafer recycles offscreen canvases: whatever was recorded before a
-      // clear is no longer part of what the canvas shows.
-      this.ops = [];
-      this.path.begin();
-      this.hits.clear();
+      if (full && !this.clipped) {
+        // Leafer clears a layer canvas before a frame (wrapped in a
+        // save/restore) and recycles a canvas at rest by clearing the area it
+        // used. Either way the layer starts over; the save stack's own clip is
+        // what tells an eraser's clear from a fresh layer.
+        this.ops = [];
+        this.path.begin();
+        this.hits.clear();
+        this.readPixels = false;
+        this.grayscale = false;
+        return;
+      }
+      // A clear while drawing (a path eraser's clip then clearRect) erases
+      // the layer's earlier content: record it, and the snapshot is drawn as
+      // one image whose earlier content the serializer masks away.
+      this.call("clearRect", x, y, w, h);
       return;
     }
     // Leafer clears the whole canvas before every frame. NSH starts each
@@ -422,6 +453,12 @@ export class NshRecordingContext {
 
   putImageData(_image: unknown, _dx: number, _dy: number): void {
     // NSH's canvas has no pixel access; compositing is replayed as vectors.
+    // A render canvas that read its pixels back and writes them back is
+    // Leafer's grayscale mask: replay its drawing through a luminance mask.
+    if (!this.hitOnly && this.readPixels) {
+      this.grayscale = true;
+      this.readPixels = false;
+    }
   }
 
   createLinearGradient(x0: number, y0: number, x1: number, y1: number): GradientRecord {
@@ -444,7 +481,10 @@ export class NshRecordingContext {
   }
 
   createPattern(image: unknown, repeat: string | null): PatternRecord {
-    return new PatternRecord(image, repeat);
+    // A canvas pattern must survive Leafer recycling the canvas it was made
+    // from, so the tile is copied at creation, as drawImage copies one.
+    const source = isSnapshotSource(image) ? new SnapshotImage(image.snapshot()) : image;
+    return new PatternRecord(source, repeat);
   }
 
   // -- hit testing ---------------------------------------------------------
@@ -482,6 +522,11 @@ export class NshRecordingContext {
     height: number;
     data: Uint8ClampedArray;
   } {
+    // A render canvas has no pixels to read: note the read, and answer from
+    // the (empty) hit geometry. Leafer's grayscale-mask pass reads, converts
+    // color to alpha and writes back; `putImageData` turns that into the
+    // luminance-mask flag a snapshot carries.
+    if (!this.hitOnly) this.readPixels = true;
     return this.hits.getImageData(x, y, w, h);
   }
 }
