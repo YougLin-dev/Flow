@@ -115,11 +115,12 @@ new provider and, if it needs network access, a deliberate host entry in
 
 The canvas is a native NSH view tree. `components/FlowCanvas.tsx` holds the
 world-space cards and edges, the screen-space selection overlay and the
-interaction surface; `components/FlowCard.tsx` and `components/FlowEdge.tsx`
-render one card and one connector. `flow/scene.ts` is the headless model, and
-`flow/canvas-controller.ts` turns pointer events into selection, drag, resize,
-marquee, pan and connector gestures. `components/GridBackground.tsx` draws the
-dot grid in screen space.
+interaction surface; `components/FlowCard.tsx` renders one card,
+`components/FlowEdges.tsx` strokes the viewport's connectors in one native
+canvas and `components/FlowEdge.tsx` the connection preview. `flow/scene.ts`
+is the headless model, and `flow/canvas-controller.ts` turns pointer events
+into selection, drag, resize, marquee, pan and connector gestures.
+`components/GridBackground.tsx` draws the dot grid in screen space.
 
 The composer is a native panel (`components/NodeComposer.tsx`) in the same
 view tree as the rest of the app. `flow/overlay.ts` places it under the

@@ -1,6 +1,8 @@
 import { expect, test } from "nsh/test";
 import {
+  connectionBounds,
   connectionPoints,
+  connectorControls,
   cubicAt,
   distanceToConnection,
   portButtonPoint,
@@ -40,6 +42,26 @@ test("samples the connector from the output port to the input", () => {
   expect(points[0]).toEqual(from);
   expect(points[16]).toEqual(to);
   expect(points.every((point) => Math.abs(point.y - 170) < 0.001)).toBe(true);
+});
+
+test("the control points bound the drawn cubic", () => {
+  expect(connectorControls({ x: 0, y: 0 }, { x: 200, y: 200 })).toEqual({
+    c1: { x: 130, y: 0 },
+    c2: { x: 70, y: 200 },
+  });
+  expect(connectionBounds({ x: 0, y: 0 }, { x: 200, y: 200 })).toEqual({
+    x: 0,
+    y: 0,
+    width: 200,
+    height: 200,
+  });
+  // Short curves reach past their ports, and the box holds that reach.
+  expect(connectionBounds({ x: 0, y: 0 }, { x: 40, y: 10 })).toEqual({
+    x: -20,
+    y: 0,
+    width: 80,
+    height: 10,
+  });
 });
 
 test("hit testing follows the cubic, not its straight chord", () => {

@@ -55,6 +55,21 @@ tree:
 The Rust document core, commands, undo, search and the viewport contract are
 unchanged.
 
+### Amendment (2026-11-09): connector strokes
+
+The decision above removed `<Canvas>` with the Leafer scene, when a connector
+was a polyline of straight line views. Those sampled views showed joints and
+beading at every zoom, which is below the canvas' visual bar, and NSH grew a
+native `<Canvas>` that records a drawing and replays it natively at the
+transformed device resolution: it is a stroking surface, not a retained scene
+or a second render loop.
+
+Connectors therefore stroke their cubic once on that canvas: one shared
+`FlowEdges` canvas for the viewport and one `FlowEdge` canvas for the preview.
+Cards, ports, selection, the composer, hit testing and every gesture stay
+ordinary NSH views; the `<Canvas>` exception is limited to drawing connector
+lines.
+
 ## Consequences
 
 - The `src/leafer/` adapter, its platform modules and their tests are deleted;
@@ -73,9 +88,11 @@ unchanged.
   representation at very low zoom is still future work.
 - Text inside the scaled world view scales with the camera, while the composer
   and chrome stay in screen space and readable.
-- Connectors are polyline approximations of the cubic. They are visually
-  identical at the current thickness; a future path primitive would replace
-  the sampling without changing the model.
+- Connectors stroke the cubic directly on native-canvas layers (see the
+  amendment): the world's connectors in one shared canvas, the preview in its
+  own above the cards. The canvas replays a recorded drawing at the
+  transformed resolution, so the line stays smooth and sharp at any zoom
+  without changing the scene model.
 - Rotation, skew and flip remain unsupported because a node is stored as an
   axis-aligned world rectangle.
 

@@ -142,9 +142,9 @@ events and renders four kinds of children:
   current `grid-dot` token when the appearance changes.
 - **World** — a zero-size view translated and scaled by the camera
   (`transform: translate(x, y) scale(s)`, origin `0 0`). Its children are in
-  world coordinates: a `FlowEdge` per connector and a `FlowCard` per visible
-  node. The camera's transform is the only mapping from world to screen; the
-  scene never caches screen geometry on a card.
+  world coordinates: one `FlowEdges` canvas for every connector and a
+  `FlowCard` per visible node. The camera's transform is the only mapping from
+  world to screen; the scene never caches screen geometry on a card.
 - **Selection overlay** — the marquee box in screen space, derived from the
   controller each time the drag changes. It does not take pointer events. A
   selected card shows the same rounded accent border it shows on hover, so no
@@ -160,11 +160,13 @@ title and status above the card, the body text or image thumbnails inside it
 while the card is hovered or selected. A plus rests just outside the border;
 inside the side zone it eases toward the pointer in both axes, and it springs
 back when the pointer leaves. The plus is only a drag handle: connectors meet
-the card's own border. `FlowEdge` samples the connector cubic
-(`flow/connection.ts`) into densely spaced, overlapping straight line views
-with rounded caps; the overlap keeps antialiased joints from showing gaps,
-and there is no arrowhead. Both are presentational: props are accessors, and
-the page passes scene signals to them.
+the card's own border. `FlowEdges` strokes every connector's cubic from
+`flow/connection.ts` in one native-canvas layer with round caps; the canvas
+rasterizer draws at the transformed resolution, so the lines stay smooth and
+sharp at every camera scale instead of showing sampled joints, and there is no
+arrowhead. The connection preview is a single-edge `FlowEdge` canvas above the
+cards. Both are presentational: props are accessors, and the page passes
+scene signals to them.
 
 The scene model (`flow/scene.ts`) is headless: it holds the visible nodes and
 edges, the selection, transient drag geometry (`overrides`), previews, the

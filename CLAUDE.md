@@ -28,11 +28,13 @@ SQLite/search benchmark.
   adapter and migrations. Never interpolate values into a query.
 - **Signals stay private in `src/store.ts`.** Export readers and actions;
   pages bind them to presentational components.
-- **The canvas is native views.** Cards, ports, connectors, selection and the
-  composer are ordinary NSH views. Keep geometry in `src/flow/` (scene, camera,
-  selection, overlay), gestures in `src/flow/canvas-controller.ts`, and the
-  views in `src/components/FlowCanvas.tsx` and its parts; extend those with
-  tests instead of adding a canvas library.
+- **The canvas is native views.** Cards, ports, selection and the composer are
+  ordinary NSH views; connectors are stroked in one native `<Canvas>` layer
+  (never a retained scene), and hit testing stays in the scene model. Keep
+  geometry in `src/flow/` (scene, camera, selection, overlay), gestures in
+  `src/flow/canvas-controller.ts`, and the views in
+  `src/components/FlowCanvas.tsx` and its parts; extend those with tests
+  instead of adding a canvas library.
 - **The document core is Rust's.** `src/native/` is the mixed NSH Rust crate;
   it owns SQLite, FTS5, RTree, undo history and asset metadata. TSX must not
   open SQLite or write SQL. The canvas stays in TSX/QuickJS and is never moved

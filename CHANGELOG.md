@@ -44,8 +44,9 @@ All notable changes to Flow are recorded here. The format follows
   screen-reader-accessible without a separate inspector.
 - The boundary rule now fails closed when the importing module itself is
   unclassified, not only when its target is.
-- Connectors render as densely sampled, overlapping line segments with rounded
-  caps; connector arrowheads are gone. Ports are round plus buttons just
+- Connectors are stroked as cubics in one native-canvas layer, so every line
+  stays smooth and sharp at any zoom instead of showing sampled joints;
+  connector arrowheads are gone. Ports are round plus buttons just
   outside a card's left and right borders instead of permanent accent dots:
   they appear while a card is hovered or selected, ease toward the pointer in
   a side zone and spring back when it leaves, and dragging one starts a

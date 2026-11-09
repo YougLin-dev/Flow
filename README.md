@@ -1,9 +1,10 @@
 # Flow
 
 An infinite flow canvas built with [Native Shell](https://nsh.dev/) (NSH). The
-canvas is a native NSH view tree — cards, ports, connectors, selection and the
-composer are ordinary views, so text, focus and accessibility are the
-platform's, while hit testing is the scene model's. A mixed-app Rust crate in `src/native/` owns the document
+canvas is a native NSH view tree — cards, ports, selection and the composer
+are ordinary views, so text, focus and accessibility are the platform's, while
+hit testing is the scene model's. Connectors are stroked on a native canvas
+layer so the curves stay smooth and sharp at any zoom. A mixed-app Rust crate in `src/native/` owns the document
 database, search and undo core; the canvas stays in TSX. `⌘K` / `Ctrl+K` (or
 the Search button) opens a command palette over the Rust full-text index.
 
@@ -92,7 +93,8 @@ src/                   the NSH app: its root, entry, config and assets
   components/
     FlowCanvas.tsx     the canvas: world-space cards and edges, gestures
     FlowCard.tsx       one card: title, status, body, ports
-    FlowEdge.tsx       one connector, sampled from the cubic into line views
+    FlowEdges.tsx      every connector, stroked as one native-canvas layer
+    FlowEdge.tsx       the connection preview, one canvas stroke
     GridBackground.tsx the dot-grid backdrop
     SelectionOverlay.tsx selection borders, resize handles and the marquee
     NodeComposer.tsx   the native composer attached to the selected card

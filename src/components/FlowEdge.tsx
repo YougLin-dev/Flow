@@ -1,10 +1,17 @@
 /**
- * A connector on the native canvas, drawn as densely sampled, overlapping
- * straight segments with rounded caps. Geometry is in world-space points, so
- * the line scales with the camera.
+ * One connector drawn as a single native-canvas cubic. The canvas strokes
+ * the curve natively, so the line is smooth and stays sharp at every camera
+ * scale; geometry is in world-space points.
  */
-import { View } from "nsh";
-import { connectionPoints, type Point } from "../flow/connection";
+import { Canvas, type CanvasRenderingContext2D, colorScheme, token } from "nsh";
+import {
+  type BoxGeometry,
+  connectionBounds,
+  connectorControls,
+  EDGE_PADDING,
+  EDGE_THICKNESS,
+  type Point,
+} from "../flow/connection";
 
 export interface FlowEdgeProps {
   readonly from: () => Point | null;
@@ -14,80 +21,53 @@ export interface FlowEdgeProps {
   readonly zIndex?: number;
 }
 
-interface Segment {
-  readonly x: number;
-  readonly y: number;
-  readonly length: number;
-  readonly angle: number;
-}
-
-const THICKNESS = 2;
-/** World points one segment spans; shorter segments read as a smooth curve. */
-const STEP_LENGTH = 10;
-const MIN_STEPS = 16;
-const MAX_STEPS = 64;
-/** Each segment reaches past its joint, so antialiased ends cannot leave gaps. */
-const OVERLAP = 0.75;
-
-/** The connector's samples, in world coordinates. */
-export function edgeSegments(from: Point | null, to: Point | null): Segment[] {
-  if (!from || !to) return [];
-  const rough = connectionPoints(from, to, MIN_STEPS);
-  let length = 0;
-  for (let index = 0; index + 1 < rough.length; index += 1) {
-    const a = rough[index];
-    const b = rough[index + 1];
-    if (a && b) length += Math.hypot(b.x - a.x, b.y - a.y);
-  }
-  const steps = Math.min(MAX_STEPS, Math.max(MIN_STEPS, Math.ceil(length / STEP_LENGTH)));
-  const points = connectionPoints(from, to, steps);
-  const segments: Segment[] = [];
-  for (let index = 0; index + 1 < points.length; index += 1) {
-    const a = points[index];
-    const b = points[index + 1];
-    if (!a || !b) continue;
-    const dx = b.x - a.x;
-    const dy = b.y - a.y;
-    segments.push({
-      x: a.x,
-      y: a.y - THICKNESS / 2,
-      length: Math.hypot(dx, dy) + OVERLAP,
-      angle: (Math.atan2(dy, dx) * 180) / Math.PI,
-    });
-  }
-  return segments;
-}
-
 export function FlowEdge(props: FlowEdgeProps) {
-  const tone = () => (props.selected() ? "bg-chart-1" : "bg-muted-foreground");
+  const box = (): BoxGeometry | null => {
+    const from = props.from();
+    const to = props.to();
+    return from && to ? connectionBounds(from, to) : null;
+  };
+  const left = () => (box()?.x ?? 0) - EDGE_PADDING;
+  const top = () => (box()?.y ?? 0) - EDGE_PADDING;
+  const width = () => (box()?.width ?? 0) + EDGE_PADDING * 2;
+  const height = () => (box()?.height ?? 0) + EDGE_PADDING * 2;
+
+  const draw = (cx: CanvasRenderingContext2D): void => {
+    const from = props.from();
+    const to = props.to();
+    if (!from || !to) return;
+    const origin = { x: left(), y: top() };
+    // Read the scheme so a theme switch redraws the connector's color.
+    colorScheme();
+    const { c1, c2 } = connectorControls(from, to);
+    cx.strokeStyle = token(props.selected() ? "chart-1" : "muted-foreground");
+    cx.lineWidth = EDGE_THICKNESS;
+    cx.lineCap = "round";
+    cx.beginPath();
+    cx.moveTo(from.x - origin.x, from.y - origin.y);
+    cx.bezierCurveTo(
+      c1.x - origin.x,
+      c1.y - origin.y,
+      c2.x - origin.x,
+      c2.y - origin.y,
+      to.x - origin.x,
+      to.y - origin.y,
+    );
+    cx.stroke();
+  };
+
   return (
-    <View
+    <Canvas
       style={{
         position: "absolute",
-        left: 0,
-        top: 0,
-        width: 0,
-        height: 0,
+        left: left(),
+        top: top(),
+        width: width(),
+        height: height(),
         zIndex: props.zIndex ?? 0,
+        pointerEvents: "none",
       }}
-    >
-      <Each of={edgeSegments(props.from(), props.to())} key="index">
-        {(segment) => (
-          <View
-            classList={{ absolute: true, [tone()]: true }}
-            style={{
-              position: "absolute",
-              left: segment().x,
-              top: segment().y,
-              width: segment().length,
-              height: THICKNESS,
-              borderRadius: THICKNESS / 2,
-              transform: [{ rotate: `${segment().angle}deg` }],
-              transformOrigin: "0 50%",
-            }}
-          />
-        )}
-      </Each>
-    </View>
+      draw={draw}
+    />
   );
 }

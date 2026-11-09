@@ -56,8 +56,11 @@ export function portZone(node: BoxGeometry, side: PortSide, x: number, y: number
   return { x: side === "in" ? border - distance : border + distance, y };
 }
 
-/** The connector hit distance, in world units. */
+/** The connector's stroke width and hit distance, in world units. */
+export const EDGE_THICKNESS = 2;
 export const EDGE_HIT_DISTANCE = 8;
+/** The room a connector canvas leaves around its cubic for the stroke. */
+export const EDGE_PADDING = 4;
 
 /** The control-point reach of the connector's cubic curve. */
 function controlReach(from: Point, to: Point): number {
@@ -66,11 +69,31 @@ function controlReach(from: Point, to: Point): number {
   return Math.max(60, Math.min(260, Math.abs(dx) * 0.5 + Math.abs(dy) * 0.15));
 }
 
+/** The cubic's control points: horizontal handles off each port. */
+export function connectorControls(from: Point, to: Point): { c1: Point; c2: Point } {
+  const reach = controlReach(from, to);
+  return {
+    c1: { x: from.x + reach, y: from.y },
+    c2: { x: to.x - reach, y: to.y },
+  };
+}
+
+/** The box holding the connector's whole cubic, from its control points. */
+export function connectionBounds(from: Point, to: Point): BoxGeometry {
+  const { c1, c2 } = connectorControls(from, to);
+  const x = Math.min(from.x, c1.x, c2.x, to.x);
+  const y = Math.min(from.y, c1.y, c2.y, to.y);
+  return {
+    x,
+    y,
+    width: Math.max(from.x, c1.x, c2.x, to.x) - x,
+    height: Math.max(from.y, c1.y, c2.y, to.y) - y,
+  };
+}
+
 /** Sample points along the connector, from the output port to the input. */
 export function connectionPoints(from: Point, to: Point, steps = 16): Point[] {
-  const reach = controlReach(from, to);
-  const c1 = { x: from.x + reach, y: from.y };
-  const c2 = { x: to.x - reach, y: to.y };
+  const { c1, c2 } = connectorControls(from, to);
   const points: Point[] = [from];
   for (let index = 1; index <= steps; index += 1) {
     points.push(cubicAt(from, c1, c2, to, index / steps));
@@ -80,9 +103,7 @@ export function connectionPoints(from: Point, to: Point, steps = 16): Point[] {
 
 /** How far `point` is from the cubic connector, by sampled segments. */
 export function distanceToConnection(from: Point, to: Point, point: Point): number {
-  const reach = controlReach(from, to);
-  const c1 = { x: from.x + reach, y: from.y };
-  const c2 = { x: to.x - reach, y: to.y };
+  const { c1, c2 } = connectorControls(from, to);
   let best = Number.POSITIVE_INFINITY;
   let previous = from;
   const steps = 24;

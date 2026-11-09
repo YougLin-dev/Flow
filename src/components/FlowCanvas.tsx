@@ -14,6 +14,7 @@ import type { CanvasController } from "../flow/canvas-controller";
 import type { FlowScene } from "../flow/scene";
 import { FlowCard } from "./FlowCard";
 import { FlowEdge } from "./FlowEdge";
+import { FlowEdges } from "./FlowEdges";
 import { GridBackground } from "./GridBackground";
 import { SelectionOverlay } from "./SelectionOverlay";
 
@@ -201,15 +202,7 @@ export function FlowCanvas(props: FlowCanvasProps) {
           transform: `translate(${props.camera.x}px, ${props.camera.y}px) scale(${props.camera.scale})`,
         }}
       >
-        <Each of={props.scene.edges()} key={(edge) => edge.id}>
-          {(edge) => (
-            <FlowEdge
-              from={() => props.scene.portWorld(edge().fromId, "out")}
-              to={() => props.scene.portWorld(edge().toId, "in")}
-              selected={() => props.scene.selectedEdge() === edge().id}
-            />
-          )}
-        </Each>
+        <FlowEdges scene={props.scene} />
         <Each of={props.scene.nodes()} key={(node) => node.id}>
           {(node) => (
             <FlowCard
