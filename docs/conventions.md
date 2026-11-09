@@ -10,16 +10,16 @@ tooling (`package.json`, `vite.config.ts`, `tsconfig.json`, `scripts/`,
 
 ## File names
 
-| File                | Convention                     | Example                          |
-| ------------------- | ------------------------------ | -------------------------------- |
-| Component           | PascalCase, named after export | `TitleBar.tsx`, `FlowPage.tsx`   |
-| Component test      | `<Component>.test.tsx`         | `App.test.tsx`                   |
-| Module              | kebab-case                     | `nsh-platform.ts`, `camera.ts`   |
-| Module test         | `<module>.test.ts` beside it   | `nsh-platform.test.ts`           |
-| Build/check tooling | kebab-case `.mjs` / `.js`      | `test-host.mjs`, `boundaries.js` |
-| Rust module         | snake_case `.rs`               | `db.rs`, `history.rs`            |
-| Directory           | lowercase kebab-case           | `components/`, `leafer/`         |
-| Asset               | lowercase, `-` and `@2x`/`@3x` | `pin-active.png`, `node@2x.png`  |
+| File                | Convention                     | Example                             |
+| ------------------- | ------------------------------ | ----------------------------------- |
+| Component           | PascalCase, named after export | `TitleBar.tsx`, `FlowPage.tsx`      |
+| Component test      | `<Component>.test.tsx`         | `App.test.tsx`                      |
+| Module              | kebab-case                     | `canvas-controller.ts`, `camera.ts` |
+| Module test         | `<module>.test.ts` beside it   | `canvas-controller.test.ts`         |
+| Build/check tooling | kebab-case `.mjs` / `.js`      | `test-host.mjs`, `boundaries.js`    |
+| Rust module         | snake_case `.rs`               | `db.rs`, `history.rs`               |
+| Directory           | lowercase kebab-case           | `components/`, `flow/`              |
+| Asset               | lowercase, `-` and `@2x`/`@3x` | `pin-active.png`, `node@2x.png`     |
 
 File names are checked by Oxlint's `unicorn/filename-case` in `vite.config.ts`:
 PascalCase for `.tsx`, kebab-case for `.ts`, `.js` and `.mjs`, with
@@ -41,37 +41,36 @@ nothing; every other PascalCase file exports a value of the same name.
 - Components take values and callbacks; they do not import the store. Pages
   bind store readers/actions to component props.
 - Module-level constants are `const`; mutable state lives inside its owner
-  (`let` in a page, component, store closure or adapter class), never as a
-  mutable module-level binding. The platform adapter's guarded install and
-  measurement-context caches are the one exception: they are initialized once,
-  scoped to the adapter, and reset by installation or cleanup.
+  (`let` in a page, component, store closure or controller class), never as a
+  mutable module-level binding.
 - Split by responsibility, not by line count. The `max-lines` rule caps a
   module at 500 code lines (blank and comment lines excluded); treat that as a
   prompt to look for a seam, never as a target to fill or an arbitrary split.
-  Good seams are already in the code: types and their algorithms, recording
-  vs replay, geometry vs painting. Avoid a `utils.ts` grab bag; name a module
-  after the one job it does.
+  Good seams are already in the code: the scene model vs its views, geometry
+  vs gesture routing, or drawing vs hit testing. Avoid a `utils.ts` grab bag;
+  name a module after the one job it does.
 - When internal modules need a stable surface, keep one facade module beside
   the directory and export from there; consumers import the facade, while the
-  internal modules import each other directly. `leafer/nsh-platform.ts` is the
-  facade for `leafer/platform/`, and the same pattern keeps the dependency
-  graph acyclic.
+  internal modules import each other directly. The pattern keeps the
+  dependency graph acyclic; use it when a directory actually has internal
+  modules, not as indirection everywhere.
 - The mixed Rust crate lives in `src/native/`. Its `#[native_module]` exports
   are the only surface TSX sees, imported as `@flow/native`; do not add a
   second Rust-backed import path. Keep SQLite and search code in Rust, and
-  keep TSX/Leafer code out of the crate.
+  keep TSX/canvas code out of the crate.
 - SeaORM entities are one file per table under `src/native/src/entity/`, named
-  after the table. Commands live in `mutation.rs`, reads in `search.rs`,
-  `viewport.rs` or `scene.rs`; `db.rs` owns the worker handle, history and
-  startup, and `schema.rs` owns table creation. Raw SQLITE SQL belongs only in
-  `schema.rs`/`search.rs` for virtual tables.
+  after the table. Commands live in `mutation.rs`; reads in `search.rs`,
+  `viewport.rs`, `scene.rs` or `detail.rs`; asset bytes in `asset.rs`; `db.rs`
+  owns the worker handle, history and startup, and `schema.rs` owns table
+  creation. Raw SQLITE SQL belongs only in `schema.rs`/`search.rs` for virtual
+  tables.
 
 ## Imports
 
 Order, separated by blank lines:
 
 1. `nsh` and `nsh/*`
-2. third-party packages (`@leafer-ui/*`, …)
+2. third-party packages
 3. local modules (`../store`, `./data`)
 
 Type-only imports must say `import type` (or `import { type X }`); the
@@ -80,7 +79,7 @@ TypeScript setting `verbatimModuleSyntax` and the lint rule
 `import/no-duplicates` and `import/no-self-import` are errors.
 
 Dependencies flow down: `App.tsx → pages → components/store`, and
-`pages → flow/leafer/lib`. Lower layers never import a page or the shell; the
+`pages → flow/lib`. Lower layers never import a page or the shell; the
 `boundaries/no-upward-import` rule (`lint/boundaries.js`) reports a violation.
 
 ## Types
@@ -92,10 +91,9 @@ The compiler runs with `strict`, `verbatimModuleSyntax`,
 
 - **No `any`.** `typescript/no-explicit-any` is an error, and so are the
   `no-unsafe-*` rules: a value that is `any` cannot be assigned, called,
-  dereferenced, returned or passed as an argument. Third-party declarations
-  that use `any` are handled at the boundary with `unknown` and type guards
-  (`isRecord`, `instanceof`, `in` checks), as in `leafer/platform/values.ts`
-  and the other adapter modules behind `leafer/nsh-platform.ts`.
+  dereferenced, returned or passed as an argument. Values from NSH,
+  `JSON.parse` or another untyped source are handled at the boundary with
+  `unknown` and type guards (`isRecord`, `instanceof`, `in` checks).
   Plain `.js`/`.mjs` tooling (scripts and the lint plugin) is not
   type-checked, so those rules are off there.
 - Object shapes use `interface`; unions and aliases use `type`
@@ -134,8 +132,8 @@ The compiler runs with `strict`, `verbatimModuleSyntax`,
   (the 46-point caption-button lane) or canvas coordinates, with a comment.
 - Interaction states use `hover:`, `active:`, `selected:` and component state
   props; do not reimplement them with JS.
-- Leafer scene colors also use `token()`, so the canvas follows light/dark
-  with the rest of the app.
+- Canvas views also use token() or token classes, so the scene follows
+  light/dark with the rest of the app.
 - The application name is **Flow** (capital F) in user-visible text and
   `flow` in ids, package names and paths.
 
@@ -144,7 +142,8 @@ The compiler runs with `strict`, `verbatimModuleSyntax`,
 - Document exported functions, types and props with `/** … */`, one line
   where possible.
 - Comments explain _why_ (a platform quirk, an invariant, a workaround), not
-  _what_ the next line does. The adapter and camera rely on this heavily.
+  _what_ the next line does. The camera, geometry and gesture modules rely on
+  this heavily.
 - Keep a file's header comment describing its role; update it when the role
   changes.
 - Do not leave commented-out code. Delete it; git remembers.

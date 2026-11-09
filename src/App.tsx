@@ -8,7 +8,7 @@ import { isPinned, togglePinned } from "./store";
 installWindowChrome();
 
 /**
- * Flow — an infinite canvas built with Leafer on NSH's native view tree.
+ * Flow — an infinite canvas built with NSH's native view tree.
  *
  * The shell owns the window chrome and composes the page; the workspace and
  * its interactions live in `pages/FlowPage.tsx`, and its shared state in

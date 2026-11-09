@@ -12,6 +12,7 @@ pub struct Model {
     pub mime: String,
     pub size: i64,
     pub meta_json: String,
+    pub created_at: i64,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]

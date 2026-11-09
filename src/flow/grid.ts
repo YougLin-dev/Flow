@@ -1,37 +1,20 @@
-import { token, type CanvasRenderingContext2D } from "nsh";
-import type { CanvasCamera } from "../leafer/camera";
+/** The dot grid's tile layout in screen space. */
+export interface GridLayout {
+  readonly columns: number;
+  readonly rows: number;
+}
 
 /**
- * The infinite canvas' dot grid: dots sit at world coordinates, so they pan
- * and zoom with the scene. The spacing doubles or halves to keep the dots
- * between 36 and 72 screen points apart at any zoom.
+ * The tiles needed to cover a stage of `width` × `height`. Placement starts
+ * one tile before the camera's wrapped offset, so one extra tile each way is
+ * enough at any offset.
  */
-export function drawGrid(
-  cx: CanvasRenderingContext2D,
-  width: number,
-  height: number,
-  camera: CanvasCamera | null,
-): void {
-  cx.fillStyle = token("background");
-  cx.fillRect(0, 0, width, height);
-  if (!camera) return;
+export function gridLayout(width: number, height: number, tile: number): GridLayout {
+  if (!Number.isFinite(tile) || tile <= 0) return { columns: 1, rows: 1 };
+  return { columns: tileCount(width, tile), rows: tileCount(height, tile) };
+}
 
-  const scale = Math.abs(camera.scale) || 1;
-  let step = 32;
-  while (step * scale < 36) step *= 2;
-  while (step * scale > 72) step /= 2;
-  const gap = step * scale;
-  if (!(gap > 0.5) || !Number.isFinite(gap)) return;
-  const offsetX = ((camera.x % gap) + gap) % gap;
-  const offsetY = ((camera.y % gap) + gap) % gap;
-
-  cx.beginPath();
-  for (let x = offsetX; x < width; x += gap) {
-    for (let y = offsetY; y < height; y += gap) {
-      cx.moveTo(x + 1, y);
-      cx.arc(x, y, 1, 0, Math.PI * 2);
-    }
-  }
-  cx.fillStyle = token("grid-dot");
-  cx.fill();
+function tileCount(size: number, tile: number): number {
+  if (!Number.isFinite(size) || size <= 0) return 1;
+  return Math.ceil(size / tile) + 1;
 }

@@ -1,27 +1,32 @@
-import { cleanup, colorScheme, effect, host, keymap, signal, View } from "nsh";
+import { cleanup, effect, keymap, Picker, signal, untracked, View } from "nsh";
 import { isAvailable } from "nsh/desktop";
-import type { App as LeaferApp, IEditorBase } from "@leafer-ui/miniapp";
-import {
-  Document,
-  type ChangeSet,
-  type NodeInput,
-  type SearchHit,
-  type Viewport,
-} from "@flow/native";
+import type { ChangeSet, Document, NodeBounds, SearchHit } from "@flow/native";
 import { BrandCard } from "../components/BrandCard";
+import { FlowCanvas } from "../components/FlowCanvas";
 import { HintBar } from "../components/HintBar";
+import { InlineTextEditor } from "../components/InlineTextEditor";
+import { NodeComposer } from "../components/NodeComposer";
+import { NodeToolbar } from "../components/NodeToolbar";
 import { SearchButton } from "../components/SearchButton";
-import { SearchPalette, type SearchFilter } from "../components/SearchPalette";
+import { SearchPalette } from "../components/SearchPalette";
 import { SelectionBadge } from "../components/SelectionBadge";
 import { ToolSwitch } from "../components/ToolSwitch";
 import { ZoomControls } from "../components/ZoomControls";
-import { CONTENT, seedEdges, seedNodes } from "../flow/data";
-import { databasePath } from "../flow/database-path";
-import { drawGrid } from "../flow/grid";
+import { AssetUrls } from "../flow/asset-urls";
+import { bindFlowKeys } from "../flow/bindings";
+import { CanvasCamera } from "../flow/camera";
+import { CanvasController } from "../flow/canvas-controller";
+import { ComposerState } from "../flow/composer-state";
+import { CONTENT } from "../flow/data";
+import { openFlowDocument } from "../flow/document-session";
+import { NodeRunner } from "../flow/execution";
+import type { NodeKindId } from "../flow/node-kinds";
+import { NodeSession } from "../flow/node-session";
+import { composerAnchor, inlineAnchor } from "../flow/overlay";
+import { PreviewLoader } from "../flow/preview-loader";
+import { SEARCH_FILTERS } from "../flow/search-filters";
 import { FlowScene } from "../flow/scene";
-import { CanvasCamera } from "../leafer/camera";
-import { refreshEditBox } from "../leafer/editor-box";
-import { LeaferView } from "../leafer/LeaferView";
+import { ViewportController } from "../flow/viewport-controller";
 import {
   currentTool,
   selectedCount,
@@ -31,180 +36,189 @@ import {
   zoomPercent,
 } from "../store";
 
-const VIEWPORT_MARGIN = 0.25;
-const VIEWPORT_DELAY_MS = 80;
-
-const SEARCH_FILTERS: readonly SearchFilter[] = [
-  { label: "All", kind: null },
-  { label: "Panels", kind: "panel" },
-];
-
 /**
- * The flow workspace: a Leafer canvas, its camera, and the controls that
- * float over it. The page owns the camera and the editor for as long as it is
- * mounted; the shared tool, zoom and selection values live in the store.
- *
- * The document lives in Rust. This page only keeps the visible cards in Leaner
- * and sends one command per user gesture.
+ * The flow workspace: a native canvas of cards and connectors, the page's
+ * document session, and the native composer attached to the selected card.
  */
 export function FlowPage() {
-  let app: LeaferApp | null = null;
-  let camera: CanvasCamera | null = null;
-  let editor: IEditorBase | null = null;
-  let scene: FlowScene | null = null;
   let document: Document | null = null;
-  let stageWidth = 1;
-  let stageHeight = 1;
-  // Once the user moves the camera, a resize keeps it where it is.
-  let userCamera = false;
-  let recolor: (() => void) | null = null;
-  let zoomFrame = 0;
-  let viewportTimer: ReturnType<typeof setTimeout> | null = null;
-  let viewportGeneration = 0;
-  let viewportDeferred = false;
-  let cameraGeneration = 0;
+  let assets: AssetUrls | null = null;
+  let runner: NodeRunner | null = null;
   let disposed = false;
   let opening = false;
-  let committing = false;
-  let commitAgain = false;
-  let commitGeneration = 0;
-  let lastRev = 0;
+  let sized = false;
+
+  const scene = new FlowScene();
+  const camera = new CanvasCamera();
+  const stage = signal({ width: 1, height: 1 });
+  const sessionState = signal<NodeSession | null>(null);
   const searchOpen = signal(false);
+  const composerState = new ComposerState();
+  const composerHeight = signal(0);
 
-  const syncSelection = (): void => {
-    setSelectedCount(editor?.list.length ?? 0);
-  };
+  const currentSession = (): NodeSession | null => sessionState();
 
-  // The first fit happens after the document opens; NSH does not take signal
-  // writes made inside a draw call, so publish the label on the next frame.
-  // A later zoom publishes its own label directly; this frame must not
-  // overwrite it with the scale it captured earlier.
-  const publishZoom = (scale: number): void => {
-    cancelAnimationFrame(zoomFrame);
-    const percent = Math.round(scale * 100);
-    zoomFrame = requestAnimationFrame(() => {
-      if (disposed) return;
-      if (Math.round((camera?.scale ?? scale) * 100) === percent) setZoomPercent(percent);
-    });
-  };
+  const previews = new PreviewLoader({
+    document: () => document,
+    assets: () => assets,
+    scene: () => scene,
+    isDisposed: () => disposed,
+  });
+  const schedulePreviews = (): void => previews.schedule();
 
-  // The edit box lives in the editor (sky) layer and is positioned from the
-  // selected elements' world bounds. Moving the camera changes those bounds
-  // without changing the elements themselves, so Leafer does not refresh the
-  // box on its own; update the layout and the editor after every camera move.
-  const refreshEditor = (): void => refreshEditBox(editor, scene?.world ?? null);
-
-  // Change sets carry the document revision; a viewport read that started
-  // before a command must not rewind the scene.
   const applyChanges = (changes: ChangeSet): void => {
-    lastRev = Math.max(lastRev, changes.rev);
-    scene?.applyChangeSet(changes);
-    refreshEditor();
+    viewport.noteRev(changes.rev);
+    scene.applyChangeSet(changes);
+    currentSession()?.onChanges(changes);
+    schedulePreviews();
   };
 
-  const visibleRect = (): { rect: Viewport; margin: number } => {
-    if (!camera) {
-      return { rect: CONTENT, margin: 0 };
-    }
-    const rect = camera.visibleBounds({ width: stageWidth, height: stageHeight });
-    const margin = Math.max(rect.width, rect.height) * VIEWPORT_MARGIN;
-    return { rect, margin };
-  };
+  const viewport = new ViewportController({
+    camera: () => camera,
+    scene: () => scene,
+    document: () => document,
+    applyChanges,
+    schedulePreviews,
+    publishZoom: (percent) => setZoomPercent(percent),
+    isDisposed: () => disposed,
+  });
 
-  // Throttle viewport reads during a pan or zoom; Leafer moves the cards it
-  // already has between reads, so the scene never waits on the database.
-  const scheduleViewport = (): void => {
-    if (viewportTimer !== null || disposed) return;
-    viewportTimer = setTimeout(() => {
-      viewportTimer = null;
-      if (!disposed) void refreshViewport();
-    }, VIEWPORT_DELAY_MS);
-  };
-
-  const refreshViewport = async (): Promise<void> => {
+  const commitBounds = (bounds: readonly NodeBounds[]): void => {
     const doc = document;
-    if (!doc || !scene || disposed) return;
-    // Do not overwrite a card while the editor is dragging it. Remember to
-    // read again when the gesture commits; otherwise the timer is consumed
-    // and newly exposed cards stay missing until the camera moves again.
-    if (app?.interaction?.dragging) {
-      viewportDeferred = true;
-      return;
-    }
-
-    const generation = ++viewportGeneration;
-    const { rect, margin } = visibleRect();
-    try {
-      const snapshot = await doc.scene(rect, margin);
-      if (disposed || generation !== viewportGeneration || !scene) return;
-      if (app?.interaction?.dragging) {
-        viewportDeferred = true;
-        return;
+    if (!doc || disposed || bounds.length === 0) return;
+    void (async () => {
+      try {
+        const changes = await doc.setNodeBounds([...bounds]);
+        if (!disposed) applyChanges(changes);
+      } catch (error) {
+        console.error("Flow could not persist the gesture", error);
+        scene.clearOverrides();
       }
-      if (snapshot.rev < lastRev) return;
-      lastRev = snapshot.rev;
-      // At low zoom the viewport can cover tens of thousands of nodes. Keep
-      // the card count bounded; selected cards survive the cap.
-      const scale = camera?.scale ?? 1;
-      const maxCards = scale < 0.15 ? 300 : scale < 0.4 ? 800 : 2_000;
-      scene.apply(snapshot, { maxCards });
-      viewportDeferred = false;
-      refreshEditor();
-    } catch (error) {
-      console.error("Flow could not read the viewport", error);
+    })();
+  };
+
+  const selectEdge = (id: string | null): void => {
+    scene.selectEdge(id);
+    if (id === null) return;
+    scene.select([]);
+  };
+
+  const closeComposer = (): void => {
+    const session = currentSession();
+    composerState.save(session, session?.detail() ?? null);
+    composerState.reset();
+    session?.closeComposer();
+  };
+
+  /** Writes the inline editor's draft and closes it. */
+  const closeInlineDraft = (): void => {
+    const session = currentSession();
+    const id = session?.inlineId() ?? null;
+    if (!session || id === null) return;
+    const text = session.inlineText();
+    session.closeInline();
+    void session.commitBody(id, text);
+  };
+
+  const openComposer = (id: string): void => {
+    const session = currentSession();
+    if (!session) return;
+    const previous = session.composerId();
+    if (previous === id) return;
+    // Switching cards directly (a click or a search result) must keep the
+    // open composer's drafts; only the close paths saved them before.
+    if (previous !== null) {
+      composerState.save(session, session.detail());
+      composerState.reset();
     }
+    if (session.inlineId() !== null && session.inlineId() !== id) closeInlineDraft();
+    if (session.inlineId() === id) return;
+    session.openComposer(id);
   };
 
-  const drainDeferredViewport = (): void => {
-    if (!viewportDeferred || disposed) return;
-    viewportDeferred = false;
-    scheduleViewport();
+  const controller = new CanvasController({
+    scene: () => scene,
+    camera: () => camera,
+    tool: () => currentTool(),
+    panBy: (dx, dy) => viewport.panBy(dx, dy),
+    commitBounds,
+    selectEdge,
+    reconnectEdge: (edgeId, fromId, toId) =>
+      void currentSession()?.reconnectEdge(edgeId, fromId, toId),
+    connectNodes: (fromId, toId) => void currentSession()?.connectNodes(fromId, toId),
+    openInline: (nodeId) => {
+      const session = currentSession();
+      if (!session || session.inlineId() === nodeId) return;
+      // The inline editor takes the composer's place; writing its drafts
+      // first keeps an edit made in the composer from vanishing.
+      if (session.inlineId() !== null) closeInlineDraft();
+      if ((session.composerId() ?? null) !== null) closeComposer();
+      void session.openInline(nodeId);
+    },
+    // A multi-card selection has no composer; the effect below closes one
+    // that was open, so do not start loading a new one here.
+    onCardPress: (id) => {
+      if (scene.selection().length === 1) openComposer(id);
+    },
+  });
+
+  const composerPosition = (): { left: number; top: number; width: number } | null => {
+    const id = currentSession()?.composerId() ?? null;
+    if (id === null) return null;
+    const rect = scene.cardRect(id);
+    if (!rect) return null;
+    const size = stage();
+    const width = Math.min(360, Math.max(280, size.width - 16));
+    const anchor = composerAnchor(rect, camera, size, {
+      width,
+      height: Math.max(1, composerHeight()),
+    });
+    return { left: anchor.left, top: anchor.top, width };
   };
 
-  const fitToDocument = async (announce = true, schedule = true): Promise<void> => {
+  const inlinePosition = (): {
+    left: number;
+    top: number;
+    width: number;
+    height: number;
+  } | null => {
+    const id = currentSession()?.inlineId();
+    if (!id) return null;
+    const rect = scene.cardRect(id);
+    if (!rect) return null;
+    return inlineAnchor(rect, camera, stage());
+  };
+
+  const panBy = (dx: number, dy: number): void => {
+    if (searchOpen()) return;
+    viewport.panBy(dx, dy);
+  };
+
+  const setZoom = (factor: number): void => {
+    const size = stage();
+    viewport.zoomAround(factor, size.width / 2, size.height / 2);
+  };
+
+  const fit = (): void => {
+    void viewport.fitToDocument();
+  };
+
+  const searchCards = async (query: string, kind: string | null): Promise<SearchHit[]> => {
     const doc = document;
-    if (!doc || !camera || disposed) return;
-    const generation = cameraGeneration;
-    let bounds: Viewport = CONTENT;
-    try {
-      const documentBounds = await doc.bounds();
-      if (documentBounds.width > 0 || documentBounds.height > 0) {
-        bounds = documentBounds;
-      }
-    } catch (error) {
-      console.error("Flow could not read the document bounds", error);
-    }
-    // A pan or zoom during the bounds read is the newer intent; do not
-    // override it (or re-enable auto-fit) with this stale result.
-    if (disposed || !camera || generation !== cameraGeneration) return;
-
-    userCamera = false;
-    const scale = camera.fit(bounds, { width: stageWidth, height: stageHeight });
-    if (announce) publishZoom(scale);
-    refreshEditor();
-    if (schedule) scheduleViewport();
+    if (!doc) return [];
+    return doc.search(query, { kind }, 20);
   };
 
   const revealNode = async (id: string): Promise<void> => {
     const doc = document;
-    if (!doc || !camera || disposed) return;
+    if (!doc || disposed) return;
     try {
       const node = await doc.getNode(id);
-      if (!node || disposed || !camera) return;
-      cameraGeneration += 1;
-      userCamera = true;
-      const scale = camera.fit(
-        { x: node.x, y: node.y, width: node.width, height: node.height },
-        { width: stageWidth, height: stageHeight },
-      );
-      publishZoom(scale);
-      refreshEditor();
-      // The viewport moved: wait for the new snapshot before selecting its card.
-      await refreshViewport();
-      if (disposed || !scene) return;
-      // A newer scheduled read can supersede the awaited one; ensure the hit
-      // exists before selecting so the reveal never depends on that race.
-      if (!scene.card(id)) {
+      if (!node || disposed) return;
+      viewport.focusBounds({ x: node.x, y: node.y, width: node.width, height: node.height });
+      await viewport.refresh();
+      if (disposed) return;
+      if (!scene.nodes().some((candidate) => candidate.id === id)) {
         scene.applyChangeSet({
           changed: [node],
           removed: [],
@@ -212,21 +226,12 @@ export function FlowPage() {
           edgesRemoved: [],
         });
       }
-      const card = scene.card(id);
-      if (!card || disposed) return;
-      app?.editor.select([card]);
-      syncSelection();
-      refreshEditor();
-      scheduleViewport();
+      scene.select([id]);
+      openComposer(id);
+      viewport.schedule();
     } catch (error) {
       console.error("Flow could not reveal the search result", error);
     }
-  };
-
-  const searchCards = async (query: string, kind: string | null): Promise<SearchHit[]> => {
-    const doc = document;
-    if (!doc) return [];
-    return doc.search(query, { kind }, 20);
   };
 
   const selectSearchHit = (hit: SearchHit): void => {
@@ -238,158 +243,68 @@ export function FlowPage() {
     if (document || opening || disposed) return;
     opening = true;
     try {
-      const path = databasePath({
-        dataDir: process.dataDir,
-        hostPath: host.params.databasePath,
-        envPath: process.env.FLOW_DB_PATH,
-      });
-      const opened = await Document.open(path);
+      const opened = await openFlowDocument();
       if (disposed) {
         opened.dispose();
         return;
       }
       document = opened;
-
-      if ((await opened.count()) === 0 && (await opened.edgeCount()) === 0) {
-        await opened.insertNodes(seedNodes());
-        await opened.insertEdges(seedEdges());
-        // The demo was not a user action; keep Ctrl+Z for real edits.
-        await opened.clearHistory();
-      }
-
-      // Fit without publishing the zoom label: tests and users wait on that
-      // label, so it must not appear before the first cards do. Skip the
-      // scheduled read too; the direct read below is the first snapshot.
-      await fitToDocument(false, false);
-      await refreshViewport();
-      if (!disposed) publishZoom(camera?.scale ?? 1);
+      assets = new AssetUrls(opened);
+      runner = new NodeRunner(opened, {
+        onChange: (changes) => {
+          if (!disposed) applyChanges(changes);
+        },
+        onSettled: (nodeId) => {
+          if (!disposed) currentSession()?.onSettled(nodeId);
+        },
+      });
+      sessionState.set(
+        new NodeSession({
+          document: () => document,
+          scene: () => scene,
+          assets: () => assets,
+          runner: () => runner,
+          pickImages: (options) => Picker.pickImages(options),
+          applyChanges,
+          schedulePreviews,
+          activateNode: (nodeId) => scene.select([nodeId]),
+          isDisposed: () => disposed,
+        }),
+      );
+      await viewport.fitToDocument(false, false);
+      await viewport.refresh();
+      if (!disposed) viewport.announceZoom(camera.scale);
     } catch (error) {
       console.error("Flow could not open its document", error);
-      if (!disposed && camera) {
-        const scale = camera.fit(CONTENT, { width: stageWidth, height: stageHeight });
-        publishZoom(scale);
-      }
+      if (!disposed) camera.fit(CONTENT, stage());
     } finally {
       opening = false;
     }
   };
 
-  const commitGesture = (): void => {
-    drainDeferredViewport();
-    const doc = document;
-    if (!doc || !scene || disposed) return;
-
-    const bounds = scene.commitBounds();
-    if (bounds.length === 0) return;
-    const generation = ++commitGeneration;
-
-    if (committing) {
-      commitAgain = true;
-      return;
-    }
-
-    committing = true;
-    void (async () => {
-      try {
-        const changes = await doc.setNodeBounds(bounds);
-        if (disposed || !scene) return;
-        // A newer drag may have started while this write was in flight; let
-        // its commit win instead of snapping the card back.
-        if (generation === commitGeneration && !app?.interaction?.dragging) {
-          applyChanges(changes);
-        }
-      } catch (error) {
-        console.error("Flow could not persist the gesture", error);
-        await refreshViewport();
-      } finally {
-        committing = false;
-        if (commitAgain && !disposed) {
-          commitAgain = false;
-          commitGesture();
-        }
-      }
-    })();
-  };
-
-  const zoomAround = (factor: number, cx: number, cy: number): void => {
-    if (!camera) return;
-    cameraGeneration += 1;
-    userCamera = true;
-    if (camera.zoomAround(factor, cx, cy)) {
-      refreshEditor();
-      cancelAnimationFrame(zoomFrame);
-      setZoomPercent(Math.round(camera.scale * 100));
-      scheduleViewport();
-    }
-  };
-
-  const setZoom = (factor: number): void => {
-    zoomAround(factor, stageWidth / 2, stageHeight / 2);
-  };
-
-  const panBy = (dx: number, dy: number): void => {
-    if (!camera || searchOpen()) return;
-    cameraGeneration += 1;
-    userCamera = true;
-    camera.panBy(dx, dy);
-    refreshEditor();
-    scheduleViewport();
-  };
-
-  const fit = (): void => {
-    void fitToDocument();
-  };
-
-  const addNode = (): void => {
-    const doc = document;
-    if (!doc || !camera || disposed) return;
-    const center = camera.toWorld(stageWidth / 2, stageHeight / 2);
-    const id = `node-${crypto.randomUUID()}`;
-    const input: NodeInput = {
-      id,
-      kind: "panel",
-      title: "New panel",
-      body: "",
-      tags: ["untitled"],
-      x: center.x - 100,
-      y: center.y - 42,
-      width: 200,
-      height: 84,
-      z: 0,
-      dataJson: JSON.stringify({ subtitle: "Untitled", accent: "chart-1" }),
-    };
-
-    void (async () => {
-      try {
-        const changes = await doc.insertNodes([input]);
-        if (disposed) return;
-        // `applyChanges` creates the card from the change set, so the panel
-        // is selectable even when a capped viewport read would omit it.
-        applyChanges(changes);
-        const card = scene?.card(id);
-        if (card) app?.editor.select([card]);
-        syncSelection();
-        refreshEditor();
-        scheduleViewport();
-      } catch (error) {
-        console.error("Flow could not add a panel", error);
-      }
-    })();
+  const addNode = (kind: NodeKindId): void => {
+    const active = currentSession();
+    const size = stage();
+    const center = camera.toWorld(size.width / 2, size.height / 2);
+    void active?.addNode(kind, center.x, center.y);
   };
 
   const deleteSelected = (): void => {
     const doc = document;
-    if (!doc || !scene || disposed) return;
-    const ids = scene.selectedIds();
+    if (!doc || disposed || (currentSession()?.composerId() ?? null) !== null) return;
+    const edge = scene.selectedEdge();
+    if (edge !== null) {
+      selectEdge(null);
+      void currentSession()?.deleteEdge(edge);
+      return;
+    }
+    const ids = [...scene.selection()];
     if (ids.length === 0) return;
-
-    app?.editor.cancel();
-    syncSelection();
+    scene.select([]);
     void (async () => {
       try {
         const changes = await doc.deleteNodes(ids);
-        if (disposed) return;
-        applyChanges(changes);
+        if (!disposed) applyChanges(changes);
       } catch (error) {
         console.error("Flow could not delete the selection", error);
       }
@@ -397,23 +312,10 @@ export function FlowPage() {
   };
 
   const connectSelected = (): void => {
-    const doc = document;
-    if (!doc || !scene || disposed) return;
-    const selected = scene.selectedIds();
+    const selected = scene.selection();
     if (selected.length !== 2) return;
     const [from, to] = selected;
-    if (!from || !to) return;
-
-    const id = `edge-${crypto.randomUUID()}`;
-    void (async () => {
-      try {
-        const changes = await doc.insertEdges([{ id, fromId: from, toId: to, kind: "flow" }]);
-        if (disposed) return;
-        applyChanges(changes);
-      } catch (error) {
-        console.error("Flow could not connect the panels", error);
-      }
-    })();
+    if (from && to) void currentSession()?.connectNodes(from, to);
   };
 
   const undoRedo = async (direction: "undo" | "redo"): Promise<void> => {
@@ -422,125 +324,186 @@ export function FlowPage() {
     try {
       const changes = direction === "undo" ? await doc.undo() : await doc.redo();
       if (disposed) return;
-      if (changes.removed.length > 0) app?.editor.cancel();
-      // The change set already restores or removes the affected cards; the
-      // scheduled read only reconciles the rest of the viewport.
       applyChanges(changes);
-      syncSelection();
-      refreshEditor();
-      scheduleViewport();
+      viewport.schedule();
     } catch (error) {
       console.error(`Flow could not ${direction}`, error);
     }
   };
 
-  keymap.bind({
-    "mod+=": () => setZoom(1.2),
-    "mod+-": () => setZoom(1 / 1.2),
-    "mod+0": fit,
-    v: () => setTool("select"),
-    h: () => setTool("hand"),
-    n: addNode,
-    l: connectSelected,
-    backspace: deleteSelected,
-    delete: deleteSelected,
-    "mod+z": () => void undoRedo("undo"),
-    "mod+shift+z": () => void undoRedo("redo"),
-    "mod+y": () => void undoRedo("redo"),
-    // The arrows move the camera (the view moves the opposite way).
-    up: () => panBy(0, 40),
-    down: () => panBy(0, -40),
-    left: () => panBy(40, 0),
-    right: () => panBy(-40, 0),
-  });
-  keymap.bind("mod+k", () => searchOpen.update((open) => !open), { when: "always" });
-  keymap.bind(
-    "escape",
-    () => {
-      if (searchOpen()) searchOpen.set(false);
-      else editor?.cancel();
+  bindFlowKeys({
+    setZoom,
+    fit,
+    setTool,
+    addText: () => addNode("text"),
+    addImage: () => addNode("image"),
+    connectSelected,
+    deleteSelected,
+    undo: () => void undoRedo("undo"),
+    redo: () => void undoRedo("redo"),
+    panBy,
+    toggleSearch: () => searchOpen.update((open) => !open),
+    dismiss: () => {
+      if (searchOpen()) {
+        searchOpen.set(false);
+        return;
+      }
+      const active = currentSession();
+      if (active?.inlineId()) {
+        active.closeInline();
+        return;
+      }
+      if (scene.selectedEdge() !== null) {
+        selectEdge(null);
+        return;
+      }
+      if ((active?.composerId() ?? null) !== null) {
+        closeComposer();
+        return;
+      }
+      scene.select([]);
     },
-    { when: "always" },
-  );
+  });
 
-  // Leafer nodes keep the token values they were built with. When the system
-  // switches between light and dark, repaint the scene; setting a fill asks
-  // Leafer for a frame, which also redraws the token-based grid behind it.
   effect(() => {
-    colorScheme();
-    recolor?.();
+    const ids = scene.selection();
+    const session = currentSession();
+    setSelectedCount(ids.length);
+    // Opening or closing a composer must not re-arm this effect: only a
+    // selection change (or the session appearing) re-runs it.
+    untracked(() => {
+      if (ids.length === 1) {
+        const id = ids[0];
+        if (id !== undefined) openComposer(id);
+        return;
+      }
+      if (session !== null && session.composerId() !== null) {
+        composerState.save(session, session.detail());
+        composerState.reset();
+        session.closeComposer();
+      }
+    });
+  });
+
+  effect(() => {
+    composerState.sync(currentSession()?.detail() ?? null);
   });
 
   cleanup(() => {
     disposed = true;
-    viewportGeneration += 1;
-    cancelAnimationFrame(zoomFrame);
-    if (viewportTimer !== null) clearTimeout(viewportTimer);
-    editor?.off("editor.select", syncSelection);
+    previews.dispose();
+    viewport.dispose();
+    runner?.dispose();
+    assets?.dispose();
     document?.dispose();
     document = null;
+    assets = null;
+    runner = null;
+    sessionState.set(null);
   });
 
+  const composerOpen = (): boolean => (currentSession()?.composerId() ?? null) !== null;
+
   return (
-    <View class="flex-1" style={{ position: "relative" }}>
-      <LeaferView
-        class="flex-1"
-        testID="flow-canvas"
-        setup={(nextApp, size) => {
-          app = nextApp;
-          stageWidth = size.width;
-          stageHeight = size.height;
-          const flow = new FlowScene(nextApp);
-          scene = flow;
-          camera = new CanvasCamera(flow.world);
-          recolor = flow.recolor.bind(flow);
-          editor = nextApp.editor;
-          // The flow's cards have no inner text editor; a double click should
-          // not open a group or clear the selection. The document stores only
-          // an axis-aligned box, so rotation, skew and flip must not become
-          // reachable editor gestures: their geometry cannot be persisted.
-          delete editor.config.openInner;
-          editor.config.rotateable = false;
-          editor.config.skewable = false;
-          editor.config.flipable = false;
-          editor.on("editor.select", syncSelection);
-          // Keep the scene at the demo bounds while the document opens; the
-          // zoom label is published only after the first real fit.
-          camera.fit(CONTENT, size);
-          void openFlow();
-        }}
+    <View class="flex-1" style={{ position: "relative", overflow: "hidden" }}>
+      <FlowCanvas
+        scene={scene}
+        camera={camera}
+        controller={controller}
         tool={currentTool}
-        onPan={panBy}
-        onZoom={zoomAround}
-        onCommit={commitGesture}
-        drawBackdrop={(cx, size) => drawGrid(cx, size.width, size.height, camera)}
-        onResize={(size) => {
-          stageWidth = size.width;
-          stageHeight = size.height;
-          if (camera && !userCamera) {
-            void fitToDocument();
-          } else {
-            scheduleViewport();
+        onSize={(size) => {
+          stage.set(size);
+          viewport.setSize(size.width, size.height);
+          if (!sized) {
+            sized = true;
+            camera.fit(CONTENT, size);
+            void openFlow();
+            return;
           }
+          viewport.onResize(size.width, size.height);
         }}
+        onPan={(dx, dy) => viewport.panBy(dx, dy)}
+        onZoom={(factor, x, y) => viewport.zoomAround(factor, x, y)}
       />
 
-      <SearchButton shortcut={keymap.label("mod+k")} onPress={() => searchOpen.set(true)} />
+      {composerOpen() ? null : <NodeToolbar onAdd={addNode} />}
 
-      <ZoomControls
-        zoom={zoomPercent()}
-        onZoomIn={() => setZoom(1.2)}
-        onZoomOut={() => setZoom(1 / 1.2)}
-        onFit={fit}
-      />
+      {composerOpen() ? null : (
+        <SearchButton shortcut={keymap.label("mod+k")} onPress={() => searchOpen.set(true)} />
+      )}
 
-      {!isAvailable && <BrandCard />}
+      {composerOpen() ? null : (
+        <ZoomControls
+          zoom={zoomPercent()}
+          onZoomIn={() => setZoom(1.2)}
+          onZoomOut={() => setZoom(1 / 1.2)}
+          onFit={fit}
+        />
+      )}
 
-      {selectedCount() > 0 && <SelectionBadge count={selectedCount()} />}
+      {!isAvailable && !composerOpen() ? <BrandCard /> : null}
 
-      <HintBar tool={currentTool()} />
+      {selectedCount() > 0 ? (
+        <SelectionBadge count={selectedCount()} composing={composerOpen()} />
+      ) : null}
 
-      <ToolSwitch tool={currentTool()} onChange={setTool} />
+      {composerOpen() ? null : <HintBar tool={currentTool()} />}
+
+      {composerOpen() ? null : <ToolSwitch tool={currentTool()} onChange={setTool} />}
+
+      <If when={currentSession()?.detail()}>
+        {(detail) => (
+          <If when={composerPosition()}>
+            {(position) => (
+              <NodeComposer
+                detail={detail()}
+                state={composerState}
+                left={position().left}
+                top={position().top}
+                width={position().width}
+                assetUrls={() => currentSession()?.assetUrls() ?? {}}
+                running={() => currentSession()?.running() ?? false}
+                onClose={closeComposer}
+                onRun={() => {
+                  const settings = composerState.settings();
+                  if (settings !== null) void currentSession()?.run(settings);
+                }}
+                onCancel={() => currentSession()?.cancel()}
+                onRemoveInput={(id) => void currentSession()?.removeInput(id)}
+                onReorderInputs={(ids) => void currentSession()?.reorderInputs(ids)}
+                onUpload={() => void currentSession()?.upload()}
+                onSaveBody={() => {
+                  const node = currentSession()?.detail();
+                  if (node) void currentSession()?.commitBody(node.node.id, composerState.body());
+                }}
+                onSize={(height) => {
+                  if (composerHeight() !== height) composerHeight.set(height);
+                }}
+              />
+            )}
+          </If>
+        )}
+      </If>
+
+      <If when={currentSession()?.inlineId()}>
+        {(id) => (
+          <If when={inlinePosition()}>
+            {(position) => (
+              <InlineTextEditor
+                nodeId={() => currentSession()?.inlineId() ?? null}
+                text={() => currentSession()?.inlineText() ?? ""}
+                left={position().left}
+                top={position().top}
+                width={position().width}
+                height={position().height}
+                onChange={(text) => currentSession()?.setInlineText(text)}
+                onSave={(text) => void currentSession()?.commitBody(id(), text)}
+                onCancel={() => currentSession()?.closeInline()}
+              />
+            )}
+          </If>
+        )}
+      </If>
 
       <If when={searchOpen()}>
         {() => (

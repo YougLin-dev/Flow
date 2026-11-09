@@ -1,13 +1,15 @@
 //! Flow's document and search core.
 //!
 //! TSX never opens SQLite. It talks to this crate through the generated
-//! `@flow/native` module; Leafer stays on the TSX side.
+//! `@flow/native` module; the canvas stays on the TSX side.
 
 use nsh_core::prelude::*;
 
+mod asset;
 mod clock;
 mod constants;
 mod db;
+mod detail;
 mod document;
 mod entity;
 mod history;
@@ -20,8 +22,9 @@ mod viewport;
 
 use db::Database;
 use types::{
-    ChangeSet, EdgeInput, NodeBounds, NodeInput, NodeSummary, SceneSnapshot, SearchFilters,
-    SearchHit, Viewport,
+    AssetInput, AssetSummary, ChangeSet, EdgeInput, InputItemInput, InputItemSummary, NodeBounds,
+    NodeDetail, NodeInput, NodePreview, NodeSummary, ResultBatchInput, ResultItemInput,
+    SceneSnapshot, SearchFilters, SearchHit, Viewport,
 };
 
 /// The open Flow document.
@@ -75,6 +78,146 @@ impl Document {
                 .map(|mutation| mutation.changes)
         })
         .await
+    }
+
+    /// Replaces a node's kind settings (opaque JSON).
+    pub async fn set_node_settings(
+        this: Instance<Self>,
+        id: String,
+        settings_json: String,
+    ) -> Result<ChangeSet, String> {
+        let db = this.with(|document| document.db.clone());
+        off_thread(move || {
+            db.set_node_settings(id, settings_json)
+                .map(|mutation| mutation.changes)
+        })
+        .await
+    }
+
+    /// A text node's manual edit, producing one new text result item.
+    pub async fn set_manual_text(
+        this: Instance<Self>,
+        id: String,
+        text: String,
+        batch: ResultBatchInput,
+        item: ResultItemInput,
+    ) -> Result<ChangeSet, String> {
+        let db = this.with(|document| document.db.clone());
+        off_thread(move || {
+            db.set_manual_text(id, text, batch, item)
+                .map(|mutation| mutation.changes)
+        })
+        .await
+    }
+
+    /// Connects two nodes and snapshots the source's current output items.
+    pub async fn connect_edge(this: Instance<Self>, edge: EdgeInput) -> Result<ChangeSet, String> {
+        let db = this.with(|document| document.db.clone());
+        off_thread(move || db.connect_edge(edge).map(|mutation| mutation.changes)).await
+    }
+
+    /// Reconnects an edge and rebuilds the target's snapshot for it.
+    pub async fn update_edge(this: Instance<Self>, edge: EdgeInput) -> Result<ChangeSet, String> {
+        let db = this.with(|document| document.db.clone());
+        off_thread(move || db.update_edge(edge).map(|mutation| mutation.changes)).await
+    }
+
+    /// Appends one local input item.
+    pub async fn add_input(
+        this: Instance<Self>,
+        input: InputItemInput,
+    ) -> Result<ChangeSet, String> {
+        let db = this.with(|document| document.db.clone());
+        off_thread(move || db.add_input(input).map(|mutation| mutation.changes)).await
+    }
+
+    /// Removes one input item; the edge itself stays.
+    pub async fn remove_input(this: Instance<Self>, id: String) -> Result<ChangeSet, String> {
+        let db = this.with(|document| document.db.clone());
+        off_thread(move || db.remove_input(id).map(|mutation| mutation.changes)).await
+    }
+
+    /// Reorders a node's input items by id.
+    pub async fn reorder_inputs(
+        this: Instance<Self>,
+        node_id: String,
+        ids: Vec<String>,
+    ) -> Result<ChangeSet, String> {
+        let db = this.with(|document| document.db.clone());
+        off_thread(move || {
+            db.reorder_inputs(node_id, ids)
+                .map(|mutation| mutation.changes)
+        })
+        .await
+    }
+
+    /// Rebuilds a node's edge inputs from the sources' current batches.
+    pub async fn sync_inputs(
+        this: Instance<Self>,
+        node_id: String,
+    ) -> Result<Vec<InputItemSummary>, String> {
+        let db = this.with(|document| document.db.clone());
+        off_thread(move || db.sync_inputs(node_id)).await
+    }
+
+    /// Persists a provider run's immutable batch and items.
+    pub async fn save_run(
+        this: Instance<Self>,
+        batch: ResultBatchInput,
+        items: Vec<ResultItemInput>,
+    ) -> Result<ChangeSet, String> {
+        let db = this.with(|document| document.db.clone());
+        off_thread(move || db.save_run(batch, items)).await
+    }
+
+    /// Sets a node's run status without touching its results.
+    pub async fn set_node_status(
+        this: Instance<Self>,
+        id: String,
+        status: String,
+    ) -> Result<ChangeSet, String> {
+        let db = this.with(|document| document.db.clone());
+        off_thread(move || db.set_node_status(id, status)).await
+    }
+
+    /// Turns runs left running by a previous process into interrupted.
+    pub async fn recover_runs(this: Instance<Self>) -> Result<u32, String> {
+        let db = this.with(|document| document.db.clone());
+        off_thread(move || db.recover_runs()).await
+    }
+
+    /// One node with its output batch and input list, for the composer.
+    pub async fn node_detail(
+        this: Instance<Self>,
+        id: String,
+    ) -> Result<Option<NodeDetail>, String> {
+        let db = this.with(|document| document.db.clone());
+        off_thread(move || db.node_detail(id)).await
+    }
+
+    /// The first items of several nodes' current batches, for card previews.
+    pub async fn previews(
+        this: Instance<Self>,
+        ids: Vec<String>,
+    ) -> Result<Vec<NodePreview>, String> {
+        let db = this.with(|document| document.db.clone());
+        off_thread(move || db.previews(ids)).await
+    }
+
+    /// Stores asset bytes content-addressed and returns the (possibly existing)
+    /// asset summary.
+    pub async fn import_asset(
+        this: Instance<Self>,
+        input: AssetInput,
+    ) -> Result<AssetSummary, String> {
+        let db = this.with(|document| document.db.clone());
+        off_thread(move || db.import_asset(input)).await
+    }
+
+    /// An asset's bytes, for a blob or data URL in TSX.
+    pub async fn asset_bytes(this: Instance<Self>, id: String) -> Result<Vec<u8>, String> {
+        let db = this.with(|document| document.db.clone());
+        off_thread(move || db.asset_bytes(id)).await
     }
 
     /// Deletes nodes and their edges.

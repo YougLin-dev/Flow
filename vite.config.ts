@@ -24,9 +24,7 @@ export default defineConfig({
     },
     rules: {
       // `any` erases the types of everything it touches: app code may not
-      // spell it. Leafer's own declarations use `any` internally; the
-      // `src/leafer/platform/` adapter is the one place that narrows them,
-      // with `unknown` and type guards.
+      // spell it. Narrow `unknown` with type guards instead.
       "typescript/no-explicit-any": "error",
       "typescript/no-unsafe-assignment": "error",
       "typescript/no-unsafe-member-access": "error",
@@ -51,8 +49,6 @@ export default defineConfig({
       "import/no-duplicates": "error",
       "import/no-self-import": "error",
       "import/no-default-export": "error",
-      // `@leafer-in/editor` and NSH modules register themselves on import.
-      "import/no-unassigned-import": "off",
 
       "no-console": ["error", { allow: ["error"] }],
       "no-debugger": "error",
@@ -117,7 +113,7 @@ export default defineConfig({
         rules: {
           // nsh/test awaits the callback; it is typed as returning void.
           "typescript/no-misused-promises": "off",
-          // Tests build stand-ins for native canvases on purpose.
+          // Tests build typed stand-ins for platform objects on purpose.
           "typescript/no-unsafe-type-assertion": "off",
         },
       },

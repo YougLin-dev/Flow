@@ -1,243 +1,207 @@
 import { expect, test } from "nsh/test";
-import { App, Box, Group, Line } from "@leafer-ui/miniapp";
-import "@leafer-in/editor";
+import { effect } from "nsh";
 import type { EdgeSummary, NodeSummary, SceneSnapshot } from "@flow/native";
-import { installNshPlatform, NshCanvasSurface } from "../leafer/nsh-platform";
+import type { BoxGeometry } from "./connection";
 import { FlowScene } from "./scene";
 
-function node(id: string, x: number, y: number): NodeSummary {
+function node(id: string, x: number, y: number, overrides: Partial<NodeSummary> = {}): NodeSummary {
   return {
     id,
-    kind: "panel",
+    kind: "text",
     title: id,
+    body: id,
     x,
     y,
     width: 200,
     height: 84,
     z: 0,
     rev: 1,
-    dataJson: JSON.stringify({ subtitle: id, accent: "chart-1" }),
+    dataJson: "{}",
+    settingsJson: "{}",
+    status: "idle",
+    outputBatchId: null,
+    ...overrides,
   };
 }
 
 function edge(id: string, fromId: string, toId: string): EdgeSummary {
-  return {
-    id,
-    fromId,
-    toId,
-    fromPort: null,
-    toPort: null,
-    kind: "flow",
-    dataJson: "{}",
-  };
+  return { id, fromId, toId, fromPort: null, toPort: null, kind: "flow", dataJson: "{}" };
 }
 
 function snapshot(nodes: NodeSummary[], edges: EdgeSummary[] = []): SceneSnapshot {
   return { rev: 1, nodes, edges };
 }
 
-function appWithScene(): { app: App; view: NshCanvasSurface; scene: FlowScene } {
-  installNshPlatform();
-  const view = new NshCanvasSurface(800, 600, false);
-  const app = new App({
-    view,
-    width: 800,
-    height: 600,
-    pixelRatio: 1,
-    start: false,
-    usePartRender: false,
-    tree: {},
-    editor: {},
-  });
-  const scene = new FlowScene(app);
-  app.start();
-  return { app, view, scene };
+function rect(scene: FlowScene, id: string): BoxGeometry {
+  const value = scene.cardRect(id);
+  if (!value) throw new Error(`The scene has no card "${id}".`);
+  return value;
 }
 
-function connectorLine(scene: FlowScene): Line {
-  const layer = scene.world.children[0];
-  if (!(layer instanceof Group)) throw new Error("The edge layer is not a group.");
-  const line = layer.children.find((child): child is Line => child instanceof Line);
-  if (!line) throw new Error("The scene has no connector line.");
-  return line;
-}
-
-test("renders the viewport nodes and their edges", () => {
-  const { app, scene } = appWithScene();
-
+test("reconciles a viewport snapshot and prunes what leaves it", () => {
+  const scene = new FlowScene();
   scene.apply(snapshot([node("a", 40, 40), node("b", 360, 40)], [edge("a-b", "a", "b")]));
-  app.tree.updateLayout();
 
-  expect(scene.card("a") instanceof Box).toBe(true);
-  expect(scene.card("b") instanceof Box).toBe(true);
+  expect(scene.cardCount()).toBe(2);
   expect(scene.edgeCount()).toBe(1);
-  expect(connectorLine(scene).visible).toBe(true);
+  expect(rect(scene, "a")).toEqual({ x: 40, y: 40, width: 200, height: 84 });
 
-  // Panning the viewport away from `b` removes its card and the edge.
   scene.apply(snapshot([node("a", 40, 40)]));
-  app.tree.updateLayout();
-  expect(scene.card("b")).toBeNull();
+  expect(scene.cardCount()).toBe(1);
+  expect(scene.cardRect("b")).toBeNull();
   expect(scene.edgeCount()).toBe(0);
-  expect(scene.world.children.length).toBe(2);
-
-  app.destroy();
 });
 
-test("keeps connectors out of an offscreen group", () => {
-  const { app, scene } = appWithScene();
-  scene.apply(snapshot([node("a", 40, 40), node("b", 360, 40)], [edge("a-b", "a", "b")]));
+test("caps a snapshot but keeps the selected cards and their connector", () => {
+  const scene = new FlowScene();
+  scene.apply(
+    snapshot([node("a", 0, 0), node("b", 260, 0), node("c", 520, 0)], [edge("a-b", "a", "b")]),
+  );
+  scene.select(["a", "b"]);
 
-  // A group with opacity below 1 is composited offscreen, and NSH draws such
-  // a layer as an SVG image only once it has loaded: a card moving every
-  // frame would leave its connectors flickering or missing. The opacity
-  // belongs to each connector, which replays as one alpha.
-  const layer = scene.world.children[0];
-  if (!(layer instanceof Group)) throw new Error("The edge layer is not a group.");
-  expect(layer.opacity).toBe(1);
-  expect(connectorLine(scene).opacity).toBe(0.9);
-
-  app.destroy();
+  scene.apply(snapshot([node("c", 520, 0)]), { maxCards: 1 });
+  expect(scene.cardRect("a")).not.toBeNull();
+  expect(scene.cardRect("b")).not.toBeNull();
+  expect(scene.cardRect("c")).not.toBeNull();
+  expect(scene.edgeCount()).toBe(1);
 });
 
-test("caps a low-zoom snapshot and keeps a selected card", () => {
-  const { app, scene } = appWithScene();
-  scene.apply(snapshot([node("a", 40, 40), node("b", 360, 40), node("c", 680, 40)]), {
-    maxCards: 2,
-  });
-
-  expect(scene.card("a") instanceof Box).toBe(true);
-  expect(scene.card("b") instanceof Box).toBe(true);
-  expect(scene.card("c")).toBeNull();
-
-  const a = scene.card("a");
-  if (!(a instanceof Box)) throw new Error("The selected card was not built.");
-  app.editor.select([a]);
-
-  // A snapshot that no longer contains `a` must not drop the selection.
-  scene.apply(snapshot([node("b", 360, 40), node("c", 680, 40)]), { maxCards: 2 });
-  expect(scene.card("a") === a).toBe(true);
-
-  app.editor.cancel();
-  scene.apply(snapshot([node("b", 360, 40), node("c", 680, 40)]), { maxCards: 2 });
-  expect(scene.card("a")).toBeNull();
-
-  app.destroy();
-});
-
-test("does not persist editor transforms the document cannot store", () => {
-  const { app, scene } = appWithScene();
-  scene.apply(snapshot([node("a", 40, 40)]));
-  app.tree.updateLayout();
-
-  const card = scene.card("a");
-  if (!(card instanceof Box)) throw new Error("The card was not built.");
-  card.rotation = 30;
-  card.scaleX = -1;
-  card.skewX = 10;
-  app.tree.updateLayout();
-
-  // Rotation, skew and negative scale are not in the document model; the
-  // committed geometry must stay the card's logical box, not its AABB.
-  expect(scene.commitBounds()).toEqual([]);
-
-  app.destroy();
-});
-
-test("creates a card from a change set the viewport cap did not include", () => {
-  const { app, scene } = appWithScene();
-  scene.apply(snapshot([node("a", 40, 40)]));
-  expect(scene.card("new")).toBeNull();
+test("applies a change set and keeps edges to existing cards", () => {
+  const scene = new FlowScene();
+  scene.apply(snapshot([node("a", 0, 0)]));
 
   scene.applyChangeSet({
-    changed: [node("new", 360, 40)],
+    changed: [node("b", 300, 0)],
+    removed: [],
+    edgesChanged: [edge("a-b", "a", "b"), edge("b-x", "b", "x")],
+    edgesRemoved: [],
+  });
+  expect(scene.cardRect("b")).toEqual({ x: 300, y: 0, width: 200, height: 84 });
+  expect(scene.edgeCount()).toBe(1);
+  expect(scene.edgeEndpoints("a-b")).toEqual({ fromId: "a", toId: "b" });
+
+  scene.applyChangeSet({ changed: [], removed: ["b"], edgesChanged: [], edgesRemoved: [] });
+  expect(scene.cardRect("b")).toBeNull();
+  expect(scene.edgeCount()).toBe(0);
+});
+
+test("notifies geometry bindings when a change set moves a card", () => {
+  const scene = new FlowScene();
+  scene.apply(snapshot([node("a", 40, 40)]));
+  const xs: (number | undefined)[] = [];
+  effect(() => {
+    xs.push(scene.cardRect("a")?.x);
+  });
+
+  scene.applyChangeSet({
+    changed: [node("a", 90, 40)],
     removed: [],
     edgesChanged: [],
     edgesRemoved: [],
   });
-
-  expect(scene.card("new") instanceof Box).toBe(true);
-  app.destroy();
+  expect(xs.at(-1)).toBe(90);
 });
 
-test("keeps a connector while both endpoints stay selected", () => {
-  const { app, scene } = appWithScene();
-  scene.apply(snapshot([node("a", 40, 40), node("b", 360, 40)], [edge("a-b", "a", "b")]));
-  app.tree.updateLayout();
+test("selecting a card clears the selected edge", () => {
+  const scene = new FlowScene();
+  scene.apply(snapshot([node("a", 0, 0), node("b", 300, 0)], [edge("a-b", "a", "b")]));
+  scene.selectEdge("a-b");
 
-  const a = scene.card("a");
-  const b = scene.card("b");
-  if (!(a instanceof Box) || !(b instanceof Box)) throw new Error("Cards were not built.");
-  app.editor.select([a, b]);
-
-  // Both cards are pinned even though the snapshot returns neither; their
-  // connector must survive too.
-  scene.apply(snapshot([]));
-  app.tree.updateLayout();
-  expect(scene.card("a") === a).toBe(true);
-  expect(scene.card("b") === b).toBe(true);
-  expect(scene.edgeCount()).toBe(1);
-
-  app.editor.cancel();
-  scene.apply(snapshot([]));
-  app.tree.updateLayout();
-  expect(scene.edgeCount()).toBe(0);
-
-  app.destroy();
+  scene.select(["a"]);
+  expect(scene.selectedEdge()).toBeNull();
 });
 
-test("caps a large viewport snapshot instead of building every card", () => {
-  const { app, scene } = appWithScene();
-  const nodes = Array.from({ length: 1_000 }, (_, index) => node(`n${index}`, index * 220, 0));
+test("selects, toggles and ignores unknown cards", () => {
+  const scene = new FlowScene();
+  scene.apply(snapshot([node("a", 0, 0), node("b", 300, 0)]));
 
-  scene.apply(snapshot(nodes), { maxCards: 300 });
+  scene.select(["a", "a", "ghost"]);
+  expect(scene.selectedIds()).toEqual(["a"]);
 
-  expect(scene.cardCount()).toBe(300);
-  expect(scene.card("n0") instanceof Box).toBe(true);
-  expect(scene.card("n999")).toBeNull();
+  scene.toggleSelected("b");
+  expect(scene.selectedIds()).toEqual(["a", "b"]);
+  scene.toggleSelected("a");
+  expect(scene.selectedIds()).toEqual(["b"]);
 
-  app.destroy();
+  scene.select([]);
+  expect(scene.selectedIds()).toEqual([]);
 });
 
-test("updates a card in place and reports the gesture's bounds", () => {
-  const { app, scene } = appWithScene();
+test("keeps transient geometry ahead of the document until it is committed", () => {
+  const scene = new FlowScene();
   scene.apply(snapshot([node("a", 40, 40)]));
-  app.tree.updateLayout();
 
-  const card = scene.card("a");
-  if (!(card instanceof Box)) throw new Error("The card was not built.");
+  scene.setOverrides(new Map([["a", { x: 90, y: 60, width: 220, height: 100 }]]));
+  expect(rect(scene, "a")).toEqual({ x: 90, y: 60, width: 220, height: 100 });
+  expect(scene.commitBounds()).toEqual([{ id: "a", x: 90, y: 60, width: 220, height: 100 }]);
 
-  card.x = 100;
-  card.width = 240;
-  app.tree.updateLayout();
-
-  expect(scene.commitBounds()).toEqual([{ id: "a", x: 100, y: 40, width: 240, height: 84 }]);
-
+  // The document's answer clears the override when it matches.
   scene.applyChangeSet({
-    changed: [{ ...node("a", 100, 40), width: 240 }],
+    changed: [node("a", 90, 60, { width: 220, height: 100 })],
     removed: [],
     edgesChanged: [],
     edgesRemoved: [],
   });
-  expect(scene.card("a") === card).toBe(true);
-  expect(scene.commitBounds()).toEqual([]);
-
-  app.destroy();
+  expect(scene.overrides().size).toBe(0);
+  expect(rect(scene, "a")).toEqual({ x: 90, y: 60, width: 220, height: 100 });
 });
 
-test("keeps a connector attached when its card moves", () => {
-  const { app, scene } = appWithScene();
-  scene.apply(snapshot([node("a", 40, 40), node("b", 360, 40)], [edge("a-b", "a", "b")]));
-  app.tree.updateLayout();
+test("drops the overrides on a cancelled gesture", () => {
+  const scene = new FlowScene();
+  scene.apply(snapshot([node("a", 40, 40)]));
+  scene.setOverrides(new Map([["a", { x: 1, y: 2, width: 3, height: 4 }]]));
 
-  const line = connectorLine(scene);
-  const before = line.points?.slice() ?? [];
+  scene.clearOverrides();
+  expect(scene.overrides().size).toBe(0);
+  expect(rect(scene, "a")).toEqual({ x: 40, y: 40, width: 200, height: 84 });
+});
 
-  const card = scene.card("a");
-  if (!(card instanceof Box)) throw new Error("The card was not built.");
-  card.x = Number(card.x) + 1000;
-  app.tree.updateLayout();
+test("finds ports, cards and connectors in world coordinates", () => {
+  const scene = new FlowScene();
+  scene.apply(snapshot([node("a", 0, 0), node("b", 300, 0)], [edge("a-b", "a", "b")]));
 
-  expect(line.points ?? []).not.toEqual(before);
+  expect(scene.portWorld("a", "out")).toEqual({ x: 200, y: 42 });
+  expect(scene.portAt(200, 42)).toEqual({ nodeId: "a", side: "out" });
+  expect(scene.portAt(300, 42)).toEqual({ nodeId: "b", side: "in" });
+  expect(scene.nodeAt(100, 30)).toBe("a");
+  expect(scene.nodeAt(250, 30)).toBeNull();
+  expect(scene.edgeAt(250, 42)).toBe("a-b");
+  expect(scene.kindOf("a")).toBe("text");
+});
 
-  app.destroy();
+test("picks the nearest port when two are in reach", () => {
+  const scene = new FlowScene();
+  scene.apply(snapshot([node("a", 0, 0), node("b", 188, 0)]));
+
+  // a's output is 10 points away, b's input only 2.
+  expect(scene.portAt(190, 42)).toEqual({ nodeId: "b", side: "in" });
+});
+
+test("picks the topmost card under a point", () => {
+  const scene = new FlowScene();
+  scene.apply(snapshot([node("low", 0, 0, { z: 0 }), node("high", 40, 20, { z: 5 })]));
+
+  expect(scene.nodeAt(100, 50)).toBe("high");
+});
+
+test("previews only the cards in the scene", () => {
+  const scene = new FlowScene();
+  scene.apply(snapshot([node("a", 0, 0, { kind: "image", outputBatchId: "batch" })]));
+
+  expect(scene.previewTargets()).toEqual([{ id: "a", batchId: "batch" }]);
+  scene.applyPreviews([
+    { nodeId: "a", urls: ["data:image/png;base64,x"], count: 1 },
+    { nodeId: "ghost", urls: [], count: 0 },
+  ]);
+  expect(scene.previews().get("a")?.count).toBe(1);
+  expect(scene.previews().has("ghost")).toBe(false);
+});
+
+test("publishes and clears the connection preview", () => {
+  const scene = new FlowScene();
+  scene.setConnectionPreview({ x: 1, y: 2 }, { x: 3, y: 4 });
+  expect(scene.connectionPreview()).toEqual({ from: { x: 1, y: 2 }, to: { x: 3, y: 4 } });
+
+  scene.setConnectionPreview(null, null);
+  expect(scene.connectionPreview()).toBeNull();
 });

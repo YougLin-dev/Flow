@@ -1,11 +1,11 @@
 # Flow
 
-An infinite flow canvas built with [Leafer](https://www.leaferjs.com/) and
-[Native Shell](https://nsh.dev/) (NSH). The canvas is a Leafer scene rendered
-through NSH's native `Canvas`; the window chrome, controls and overlays are
-NSH views drawn around it. A mixed-app Rust crate in `src/native/` owns the
-document database, search and undo core; Leafer stays in TSX. `⌘K` / `Ctrl+K`
-(or the Search button) opens a command palette over the Rust full-text index.
+An infinite flow canvas built with [Native Shell](https://nsh.dev/) (NSH). The
+canvas is a native NSH view tree — cards, ports, connectors, selection and the
+composer are ordinary views, so text, focus and accessibility are the
+platform's, while hit testing is the scene model's. A mixed-app Rust crate in `src/native/` owns the document
+database, search and undo core; the canvas stays in TSX. `⌘K` / `Ctrl+K` (or
+the Search button) opens a command palette over the Rust full-text index.
 
 The app is sandboxed by `src/nsh.json`: it may read its own bundled assets but
 no remote host. An integration that fetches or loads remote images adds that
@@ -67,7 +67,7 @@ dependency rule is a project Oxlint JS plugin (`lint/boundaries.js`), so a
 single command enforces all of it.
 
 The normative engineering standard is [docs/standards.md](docs/standards.md):
-read it before changing architecture, the canvas adapter, state ownership or
+read it before changing architecture, the native canvas, state ownership or
 release tooling.
 
 ## Project layout
@@ -85,8 +85,16 @@ src/                   the NSH app: its root, entry, config and assets
   store.ts             app state: private signals behind readers and actions
   tool.ts              the Tool union shared by the store and the controls
   pages/
-    FlowPage.tsx       the canvas page: camera, editor, input, overlays
+    FlowPage.tsx       the workspace: document session, camera, overlays
   components/
+    FlowCanvas.tsx     the canvas: world-space cards and edges, gestures
+    FlowCard.tsx       one card: title, status, body, ports
+    FlowEdge.tsx       one connector, sampled from the cubic into line views
+    GridBackground.tsx the dot-grid backdrop
+    SelectionOverlay.tsx selection borders, resize handles and the marquee
+    NodeComposer.tsx   the native composer attached to the selected card
+    InlineTextEditor.tsx the screen-space text editor
+    NodeToolbar.tsx    floating add-node buttons
     TitleBar.tsx       custom title bar (pin, drag, native window controls)
     ZoomControls.tsx   zoom in / out / fit
     SearchButton.tsx   floating search entry point
@@ -98,8 +106,13 @@ src/                   the NSH app: its root, entry, config and assets
   flow/
     data.ts            the demo nodes/edges used to seed an empty document
     database-path.ts   resolves the document path from host/env/data-dir
-    scene.ts           reconciles the Leafer cards with the viewport snapshot
-    grid.ts            draws the dot-grid backdrop
+    scene.ts           headless scene model: cards, edges, selection, previews
+    camera.ts          infinite-canvas camera (pan, zoom, fit)
+    grid.ts            the dot grid's screen-space tile layout
+    canvas-controller.ts pointer gestures: select, drag, resize, marquee, connect
+    selection.ts       selection handles, resize and marquee geometry
+    overlay.ts         composer and inline-editor placement
+    composer-state.ts  the composer's drafts
   native/              mixed NSH Rust crate (SQLite/FTS5/RTree document core)
     Cargo.toml
     src/lib.rs         exports the @flow/native Document class
@@ -111,11 +124,6 @@ src/                   the NSH app: its root, entry, config and assets
     src/viewport.rs    RTree viewport reads
     src/scene.rs       visible nodes + edges, and document bounds
     src/history.rs     reversible undo/redo operations
-  leafer/
-    LeaferView.tsx     NSH <Canvas> hosting a Leafer App (input, frames)
-    nsh-platform.ts    public facade of Leafer's platform layer on NSH
-    platform/          adapter modules, one responsibility per file
-    camera.ts          infinite-canvas camera (pan, zoom, fit, culling bounds)
   lib/
     window-chrome.ts   hides the native title bar and reports its metrics
   assets/              icons and images (imported by modules)
@@ -144,7 +152,7 @@ test.
 
 ## Documentation
 
-- [Architecture](docs/architecture.md) — the layers, the Leafer adapter, input
+- [Architecture](docs/architecture.md) — the layers, the native canvas, input
   and rendering.
 - [Conventions](docs/conventions.md) — naming, imports, types, styling,
   comments and the checks that enforce them.

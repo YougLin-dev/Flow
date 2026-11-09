@@ -1,122 +1,78 @@
-import { token } from "nsh";
-import type { App as LeaferApp } from "@leafer-ui/miniapp";
-import {
-  Box,
-  Group,
-  Image as LeaferImage,
-  Line,
-  Polygon,
-  PropertyEvent,
-  Rect,
-  Text as LeaferText,
-} from "@leafer-ui/miniapp";
-import type { IUI } from "@leafer-ui/interface";
-import type { EdgeSummary, NodeBounds, NodeSummary, SceneSnapshot } from "@flow/native";
-import nodeIcon from "../assets/node@2x.png";
-import type { FlowAccent } from "./data";
-
-const ACCENTS: readonly FlowAccent[] = ["chart-1", "chart-2", "chart-3", "chart-4", "chart-5"];
-
-interface Card {
-  readonly id: string;
-  readonly box: Box;
-  readonly stripe: Rect;
-  readonly title: LeaferText;
-  readonly subtitle: LeaferText;
-  readonly image: LeaferImage;
-  readonly kind: string;
-  accent: FlowAccent;
-  applied: { x: number; y: number; width: number; height: number };
-}
-
-interface EdgeView {
-  readonly id: string;
-  fromId: string;
-  toId: string;
-  readonly line: Line;
-  readonly arrow: Polygon;
-}
-
-interface Palette {
-  card: string;
-  border: string;
-  title: string;
-  muted: string;
-  edge: string;
-  shadow: string;
-}
-
-interface NodeData {
-  subtitle: string;
-  accent: FlowAccent;
-}
-
 /**
- * The Leafer side of the flow: it owns the cards and connectors for the nodes
- * the Rust core reports for the current viewport, and reconciles that set as
- * the camera moves. It never needs the whole document in memory.
+ * The scene model behind the native canvas: the nodes and edges the document
+ * reports for the viewport, the user's selection, transient drag geometry and
+ * the image previews the page loaded. It owns no views; the canvas components
+ * read its signals and the page drives its commands.
  */
+import { signal } from "nsh";
+import type { EdgeSummary, NodeBounds, NodeSummary, SceneSnapshot } from "@flow/native";
+import {
+  type BoxGeometry,
+  distanceToConnection,
+  EDGE_HIT_DISTANCE,
+  PORT_HIT_RADIUS,
+  type Point,
+  type PortSide,
+  portPoint,
+} from "./connection";
+
+/** The URLs a card's image body should show, loaded by the page. */
+export interface PreviewView {
+  readonly nodeId: string;
+  readonly urls: readonly string[];
+  readonly count: number;
+}
+
+export interface ConnectionPreview {
+  readonly from: Point;
+  readonly to: Point;
+}
+
 export class FlowScene {
-  readonly world: Group;
+  /** The cards on the canvas, in creation order. */
+  readonly nodes = signal<readonly NodeSummary[]>([]);
+  readonly edges = signal<readonly EdgeSummary[]>([]);
+  readonly previews = signal<ReadonlyMap<string, PreviewView>>(new Map());
+  /** Geometry being dragged or resized, ahead of the document. */
+  readonly overrides = signal<ReadonlyMap<string, BoxGeometry>>(new Map());
+  /** The document ids of the selected cards. */
+  readonly selection = signal<readonly string[]>([]);
+  readonly selectedEdge = signal<string | null>(null);
+  readonly connectionPreview = signal<ConnectionPreview | null>(null);
 
-  private readonly app: LeaferApp;
-  private readonly edgesLayer: Group;
-  private readonly cards = new Map<string, Card>();
-  private readonly idByBox = new Map<IUI, string>();
-  private readonly edges = new Map<string, EdgeView>();
-  private palette: Palette;
-  private dirtyEdges = false;
+  private readonly byId = new Map<string, NodeSummary>();
+  private readonly edgeById = new Map<string, EdgeSummary>();
+  private readonly applied = new Map<string, BoxGeometry>();
 
-  constructor(app: LeaferApp) {
-    this.app = app;
-    this.palette = readPalette();
-    this.world = new Group({ x: 0, y: 0, scale: 1 });
-    // Connectors sit under the cards. Their opacity is per connector: a
-    // group's opacity would composite them offscreen, and NSH can only draw
-    // that layer as an SVG image once it has loaded, so a moving card would
-    // leave its connectors flickering or missing for the next frames.
-    this.edgesLayer = new Group();
-    this.world.add(this.edgesLayer);
-    app.tree.add(this.world);
-
-    app.tree.on("layout.end", () => this.flushEdges());
-    app.on("layout.end", () => this.flushEdges());
-  }
-
-  /**
-   * Reconciles the scene with one viewport snapshot. `maxCards` is the
-   * low-zoom budget: the plan calls for a capped, simplified view rather than
-   * building all 100k cards. Selected cards stay even when they fall outside
-   * the viewport or the budget, so the editor's box remains valid.
-   */
+  /** Reconciles the scene with one viewport snapshot. */
   apply(snapshot: SceneSnapshot, options: { maxCards?: number } = {}): void {
     const maxCards = options.maxCards ?? Number.POSITIVE_INFINITY;
     const nodes =
       snapshot.nodes.length > maxCards ? snapshot.nodes.slice(0, maxCards) : snapshot.nodes;
     const seen = new Set(nodes.map((node) => node.id));
-    for (const [id, card] of this.cards) {
-      if (this.app.editor.list.includes(card.box)) seen.add(id);
-    }
+    for (const id of this.selection()) seen.add(id);
 
     for (const node of nodes) {
-      const card = this.cards.get(node.id);
-      if (card) {
-        this.updateCard(card, node);
-      } else {
-        this.createCard(node);
-      }
+      this.byId.set(node.id, node);
+      this.applied.set(node.id, rectOfNode(node));
     }
-
-    for (const [id, card] of this.cards) {
+    for (const [id] of this.byId) {
       if (seen.has(id)) continue;
-      card.box.remove();
-      this.idByBox.delete(card.box);
-      this.cards.delete(id);
+      this.byId.delete(id);
+      this.applied.delete(id);
+      this.dropOverride(id);
     }
 
-    this.applyEdges(snapshot.edges);
-    this.markEdgesDirty();
-    this.flushEdges();
+    // A selection pinned past the viewport keeps the connectors between its
+    // cards even when the snapshot no longer reports them.
+    const pinned = new Set(this.selection());
+    const keptEdges = [...this.edgeById.values()].filter(
+      (edge) => pinned.has(edge.fromId) && pinned.has(edge.toId),
+    );
+    this.edgeById.clear();
+    for (const edge of snapshot.edges) this.edgeById.set(edge.id, edge);
+    for (const edge of keptEdges) this.edgeById.set(edge.id, edge);
+    this.prune();
   }
 
   /** Applies a command result without another database read. */
@@ -127,389 +83,216 @@ export class FlowScene {
     edgesRemoved: string[];
   }): void {
     for (const node of changes.changed) {
-      const card = this.cards.get(node.id);
-      if (card) this.updateCard(card, node);
-      // A command can introduce a node the viewport snapshot has not seen
-      // (a new panel, or an undone delete). Create it here instead of waiting
-      // for the next capped read, which might not include it.
-      else this.createCard(node);
+      this.byId.set(node.id, node);
+      this.applied.set(node.id, rectOfNode(node));
+      const override = this.overrides().get(node.id);
+      if (override && sameRect(override, rectOfNode(node))) this.dropOverride(node.id);
     }
-
     for (const id of changes.removed) {
-      const card = this.cards.get(id);
-      if (!card) continue;
-      if (this.app.editor.list.includes(card.box)) this.app.editor.cancel();
-      card.box.remove();
-      this.idByBox.delete(card.box);
-      this.cards.delete(id);
+      this.byId.delete(id);
+      this.applied.delete(id);
+      this.dropOverride(id);
     }
-
-    for (const edge of changes.edgesChanged) {
-      this.upsertEdge(edge);
-    }
-    for (const id of changes.edgesRemoved) {
-      this.removeEdge(id);
-    }
-
-    this.markEdgesDirty();
-    this.flushEdges();
+    for (const edge of changes.edgesChanged) this.edgeById.set(edge.id, edge);
+    for (const id of changes.edgesRemoved) this.edgeById.delete(id);
+    this.prune();
   }
 
-  /** The geometry changed by the editor since the last applied snapshot. */
+  /** Replaces the image thumbnails the page loaded for visible cards. */
+  applyPreviews(previews: readonly PreviewView[]): void {
+    const next = new Map<string, PreviewView>();
+    for (const preview of previews) {
+      if (this.byId.has(preview.nodeId)) next.set(preview.nodeId, preview);
+    }
+    this.previews.set(next);
+  }
+
+  /** The geometry changed by a drag or resize since the last snapshot. */
   commitBounds(): NodeBounds[] {
     const changed: NodeBounds[] = [];
-    for (const card of this.cards.values()) {
-      // Read the card's own geometry, not `getBounds`: the latter returns the
-      // axis-aligned outer box of any rotation, skew or negative scale, which
-      // the document model cannot represent. The editor disables those
-      // gestures, so x/y/width/height are the authoritative world geometry.
-      const next = {
-        id: card.id,
-        x: card.box.x ?? card.applied.x,
-        y: card.box.y ?? card.applied.y,
-        width: card.box.width ?? card.applied.width,
-        height: card.box.height ?? card.applied.height,
-      };
-      if (
-        Math.abs(next.x - card.applied.x) > 0.01 ||
-        Math.abs(next.y - card.applied.y) > 0.01 ||
-        Math.abs(next.width - card.applied.width) > 0.01 ||
-        Math.abs(next.height - card.applied.height) > 0.01
-      ) {
-        changed.push(next);
-      }
+    for (const [id, rect] of this.overrides()) {
+      const applied = this.applied.get(id);
+      if (!applied) continue;
+      if (!sameRect(applied, rect)) changed.push({ id, ...rect });
     }
     return changed;
   }
 
-  /** The document ids of the cards the editor has selected. */
-  selectedIds(): string[] {
-    const ids: string[] = [];
-    this.app.editor.list.forEach((leaf) => {
-      if (!(leaf instanceof Box)) return;
-      const id = this.idByBox.get(leaf);
-      if (id) ids.push(id);
-    });
-    return ids;
+  /** Drops every transient geometry (a failed commit, or a cancelled drag). */
+  clearOverrides(): void {
+    if (this.overrides().size === 0) return;
+    this.overrides.set(new Map());
   }
 
-  card(id: string): Box | null {
-    return this.cards.get(id)?.box ?? null;
+  /** Replaces the overrides in one write; the drag controller builds them. */
+  setOverrides(next: ReadonlyMap<string, BoxGeometry>): void {
+    this.overrides.set(new Map(next));
+  }
+
+  selectedIds(): readonly string[] {
+    return this.selection();
+  }
+
+  /** Replaces the selection, ignoring ids the scene does not have. */
+  select(ids: readonly string[]): void {
+    const next: string[] = [];
+    for (const id of ids) {
+      if (this.byId.has(id) && !next.includes(id)) next.push(id);
+    }
+    // Selecting cards is a different selection than an edge; leaving a stale
+    // edge selected would make Delete act on the wrong thing.
+    if (next.length > 0 && this.selectedEdge() !== null) this.selectedEdge.set(null);
+    const current = this.selection();
+    if (next.length === current.length && next.every((id, index) => id === current[index])) return;
+    this.selection.set(next);
+  }
+
+  toggleSelected(id: string): void {
+    const current = this.selection();
+    this.select(current.includes(id) ? current.filter((value) => value !== id) : [...current, id]);
+  }
+
+  selectEdge(id: string | null): void {
+    if (this.selectedEdge() === id) return;
+    this.selectedEdge.set(id);
+  }
+
+  /** The world rectangle of a card, including a drag in progress. */
+  cardRect(id: string): BoxGeometry | null {
+    // Read the nodes signal so a binding that positions a card or connector
+    // recomputes when a change set moves it, not only during an override.
+    this.nodes();
+    const override = this.overrides().get(id);
+    if (override) return override;
+    const node = this.byId.get(id);
+    return node ? rectOfNode(node) : null;
+  }
+
+  /** The world point of a card's input or output port. */
+  portWorld(id: string, side: PortSide): Point | null {
+    const rect = this.cardRect(id);
+    return rect ? portPoint(rect, side) : null;
+  }
+
+  /** The port under a world point, nearest first. */
+  portAt(x: number, y: number): { nodeId: string; side: PortSide } | null {
+    let nearest: { nodeId: string; side: PortSide; distance: number } | null = null;
+    for (const node of this.byId.values()) {
+      const rect = this.cardRect(node.id);
+      if (!rect) continue;
+      for (const side of ["out", "in"] as const) {
+        const point = portPoint(rect, side);
+        const distance = Math.hypot(point.x - x, point.y - y);
+        if (distance <= PORT_HIT_RADIUS && (!nearest || distance < nearest.distance)) {
+          nearest = { nodeId: node.id, side, distance };
+        }
+      }
+    }
+    return nearest === null ? null : { nodeId: nearest.nodeId, side: nearest.side };
+  }
+
+  /** The kind of a card in the scene. */
+  kindOf(id: string): string | null {
+    return this.byId.get(id)?.kind ?? null;
+  }
+
+  /** The topmost card under a world point. */
+  nodeAt(x: number, y: number): string | null {
+    let hit: { id: string; z: number } | null = null;
+    for (const node of this.byId.values()) {
+      const rect = this.cardRect(node.id);
+      if (!rect) continue;
+      const inside =
+        x >= rect.x && x <= rect.x + rect.width && y >= rect.y && y <= rect.y + rect.height;
+      if (inside && (hit === null || node.z >= hit.z)) hit = { id: node.id, z: node.z };
+    }
+    return hit?.id ?? null;
+  }
+
+  /** The connector near a world point, if any. */
+  edgeAt(x: number, y: number): string | null {
+    let nearest: { id: string; distance: number } | null = null;
+    for (const edge of this.edgeById.values()) {
+      const from = this.portWorld(edge.fromId, "out");
+      const to = this.portWorld(edge.toId, "in");
+      if (!from || !to) continue;
+      const distance = distanceToConnection(from, to, { x, y });
+      if (distance <= EDGE_HIT_DISTANCE && (!nearest || distance < nearest.distance)) {
+        nearest = { id: edge.id, distance };
+      }
+    }
+    return nearest?.id ?? null;
+  }
+
+  /** One connector's current endpoints. */
+  edgeEndpoints(id: string): { fromId: string; toId: string } | null {
+    const edge = this.edgeById.get(id);
+    return edge ? { fromId: edge.fromId, toId: edge.toId } : null;
+  }
+
+  /** Draws the temporary connector while the user drags from a port. */
+  setConnectionPreview(from: Point | null, to: Point | null): void {
+    if (!from || !to) {
+      if (this.connectionPreview() !== null) this.connectionPreview.set(null);
+      return;
+    }
+    this.connectionPreview.set({ from, to });
+  }
+
+  /** Image cards with a current batch, for the page's preview reads. */
+  previewTargets(): { id: string; batchId: string }[] {
+    const targets: { id: string; batchId: string }[] = [];
+    for (const node of this.byId.values()) {
+      if (node.kind === "image" && node.outputBatchId) {
+        targets.push({ id: node.id, batchId: node.outputBatchId });
+      }
+    }
+    return targets;
   }
 
   /** The number of cards currently in the scene. */
   cardCount(): number {
-    return this.cards.size;
+    return this.byId.size;
   }
 
-  /** The number of connectors currently drawn (both endpoints visible). */
+  /** The number of connectors currently drawn (both endpoints present). */
   edgeCount(): number {
-    let count = 0;
-    for (const edge of this.edges.values()) {
-      if (edge.line.visible) count += 1;
-    }
-    return count;
+    return this.edgeById.size;
   }
 
-  /** Re-reads the design tokens after the system appearance changes. */
-  recolor(): void {
-    this.palette = readPalette();
-    for (const card of this.cards.values()) {
-      this.styleCard(card);
+  private prune(): void {
+    for (const [id, edge] of this.edgeById) {
+      if (!this.byId.has(edge.fromId) || !this.byId.has(edge.toId)) this.edgeById.delete(id);
     }
-    for (const edge of this.edges.values()) {
-      edge.line.stroke = this.palette.edge;
-      edge.arrow.fill = this.palette.edge;
+    const selected = this.selectedEdge();
+    if (selected !== null && !this.edgeById.has(selected)) this.selectedEdge.set(null);
+    const keep = new Set(this.selection().filter((id) => this.byId.has(id)));
+    if (keep.size !== this.selection().length) this.selection.set([...keep]);
+    for (const id of this.overrides().keys()) {
+      if (!this.byId.has(id)) this.dropOverride(id);
     }
-    this.markEdgesDirty();
-    this.flushEdges();
+    this.nodes.set([...this.byId.values()]);
+    this.edges.set([...this.edgeById.values()]);
   }
 
-  private createCard(node: NodeSummary): void {
-    const data = nodeData(node);
-    const accent = token(data.accent);
-
-    const box = new Box({
-      x: node.x,
-      y: node.y,
-      width: node.width,
-      height: node.height,
-      zIndex: node.z,
-      cornerRadius: 16,
-      fill: this.palette.card,
-      stroke: this.palette.border,
-      strokeWidth: 1,
-      shadow: { x: 0, y: 10, blur: 26, color: this.palette.shadow },
-      draggable: true,
-      editable: true,
-      resizeChildren: true,
-      hoverStyle: { stroke: accent, strokeWidth: 1.5 },
-    });
-
-    const stripe = new Rect({
-      x: 16,
-      y: 18,
-      width: 4,
-      height: 48,
-      cornerRadius: 2,
-      fill: accent,
-      hittable: false,
-    });
-    const title = new LeaferText({
-      x: 32,
-      y: 16,
-      width: Math.max(1, node.width - 84),
-      text: node.title,
-      fontSize: 15,
-      fontWeight: 600,
-      fill: this.palette.title,
-      hittable: false,
-    });
-    const subtitle = new LeaferText({
-      x: 32,
-      y: 42,
-      width: Math.max(1, node.width - 48),
-      text: data.subtitle,
-      fontSize: 12,
-      fill: this.palette.muted,
-      hittable: false,
-    });
-    const image = new LeaferImage({
-      x: node.width - 44,
-      y: 18,
-      width: 22,
-      height: 22,
-      url: nodeIcon.url,
-      hittable: false,
-    });
-
-    box.add(stripe);
-    box.add(title);
-    box.add(image);
-    box.add(subtitle);
-    this.world.add(box);
-
-    const card: Card = {
-      id: node.id,
-      box,
-      stripe,
-      title,
-      subtitle,
-      image,
-      kind: node.kind,
-      accent: data.accent,
-      applied: boundsOf(node),
-    };
-    this.cards.set(node.id, card);
-    this.idByBox.set(box, node.id);
-    box.on(PropertyEvent.CHANGE, () => {
-      this.markEdgesDirty();
-    });
-  }
-
-  private updateCard(card: Card, node: NodeSummary): void {
-    const data = nodeData(node);
-    const geometryChanged =
-      card.box.x !== node.x ||
-      card.box.y !== node.y ||
-      card.box.width !== node.width ||
-      card.box.height !== node.height;
-    const textChanged = card.title.text !== node.title || card.subtitle.text !== data.subtitle;
-
-    card.box.x = node.x;
-    card.box.y = node.y;
-    card.box.width = node.width;
-    card.box.height = node.height;
-    if (card.box.zIndex !== node.z) card.box.zIndex = node.z;
-    card.applied = boundsOf(node);
-
-    if (textChanged) {
-      card.title.text = node.title;
-      card.subtitle.text = data.subtitle;
-    }
-    if (geometryChanged) {
-      card.title.width = Math.max(1, node.width - 84);
-      card.subtitle.width = Math.max(1, node.width - 48);
-      card.image.x = node.width - 44;
-    }
-    if (card.accent !== data.accent) {
-      card.accent = data.accent;
-      this.styleCard(card);
-    }
-  }
-
-  private styleCard(card: Card): void {
-    const accent = token(card.accent);
-    card.box.fill = this.palette.card;
-    card.box.stroke = this.palette.border;
-    card.box.shadow = { x: 0, y: 10, blur: 26, color: this.palette.shadow };
-    card.box.hoverStyle = { stroke: accent, strokeWidth: 1.5 };
-    card.stripe.fill = accent;
-    card.title.fill = this.palette.title;
-    card.subtitle.fill = this.palette.muted;
-  }
-
-  private applyEdges(edges: EdgeSummary[]): void {
-    const wanted = new Set(edges.map((edge) => edge.id));
-    for (const [id, edge] of this.edges) {
-      // A pinned pair can leave both the viewport and Rust's node limit while
-      // remaining in the scene; keep their connector until one endpoint is
-      // deselected or removed. Deletions still arrive through the change set.
-      if (!wanted.has(id) && !(this.isPinned(edge.fromId) && this.isPinned(edge.toId))) {
-        this.removeEdge(id);
-      }
-    }
-    for (const edge of edges) {
-      this.upsertEdge(edge);
-    }
-  }
-
-  private isPinned(id: string): boolean {
-    const card = this.cards.get(id);
-    return card !== undefined && this.app.editor.list.includes(card.box);
-  }
-
-  private upsertEdge(edge: EdgeSummary): void {
-    if (!this.cards.has(edge.fromId) || !this.cards.has(edge.toId)) {
-      this.removeEdge(edge.id);
-      return;
-    }
-
-    let view = this.edges.get(edge.id);
-    if (!view) {
-      const line = new Line({
-        points: [0, 0, 0, 0],
-        stroke: this.palette.edge,
-        strokeWidth: 1.5,
-        strokeCap: "round",
-        opacity: 0.9,
-        hittable: false,
-      });
-      const arrow = new Polygon({
-        points: [0, 0, -10, -5, -10, 5],
-        fill: this.palette.edge,
-        opacity: 0.9,
-        hittable: false,
-      });
-      this.edgesLayer.add(line);
-      this.edgesLayer.add(arrow);
-      view = { id: edge.id, fromId: edge.fromId, toId: edge.toId, line, arrow };
-      this.edges.set(edge.id, view);
-    } else {
-      view.fromId = edge.fromId;
-      view.toId = edge.toId;
-    }
-
-    this.markEdgesDirty();
-  }
-
-  private removeEdge(id: string): void {
-    const edge = this.edges.get(id);
-    if (!edge) return;
-    edge.line.remove();
-    edge.arrow.remove();
-    this.edges.delete(id);
-  }
-
-  private markEdgesDirty(): void {
-    this.dirtyEdges = true;
-  }
-
-  private flushEdges(): void {
-    // `getBounds` can run a layout, which emits `layout.end` again. Clearing
-    // the mark first makes the nested call a no-op.
-    if (!this.dirtyEdges) return;
-    this.dirtyEdges = false;
-    for (const edge of this.edges.values()) this.updateEdge(edge);
-  }
-
-  private updateEdge(edge: EdgeView): void {
-    const from = this.cards.get(edge.fromId)?.box;
-    const to = this.cards.get(edge.toId)?.box;
-
-    if (!from || !to) {
-      edge.line.visible = false;
-      edge.arrow.visible = false;
-      return;
-    }
-
-    const a = from.getBounds("box", this.world);
-    const b = to.getBounds("box", this.world);
-    const acx = a.x + a.width / 2;
-    const acy = a.y + a.height / 2;
-    const bcx = b.x + b.width / 2;
-    const bcy = b.y + b.height / 2;
-
-    let x1: number;
-    let y1: number;
-    let x2: number;
-    let y2: number;
-    if (Math.abs(bcx - acx) >= Math.abs(bcy - acy)) {
-      if (bcx >= acx) {
-        x1 = a.x + a.width;
-        y1 = acy;
-        x2 = b.x;
-        y2 = bcy;
-      } else {
-        x1 = a.x;
-        y1 = acy;
-        x2 = b.x + b.width;
-        y2 = bcy;
-      }
-    } else if (bcy >= acy) {
-      x1 = acx;
-      y1 = a.y + a.height;
-      x2 = bcx;
-      y2 = b.y;
-    } else {
-      x1 = acx;
-      y1 = a.y;
-      x2 = bcx;
-      y2 = b.y + b.height;
-    }
-
-    edge.line.visible = true;
-    edge.arrow.visible = true;
-    edge.line.points = [x1, y1, x2, y2];
-    edge.arrow.x = x2;
-    edge.arrow.y = y2;
-    edge.arrow.rotation = (Math.atan2(y2 - y1, x2 - x1) * 180) / Math.PI;
+  private dropOverride(id: string): void {
+    const current = this.overrides();
+    if (!current.has(id)) return;
+    const next = new Map(current);
+    next.delete(id);
+    this.overrides.set(next);
   }
 }
 
-function readPalette(): Palette {
-  return {
-    card: token("card"),
-    border: token("border"),
-    title: token("card-foreground"),
-    muted: token("muted-foreground"),
-    edge: token("border"),
-    shadow: token("flow-shadow"),
-  };
-}
-
-function boundsOf(node: NodeSummary): Card["applied"] {
+function rectOfNode(node: NodeSummary): BoxGeometry {
   return { x: node.x, y: node.y, width: node.width, height: node.height };
 }
 
-function nodeData(node: NodeSummary): NodeData {
-  let parsed: unknown = null;
-  try {
-    parsed = JSON.parse(node.dataJson);
-  } catch {
-    parsed = null;
-  }
-  const record = isRecord(parsed) ? parsed : {};
-  return {
-    subtitle: typeof record.subtitle === "string" ? record.subtitle : "",
-    accent: isAccent(record.accent) ? record.accent : "chart-1",
-  };
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null;
-}
-
-function isAccent(value: unknown): value is FlowAccent {
-  return typeof value === "string" && (ACCENTS as readonly string[]).includes(value);
+function sameRect(a: BoxGeometry, b: BoxGeometry): boolean {
+  return (
+    Math.abs(a.x - b.x) <= 0.01 &&
+    Math.abs(a.y - b.y) <= 0.01 &&
+    Math.abs(a.width - b.width) <= 0.01 &&
+    Math.abs(a.height - b.height) <= 0.01
+  );
 }

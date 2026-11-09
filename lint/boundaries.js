@@ -5,7 +5,7 @@
  *   page                 may use pages, components, the store and foundations
  *   component            may use components, shared types and foundations
  *   store                may use shared types and foundations
- *   foundation           may use foundations only (flow/, leafer/, lib/, tool.ts)
+ *   foundation           may use foundations only (flow/, lib/, tool.ts)
  *
  * A component or foundation importing a page, or anything below a page
  * importing the store, is reported. Tests are skipped: they may reach into
@@ -42,8 +42,6 @@ export function layerOf(file) {
   if (
     stem === "flow" ||
     stem.startsWith("flow/") ||
-    stem === "leafer" ||
-    stem.startsWith("leafer/") ||
     stem === "lib" ||
     stem.startsWith("lib/") ||
     stem === "native" ||

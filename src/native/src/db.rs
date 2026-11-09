@@ -1,5 +1,5 @@
 use std::fs;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::mpsc::{self, Receiver, Sender};
 use std::sync::{Arc, Mutex};
 
@@ -8,8 +8,10 @@ use sea_orm::{
     PaginatorTrait, QueryFilter,
 };
 
+use crate::asset;
 use crate::clock::now_ms;
 use crate::constants::DOCUMENT_ID;
+use crate::detail;
 use crate::document;
 use crate::entity::{documents, edges, nodes};
 #[cfg(test)]
@@ -20,8 +22,9 @@ use crate::scene;
 use crate::schema;
 use crate::search;
 use crate::types::{
-    ChangeSet, EdgeInput, NodeBounds, NodeInput, NodeSummary, SceneSnapshot, SearchFilters,
-    SearchHit, Viewport,
+    AssetInput, AssetSummary, ChangeSet, EdgeInput, InputItemInput, InputItemSummary, NodeBounds,
+    NodeDetail, NodeInput, NodePreview, NodeSummary, ResultBatchInput, ResultItemInput,
+    SceneSnapshot, SearchFilters, SearchHit, Viewport,
 };
 use crate::viewport;
 
@@ -41,6 +44,7 @@ type Job = Box<dyn FnOnce(&DatabaseConnection) + Send + 'static>;
 pub struct Database {
     tx: Arc<Mutex<Sender<Job>>>,
     history: Arc<Mutex<History>>,
+    assets_dir: Arc<PathBuf>,
 }
 
 impl Database {
@@ -48,6 +52,7 @@ impl Database {
         let (ready_tx, ready_rx) = mpsc::channel();
         let (job_tx, job_rx) = mpsc::channel::<Job>();
         let path = path.to_owned();
+        let assets_dir = Arc::new(asset::assets_dir_for(&path));
 
         std::thread::Builder::new()
             .name("flow-db".to_owned())
@@ -61,6 +66,7 @@ impl Database {
         Ok(Self {
             tx: Arc::new(Mutex::new(job_tx)),
             history: Arc::new(Mutex::new(History::default())),
+            assets_dir,
         })
     }
 
@@ -80,6 +86,90 @@ impl Database {
         tags: Vec<String>,
     ) -> Result<Mutation, String> {
         self.run_mutation(move |conn| mutation::set_node_text(conn, id, title, body, tags))
+    }
+
+    pub fn set_node_settings(&self, id: String, settings_json: String) -> Result<Mutation, String> {
+        self.run_mutation(move |conn| mutation::set_node_settings(conn, id, settings_json))
+    }
+
+    /// A text node's manual edit: a new immutable text batch, not undoable as
+    /// a provider run, but this specific call is user history.
+    pub fn set_manual_text(
+        &self,
+        id: String,
+        text: String,
+        batch: ResultBatchInput,
+        item: ResultItemInput,
+    ) -> Result<Mutation, String> {
+        self.run_mutation(move |conn| mutation::set_manual_text(conn, id, text, batch, item))
+    }
+
+    /// Inserts an edge and snapshots the source's current output into the
+    /// target's input list.
+    pub fn connect_edge(&self, edge: EdgeInput) -> Result<Mutation, String> {
+        self.run_mutation(move |conn| mutation::connect_edge(conn, edge))
+    }
+
+    pub fn update_edge(&self, edge: EdgeInput) -> Result<Mutation, String> {
+        self.run_mutation(move |conn| mutation::update_edge(conn, edge))
+    }
+
+    pub fn add_input(&self, input: InputItemInput) -> Result<Mutation, String> {
+        self.run_mutation(move |conn| mutation::add_input(conn, input))
+    }
+
+    pub fn remove_input(&self, id: String) -> Result<Mutation, String> {
+        self.run_mutation(move |conn| mutation::remove_input(conn, id))
+    }
+
+    pub fn reorder_inputs(&self, node_id: String, ids: Vec<String>) -> Result<Mutation, String> {
+        self.run_mutation(move |conn| mutation::reorder_inputs(conn, node_id, ids))
+    }
+
+    /// Rebuilds edge inputs from the sources' current batches, before a run.
+    pub fn sync_inputs(&self, node_id: String) -> Result<Vec<InputItemSummary>, String> {
+        self.run(move |conn| {
+            mutation::sync_inputs(conn, node_id.clone())?;
+            detail::inputs(conn, &node_id)
+        })
+    }
+
+    /// Persists a completed, failed or cancelled provider run. Not undoable.
+    pub fn save_run(
+        &self,
+        batch: ResultBatchInput,
+        items: Vec<ResultItemInput>,
+    ) -> Result<ChangeSet, String> {
+        self.run(move |conn| mutation::save_run(conn, batch, items))
+    }
+
+    pub fn set_node_status(&self, id: String, status: String) -> Result<ChangeSet, String> {
+        self.run(move |conn| mutation::set_node_status(conn, id, status))
+    }
+
+    /// Marks runs left running by a previous process as interrupted.
+    pub fn recover_runs(&self) -> Result<u32, String> {
+        self.run(mutation::recover_runs)
+    }
+
+    /// A node with its output batch and input list.
+    pub fn node_detail(&self, id: String) -> Result<Option<NodeDetail>, String> {
+        self.run(move |conn| detail::node_detail(conn, &id))
+    }
+
+    /// The first items of several nodes' current batches, for card previews.
+    pub fn previews(&self, ids: Vec<String>) -> Result<Vec<NodePreview>, String> {
+        self.run(move |conn| detail::previews(conn, ids))
+    }
+
+    pub fn import_asset(&self, input: AssetInput) -> Result<AssetSummary, String> {
+        let assets_dir = Arc::clone(&self.assets_dir);
+        self.run(move |conn| asset::import_asset(conn, &assets_dir, input))
+    }
+
+    pub fn asset_bytes(&self, id: String) -> Result<Vec<u8>, String> {
+        let assets_dir = Arc::clone(&self.assets_dir);
+        self.run(move |conn| asset::asset_bytes(conn, &assets_dir, id))
     }
 
     pub fn delete_nodes(&self, ids: Vec<String>) -> Result<Mutation, String> {
@@ -384,6 +474,7 @@ mod tests {
             height: 84.0,
             z: 0.0,
             data_json: None,
+            settings_json: None,
         }
     }
 
@@ -586,6 +677,38 @@ mod tests {
         assert_eq!(redone.removed, vec!["a"]);
         assert_eq!(db.count().expect("count after redo"), 1);
         assert_eq!(db.edge_count().expect("edge count after redo"), 0);
+    }
+
+    #[test]
+    fn rejects_self_and_duplicate_connections() {
+        let db = Database::open(":memory:").expect("open");
+        db.insert_nodes(vec![
+            node("a", "Source", "", &["text"], 0.0, 0.0),
+            node("b", "Target", "", &["image"], 300.0, 0.0),
+        ])
+        .expect("insert nodes");
+        let edge = |id: &str, from: &str, to: &str| EdgeInput {
+            id: id.to_owned(),
+            from_id: from.to_owned(),
+            to_id: to.to_owned(),
+            from_port: Some("out".to_owned()),
+            to_port: Some("in".to_owned()),
+            kind: "flow".to_owned(),
+            data_json: None,
+        };
+
+        db.connect_edge(edge("a-b", "a", "b")).expect("connect");
+        let duplicate = match db.connect_edge(edge("a-b-again", "a", "b")) {
+            Ok(_) => panic!("a duplicate edge was accepted"),
+            Err(error) => error,
+        };
+        assert!(duplicate.contains("already connected"), "{duplicate}");
+        let own = match db.connect_edge(edge("a-a", "a", "a")) {
+            Ok(_) => panic!("a self edge was accepted"),
+            Err(error) => error,
+        };
+        assert!(own.contains("cannot connect to itself"), "{own}");
+        assert_eq!(db.edge_count().expect("edge count"), 1);
     }
 
     #[test]
@@ -831,6 +954,7 @@ mod tests {
                 mime: Set("image/png".to_owned()),
                 size: Set(1),
                 meta_json: Set("{}".to_owned()),
+                created_at: Set(0),
             })
             .exec(conn)
             .map_err(|error| error.to_string())?;
@@ -875,6 +999,752 @@ mod tests {
             .expect("count relations");
 
         assert_eq!(counts, (0, 0));
+    }
+
+    #[test]
+    fn snapshots_edges_into_ordered_inputs_and_undoes_their_removal() {
+        let db = Database::open(":memory:").expect("open");
+        db.insert_nodes(vec![
+            node("text", "Text", "A lake", &[], 0.0, 0.0),
+            node("image", "Image", "", &[], 400.0, 0.0),
+        ])
+        .expect("insert nodes");
+
+        db.save_run(
+            ResultBatchInput {
+                id: "batch-text".to_owned(),
+                node_id: "text".to_owned(),
+                trigger: "manual".to_owned(),
+                provider: "manual".to_owned(),
+                model: String::new(),
+                params_json: "{}".to_owned(),
+                status: "done".to_owned(),
+                error: None,
+            },
+            vec![
+                ResultItemInput {
+                    id: "item-a".to_owned(),
+                    position: 0.0,
+                    kind: "text".to_owned(),
+                    text: "A lake".to_owned(),
+                    asset_id: None,
+                    meta_json: None,
+                },
+                ResultItemInput {
+                    id: "item-b".to_owned(),
+                    position: 1.0,
+                    kind: "text".to_owned(),
+                    text: "At dawn".to_owned(),
+                    asset_id: None,
+                    meta_json: None,
+                },
+            ],
+        )
+        .expect("save source batch");
+
+        db.connect_edge(EdgeInput {
+            id: "edge-text-image".to_owned(),
+            from_id: "text".to_owned(),
+            to_id: "image".to_owned(),
+            from_port: Some("out".to_owned()),
+            to_port: Some("in".to_owned()),
+            kind: "flow".to_owned(),
+            data_json: None,
+        })
+        .expect("connect");
+
+        let detail = db
+            .node_detail("image".to_owned())
+            .expect("detail")
+            .expect("image detail");
+        assert_eq!(detail.inputs.len(), 2);
+        assert_eq!(detail.inputs[0].item_id.as_deref(), Some("item-a"));
+        assert_eq!(detail.inputs[1].item_id.as_deref(), Some("item-b"));
+        assert_eq!(detail.inputs[0].origin, "edge");
+
+        let removed = db
+            .remove_input(detail.inputs[0].id.clone())
+            .expect("remove first input");
+        assert_eq!(removed.changes.changed.len(), 1);
+        assert_eq!(removed.changes.changed[0].id, "image");
+        assert_eq!(removed.changes.changed[0].status, "idle");
+        let after = db
+            .node_detail("image".to_owned())
+            .expect("detail")
+            .expect("image detail");
+        assert_eq!(after.inputs.len(), 1);
+        assert_eq!(after.inputs[0].item_id.as_deref(), Some("item-b"));
+
+        // A run's input sync clears removals and recreates the snapshots;
+        // undoing the earlier removal must still succeed idempotently.
+        db.sync_inputs("image".to_owned()).expect("sync after run");
+        let undone = db.undo().expect("undo input removal");
+        assert!(undone.changed.iter().any(|node| node.id == "image"));
+        let restored = db
+            .node_detail("image".to_owned())
+            .expect("detail")
+            .expect("image detail");
+        assert_eq!(restored.inputs.len(), 2);
+    }
+
+    #[test]
+    fn sync_rebuilds_edge_inputs_and_keeps_local_items() {
+        let db = Database::open(":memory:").expect("open");
+        db.insert_nodes(vec![
+            node("text", "Text", "A lake", &[], 0.0, 0.0),
+            node("image", "Image", "", &[], 400.0, 0.0),
+        ])
+        .expect("insert nodes");
+        db.save_run(
+            ResultBatchInput {
+                id: "batch-old".to_owned(),
+                node_id: "text".to_owned(),
+                trigger: "run".to_owned(),
+                provider: "mock-text".to_owned(),
+                model: "mock-text".to_owned(),
+                params_json: "{}".to_owned(),
+                status: "done".to_owned(),
+                error: None,
+            },
+            vec![ResultItemInput {
+                id: "item-old".to_owned(),
+                position: 0.0,
+                kind: "text".to_owned(),
+                text: "Old".to_owned(),
+                asset_id: None,
+                meta_json: None,
+            }],
+        )
+        .expect("old batch");
+        db.connect_edge(EdgeInput {
+            id: "edge".to_owned(),
+            from_id: "text".to_owned(),
+            to_id: "image".to_owned(),
+            from_port: None,
+            to_port: None,
+            kind: "flow".to_owned(),
+            data_json: None,
+        })
+        .expect("connect");
+        db.add_input(InputItemInput {
+            id: "local".to_owned(),
+            node_id: "image".to_owned(),
+            position: 99.0,
+            kind: "text".to_owned(),
+            origin: "local".to_owned(),
+            edge_id: None,
+            item_id: None,
+            asset_id: None,
+            text: "Local".to_owned(),
+            meta_json: None,
+        })
+        .expect("local input");
+
+        db.save_run(
+            ResultBatchInput {
+                id: "batch-new".to_owned(),
+                node_id: "text".to_owned(),
+                trigger: "run".to_owned(),
+                provider: "mock-text".to_owned(),
+                model: "mock-text".to_owned(),
+                params_json: "{}".to_owned(),
+                status: "done".to_owned(),
+                error: None,
+            },
+            vec![ResultItemInput {
+                id: "item-new".to_owned(),
+                position: 0.0,
+                kind: "text".to_owned(),
+                text: "New".to_owned(),
+                asset_id: None,
+                meta_json: None,
+            }],
+        )
+        .expect("new batch");
+
+        let inputs = db.sync_inputs("image".to_owned()).expect("sync");
+        assert_eq!(inputs.len(), 2);
+        assert_eq!(inputs[0].text, "Local");
+        assert_eq!(inputs[1].item_id.as_deref(), Some("item-new"));
+    }
+
+    #[test]
+    fn deleting_a_source_removes_downstream_inputs_and_undo_restores_them() {
+        let db = Database::open(":memory:").expect("open");
+        db.insert_nodes(vec![
+            node("text", "Text", "A lake", &[], 0.0, 0.0),
+            node("image", "Image", "", &[], 400.0, 0.0),
+        ])
+        .expect("insert nodes");
+        db.save_run(
+            ResultBatchInput {
+                id: "batch".to_owned(),
+                node_id: "text".to_owned(),
+                trigger: "manual".to_owned(),
+                provider: "manual".to_owned(),
+                model: String::new(),
+                params_json: "{}".to_owned(),
+                status: "done".to_owned(),
+                error: None,
+            },
+            vec![ResultItemInput {
+                id: "item".to_owned(),
+                position: 0.0,
+                kind: "text".to_owned(),
+                text: "A lake".to_owned(),
+                asset_id: None,
+                meta_json: None,
+            }],
+        )
+        .expect("batch");
+        db.connect_edge(EdgeInput {
+            id: "edge".to_owned(),
+            from_id: "text".to_owned(),
+            to_id: "image".to_owned(),
+            from_port: None,
+            to_port: None,
+            kind: "flow".to_owned(),
+            data_json: None,
+        })
+        .expect("connect");
+
+        db.delete_nodes(vec!["text".to_owned()])
+            .expect("delete source");
+        let after = db
+            .node_detail("image".to_owned())
+            .expect("detail")
+            .expect("image detail");
+        assert_eq!(after.inputs.len(), 0);
+        assert_eq!(db.edge_count().expect("edges"), 0);
+
+        db.undo().expect("undo delete");
+        let restored = db
+            .node_detail("image".to_owned())
+            .expect("detail")
+            .expect("image detail");
+        assert_eq!(restored.inputs.len(), 1);
+        assert_eq!(db.edge_count().expect("edges after undo"), 1);
+
+        db.redo().expect("redo delete");
+        let after_redo = db
+            .node_detail("image".to_owned())
+            .expect("detail")
+            .expect("image detail");
+        assert_eq!(after_redo.inputs.len(), 0);
+        assert_eq!(db.edge_count().expect("edges after redo"), 0);
+    }
+
+    #[test]
+    fn a_manual_text_edit_is_one_undoable_batch() {
+        let db = Database::open(":memory:").expect("open");
+        db.insert_nodes(vec![node("text", "Text", "Before", &[], 0.0, 0.0)])
+            .expect("insert");
+        let changes = db
+            .set_manual_text(
+                "text".to_owned(),
+                "After".to_owned(),
+                ResultBatchInput {
+                    id: "batch-manual".to_owned(),
+                    node_id: "text".to_owned(),
+                    trigger: "manual".to_owned(),
+                    provider: "manual".to_owned(),
+                    model: String::new(),
+                    params_json: "{}".to_owned(),
+                    status: "done".to_owned(),
+                    error: None,
+                },
+                ResultItemInput {
+                    id: "item-manual".to_owned(),
+                    position: 0.0,
+                    kind: "text".to_owned(),
+                    text: "After".to_owned(),
+                    asset_id: None,
+                    meta_json: None,
+                },
+            )
+            .expect("manual edit");
+        assert_eq!(changes.changes.changed[0].body, "After");
+        let detail = db
+            .node_detail("text".to_owned())
+            .expect("detail")
+            .expect("text detail");
+        assert_eq!(
+            detail.batch.as_ref().map(|batch| batch.id.as_str()),
+            Some("batch-manual")
+        );
+        assert_eq!(
+            detail.batch.as_ref().map(|batch| batch.items.len()),
+            Some(1)
+        );
+
+        db.undo().expect("undo manual edit");
+        let restored = db
+            .node_detail("text".to_owned())
+            .expect("detail")
+            .expect("text detail");
+        assert_eq!(restored.node.body, "Before");
+        assert_eq!(restored.node.output_batch_id, None);
+        // The batch itself is immutable and stays for any downstream snapshot.
+        assert_eq!(
+            db.node_detail("text".to_owned())
+                .expect("detail")
+                .expect("detail")
+                .batch
+                .map(|batch| batch.id),
+            None
+        );
+    }
+
+    #[test]
+    fn bodies_written_by_manual_edits_and_runs_are_searchable() {
+        let db = Database::open(":memory:").expect("open");
+        db.insert_nodes(vec![node("text", "Panel", "Before", &[], 0.0, 0.0)])
+            .expect("insert");
+
+        db.set_manual_text(
+            "text".to_owned(),
+            "Orchid petals".to_owned(),
+            ResultBatchInput {
+                id: "batch-manual".to_owned(),
+                node_id: "text".to_owned(),
+                trigger: "manual".to_owned(),
+                provider: "manual".to_owned(),
+                model: String::new(),
+                params_json: "{}".to_owned(),
+                status: "done".to_owned(),
+                error: None,
+            },
+            ResultItemInput {
+                id: "item-manual".to_owned(),
+                position: 0.0,
+                kind: "text".to_owned(),
+                text: "Orchid petals".to_owned(),
+                asset_id: None,
+                meta_json: None,
+            },
+        )
+        .expect("manual edit");
+        assert_eq!(
+            db.search("Orchid".to_owned(), SearchFilters::default(), 20)
+                .expect("manual search")
+                .len(),
+            1
+        );
+        assert!(
+            db.search("Before".to_owned(), SearchFilters::default(), 20)
+                .expect("old body search")
+                .is_empty()
+        );
+
+        db.save_run(
+            ResultBatchInput {
+                id: "batch-run".to_owned(),
+                node_id: "text".to_owned(),
+                trigger: "run".to_owned(),
+                provider: "mock-text".to_owned(),
+                model: "mock-text".to_owned(),
+                params_json: "{}".to_owned(),
+                status: "done".to_owned(),
+                error: None,
+            },
+            vec![ResultItemInput {
+                id: "item-run".to_owned(),
+                position: 0.0,
+                kind: "text".to_owned(),
+                text: "Marigold fields".to_owned(),
+                asset_id: None,
+                meta_json: None,
+            }],
+        )
+        .expect("run");
+        assert_eq!(
+            db.search("Marigold".to_owned(), SearchFilters::default(), 20)
+                .expect("run search")
+                .len(),
+            1
+        );
+        assert!(
+            db.search("Orchid".to_owned(), SearchFilters::default(), 20)
+                .expect("replaced body search")
+                .is_empty()
+        );
+    }
+
+    #[test]
+    fn undoing_a_settings_edit_keeps_a_later_run_output() {
+        let db = Database::open(":memory:").expect("open");
+        db.insert_nodes(vec![node("a", "A", "Original", &[], 0.0, 0.0)])
+            .expect("insert");
+        db.set_node_settings("a".to_owned(), "{\"prompt\":\"one\"}".to_owned())
+            .expect("settings");
+
+        // Runs are not history: the undo below must not resurrect the body,
+        // output or status this run wrote.
+        db.save_run(
+            ResultBatchInput {
+                id: "batch".to_owned(),
+                node_id: "a".to_owned(),
+                trigger: "run".to_owned(),
+                provider: "mock-text".to_owned(),
+                model: "mock-text".to_owned(),
+                params_json: "{}".to_owned(),
+                status: "done".to_owned(),
+                error: None,
+            },
+            vec![ResultItemInput {
+                id: "item".to_owned(),
+                position: 0.0,
+                kind: "text".to_owned(),
+                text: "Run output".to_owned(),
+                asset_id: None,
+                meta_json: None,
+            }],
+        )
+        .expect("run");
+
+        db.undo().expect("undo settings");
+        let detail = db
+            .node_detail("a".to_owned())
+            .expect("detail")
+            .expect("node detail");
+        assert_eq!(detail.node.settings_json, "{}");
+        assert_eq!(detail.node.body, "Run output");
+        assert_eq!(detail.node.output_batch_id.as_deref(), Some("batch"));
+        // The settings no longer match the output, so it cannot be "done".
+        assert_eq!(detail.node.status, "stale");
+
+        db.redo().expect("redo settings");
+        let redone = db
+            .node_detail("a".to_owned())
+            .expect("detail")
+            .expect("node detail");
+        assert_eq!(redone.node.settings_json, "{\"prompt\":\"one\"}");
+        assert_eq!(redone.node.body, "Run output");
+        assert_eq!(redone.node.output_batch_id.as_deref(), Some("batch"));
+    }
+
+    #[test]
+    fn reimporting_an_asset_restores_missing_bytes() {
+        let db = Database::open(":memory:").expect("open");
+        let bytes = b"<svg xmlns=\"http://www.w3.org/2000/svg\"/>".to_vec();
+        let first = db
+            .import_asset(AssetInput {
+                id: "asset-1".to_owned(),
+                kind: "image".to_owned(),
+                name: "one.svg".to_owned(),
+                mime: "image/svg+xml".to_owned(),
+                bytes: bytes.clone(),
+                meta_json: None,
+            })
+            .expect("import");
+
+        std::fs::remove_file(db.assets_dir.join(&first.hash)).expect("remove the stored bytes");
+        assert!(db.asset_bytes(first.id.clone()).is_err());
+
+        let second = db
+            .import_asset(AssetInput {
+                id: "asset-2".to_owned(),
+                kind: "image".to_owned(),
+                name: "two.svg".to_owned(),
+                mime: "image/svg+xml".to_owned(),
+                bytes: bytes.clone(),
+                meta_json: None,
+            })
+            .expect("reimport");
+        assert_eq!(second.id, first.id);
+        assert_eq!(db.asset_bytes(first.id).expect("read back"), bytes);
+    }
+
+    #[test]
+    fn a_successful_run_marks_its_targets_stale_and_keeps_the_last_output() {
+        let db = Database::open(":memory:").expect("open");
+        db.insert_nodes(vec![
+            node("a", "A", "", &[], 0.0, 0.0),
+            node("b", "B", "", &[], 400.0, 0.0),
+        ])
+        .expect("insert");
+        db.connect_edge(EdgeInput {
+            id: "a-b".to_owned(),
+            from_id: "a".to_owned(),
+            to_id: "b".to_owned(),
+            from_port: None,
+            to_port: None,
+            kind: "flow".to_owned(),
+            data_json: None,
+        })
+        .expect("connect");
+
+        let first = db
+            .save_run(
+                ResultBatchInput {
+                    id: "batch-b".to_owned(),
+                    node_id: "b".to_owned(),
+                    trigger: "run".to_owned(),
+                    provider: "mock-text".to_owned(),
+                    model: "mock-text".to_owned(),
+                    params_json: "{}".to_owned(),
+                    status: "done".to_owned(),
+                    error: None,
+                },
+                vec![ResultItemInput {
+                    id: "item-b".to_owned(),
+                    position: 0.0,
+                    kind: "text".to_owned(),
+                    text: "B output".to_owned(),
+                    asset_id: None,
+                    meta_json: None,
+                }],
+            )
+            .expect("save run");
+        assert_eq!(first.changed[0].status, "done");
+        assert_eq!(first.changed[0].output_batch_id.as_deref(), Some("batch-b"));
+
+        let second = db
+            .save_run(
+                ResultBatchInput {
+                    id: "batch-a".to_owned(),
+                    node_id: "a".to_owned(),
+                    trigger: "run".to_owned(),
+                    provider: "mock-text".to_owned(),
+                    model: "mock-text".to_owned(),
+                    params_json: "{}".to_owned(),
+                    status: "done".to_owned(),
+                    error: None,
+                },
+                vec![ResultItemInput {
+                    id: "item-a".to_owned(),
+                    position: 0.0,
+                    kind: "text".to_owned(),
+                    text: "A output".to_owned(),
+                    asset_id: None,
+                    meta_json: None,
+                }],
+            )
+            .expect("save source run");
+        assert!(
+            second
+                .changed
+                .iter()
+                .any(|node| { node.id == "b" && node.status == "stale" })
+        );
+
+        let failed = db
+            .save_run(
+                ResultBatchInput {
+                    id: "batch-failed".to_owned(),
+                    node_id: "b".to_owned(),
+                    trigger: "run".to_owned(),
+                    provider: "mock-text".to_owned(),
+                    model: "mock-text".to_owned(),
+                    params_json: "{}".to_owned(),
+                    status: "failed".to_owned(),
+                    error: Some("prompt is empty".to_owned()),
+                },
+                Vec::new(),
+            )
+            .expect("save failure");
+        assert_eq!(failed.changed[0].status, "failed");
+        assert_eq!(
+            failed.changed[0].output_batch_id.as_deref(),
+            Some("batch-b")
+        );
+    }
+
+    #[test]
+    fn assets_are_content_addressed_and_read_back() {
+        let db = Database::open(":memory:").expect("open");
+        let bytes = b"<svg xmlns=\"http://www.w3.org/2000/svg\"/>".to_vec();
+        let first = db
+            .import_asset(AssetInput {
+                id: "asset-1".to_owned(),
+                kind: "image".to_owned(),
+                name: "one.svg".to_owned(),
+                mime: "image/svg+xml".to_owned(),
+                bytes: bytes.clone(),
+                meta_json: None,
+            })
+            .expect("import");
+        let second = db
+            .import_asset(AssetInput {
+                id: "asset-2".to_owned(),
+                kind: "image".to_owned(),
+                name: "two.svg".to_owned(),
+                mime: "image/svg+xml".to_owned(),
+                bytes: bytes.clone(),
+                meta_json: None,
+            })
+            .expect("import duplicate");
+        assert_eq!(first.id, second.id);
+        assert_eq!(first.size, bytes.len() as f64);
+        assert_eq!(db.asset_bytes(first.id).expect("read bytes"), bytes);
+    }
+
+    #[test]
+    fn reordering_inputs_is_undoable() {
+        let db = Database::open(":memory:").expect("open");
+        db.insert_nodes(vec![node("n", "N", "", &[], 0.0, 0.0)])
+            .expect("insert");
+        for (id, text) in [("one", "One"), ("two", "Two")] {
+            db.add_input(InputItemInput {
+                id: id.to_owned(),
+                node_id: "n".to_owned(),
+                position: 0.0,
+                kind: "text".to_owned(),
+                origin: "local".to_owned(),
+                edge_id: None,
+                item_id: None,
+                asset_id: None,
+                text: text.to_owned(),
+                meta_json: None,
+            })
+            .expect("add input");
+        }
+        let before = db
+            .node_detail("n".to_owned())
+            .expect("detail")
+            .expect("node")
+            .inputs;
+        assert!(before.iter().any(|input| input.id == "one"));
+        db.reorder_inputs("n".to_owned(), vec!["two".to_owned(), "one".to_owned()])
+            .expect("reorder");
+        let after = db
+            .node_detail("n".to_owned())
+            .expect("detail")
+            .expect("node")
+            .inputs;
+        assert_eq!(after[0].id, "two");
+        assert_eq!(after[1].id, "one");
+
+        db.undo().expect("undo reorder");
+        let restored = db
+            .node_detail("n".to_owned())
+            .expect("detail")
+            .expect("node")
+            .inputs;
+        let restored_ids: Vec<&str> = restored.iter().map(|input| input.id.as_str()).collect();
+        let before_ids: Vec<&str> = before.iter().map(|input| input.id.as_str()).collect();
+        assert_eq!(restored_ids, before_ids);
+    }
+
+    #[test]
+    fn reconnecting_an_edge_moves_its_input_snapshot_and_undoes_it() {
+        let db = Database::open(":memory:").expect("open");
+        db.insert_nodes(vec![
+            node("source", "Source", "A lake", &[], 0.0, 0.0),
+            node("old", "Old target", "", &[], 400.0, 0.0),
+            node("new", "New target", "", &[], 800.0, 0.0),
+        ])
+        .expect("insert nodes");
+        db.save_run(
+            ResultBatchInput {
+                id: "batch".to_owned(),
+                node_id: "source".to_owned(),
+                trigger: "manual".to_owned(),
+                provider: "manual".to_owned(),
+                model: String::new(),
+                params_json: "{}".to_owned(),
+                status: "done".to_owned(),
+                error: None,
+            },
+            vec![ResultItemInput {
+                id: "item".to_owned(),
+                position: 0.0,
+                kind: "text".to_owned(),
+                text: "A lake".to_owned(),
+                asset_id: None,
+                meta_json: None,
+            }],
+        )
+        .expect("batch");
+        db.connect_edge(EdgeInput {
+            id: "edge".to_owned(),
+            from_id: "source".to_owned(),
+            to_id: "old".to_owned(),
+            from_port: None,
+            to_port: None,
+            kind: "flow".to_owned(),
+            data_json: None,
+        })
+        .expect("connect");
+
+        db.update_edge(EdgeInput {
+            id: "edge".to_owned(),
+            from_id: "source".to_owned(),
+            to_id: "new".to_owned(),
+            from_port: None,
+            to_port: None,
+            kind: "flow".to_owned(),
+            data_json: None,
+        })
+        .expect("reconnect");
+
+        let old = db
+            .node_detail("old".to_owned())
+            .expect("detail")
+            .expect("old detail");
+        let new = db
+            .node_detail("new".to_owned())
+            .expect("detail")
+            .expect("new detail");
+        assert_eq!(old.inputs.len(), 0);
+        assert_eq!(new.inputs.len(), 1);
+        assert_eq!(new.inputs[0].edge_id.as_deref(), Some("edge"));
+
+        db.undo().expect("undo reconnect");
+        let old = db
+            .node_detail("old".to_owned())
+            .expect("detail")
+            .expect("old detail");
+        let new = db
+            .node_detail("new".to_owned())
+            .expect("detail")
+            .expect("new detail");
+        assert_eq!(old.inputs.len(), 1);
+        assert_eq!(new.inputs.len(), 0);
+
+        db.redo().expect("redo reconnect");
+        let old = db
+            .node_detail("old".to_owned())
+            .expect("detail")
+            .expect("old detail");
+        let new = db
+            .node_detail("new".to_owned())
+            .expect("detail")
+            .expect("new detail");
+        assert_eq!(old.inputs.len(), 0);
+        assert_eq!(new.inputs.len(), 1);
+        assert_eq!(new.inputs[0].edge_id.as_deref(), Some("edge"));
+    }
+
+    #[test]
+    fn recovering_runs_marks_running_nodes_interrupted() {
+        let db = Database::open(":memory:").expect("open");
+        db.insert_nodes(vec![node("a", "A", "", &[], 0.0, 0.0)])
+            .expect("insert");
+        db.set_node_status("a".to_owned(), "running".to_owned())
+            .expect("running");
+        db.save_run(
+            ResultBatchInput {
+                id: "batch".to_owned(),
+                node_id: "a".to_owned(),
+                trigger: "run".to_owned(),
+                provider: "mock-text".to_owned(),
+                model: "mock-text".to_owned(),
+                params_json: "{}".to_owned(),
+                status: "running".to_owned(),
+                error: None,
+            },
+            Vec::new(),
+        )
+        .expect("running batch");
+
+        assert_eq!(db.recover_runs().expect("recover"), 1);
+        let detail = db
+            .node_detail("a".to_owned())
+            .expect("detail")
+            .expect("detail");
+        assert_eq!(detail.node.status, "interrupted");
+        assert_eq!(detail.batch, None);
     }
 
     fn benchmark_nodes(chunk: usize) -> Vec<NodeInput> {

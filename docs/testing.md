@@ -9,7 +9,7 @@ can be `async`. The local dependency-boundary rule has its own Bun test,
 ```sh
 bun run test                       # every app test, headless
 bun run test -- --filter camera    # tests whose name contains "camera"
-nsh test src/leafer/camera.test.ts # one file
+nsh test src/flow/camera.test.ts   # one file
 bun run test:host                  # on this machine's real host (Windows, macOS or Linux)
 bun run test:lint                  # the boundary rule's tests (also part of check)
 bun run test:bench                 # the ignored 100k SQLite/FTS5/RTree benchmark
@@ -33,8 +33,11 @@ that only exists on a real desktop. `scripts/test-host.mjs` runs each
 `*.test.ts(x)` file in its own `nsh test` process, because the host loads a
 test bundle before an app registers its native module. That means
 `native.test.ts` cannot load on the host; it is headless-only and the script
-skips it. Adding a test file that imports `@flow/native` at run time has the
-same limitation.
+skips it. A test that imports `@flow/native` at run time has the same
+limitation: name it `*.native.test.ts` (for example
+`flow/node-session.native.test.ts`) so the host script skips it too. Test the
+TSX side of those modules through that headless test instead of duplicating
+the run in `App.test.tsx`.
 
 `bun run test:100k` is a real-host smoke, not part of `bun run test`: it seeds
 100,000 nodes into `.nsh/bench/flow-100k.db` through an ignored Rust test,
@@ -43,34 +46,38 @@ last node, reveals and selects it, fits the document and saves screenshots
 (`flow-100k-reveal.png`, `flow-100k-overview.png`). It exercises the whole
 path — RTree viewport reads, card budget, hash sampling and search — against
 the real window; review the screenshots manually and treat their artifacts as
-git-ignored evidence. At the Fit scale (~5%) Leafer renders no cards because
-each is only a few pixels tall; the smoke checks the 6% overview, where
-sampled cards are visible, instead. A minimum-size or cluster representation
-at very low zoom is still to be designed.
+git-ignored evidence. At the Fit scale (~5%) each card is only a few pixels
+tall; the smoke checks the 6% overview instead. A minimum-size or cluster
+representation at very low zoom is still to be designed.
 
 ## The test levels
 
-| Level       | Where                                                                                                                                           | What it proves                                                           |
-| ----------- | ----------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------ |
-| Unit        | `leafer/camera.test.ts`, `leafer/nsh-platform.test.ts`, `flow/grid.test.ts`, `flow/data.test.ts`, `flow/database-path.test.ts`, `store.test.ts` | Pure logic, the canvas adapter, path/data invariants and store actions.  |
-| Native      | `native.test.ts`, Rust tests in `db.rs`, `search.rs`, `viewport.rs`                                                                             | SeaORM schema/persistence, FTS5/RTree plans, commands, history and undo. |
-| Integration | `leafer/editor.test.ts`, `leafer/culling.test.ts`, `flow/scene.test.ts`                                                                         | Leafer's real editor and the viewport-driven card/edge reconciliation.   |
-| End-to-end  | `App.test.tsx`                                                                                                                                  | The mounted app: text, presses, drags, keyboard.                         |
+| Level      | Where                                                                                                                                                                                                                                                                                                         | What it proves                                                                                                      |
+| ---------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------- |
+| Unit       | `flow/camera.test.ts`, `flow/scene.test.ts`, `flow/selection.test.ts`, `flow/overlay.test.ts`, `flow/canvas-controller.test.ts`, `flow/composer-state.test.ts`, `flow/grid.test.ts`, `flow/connection.test.ts`, `flow/data.test.ts`, `flow/database-path.test.ts`, `flow/node-kinds.test.ts`, `store.test.ts` | Pure logic, the scene model, gesture routing, camera math, placement, drafts, grid coverage and connector geometry. |
+| Native     | `native.test.ts`, `flow/node-session.native.test.ts`, Rust tests in `db.rs`, `search.rs`, `viewport.rs`                                                                                                                                                                                                       | SeaORM schema/persistence, assets, FTS5/RTree plans, commands, history, undo, runs and the composer session.        |
+| End-to-end | `App.test.tsx`                                                                                                                                                                                                                                                                                                | The mounted app: text, presses, drags, keyboard, composer and inputs.                                               |
 
-Prefer the lowest level that can catch the bug. The adapter tests construct a
-`NshCanvasSurface` directly and inspect recorded ops or replay effects; the
-editor tests build a Leafer `App` with the adapter and drive
-`interaction.pointerDown/Move/Up`; only behaviour that needs the real view
-tree belongs in `App.test.tsx`.
+Prefer the lowest level that can catch the bug. The scene and controller unit
+tests construct a `FlowScene` and `CanvasCamera` and drive the controller's
+pointer methods directly; only behaviour that needs the real view tree belongs
+in `App.test.tsx`.
 
 ## Writing an app test
 
 ```tsx
-import { expect, open, test } from "nsh/test";
+import { open, test } from "nsh/test";
 
 test("clears the selection with Escape", async () => {
   const app = await open("./App.tsx");
-  await app.waitUntil(() => app.texts().some((text) => text.includes("card selected")));
+  await app.waitUntil(() => app.texts().some((text) => /^\d+%$/.test(text)));
+
+  // A new node is selected and its composer is open; the first Escape closes
+  // the composer, the second clears the selection.
+  await app.keyboard.press("n");
+  await app.waitUntil(() => app.shows("id:node-composer"));
+  await app.keyboard.press("escape");
+  await app.waitUntil(() => app.texts().some((text) => text.includes("Esc to clear")));
 
   await app.keyboard.press("escape");
   await app.waitUntil(() => !app.texts().some((text) => text.includes("card selected")));
@@ -84,25 +91,35 @@ test("clears the selection with Escape", async () => {
 - `app.drag(target, { x, y })` moves by a delta from the element's center;
   `app.press`, `app.hover`, `app.keyboard.press`, `app.texts()` and
   `app.screenshot()` cover the rest.
-- Wait with `app.waitUntil(predicate)`, never `setTimeout`. Canvas rendering
-  and the editor update on later frames, so a state that follows a drag needs
-  a wait.
+- Wait with `app.waitUntil(predicate)`, never `setTimeout`. The viewport
+  refresh and preview reads land on later turns, so a state that follows a
+  drag needs a wait.
 - `app.waitUntil` has a timeout; a predicate that never becomes true fails with
   the wait, not a hang.
 
 ## Testing the canvas
 
-The canvas is a single NSH element (`testID="flow-canvas"`); its contents are
-not in the view tree. To test scene behaviour, either:
+Cards and the composer are ordinary views, so their text appears in
+`app.texts()` and their controls are found by `testID` or label. Pointer
+interaction still goes through the canvas: `app.drag("id:flow-canvas", delta)`
+moves the pointer, and the page's overlays (selection count, zoom percentage,
+tool state) reflect the scene.
 
-- test the scene and camera directly (`FlowScene`, `CanvasCamera`), or
-- drive Leafer's editor through the adapter in an integration test, or
-- assert on the app's overlays — selection count, zoom percentage, tool state —
-  which reflect the canvas state in the native view tree.
+For behaviour below the pointer, test the pieces directly:
 
-The zoom label is the easiest observable: it is `—` before the first fit and
-`<n>%` afterwards. `App.test.tsx` parses it to compute world-to-screen deltas
-for drags.
+- `FlowScene` in `flow/scene.test.ts`: viewport reconciliation, pinning,
+  change sets, overrides, selection and world-space hit tests.
+- `CanvasController` in `flow/canvas-controller.test.ts`: press/drag/resize/
+  marquee/pan/connect against a real scene and camera with a recorded host.
+- `CanvasCamera` in `flow/camera.test.ts`: pan, zoom-around and fit invariants.
+- `composerAnchor`/`inlineAnchor` in `flow/overlay.test.ts`: placement and
+  clamping.
+- `ComposerState` in `flow/composer-state.test.ts`: drafts, reloads and saves.
+
+`App.test.tsx` drives the real path end to end: box selection, pan, zoom,
+search reveal, opening the native composer, running a node, editing the body,
+removing an input and switching nodes. The zoom label is the easiest
+observable: it is `—` before the first fit and `<n>%` afterwards.
 
 ## Rules
 
@@ -110,40 +127,51 @@ for drags.
   selection with Escape"), not which function runs.
 - App tests use `app.waitUntil`, never a sleep; no retries, no shared mutable
   state between tests. A real timer is allowed only where the behavior is
-  timer-based: `editor.test.ts` has one documented 200 ms double-click spacing
-  timer, and a new one needs the same comment and reviewer approval.
-- Destroy Leafer `App`s/`Leafer`s you create (`app.destroy()`), or the next
-  test in the file may inherit timers.
+  timer-based, with a comment and reviewer approval.
 - Assert on outcomes (text, selection, position), not internal call counts,
-  unless you are testing the adapter itself.
+  unless you are testing the controller or scene directly.
 - A bug fix comes with a test that fails before it and passes after.
 - Do not add `any` to make a test compile; build a typed stand-in and cast
-  through `unknown` where a full DOM canvas cannot exist.
+  through `unknown` where a full platform object cannot exist.
 
 ## Coverage expectations
 
-- `leafer/nsh-platform.test.ts` covers the `leafer/platform/` modules: every
-  newly supported canvas feature gets a test that records a call, replays it,
-  and asserts the effect (patterns, gradients, snapshots, hit tests).
-- `leafer/svg.test.ts` covers the rasterized-layer serializer: masks, erasers,
-  grayscale and blend isolation, pattern gaps and repeat modes, patterned
-  strokes and text, transforms (paths, conic paints, shadows), text spacing and
-  RTL anchors, shadows, negative and fractional rectangles, `clearRect` and
-  snapshot placement. Rendering those layers
-  needs the NSH build in [nsh.md](nsh.md); the tests assert the generated SVG
-  and the replay's `drawImage` call without needing it.
-- `leafer/camera.ts`: pan/zoom/fit invariants (the point under the cursor
-  stays put, content stays centered).
+- `flow/scene.ts`: a snapshot prunes and pins, change sets apply, overrides
+  win until committed, selection ignores unknown ids, ports/edges hit test in
+  world coordinates, and previews only include visible cards.
+- `flow/camera.ts`: pan/zoom/fit invariants (the point under the cursor stays
+  put, content stays centered), clamping and the view signal.
+- `flow/selection.ts`: handle placement and reach, normalized rectangles,
+  touching-edge intersections, and resizing that keeps the opposite edge fixed
+  and never goes below the minimum.
+- `flow/overlay.ts`: placement under/above/beside the card, stage clamping and
+  camera pan/zoom.
+- `flow/canvas-controller.ts`: card press and drag commit, cancel, Shift
+  toggle, marquee, hand pan, resize, new connections and reconnects.
+- `flow/composer-state.ts`: draft loading, same-node sync, reset, count
+  clamping and saving settings/body.
+- `flow/grid.ts`: the tile count covers the stage at every wrapped camera
+  offset, including a 4K width, and an invalid tile side falls back to one.
 - `pages/FlowPage.tsx`: through `App.test.tsx` for interaction flows, not
-  through unit tests of its closures.
+  through unit tests of its closures. Composer selection, runs, input removal,
+  body edits and switching nodes are app tests.
+- `components/NodeComposer.tsx`: through `App.test.tsx`, where its controls
+  must re-read session signals inside JSX (components run once).
 - `components/SearchPalette.tsx`: through `App.test.tsx` — opening by shortcut
   and button, typing, switching filters, choosing a result by click or Enter,
   Escape and the selection that follows a hit. Kind filtering itself is
   asserted through the Rust search tests; the palette's arrow bindings are
   wired to the visible active row but are not asserted through the native view
   tree. The real-host 100k smoke exercises the camera reveal.
+- `flow/node-kinds.ts` and `flow/connection.ts`: direct unit tests for settings
+  parsing/clamping, connection rules, port points, sampled curves and hit
+  distances.
+- `flow/node-session.ts` and `flow/execution.ts`: `node-session.native.test.ts`
+  drives the real Rust document through a mock picker and the mock providers:
+  runs, stale propagation, manual text, inline editing and uploads. Provider
+  output goes through the immutable batch/asset path, not a fake.
 - `store.ts`: readers and actions directly in `store.test.ts`, and their page
   wiring through `App.test.tsx`; the signals stay private by design.
 - `lint/boundaries.js`: `lint/boundaries.test.js` covers layer classification,
   bare-directory targets, upward reports and the fail-closed `unknown` report.
-  Extend it when adding a directory, facade or layer.
+  Extend it when adding a directory or layer.

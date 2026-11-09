@@ -1,8 +1,10 @@
 # Architecture
 
-Flow is an NSH app: NSH owns the window, the view tree, input, theming and
-packaging. Leafer owns one thing — the canvas scene — and `leafer/` adapts it
-to NSH's recording `Canvas`. Everything else composes those two.
+Flow is an NSH app. NSH owns the window, the view tree, input, theming and
+packaging; the canvas is a native view tree, so cards, connectors, selection
+and the composer are ordinary NSH views rather than a drawn surface. A Rust
+document core supplies only the nodes and edges the viewport needs. Everything
+else composes those three.
 
 App paths in this document are relative to `src/`, the NSH application root:
 `src/App.tsx`, `src/nsh.json`, `src/theme.json` and `src/assets/` live
@@ -13,10 +15,9 @@ together, while the repository root holds `package.json`, `vite.config.ts`,
 
 ```
 App.tsx                     app shell: title bar + page, nothing else
- ├─ pages/FlowPage.tsx      the workspace: camera, editor, input, overlays
- │   ├─ components/*        presentational controls (props only)
- │   ├─ flow/*              the scene: data, Leafer shapes, grid backdrop
- │   ├─ leafer/*            the canvas host, adapter and camera
+ ├─ pages/FlowPage.tsx      the workspace: document session, camera, overlays
+ │   ├─ components/*        presentational views and the canvas surface
+ │   ├─ flow/*              node kinds, execution, scene, camera, gestures
  │   └─ store.ts            shared state behind readers and actions
  ├─ components/TitleBar.tsx window chrome (props only)
  ├─ store.ts                pinned state
@@ -40,12 +41,19 @@ are.
 `src/native/` is a Rust crate in NSH's mixed-app mode. It owns the document
 database, commands and undo, full-text search, viewport queries and asset
 metadata. TSX imports its generated API from `@flow/native`; it must not open
-SQLite or write SQL. Leafer stays in TSX and continues to own the scene,
-editor, camera and input.
+SQLite or write SQL. The canvas stays in TSX and owns only the scene model and
+its views.
 
 - `src/nsh.json` declares `"rust": "native"`; `App.tsx` remains the app entry.
 - The database is SQLite with WAL, FTS5 (trigram tokenizer) and an RTree
   viewport index. Node, FTS and RTree rows change in one transaction.
+- Schema version 2 is the node editor's breaking reset: the migration drops
+  the version 1 document and recreates the tables (there is no data
+  migration). The core also stores immutable result batches/items, ordered
+  node inputs and content-addressed asset bytes under `<database dir>/assets/`.
+  Its commands cover settings, manual text, connect/reconnect, input changes,
+  runs and crash recovery. [The node editor contract](node-editor.md) records
+  the data model and semantics.
 - Ordinary tables are SeaORM entities; SeaQuery builds dynamic filters and
   joins. Only the FTS5/RTree virtual-table adapter (`schema.rs`/`search.rs`)
   contains static SQLite SQL.
@@ -62,9 +70,8 @@ editor, camera and input.
   one environment variable. An empty document is seeded from the demo flow.
 - `FlowScene` is driven from `scene(rect, margin)` snapshots. Drag/resize,
   add, delete and connect each send one command; undo/redo return change sets.
-  The editor disables rotation, skew and flip because a node is stored as an
-  axis-aligned box; gesture commits read that logical box, never transformed
-  bounds.
+  A card is stored as an axis-aligned world rectangle, so gestures commit a
+  rectangle, never transformed bounds.
 - Viewport reads are throttled to 80 ms and capped at low zoom (300/800/2000
   cards); selected cards stay in the scene when they leave the viewport.
   Nodes inside `rect` sort before margin-only nodes so prefetching cannot
@@ -80,7 +87,37 @@ editor, camera and input.
 - The decision and the phased migration are recorded in
   [ADR 0002](adr/0002-rust-document-core.md),
   [ADR 0003](adr/0003-orm-seaorm.md) and
-  [the Rust core plan](plans/rust-core.md).
+  [the Rust core plan](plans/rust-core.md). The canvas itself is
+  [ADR 0004](adr/0004-native-view-canvas.md).
+
+## Node editor
+
+M1 adds one generic executable node shape: one input port, one output port,
+and many-to-many directed connections carrying typed text and image items. A
+TSX kind registry (`flow/node-kinds.ts`) declares each kind's ports, defaults
+and settings schema; `flow/execution.ts` owns its provider. Rust stores only
+`kind` and opaque `settings_json`.
+
+- Connecting an edge snapshots all current items of the source's batch into
+  the target's inputs. Reconnecting rebuilds that snapshot, and deleting an
+  edge removes exactly the inputs it contributed; a local upload can be
+  deleted without deleting its edge.
+- Result batches and their items are immutable. A rerun or manual text edit
+  appends a batch and moves the node's output; old batches remain for
+  downstream snapshots. Provider runs are not undo history, while connect,
+  delete, input and manual-text edits are.
+- Statuses are `idle`, `stale`, `running`, `done`, `failed`, `cancelled` and
+  `interrupted`. A changed upstream marks an existing downstream result stale;
+  startup turns abandoned runs into `interrupted`.
+- The native canvas draws cards, ports, connectors and the connection preview.
+  Selecting a card opens `NodeComposer`, a native panel anchored under the
+  card (above it, then beside it, when the viewport leaves no room) and
+  clamped to the stage; it is built from the same controls as the rest of the
+  app. The inline text editor is a screen-space native overlay. The image
+  node's body shows a thumbnail grid.
+- Mock text and mock image providers exercise the run lifecycle and the
+  provider seam. See [the node editor contract](node-editor.md) for the full
+  M1 rules and non-goals.
 
 ## State
 
@@ -90,127 +127,78 @@ reader where the value is displayed; NSH tracks that read and updates only
 the binding. Nothing writes another page's local state.
 
 State that belongs to one mounted page stays there: `FlowPage` owns the
-`CanvasCamera` and the Leafer `IEditorBase`, because they live and die with
-the canvas. Values the chrome and overlays share (tool, zoom label,
-selection count, window pin) move to the store. `App` binds the store's
-`isPinned`/`togglePinned` into `TitleBar`, so the component stays reusable.
+`FlowScene`, the `CanvasCamera`, the `CanvasController`, the stage size and the
+document session, because they live and die with the workspace. Values the
+chrome and overlays share (tool, zoom label, selection count, window pin) move
+to the store. `App` binds the store's `isPinned`/`togglePinned` into
+`TitleBar`, so the component stays reusable.
 
-## The canvas host
+## The canvas
 
-`LeaferView` is an NSH `<Canvas>`. On the first `draw` it builds a Leafer
-`App` over an `NshCanvasSurface`; every frame after that replays Leafer's
-drawing onto the NSH context. `App` stacks three layers:
+`FlowCanvas` is one native view with `testID="flow-canvas"`. It reads pointer
+events and renders four kinds of children:
 
-- `tree` — the scene built by `flow/scene.ts` (cards, images, edges),
-- `sky` — Leafer's editor (selection box and handles),
-- the app itself — composites the two.
+- **Grid** — a tiled dot-grid background in screen space, regenerated with the
+  current `grid-dot` token when the appearance changes.
+- **World** — a zero-size view translated and scaled by the camera
+  (`transform: translate(x, y) scale(s)`, origin `0 0`). Its children are in
+  world coordinates: a `FlowEdge` per connector and a `FlowCard` per visible
+  node. The camera's transform is the only mapping from world to screen; the
+  scene never caches screen geometry on a card.
+- **Selection overlay** — screen-space borders, eight resize handles and the
+  marquee box, derived from the scene and the camera each time the camera,
+  selection or drag changes. It does not take pointer events.
+- **Interaction view** — a transparent, full-size view that owns the cursor
+  and dispatches presses, moves and touches to the `CanvasController`.
 
-The editor gets its own layer so its handles never take part in scene hit
-testing and box selection can start on empty canvas.
+`FlowCard` positions itself from the node's world rectangle and renders title,
+status, body text and the input/output ports. `FlowEdge` samples the connector
+cubic (`flow/connection.ts`) into straight rotated line views and draws an
+arrowhead at the input end. Both are presentational: props are accessors, and
+the page passes scene signals to them.
 
-### The platform adapter
+The scene model (`flow/scene.ts`) is headless: it holds the visible nodes and
+edges, the selection, transient drag geometry (`overrides`), previews and the
+connection preview, and answers world-space hit questions (`nodeAt`,
+`portAt`, `edgeAt`). `CanvasController` turns pointer events into commands:
+select/toggle, drag, resize from a handle, marquee, pan with the hand tool,
+and the port/edge gestures. `CanvasCamera` stores logical `x`, `y` and
+`scale`; `panBy`, `zoomAround` and `fit` rebuild the view from those values.
 
-`leafer/nsh-platform.ts` makes Leafer believe it runs in a browser. The file
-is the adapter's public facade; `leafer/platform/` holds the implementation,
-split by responsibility:
-
-| Module                  | Responsibility                                              |
-| ----------------------- | ----------------------------------------------------------- |
-| `geometry.ts`           | points, matrices, clamping                                  |
-| `path.ts`               | path recording and curve flattening                         |
-| `hit-test.ts`           | winding/stroke tests and recorded hit regions               |
-| `paint.ts`              | gradient and pattern records                                |
-| `pattern.ts`            | a pattern's tile size, inner image size and repeat mode     |
-| `snapshot.ts`           | offscreen canvas snapshots                                  |
-| `raster.ts`             | when a layer must be rasterized instead of replayed         |
-| `replay.ts`             | replaying recorded operations onto NSH's context            |
-| `svg/`                  | a layer as a self-contained SVG: paths, text, paints, masks |
-| `recording-context.ts`  | the Canvas 2D context Leafer draws through                  |
-| `canvas.ts`, `op.ts`    | context/gradient types and recorded-operation shape         |
-| `measure.ts`            | text measurement through the frame's native context         |
-| `surface.ts`            | the canvas element Leafer creates offscreen and on the view |
-| `host.ts`               | Platform/Creator installation, frame host and pointer data  |
-| `frame.ts`              | Leafer's hidden per-frame render-mark reset                 |
-| `image.ts`, `values.ts` | image URLs/density and narrowing helpers                    |
-
-- **Recording context.** `NshCanvasSurface` is a canvas whose 2D context
-  records every call (`[0, property, value]` / `[1, method, ...args]`).
-  `replayOps` replays them onto the real NSH context, translating the things
-  NSH's canvas lacks: gradients, patterns (clipped and tiled by hand), and
-  offscreen canvases (snapshotted and replayed as vectors when the layer
-  allows it).
-- **Rasterized layers.** An offscreen layer whose own compositing must stay
-  inside it is serialized to a self-contained SVG (`svg/`) and drawn as one
-  image: alpha masks and erasers, blend copies, group opacity, grayscale
-  masks, patterned strokes and text, and partial clears. NSH's image loader
-  rasterizes the document, so the layer's composite operations apply to the
-  layer alone, then the finished layer is composited once. Plain layers stay
-  vector; a layer drawn with a composite operation of its own is rasterized
-  and composited once. This path needs the NSH build described in
-  [nsh.md](nsh.md).
-- **Hit testing.** Hit canvases record path geometry in JS instead of pixels;
-  `isPointInPath`, `isPointInStroke` and `getImageData` answer from that
-  geometry (polygons, stroke distance, winding).
-- **Platform hooks.** `Platform.origin` creates canvases, loads images and
-  content; `Platform.requestRender` schedules an NSH frame; `Creator` builds
-  Leafer's canvas and interaction without a DOM; `devicePixelRatio` is 1
-  because NSH draws in points.
-- **Assets.** `loadImage` divides pixel sizes by the `@2x`/`@3x` in an asset's
-  file name (or by the screen ratio for remote images), so the scene works in
-  points like the rest of the app.
-
-The recording is deliberately a subset: unsupported calls are skipped, never
-crashed. Anything new that Leafer starts calling has to be added to the
-matching `platform/` module, with a test in `leafer/nsh-platform.test.ts`.
-
-### Frames
-
-Leafer marks itself dirty and calls `Platform.requestRender`; the view
-coalesces that into one `requestAnimationFrame`. NSH then calls `draw`, which
-begins a fresh recording, draws the backdrop, asks Leafer for a full frame,
-replays it, and clears Leafer's per-frame render marks. Clearing the marks is
-what lets the next change ask for another frame — otherwise Leafer believes
-its frame is still pending. There is no browser loop: every NSH frame is a
-full frame, and Leafer's culling keeps off-screen work near zero.
-
-## Camera and scene
-
-The scene is built once in world coordinates. `CanvasCamera` wraps the group
-that contains it and exposes `x`, `y`, `scale`, `toWorld`, `toScreen`,
-`panBy`, `zoomAround` and `fit`. Moving the camera moves that group; Leafer
-culls what falls outside the canvas.
-
-The dot grid is not part of the scene: `flow/grid.ts` draws it in screen
-space before the replay, using the camera transform and spacing that adapts
-to zoom (dots stay 36–72 points apart). The scene itself uses theme tokens
-through `token()`. Leafer nodes keep the values they were built with, so
-`FlowPage` tracks `colorScheme()` and calls the scene's `recolor()` when the
-system appearance changes; that repaint also asks Leafer for a frame, which
-redraws the grid with the new tokens.
-
-Adding a scene element means extending `flow/data.ts` and `flow/scene.ts`, not
-the adapter. Crop or move things in world coordinates; the camera takes care
-of the rest.
+The dot grid and the cards follow the camera, but the composer does not: its
+height is measured by layout and its position is computed in screen points
+from the selected card's current screen rectangle (`flow/overlay.ts`), so it
+stays readable at every zoom and never leaves the stage. The inline editor is
+anchored the same way.
 
 ## Input
 
-`LeaferView` feeds NSH's press/mouse/touch events into Leafer's interaction
-with `pointerData()`:
+`FlowCanvas` feeds NSH's press, mouse and touch events into
+`CanvasController`:
 
-- **Select** — presses go to Leafer (selection, drag, resize, Shift multi-
-  select, box select on empty canvas). Cursor state mirrors what Leafer
-  would show (`grab`, `move`, resize handles).
-- **Hand** — presses pan the camera here; Leafer never receives the press, so
-  no accidental selection happens.
+- **Select** — a press selects a card (Shift toggles), starts a drag when the
+  press lands on a selected card, starts a resize when it lands on a selection
+  handle, and starts the connector gestures at a port. A press on empty canvas
+  clears the selection and starts the marquee. A double-click on a text card
+  opens its inline editor.
+- **Hand** — presses pan the camera; nothing is selected.
 - **Touch** — one finger behaves like the current tool; two fingers pinch-zoom
   around their center and pan with it.
-- **Touch vs mouse** — platforms with both send mouse events alongside touch
-  events; the view ignores those until shortly after the touches end, and
-  carries modifier keys from whichever event has them.
+- **Hover** — mouse movement updates the hovered card and a cursor that
+  reflects the tool, a handle or a port.
 
-Keyboard commands live on the page (`keymap.bind`): `mod+=`/`mod+-`/`mod+0`
-zoom and fit, `v`/`h` switch tools, arrows pan, Escape cancels the editor.
-Each command exists once.
+Keyboard commands are declared in `flow/bindings.ts` (`bindFlowKeys`) and
+bound once by the page: `mod+=`/`mod+-`/`mod+0`
+zoom and fit, `v`/`h` switch tools, `n`/`i` add a text or image node, `l`
+connects two selected cards, `mod+z`/`mod+shift+z` undo and redo,
+Delete/Backspace delete the selected edge or cards, arrows pan, `mod+k` opens
+search, and Escape dismisses the top layer (search, inline editor, selected
+edge, composer, then the selection). Each command exists once.
+
+Pointer gestures above the canvas: dragging from an output port previews and
+creates a connection; dragging either port of a selected edge moves that end
+(source or target); a press on a connector selects it; double-clicking a text
+card opens its inline editor.
 
 ## Window chrome
 
@@ -229,19 +217,24 @@ code runs in the headless test engine.
 `src/nsh.json` declares `capabilities.network.hosts: []`: the app reads its
 own bundled assets (`asset:` is always allowed) but may reach no remote host.
 Its `capabilities.process.env` allow-list contains only `FLOW_DB_PATH`, the
-development and smoke-test database override. NSH denies every capability not
-listed, so a new integration that fetches or loads a remote image must add that
-host deliberately. Adding the `capabilities` key is what changes the app from
+development and smoke-test database override, and `capabilities.picker` is
+granted for local image uploads. NSH denies every capability not listed, so a
+new integration that fetches or loads a remote image must add that host
+deliberately. Adding the `capabilities` key is what changes the app from
 unrestricted to allow-list; keep it in place.
 
 ## Extending
 
 - **A new page** — one file in `pages/`, mounted by `App.tsx` (or a nav stack);
   share state through `store.ts`, never through another page.
+- **A new node kind** — add it to `flow/node-kinds.ts` (ports, size, settings
+  parsing, accent), give it a provider in `flow/execution.ts`, and extend
+  `components/FlowCard.tsx` if the generic text/image body is not enough.
+  Rust needs no change: `kind` and `settings_json` are opaque.
 - **A new control** — a component in `components/` that takes values and
   callbacks as props; the page binds them to the store.
-- **A new canvas feature** — first check whether Leafer supports it; then map
-  its platform needs into the matching `leafer/platform/` module (the facade
-  stays `leafer/nsh-platform.ts`) and add a test. Keep hand-written input
-  minimal: extend the adapter and Leafer's editor instead of drawing
-  interactions by hand.
+- **A new canvas feature** — keep pure geometry in `flow/selection.ts` or
+  `flow/overlay.ts`, the model in `flow/scene.ts`, gestures in
+  `flow/canvas-controller.ts`, and the view in the matching component. Add a
+  unit test for the geometry or controller path and an `App.test.tsx` flow
+  when the user can reach it.

@@ -17,6 +17,7 @@ struct ViewportRow {
     id: String,
     kind: String,
     title: String,
+    body: String,
     x: f64,
     y: f64,
     width: f64,
@@ -24,6 +25,9 @@ struct ViewportRow {
     z: f64,
     rev: i64,
     data_json: String,
+    settings_json: String,
+    status: String,
+    output_batch_id: Option<String>,
 }
 
 pub fn viewport(
@@ -43,6 +47,7 @@ pub fn viewport(
                     id: row.id,
                     kind: row.kind,
                     title: row.title,
+                    body: row.body,
                     x: row.x,
                     y: row.y,
                     width: row.width,
@@ -50,6 +55,9 @@ pub fn viewport(
                     z: row.z,
                     rev: row.rev as f64,
                     data_json: row.data_json,
+                    settings_json: row.settings_json,
+                    status: row.status,
+                    output_batch_id: row.output_batch_id,
                 })
                 .map_err(|error| error.to_string())
         })
@@ -96,6 +104,7 @@ pub(crate) fn viewport_statement(rect: Viewport, margin: f64) -> SelectStatement
             (nodes::Entity, nodes::Column::Id),
             (nodes::Entity, nodes::Column::Kind),
             (nodes::Entity, nodes::Column::Title),
+            (nodes::Entity, nodes::Column::Body),
             (nodes::Entity, nodes::Column::X),
             (nodes::Entity, nodes::Column::Y),
             (nodes::Entity, nodes::Column::Width),
@@ -103,6 +112,9 @@ pub(crate) fn viewport_statement(rect: Viewport, margin: f64) -> SelectStatement
             (nodes::Entity, nodes::Column::Z),
             (nodes::Entity, nodes::Column::Rev),
             (nodes::Entity, nodes::Column::DataJson),
+            (nodes::Entity, nodes::Column::SettingsJson),
+            (nodes::Entity, nodes::Column::Status),
+            (nodes::Entity, nodes::Column::OutputBatchId),
         ])
         .from(nodes_rtree::Entity)
         .cross_join(nodes::Entity)

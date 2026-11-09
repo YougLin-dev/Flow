@@ -1,7 +1,7 @@
 {
   "name": "flow",
   "private": true,
-  "description": "Flow — an infinite flow canvas built with Leafer and NSH.",
+  "description": "Flow — an infinite flow canvas built with NSH.",
   "license": "UNLICENSED",
   "type": "module",
   "scripts": {
@@ -22,12 +22,6 @@
     "test:bench": "cargo test --manifest-path src/native/Cargo.toml --release -- --ignored --nocapture",
     "test:100k": "bun scripts/smoke-100k.mjs",
     "package": "bun scripts/package.mjs"
-  },
-  "dependencies": {
-    "@leafer-in/editor": "2.3.3",
-    "@leafer-in/resize": "2.3.3",
-    "@leafer-ui/interface": "2.3.3",
-    "@leafer-ui/miniapp": "2.3.3"
   },
   "devDependencies": {
     "@crabnebula/packager": "0.11.2",

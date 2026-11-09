@@ -7,7 +7,8 @@
  *
  * The host loads test bundles before an app has registered its native module,
  * so a test file that imports `@flow/native` cannot load there. `native.test.ts`
- * runs in the headless suite instead; the other test files run one by one.
+ * and `*.native.test.ts` run in the headless suite instead; the other test
+ * files run one by one.
  */
 import { spawnSync } from "node:child_process";
 import { readdirSync } from "node:fs";
@@ -34,7 +35,9 @@ function testFiles(directory) {
 
 const extra = process.argv.slice(2);
 const files = testFiles("src")
-  .filter((file) => basename(file) !== "native.test.ts")
+  .filter(
+    (file) => basename(file) !== "native.test.ts" && !basename(file).endsWith(".native.test.ts"),
+  )
   .toSorted();
 let failed = false;
 

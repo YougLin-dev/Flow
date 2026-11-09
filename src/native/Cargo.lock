@@ -393,6 +393,7 @@ dependencies = [
  "rusqlite",
  "sea-orm-sync",
  "serde_json",
+ "sha2",
 ]
 
 [[package]]

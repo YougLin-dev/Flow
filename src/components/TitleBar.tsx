@@ -45,7 +45,7 @@ export function TitleBar(props: TitleBarProps) {
           class="ml-2 min-w-0 text-xs text-muted-foreground"
           style={{ numberOfLines: 1, textOverflow: "ellipsis" }}
         >
-          Leafer engine · NSH
+          Native canvas · NSH
         </Text>
       </View>
       {pinnable && (

@@ -25,6 +25,8 @@ pub struct NodeInput {
     pub z: f64,
     /// Node-specific properties as JSON; the core stores and returns it as-is.
     pub data_json: Option<String>,
+    /// The kind's opaque settings as JSON; defaults to `{}`.
+    pub settings_json: Option<String>,
 }
 
 /// The part of a node a viewport or change set needs.
@@ -33,6 +35,7 @@ pub struct NodeSummary {
     pub id: String,
     pub kind: String,
     pub title: String,
+    pub body: String,
     pub x: f64,
     pub y: f64,
     pub width: f64,
@@ -40,6 +43,9 @@ pub struct NodeSummary {
     pub z: f64,
     pub rev: f64,
     pub data_json: String,
+    pub settings_json: String,
+    pub status: String,
+    pub output_batch_id: Option<String>,
 }
 
 /// One connection between two nodes.
@@ -74,6 +80,143 @@ pub struct NodeBounds {
     pub y: f64,
     pub width: f64,
     pub height: f64,
+}
+
+/// One asset whose bytes Rust should store content-addressed. `id` is
+/// supplied by TSX; if the bytes already exist the existing asset wins.
+#[derive(Debug, Clone, PartialEq, JsObject)]
+pub struct AssetInput {
+    pub id: String,
+    pub kind: String,
+    pub name: String,
+    pub mime: String,
+    pub bytes: Vec<u8>,
+    pub meta_json: Option<String>,
+}
+
+/// An asset the document refers to. Bytes are read with `assetBytes`.
+#[derive(Debug, Clone, PartialEq, JsObject)]
+pub struct AssetSummary {
+    pub id: String,
+    pub hash: String,
+    pub kind: String,
+    pub name: String,
+    pub mime: String,
+    pub size: f64,
+    pub meta_json: String,
+    pub created_at: f64,
+}
+
+/// One item of a result batch, to store.
+#[derive(Debug, Clone, PartialEq, JsObject)]
+pub struct ResultItemInput {
+    pub id: String,
+    pub position: f64,
+    pub kind: String,
+    pub text: String,
+    pub asset_id: Option<String>,
+    pub meta_json: Option<String>,
+}
+
+/// One immutable result batch, to store.
+#[derive(Debug, Clone, PartialEq, JsObject)]
+pub struct ResultBatchInput {
+    pub id: String,
+    pub node_id: String,
+    /// `run` for a provider run, `manual` for a text-node edit.
+    pub trigger: String,
+    pub provider: String,
+    pub model: String,
+    pub params_json: String,
+    /// `done`, `failed`, `cancelled`, `running` or `interrupted`.
+    pub status: String,
+    pub error: Option<String>,
+}
+
+/// One item of a result batch, as read back.
+#[derive(Debug, Clone, PartialEq, JsObject)]
+pub struct ResultItemSummary {
+    pub id: String,
+    pub batch_id: String,
+    pub position: f64,
+    pub kind: String,
+    pub text: String,
+    pub asset_id: Option<String>,
+    pub meta_json: String,
+    pub asset: Option<AssetSummary>,
+}
+
+/// A result batch with its items, as read back.
+#[derive(Debug, Clone, PartialEq, JsObject)]
+pub struct ResultBatchSummary {
+    pub id: String,
+    pub node_id: String,
+    pub trigger: String,
+    pub provider: String,
+    pub model: String,
+    pub params_json: String,
+    pub status: String,
+    pub error: String,
+    pub created_at: f64,
+    pub items: Vec<ResultItemSummary>,
+}
+
+/// One input item of a node, to add.
+#[derive(Debug, Clone, PartialEq, JsObject)]
+pub struct InputItemInput {
+    pub id: String,
+    pub node_id: String,
+    pub position: f64,
+    pub kind: String,
+    /// `edge` or `local`.
+    pub origin: String,
+    pub edge_id: Option<String>,
+    pub item_id: Option<String>,
+    pub asset_id: Option<String>,
+    pub text: String,
+    pub meta_json: Option<String>,
+}
+
+/// One input item of a node, as read back. An edge item carries the resolved
+/// result item; a local image carries its asset.
+#[derive(Debug, Clone, PartialEq, JsObject)]
+pub struct InputItemSummary {
+    pub id: String,
+    pub node_id: String,
+    pub position: f64,
+    pub kind: String,
+    pub origin: String,
+    pub edge_id: Option<String>,
+    pub item_id: Option<String>,
+    pub asset_id: Option<String>,
+    pub text: String,
+    pub meta_json: String,
+    /// The upstream node that contributed this item, for grouping.
+    pub source_node_id: Option<String>,
+    pub source_title: Option<String>,
+    pub item: Option<ResultItemSummary>,
+    pub asset: Option<AssetSummary>,
+}
+
+/// Everything a node's composer needs, in one read.
+#[derive(Debug, Clone, PartialEq, JsObject)]
+pub struct NodeDetail {
+    pub node: NodeSummary,
+    /// The node's current output, when it has one (failed and cancelled runs
+    /// keep the previous output).
+    pub batch: Option<ResultBatchSummary>,
+    /// The newest batch of any status, for the composer's error/status line.
+    pub latest_batch: Option<ResultBatchSummary>,
+    pub inputs: Vec<InputItemSummary>,
+}
+
+/// The readable preview of a node's current batch: the first few items and
+/// the total count, for cards rather than the composer.
+#[derive(Debug, Clone, PartialEq, JsObject)]
+pub struct NodePreview {
+    pub node_id: String,
+    pub item_count: f64,
+    pub items: Vec<ResultItemSummary>,
 }
 
 /// Everything the canvas needs for one viewport.

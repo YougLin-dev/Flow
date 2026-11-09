@@ -15,6 +15,9 @@ pub struct NodeRow {
     pub height: f64,
     pub z: f64,
     pub data_json: String,
+    pub settings_json: String,
+    pub status: String,
+    pub output_batch_id: Option<String>,
     pub rev: i64,
     pub created_at: i64,
     pub updated_at: i64,
@@ -26,6 +29,7 @@ impl NodeRow {
             id: self.id.clone(),
             kind: self.kind.clone(),
             title: self.title.clone(),
+            body: self.body.clone(),
             x: self.x,
             y: self.y,
             width: self.width,
@@ -33,6 +37,9 @@ impl NodeRow {
             z: self.z,
             rev: self.rev as f64,
             data_json: self.data_json.clone(),
+            settings_json: self.settings_json.clone(),
+            status: self.status.clone(),
+            output_batch_id: self.output_batch_id.clone(),
         }
     }
 }
@@ -63,10 +70,27 @@ impl EdgeRow {
     }
 }
 
+/// A complete input row, kept so deleting an edge or node can restore it.
+#[derive(Debug, Clone)]
+pub struct InputRow {
+    pub id: String,
+    pub node_id: String,
+    pub position: i32,
+    pub kind: String,
+    pub origin: String,
+    pub edge_id: Option<String>,
+    pub item_id: Option<String>,
+    pub asset_id: Option<String>,
+    pub text: String,
+    pub meta_json: String,
+    pub created_at: i64,
+}
+
 /// One reversible database operation.
 #[derive(Debug, Clone)]
 pub enum HistoryOp {
     Insert(NodeRow),
+    Replace(NodeRow),
     Delete {
         id: String,
     },
@@ -88,9 +112,24 @@ pub enum HistoryOp {
         body: String,
         tags: Vec<String>,
     },
+    /// Restores just a node's kind settings. Output, body and status belong to
+    /// runs (which are not history) and must survive the undo of an edit.
+    Settings {
+        id: String,
+        settings_json: String,
+    },
     InsertEdge(EdgeRow),
+    ReplaceEdge(EdgeRow),
     DeleteEdge {
         id: String,
+    },
+    InsertInput(InputRow),
+    DeleteInput {
+        id: String,
+    },
+    InputOrder {
+        node_id: String,
+        order: Vec<(String, i32)>,
     },
 }
 

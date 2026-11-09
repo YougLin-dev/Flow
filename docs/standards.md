@@ -21,10 +21,11 @@ not enforcement.
 ## 1. Purpose, scope and normative language
 
 This standard defines how Flow is extended without eroding its architecture.
-Flow is an NSH TSX application whose only canvas is a Leafer scene. Its
-correctness depends on three things a generic style guide cannot protect:
-the one-way module graph, NSH's recording canvas and its once-run components,
-and Leafer's ownership of the retained scene and editor.
+Flow is an NSH TSX application whose canvas is a native view tree, backed by a
+Rust document core. Its correctness depends on three things a generic style
+guide cannot protect: the one-way module graph, NSH's once-run components and
+native views, and the split between the headless scene model and the views
+that render it.
 
 **Scope.** Every file under `src/` (the NSH app root), plus repository tooling:
 `vite.config.ts`, both tsconfigs, `lint/boundaries.js`, `lint/boundaries.test.js`,
@@ -52,8 +53,9 @@ rules those documents explain and resolves their conflicts.
    re-render and no virtual DOM.
 4. Derive values; never mirror them. An effect that writes the signal it reads
    is a bug.
-5. Leafer owns the retained scene, selection, dragging, resizing and culling.
-   The platform adapter owns everything NSH-specific; app code owns neither.
+5. The canvas is the view tree. `FlowScene` owns the visible model,
+   `CanvasController` owns pointer gestures, and components render the scene;
+   no second retained scene or drawing surface exists.
 6. Types are proofs at boundaries. `any`, `as` narrowing and `!` replace proof
    with belief and are not allowed in app code.
 7. Semantic design tokens and programmatic accessibility are correctness
@@ -78,16 +80,16 @@ root `.nsh/out` MUST NOT be edited or committed. Asset and theme paths in
 `boundaries/no-upward-import` in `lint/boundaries.js` enforces this table for
 relative imports. Tests are exempt because they may reach into any layer.
 
-| Layer        | Path                                                  | MAY import                                           |
-| ------------ | ----------------------------------------------------- | ---------------------------------------------------- |
-| Shell        | `src/App.tsx`                                         | every layer                                          |
-| Page         | `src/pages/**`                                        | pages, components, store, types, foundations, assets |
-| Component    | `src/components/**`                                   | components, types, foundations, assets               |
-| Store        | `src/store.ts`                                        | store, types, foundations, assets                    |
-| Types        | `src/tool.ts`                                         | types only                                           |
-| Foundation   | `src/flow/`, `src/leafer/`, `src/lib/`, `src/native/` | foundations, types, assets                           |
-| Asset        | `src/assets/**`                                       | nothing                                              |
-| Unclassified | any other `src/` module                               | nothing until classified                             |
+| Layer        | Path                                   | MAY import                                           |
+| ------------ | -------------------------------------- | ---------------------------------------------------- |
+| Shell        | `src/App.tsx`                          | every layer                                          |
+| Page         | `src/pages/**`                         | pages, components, store, types, foundations, assets |
+| Component    | `src/components/**`                    | components, types, foundations, assets               |
+| Store        | `src/store.ts`                         | store, types, foundations, assets                    |
+| Types        | `src/tool.ts`                          | types only                                           |
+| Foundation   | `src/flow/`, `src/lib/`, `src/native/` | foundations, types, assets                           |
+| Asset        | `src/assets/**`                        | nothing                                              |
+| Unclassified | any other `src/` module                | nothing until classified                             |
 
 Components, the store and foundations MUST NOT import a page or `src/App.tsx`.
 Foundations MUST NOT import the store. Cycles are forbidden. A page MAY import
@@ -101,9 +103,9 @@ Review)
 
 `src/native/` is a Rust foundation, not a second app layer. TSX imports only
 its generated `@flow/native` surface; Rust code owns SQLite, FTS5, RTree, undo
-history and asset metadata, and MUST NOT import TSX or Leafer. No TSX module
-may open SQLite or write SQL. Database calls cross the boundary in batches, not
-per node or per frame. (Review)
+history and asset metadata, and MUST NOT import TSX or the canvas. No TSX
+module may open SQLite or write SQL. Database calls cross the boundary in
+batches, not per node or per frame. (Review)
 
 Ordinary database work uses SeaORM entities and SeaQuery in `src/native/`;
 handwritten SQL is limited to the FTS5/RTree virtual-table adapter and
@@ -112,21 +114,20 @@ a second database driver or ORM. (Review)
 
 ### 3.3 Facades and internals
 
-`src/leafer/nsh-platform.ts` is the public facade over `src/leafer/platform/`.
-Consumers import the facade, never a `platform/*` module; the platform modules
-import each other directly. The same facade pattern applies only when a
-directory has internal modules that must stay replaceable; it is not required
-for `flow/` or `components/`. (Review; no lint rule bans deep platform imports
-today.)
+A directory that grows internal modules with a stable public surface SHOULD
+keep one facade module beside it; consumers import the facade, while the
+internal modules import each other directly. The rule exists to keep a
+replaceable seam and an acyclic graph, not to add indirection everywhere: a
+small directory such as `flow/` or `components/` is imported module by module.
+(Review; no lint rule bans deep imports today.)
 
 ### 3.4 Import safety and ownership
 
 A module MUST be import-safe: top-level code may declare types, constants and
 pure functions only. The only permitted import-time effects are `mount(App)` in
-`src/App.tsx`, `installWindowChrome()` called exactly once by `src/App.tsx`,
-and the guarded, idempotent `installNshPlatform()` on the canvas host. Timers,
-frames, listeners, key bindings, editor listeners and subscriptions MUST be
-created by the component, page or store action that owns them. (Review)
+`src/App.tsx` and `installWindowChrome()` called exactly once by `src/App.tsx`.
+Timers, frames, listeners, key bindings and subscriptions MUST be created by
+the component, page or store action that owns them. (Review)
 
 ## 4. Module and public-API design
 
@@ -146,9 +147,9 @@ created by the component, page or store action that owns them. (Review)
   async exports MUST declare `Promise<T>`. Parameters at an export boundary
   MUST be typed. (Review, Type for the resulting contract)
 - The public surface is deliberately small: component props, store readers and
-  actions, and the adapter facade. Everything else is internal. Exported
-  names and signatures SHOULD evolve additively; a breaking rename MUST update
-  every call site, test and doc in the same change. (Review)
+  actions and documented foundation modules. Everything else is internal.
+  Exported names and signatures SHOULD evolve additively; a breaking rename
+  MUST update every call site, test and doc in the same change. (Review)
 - Data is immutable by default. Fields the owner does not mutate SHOULD be
   `readonly`; exported constant tables SHOULD be `readonly` or `as const`. A
   function MUST NOT mutate a parameter, prop or imported object unless its
@@ -167,18 +168,17 @@ created by the component, page or store action that owns them. (Review)
   upstream issue and a removal condition on the same line. (Type)
 - `any` MUST NOT appear in app code or tests, explicitly or through an unsafe
   flow. `typescript/no-explicit-any` and all `typescript/no-unsafe-*` rules
-  are errors. Values from Leafer, NSH, `JSON.parse` or any untyped source MUST
-  enter as `unknown` and be narrowed with `typeof`, `in`, `instanceof`,
-  `isRecord` or a validating type predicate before use. Only
-  `src/leafer/nsh-platform.ts` and `src/leafer/platform/**` may touch Leafer's
-  untyped internals. (Lint, Type, Review)
+  are errors. Values from NSH, `JSON.parse` or any untyped source MUST enter
+  as `unknown` and be narrowed with `typeof`, `in`, `instanceof`, `isRecord`
+  or a validating type predicate before use. (Lint, Type, Review)
 - `as` MUST NOT replace a guard in app code and `!` MUST NOT be used.
-  Exceptions are narrow: tests may cast through `unknown` to build a canvas
-  stand-in, and a documented platform boundary may cast after a guard and with
+  Exceptions are narrow: tests may cast through `unknown` to build a typed
+  stand-in for a platform object, and a documented platform boundary may cast
+  after a guard and with
   a comment naming the invariant. Any remaining cast is a review item. (Lint
   `no-unsafe-type-assertion` and `no-non-null-assertion`; tests disable only
   the former.)
-- A switch over a closed union (`Tool`, operation kinds, path rules, editor
+- A switch over a closed union (`Tool`, operation kinds, path rules, drag
   modes, future routes) MUST handle every member or end with a `default` that
   throws an `Error` naming the unexpected value. A normal fallback is
   forbidden because it hides a new member. (Lint, Type, Review)
@@ -189,8 +189,8 @@ created by the component, page or store action that owns them. (Review)
   promise, no async function in a `void` position, no `await` on a
   non-thenable. Use `try/catch` with a `catch` variable of type `unknown`, or
   return the rejection. A bare empty catch is forbidden; a catch that
-  deliberately skips an unsupported native call MUST say so in a comment and
-  belongs only at the adapter's replay/measurement boundaries. Throw `Error`
+  deliberately skips an unsupported platform call MUST say so in a comment and
+  belongs only at a documented platform boundary. Throw `Error`
   objects; unsupported async platform operations MUST return
   `Promise.reject(new Error(...))`, not throw synchronously. (Lint for empty
   blocks, Review for deliberate skips.)
@@ -199,19 +199,19 @@ created by the component, page or store action that owns them. (Review)
 
 ### 6.1 State has one narrow owner
 
-| Owner                           | Owns                                                                    |
-| ------------------------------- | ----------------------------------------------------------------------- |
-| `src/store.ts`                  | tool, zoom percentage, selection count, window pin                      |
-| Page (`src/pages/FlowPage.tsx`) | `CanvasCamera`, `IEditorBase`, stage size, zoom frame, user-camera flag |
-| Component                       | transient press, hover, cursor and pinch state it renders               |
-| Future route (`NavStack`)       | stable route identity and the data the page needs                       |
+| Owner                           | Owns                                                                 |
+| ------------------------------- | -------------------------------------------------------------------- |
+| `src/store.ts`                  | tool, zoom percentage, selection count, window pin                   |
+| Page (`src/pages/FlowPage.tsx`) | `FlowScene`, `CanvasCamera`, `CanvasController`, stage size, session |
+| Component                       | transient press, hover, cursor and pinch state it renders            |
+| Future route (`NavStack`)       | stable route identity and the data the page needs                    |
 
 Every signal in `src/store.ts` MUST stay module-private. The module MUST export
 readers (`currentTool()`, `zoomPercent()`) and actions (`setTool`,
 `togglePinned`), never a signal, setter or mutable object. Actions MUST enforce
 their invariants; `togglePinned` no-ops when `nsh/desktop` is unavailable. A
 reader MUST read the signal when called, not capture it at module load. The
-store MUST NOT hold per-mount handles such as the camera or editor. A page
+store MUST NOT hold per-mount handles such as the camera or scene. A page
 MUST NOT keep a private copy of store state. Components MUST take values and
 intent callbacks as props and MUST NOT import the store. A controlled
 component keeps no private copy: it receives the current value plus a change
@@ -232,11 +232,12 @@ fine. Event handlers are installed once and MUST read the current value when
 invoked. Async work MUST read signals synchronously before the first `await`;
 reads after `await` or in timers are not tracked. Values derivable from other
 state MUST use `computed` (or a cheap closure), not a second signal written by
-an effect. An effect MUST synchronize an external system (Leafer recolor,
-window level, frame scheduling) and MUST NOT write a signal it also reads.
+an effect. An effect MUST synchronize an external system (theme repaint,
+window level) and MUST NOT write a signal it also reads.
 User intent belongs in the handler or keymap action that received it. NSH does
-not accept signal writes during `draw`; publish after the frame, as
-`FlowPage` does for the zoom label. (Review; behavior tests expose stale
+not accept signal writes from inside the canvas draw/layout computation;
+publish from a layout event, an action or after the frame, as `FlowPage` does
+in `onSize` and for the zoom label. (Review; behavior tests expose stale
 snapshots. No lint sees destructuring, mirroring or effects.)
 
 ### 6.3 UI, design tokens and accessibility
@@ -248,9 +249,8 @@ MUST NOT contain raw hex, `rgb()`/`rgba()`/`hsl()` or palette classes. When a
 role is missing, add a semantic token with both light and dark values. Token
 classes adapt automatically, so `dark:` MUST NOT be used for token colors; use
 `hover:`, `active:`, `focus:`, `selected:` and `disabled:` or component state
-props. Exceptions: `src/theme.json` itself, test fixtures, and the Canvas 2D
-protocol defaults in `src/leafer/platform/recording-context.ts` (`#000000`,
-`rgba(0,0,0,0)`), which MUST keep a comment. A new or changed token pair MUST
+props. Exceptions: `src/theme.json` itself and test fixtures. A new or changed
+token pair MUST
 be checked as an actual foreground/background pair: 4.5:1 for normal text,
 3:1 for large text, UI boundaries, focus and state indicators. Do not assume a
 token is accessible in every pairing. Raw point values are allowed only for
@@ -262,188 +262,100 @@ Prefer `nsh/base` controls (`Button`, `Checkbox`, and the like) over a
 pressable `View`; an icon-only control MUST set `accessibilityLabel`, and a
 `testID` is not a name. Expose selection with `selected`, disabled with
 `disabled`, and never with color alone. The canvas MUST have a label;
-selection count, active tool and zoom MUST be mirrored in accessible text, as
-the overlays do. Every chrome action MUST be keyboard operable except a
+selection count, active tool and zoom MUST be mirrored in accessible text
+whenever their chrome is shown, as the overlays do. Every chrome action MUST
+be keyboard operable except a
 documented path-dependent exception. Keyboard-operable views MUST have a
 visible `focus:` style. Canvas direct manipulation is the documented
-exception: selecting, moving and resizing cards is a pointer gesture owned by
-Leafer's editor, and a keyboard editing path is adoption debt. A drag- or
-pinch-only non-canvas operation MUST have a single-pointer, non-drag
-alternative; new camera animation MUST honor `reduceMotion()`. Small icon
-targets SHOULD use `hitSlop` to reach roughly 44 by 44 points. Contrast is
-4.5:1 for normal text and 3:1 for large text, interactive control boundaries,
-focus and state indicators; decorative card and section borders are exempt.
-(Review, Manual host screen-reader pass; `App.test.tsx` uses `id:` and
-`label:` selectors.)
+exception: selecting, moving and resizing cards is a pointer gesture. Every
+edit reachable that way also has a native path: selecting a card opens the
+composer, whose controls are ordinary NSH controls with names, focus and
+keyboard operation, and the selection badge carries the selection state and
+the Escape hint. A drag- or pinch-only non-canvas
+operation MUST have a single-pointer, non-drag alternative; new camera
+animation MUST honor `reduceMotion()`. Small icon targets SHOULD use
+`hitSlop` to reach roughly 44 by 44 points. Contrast is 4.5:1 for normal text
+and 3:1 for large text, interactive control boundaries, focus and state
+indicators; decorative card and section borders are exempt. (Review, Manual
+host screen-reader pass; `App.test.tsx` uses `id:` and `label:` selectors.)
 
-## 7. Canvas, Leafer and the platform adapter
+## 7. The native canvas
 
-### 7.1 The NSH canvas contract
+### 7.1 Scene, views and camera
 
-NSH `<Canvas>` is a recording surface. `draw` runs after first layout, on
-resize, and when a signal read inside it changes; each run replaces the whole
-drawing. Signals MUST be read inside `draw` if they should schedule it, and
-work MUST be proportional to what is visible. Code MUST NOT mutate the canvas
-outside `draw`. (Test, Review)
+`src/flow/scene.ts` is the only scene model. It holds the nodes and edges of
+the current viewport snapshot, the selection, transient gesture geometry,
+previews and the connection preview; it owns no views. `FlowScene` MUST
+reconcile only what `scene(rect, margin)` returns, keep the card budget,
+throttled reads, hash sampling and selected-card pinning, and MUST NOT
+instantiate the whole document. (Test, Review)
 
-### 7.2 Leafer owns the retained scene and editor
+`components/FlowCanvas.tsx` renders one world view whose transform is the
+camera's `translate(x, y) scale(s)` with origin `0 0`; cards and connectors
+position themselves in world coordinates inside it. The dot grid and the
+selection overlay are screen-space siblings. Do not cache a card's screen
+rectangle in a view, run a second layout pass, or build a parallel scene:
+`CanvasCamera.toWorld`/`toScreen` is the one mapping. Moving the camera MUST
+change the view transform, not the cards. (Test, Review)
 
-Build the scene once in `src/flow/scene.ts` from `src/flow/data.ts`, in world
-coordinates. Only the camera group moves. Selection, dragging, resizing and
-rotation MUST use Leafer's editor (`app.editor` in the `sky` layer), not
-hand-written pointer math. Decorative children MUST set `hittable: false`;
-editable cards MUST set `editable: true`. Do not recreate nodes per frame or
-per resize and do not add a parallel cull walk. The dot grid is the only
-immediate-mode drawing: screen space, before replay, never hit-tested. Derived
-geometry such as connectors MUST be recomputed when its owner moves or resizes
-(the current `PropertyEvent.CHANGE` listeners in `flow/scene.ts` are the
-mechanism) and MUST be covered by a scene test after a drag or resize. Moving
-the camera changes the selected elements' world bounds without changing the
-elements, so pan, zoom and fit MUST refresh the editor box with
-`refreshEditBox` (`src/leafer/editor-box.ts`); `updateEditBox()` is required
-for multi-selection, whose box is built from a simulated element. (Test,
-Review)
+The camera MUST store logical `x`, `y` and `scale` and rebuild its transform
+from those values; it MUST NOT compose deltas onto a previous transform. Keep
+world, screen/points and view-local space explicit, converting only through
+the camera. A card's persisted bounds are an axis-aligned world rectangle;
+selection handles, marquee boxes and the composer are screen-space geometry.
+(Review)
 
-### 7.3 Adapter confinement
+### 7.2 Hit testing and pointer input
 
-`Platform`, `Creator`, `InteractionBase`, raw canvas contexts,
-`NshRecordingContext`, `NshCanvasSurface` and every `src/leafer/platform/*`
-module MUST stay inside `src/leafer/nsh-platform.ts` and its implementation
-modules. Pages, components, `flow/` and `store.ts` MAY use Leafer's public
-scene/editor API (`@leafer-ui/miniapp`, `App`, `IEditorBase`) but MUST NOT
-import a platform module, call `Platform`/`Creator`, or hold a recording
-context or surface as app state. New platform behavior MUST land in exactly
-one matching module. Export it through the facade only when app code needs it.
-A page-level workaround is not an adapter extension. A hidden Leafer field MUST
-be read behind a narrowly typed, guarded adapter helper with a test; the
-`renderer.requestTime` reset lives in `src/leafer/platform/frame.ts`. No other
-app module may read a hidden Leafer field. (Review; adapter tests.)
+Hit tests MUST answer from the scene model, never from pixel sampling:
+`nodeAt` returns the topmost card by `z` (ties to the last), `portAt` the
+nearest port within the port hit radius, and `edgeAt` the connector within the
+edge hit distance. A miss returns `null`. A selected card that leaves the
+viewport stays in the scene, with its ports and connectors, while pinned.
+(Test)
 
-### 7.4 Recording and replay are one contract
+`CanvasController` is the one pointer router: it selects and toggles cards,
+drags, resizes from a handle, box-selects, pans with the hand tool, and drives
+the port/edge gestures. The page MUST NOT add a second press path; new canvas
+interaction belongs in the controller and its pure geometry modules
+(`selection.ts`, `connection.ts`). A press that starts an edge gesture MUST be
+consumed before card selection. (Test, Review)
 
-Every state mutation Leafer can make MUST be recorded in order, and every
-recorded operation MUST have a defined replay behavior: replayed, deliberately
-emulated, or explicitly skipped. A skip MUST be documented and tested as a
-no-op, never a crash or a silent wrong result. `beginFrame()` MUST reset ops,
-CTM, state stack, path, hit regions and styles. `replay()` MUST reset the
-native transform and dash list first. `save()`/`restore()` cover styles and
-transform, not the current path; only `beginPath()` starts a new path. Style
-properties MUST be recorded as data: `globalAlpha`, `lineWidth`,
-`globalCompositeOperation` and shadows pass through verbatim; only
-`fillStyle`/`strokeStyle` may hold paint records. Offscreen surfaces are
-ephemeral: snapshot before Leafer recycles, copy the ops array, and replay as
-vectors into the destination rectangle, except for the layers that MUST be
-rasterized as one picture (below). `drawImage` MUST support the 2-, 4- and
-8-argument forms. A snapshot is a layer: its recorded `globalAlpha` values MUST
-multiply the destination's current alpha, its `setTransform`/`resetTransform`
-MUST compose with the placement matrix, and its content MUST be clipped to the
-destination rectangle (and the source rectangle when `drawImage` supplies one).
-A snapshot's `save`/`restore` stack MUST be self-contained: Leafer can snapshot
-an offscreen layer while its own `save()` is still open, and replaying that
-unbalanced save would consume the destination's restore and clip every later
-sibling to the snapshot rectangle.
-A full offscreen `clearRect` with no clip in effect starts a new recording:
-Leafer clears a layer canvas before a full render (wrapped in a
-`save()`/`restore()`) and recycles a canvas at rest by clearing the area it
-used. A `clearRect` under a clip is recorded as one operation: it erases the
-layer's earlier content inside the clip (as Canvas clears the destination) and
-is a rasterization trigger. Pattern fills are emulated for `fill`
-and `fillRect`; a tile MUST step by its padded size and draw its picture at the
-picture's own size, so Leafer's gap stays transparent. Replaying a snapshot or
-a patterned `fillRect` may replace the native current path; a caller that needs
-the path afterwards must rebuild it. Snapshot tile dimensions MUST be positive
-and finite. (Test: every newly supported operation gets a record, replay and
-effect test in `src/leafer/nsh-platform.test.ts` or `src/leafer/svg.test.ts`;
-Review.)
+Direct manipulation is the documented pointer exception: selecting, moving
+and resizing cards is a gesture. Every edit reachable that way MUST also have
+the native composer path. A drag MUST set transient overrides and write the
+document once on release (`setNodeBounds`); a cancelled gesture MUST drop the
+overrides without a write. Touch is one finger for the current tool and two
+fingers for pinch-zoom/pan; trailing mouse events after touches MUST be
+ignored. Hover MUST NOT change the selection. (Test, Host for real pointers)
 
-**Rasterized layers.** A layer MUST be rasterized as one SVG image
-(`src/leafer/platform/svg/`) when replaying it as vectors would let its
-operations combine with the destination, or with each other, differently from
-Canvas:
+### 7.3 Resources and lifecycle
 
-- it contains any composite operation of its own (a
-  `destination-in`/`destination-out` mask, a blend mode or `copy`), a recorded
-  `clearRect`, a patterned `stroke`, `strokeRect`, `strokeText` or
-  `fillText`, or a grayscale mask;
-- it is drawn with `globalAlpha` other than 1 or a composite operation other
-  than `source-over`.
+Every object the page creates — the scene, camera, controller, viewport
+refresh, preview loader, document session and runner — MUST be disposed by
+the page's `cleanup`, exactly once and idempotently. Key bindings MUST be
+owned by the page's scope (declared in `flow/bindings.ts` and bound by the
+page) or the mounted palette, and every command
+MUST exist once. Async work MUST drop its result after disposal. Tests that
+construct a scene, camera or controller MUST keep them local to the test.
 
-A rasterized layer MUST be drawn exactly once. A recorded `clearRect` MUST
-erase the content drawn before it, clipped by every open clip, and leave the
-content drawn after it alone. The serializer MUST map `destination-in` to an
-alpha mask (a grayscale mask converts color to alpha with Leafer's Rec.601
-weights), `destination-out` to an alpha mask inverted through `feFlood` and
-`feComposite`, `copy` to a replaced layer and `destination-over` to content
-behind the earlier drawing; blend modes map to `mix-blend-mode`. Other
-Porter-Duff modes are approximated as `source-over` inside a rasterized layer
-and MUST be documented. Its paths MUST be painted under the transform in effect
-at paint time (Canvas bakes path points at command time), so strokes, dashes,
-gradients and patterns keep the space Canvas gives them; a conic gradient MUST
-be made in that space too. A shadow filter MUST sit on an untransformed wrapper
-so its region, offsets and blur stay in canvas space, and a stroke's bounds MUST
-include its joins and caps. Text MUST use the system fonts, preserve spaces
-(`xml:space`) and map `text-anchor` flow-relatively; inline raster `data:`
-images MUST be embedded. The SVG MUST carry the snapshot's size as its
-intrinsic size, a Canvas source rectangle MUST become its `viewBox` crop (the
-host's raster is larger than the intrinsic size), and it MUST be drawn into an
-explicit destination rectangle. The layer's alpha and composite operation MUST
-apply to the finished image, not to its shapes. (Test, Review.)
+### 7.4 Geometry and numeric robustness
 
-### 7.5 Geometry, coordinates and numeric robustness
+Coordinates MUST be finite before they reach layout or the camera; reject
+non-finite values at the boundary. A zoom factor MUST be positive and finite,
+and `zoomAround` MUST clamp the result to `MIN_SCALE`/`MAX_SCALE`. A fit MUST
+center finite content without dividing by zero for an empty document.
+Rectangles MAY compare approximately (a drag is committed only when it moved
+more than a sub-point), and a resize MUST never produce a size below the
+minimum. Composer and inline-editor placement MUST clamp into the stage even
+when the panel is larger than it. Geometry MUST NOT be coerced with
+truthiness such as `Number(x) || 0`; use `Number.isFinite`. (Test, Review)
 
-Use the canvas matrix convention: `a b c d e f` maps `(x, y)` to
-`(ax + cy + e, bx + dy + f)`. `transform`, `translate`, `scale` and `rotate`
-post-multiply; `setTransform` replaces the CTM; `resetTransform` clears it.
-Pair `save()` with `restore()` and start every frame at identity. Hit paths are
-recorded in the context's user space and transformed when filled or hit-tested,
-so a caller MUST NOT change the CTM between path construction and
-fill/hit-test and expect Canvas's bake-at-command semantics; baking at command
-time is adoption debt. The camera MUST store logical `x`, `y` and `scale` and
-rebuild its matrix from identity; it MUST NOT compose deltas onto a previous
-matrix. Keep world, screen/points and canvas user space explicit, converting
-only through `CanvasCamera.toWorld`/`toScreen` or an explicit matrix. NSH draws
-in points: `devicePixelRatio` MUST remain 1, sizes MUST NOT be multiplied by a
-ratio, and canvas dimensions MUST be rounded once at the frame boundary with
-`Math.max(1, Math.round(...))`. Reject non-finite coordinates, zero or
-negative sizes, non-positive scales and singular matrices. `invert` returns
-`null` for a singular or non-finite matrix; a hit under a degenerate transform
-MUST return `false`; `lineWidth` MUST be positive and finite. Geometry MUST NOT
-be coerced with truthiness such as `Number(x) || 0`; use `Number.isFinite`.
-(Test, Review)
-
-### 7.6 Hit testing is geometry, not pixels
-
-Hit tests MUST answer from recorded geometry: `isPointInPath` applies the fill
-rule (nonzero by default, even-odd when requested), `isPointInStroke` applies
-the transformed stroke width, and a hit canvas's `getImageData` returns a
-synthetic alpha mask. Hits MUST be tested topmost-first, and hit canvases MUST
-stay separate from render canvases (`hitOnly`). `addHitRegion` MUST NOT be
-used. Fill closes open subpaths implicitly; stroke does not; both behaviors
-MUST be tested. Hit canvases MAY flatten curves; render canvases MUST NOT.
-Text uses `measureText` through the frame's native context; its approximations
-MUST be documented and edge-tested. (Test, Review)
-
-### 7.7 Resources and input
-
-Every Leafer `App`, `Leafer`, host, editor listener, frame requester,
-animation frame and measure context MUST be owned by the scope that creates it
-and released when that scope is disposed: `app.destroy()`, the cleanup from
-`addDrawRequester`, `cancelAnimationFrame`, `editor.off(...)`, and
-`LeaferHost.dispose()` for the measure context. The last frame's native context
-may be retained between frames for text measurement; `measureText` falls back
-if it throws. Cleanup MUST be idempotent and MUST restore globals it replaced.
-Tests MUST destroy every Leafer `App` or `Leafer` they create.
-`installNshPlatform()` is the one guarded, process-wide install. Each view
-registers its own draw requester; `Platform.requestRender` notifies all of them.
-(Test: adapter and lifecycle tests; Review.)
-
-Canvas input MUST use NSH responders. A canvas inside a scroll view MUST claim
-drawing touches on start (`onStartShouldSetResponder={() => true}`). NSH
-press, mouse and touch events MUST be fed to Leafer through `pointerData()`,
-and the cursor state MUST mirror Leafer's. Trailing mouse events after a touch
-MUST be ignored, as `LeaferView` does. Gestures belong to Leafer's editor;
-hand-written input SHOULD stay minimal. (Test: `editor.test.ts`,
-`App.test.tsx`; Host for real pointers.)
+Distances used by hit tests are world distances (ports, edge proximity) while
+selection handles and the marquee are measured in screen points; do not mix
+them. Dot spacing is constant in screen space, so the grid stays legible at
+every zoom. Text inside the world view scales with the camera; controls that
+must stay readable (the composer, chrome) live outside it.
 
 ## 8. Async, lifecycle, performance and security
 
@@ -458,18 +370,16 @@ work is allowed only when explicit and documented. (Review, Type, Test)
 
 ### 8.2 Performance
 
-Each NSH `draw` is a full frame: record, draw the backdrop, render Leafer's
-`tree` and `sky`, replay, clear render marks. Per-frame work MUST be
-proportional to visible primitives; let Leafer cull. App code MUST NOT rebuild
-the scene, traverse the whole scene, or write a signal every frame. Batch
-paths and style changes, avoid per-pixel or per-scanline allocation, and never
-add a second render loop: `Platform.requestRender` is coalesced into one
-`requestAnimationFrame` by the canvas host. `usePartRender` MUST remain
-`false` until replay understands dirty rectangles and that is tested. Frame
-budgets (about 10 ms of app work and 16.7 ms per frame at 60 Hz, 50 ms
-input-to-feedback) are SHOULD targets measured manually on the reference host;
-they MUST NOT be asserted in CI without a stable benchmark. (Review, Manual
-profiling; the `perf` lint category is only a warning.)
+The canvas renders only the cards in the viewport snapshot; per-frame work
+MUST be proportional to visible cards, not the document. App code MUST NOT
+rebuild the scene, traverse the whole document, or write a signal every frame.
+A gesture updates transient overrides; the document write happens once on
+release, and viewport reads stay throttled. Avoid allocating in pointer move
+handlers beyond the override map, and never add a second render or layout
+loop. Frame budgets (about 10 ms of app work and 16.7 ms per frame at 60 Hz,
+50 ms input-to-feedback) are SHOULD targets measured manually on the reference
+host; they MUST NOT be asserted in CI without a stable benchmark. (Review,
+Manual profiling; the `perf` lint category is only a warning.)
 
 ### 8.3 Security and the sandbox
 
@@ -496,7 +406,7 @@ Dependencies MUST be declared in `package.json`, pinned exactly (no `^` or
 covered by the same ADR rule for a new runtime dependency. `packageManager`
 MUST name an exact Bun version and `engines` the supported minimum. A new
 runtime dependency MUST have an ADR covering need, license, maintenance,
-runtime and bundle cost, and why the adapter or an existing package is
+runtime and bundle cost, and why an existing package is
 insufficient. Lifecycle scripts and `trustedDependencies` require review.
 Removing a package MUST remove its imports, types, tests and docs. `bun audit
 --audit-level=high` SHOULD run before a release. (CI, Review)
@@ -520,13 +430,12 @@ Review)
 
 ## 9. Testing and verification
 
-| Level       | Files                                                                                                                                                                   | Proves                                                               |
-| ----------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------- |
-| Unit        | `src/leafer/camera.test.ts`, `src/leafer/nsh-platform.test.ts`, `src/flow/data.test.ts`, `src/flow/database-path.test.ts`, `src/flow/grid.test.ts`, `src/store.test.ts` | Pure logic, the adapter, data, path resolution and store behavior    |
-| Native      | `src/native.test.ts`, Rust tests in `src/native/src/db.rs`, `search.rs`, `viewport.rs`                                                                                  | SeaORM persistence, FTS5/RTree plans, commands, history and search   |
-| Lint rule   | `lint/boundaries.test.js`                                                                                                                                               | Layer classification and the rule's upward/unknown reports           |
-| Integration | `src/leafer/editor.test.ts`, `src/leafer/culling.test.ts`, `src/flow/scene.test.ts`                                                                                     | Leafer editor/culling and the built scene against `NshCanvasSurface` |
-| End-to-end  | `src/App.test.tsx`                                                                                                                                                      | The mounted app: text, presses, drags, keyboard                      |
+| Level      | Files                                                                                                                                                                                                                                                                                                                                                         | Proves                                                                                           |
+| ---------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------ |
+| Unit       | `src/flow/camera.test.ts`, `src/flow/scene.test.ts`, `src/flow/selection.test.ts`, `src/flow/overlay.test.ts`, `src/flow/canvas-controller.test.ts`, `src/flow/composer-state.test.ts`, `src/flow/grid.test.ts`, `src/flow/connection.test.ts`, `src/flow/data.test.ts`, `src/flow/database-path.test.ts`, `src/flow/node-kinds.test.ts`, `src/store.test.ts` | Pure logic, the scene model, gestures, placement, drafts, grid coverage, data and store behavior |
+| Native     | `src/native.test.ts`, `src/flow/node-session.native.test.ts`, Rust tests in `src/native/src/db.rs`, `search.rs`, `viewport.rs`, `schema.rs`                                                                                                                                                                                                                   | SeaORM persistence, FTS5/RTree plans, commands, history and search                               |
+| Lint rule  | `lint/boundaries.test.js`                                                                                                                                                                                                                                                                                                                                     | Layer classification and the rule's upward/unknown reports                                       |
+| End-to-end | `src/App.test.tsx`                                                                                                                                                                                                                                                                                                                                            | The mounted app: text, presses, drags, keyboard, composer and inputs                             |
 
 Tests under `src/` MUST sit beside the subject, import from `nsh/test`, and use
 the lowest level that catches the bug. Tooling tests such as
@@ -537,10 +446,8 @@ MUST select by `id:<testID>`,
 `label:<accessibilityLabel>`, `text:<text>`, `view:<id>` or a bare string (test
 id, label, then text). There is no `role:` selector; do not write one.
 Positional selectors MUST NOT be used. `app.waitUntil` MUST be used instead of
-sleeps; the only permitted real timer is the documented 200 ms double-click
-spacing in `src/leafer/editor.test.ts`, and any new one needs the same comment
-and reviewer approval. Tests MUST NOT share mutable state. Every Leafer
-`App`/`Leafer` MUST be destroyed. App tests MUST stub the network (a request
+sleeps; a permitted real timer MUST carry a comment and reviewer approval.
+Tests MUST NOT share mutable state. App tests MUST stub the network (a request
 not listed fails by default) and use a manual clock when time matters; `live`
 network is allowed only in an explicit integration test with review. Canvas
 state MUST be asserted through overlays, the scene or the camera, not pixels.
@@ -550,10 +457,11 @@ older "store through the page" wording in `docs/testing.md`. (Test, Host,
 Review)
 
 A deterministically reproducible bug fix MUST add a regression test that fails
-before it and passes after. Every newly supported adapter feature MUST add a
-record, replay and effect/hit test in `src/leafer/nsh-platform.test.ts`.
-`bun run test:host` MUST be reported for desktop input, window chrome or
-window level changes; `bun run package` MUST be reported for packaging changes.
+before it and passes after. A new canvas gesture or placement rule MUST add a
+controller or geometry unit test, and a user-reachable flow MUST add an
+`App.test.tsx` step. `bun run test:host` MUST be reported for desktop input,
+window chrome or window level changes; `bun run package` MUST be reported for
+packaging changes.
 CI runs the headless suite on Windows, macOS and Linux; it does not run a
 native host job, so host evidence is a local/manual gate. The PR MUST separate
 automated evidence from host/manual evidence. (Test, Host, CI)
@@ -586,10 +494,10 @@ breaking change to MAJOR, except while the app is `0.y.z`. A stable surface
 `@deprecated` with its replacement and removal release and survive at least one
 MINOR release before removal as a breaking change. (Review, CI)
 
-The repository SHOULD add `.github/CODEOWNERS` for `src/leafer/platform/`,
-`src/pages/`, `src/components/`, `src/store.ts`, `src/theme.json`,
-`src/nsh.json`, `docs/` and `.github/workflows/`, and SHOULD link this standard
-from `README.md` and `CLAUDE.md`. A PR MUST implement one self-contained
+The repository SHOULD add `.github/CODEOWNERS` for `src/components/`,
+`src/flow/`, `src/pages/`, `src/store.ts`, `src/theme.json`, `src/nsh.json`,
+`docs/` and `.github/workflows/`, and SHOULD link this standard from
+`README.md` and `CLAUDE.md`. A PR MUST implement one self-contained
 behavior, ideally one layer. It SHOULD stay near 100 changed lines and SHOULD
 be split above roughly 1,000, excluding `bun.lock` and generated output.
 Refactors, formatting, dependency bumps and behavior changes MUST be separate
@@ -605,7 +513,8 @@ PRs, and each split MUST leave the gate green. (Review)
    OS, or the PR states why not; packaging changes pass `bun run package` on
    the target OS.
 4. A behavior change has a regression test that fails before and passes after;
-   a new adapter feature has a record, replay and effect test.
+   a new canvas gesture or placement rule has a unit test and, when
+   user-reachable, an app test.
 5. Affected docs, `CLAUDE.md`, this standard, the changelog and any required
    ADR are updated in the same PR.
 6. No probe/scratch file, commented-out code, `console.log`, `any`,
@@ -618,22 +527,21 @@ PRs, and each split MUST leave the gate green. (Review)
 
 **Review checklist.** Reviewers MUST verify:
 
-- Imports follow the layer table, have no cycles, and use the facade rather
-  than `leafer/platform/*`.
-- Only the facade and platform modules touch Leafer internals; `unknown` is
-  narrowed; no `any`, `as` narrowing or `!`.
+- Imports follow the layer table and have no cycles.
+- `unknown` is narrowed; no `any`, `as` narrowing or `!`.
 - Store signals are private; every write goes through an action; components
   do not import the store; no state is mirrored.
 - Component bodies are one-time setup; props are read in bindings; effects
-  only synchronize; every timer, frame, listener, key binding and Leafer
-  object has an owner and cleanup.
-- Canvas changes are in the adapter with a record/replay test; Leafer's editor
-  owns selection, drag and resize; there is one render loop.
-- Geometry is finite, the camera rebuilds from identity, the CTM is not
-  changed between path construction and fill on a hit canvas, and hit tests
-  use recorded geometry.
+  only synchronize; every timer, listener, key binding and page-owned object
+  has an owner and cleanup.
+- Canvas changes keep geometry in `flow/`, gestures in `CanvasController` and
+  views in components; the scene reconciles only the viewport; there is no
+  second render or layout loop.
+- Geometry is finite; the camera stores logical `x`/`y`/`scale` and rebuilds
+  its transform from them; hit tests use the scene model, not pixels; world
+  and screen spaces are not mixed.
 - Tests are at the lowest level, use `waitUntil`, stable selectors, no sleeps
-  except the documented one, and destroy Leafer apps.
+  except a documented one, and clean up page-owned objects.
 - Tokens, contrast, names, roles, states, focus and drag alternatives were
   checked.
 - `src/nsh.json` still declares `capabilities`; no convenience host was added;
@@ -643,32 +551,32 @@ PRs, and each split MUST leave the gate green. (Review)
 Reviewers MUST try to falsify the change at its boundaries: non-finite, zero
 and negative inputs; a singular matrix; minimum and maximum zoom; empty
 selection; a 1 by 1 resize; touch followed by mouse; light and dark; reduced
-motion; unmount during async work; stale bounds; and an unsupported adapter
-call. Reviewers SHOULD approve when the change definitely improves code
+motion; unmount during async work; stale bounds; an out-of-range zoom; and a
+card that leaves the viewport mid-gesture. Reviewers SHOULD approve when the change definitely improves code
 health, not when it is perfect; optional style notes MUST be marked `Nit:` and
 formatting owned by Oxfmt is not a review topic. (Review)
 
 ## 12. Enforcement matrix and exception process
 
-| Area                                                          | Enforced by                                                                          | A finding is                                                                             |
-| ------------------------------------------------------------- | ------------------------------------------------------------------------------------ | ---------------------------------------------------------------------------------------- |
-| App root and commands                                         | Scripts pass `src`; `nsh check src`; Review                                          | A command without `src`, a moved config or an edited `.nsh/`                             |
-| Formatting                                                    | `bun run check` (`vp check --deny-warnings`)                                         | Any diff or warning                                                                      |
-| Types and strict flags                                        | `nsh check src`, `vp` typeCheck                                                      | Type error, weakened flag, unexplained suppression                                       |
-| `any`, unsafe values, assertions, promises, exhaustive unions | Oxlint in `vite.config.ts`                                                           | A lint error                                                                             |
-| Names, default exports, 500-line cap                          | `unicorn/filename-case`, `import/no-default-export`, `max-lines`                     | A lint error                                                                             |
-| Layer direction and cycles                                    | `boundaries/no-upward-import`, `import/no-cycle`, `lint/boundaries.test.js`          | A lint error, including bare directory and unclassified imports; a failing rule test     |
-| Store privacy, derivation, props, resources                   | Review; `store.test.ts`, `App.test.tsx`                                              | A review finding; no lint rule sees these                                                |
-| Tokens, contrast                                              | Review; Manual light/dark                                                            | A raw color, a new token without both schemes, a failing pair                            |
-| Accessibility                                                 | Review; App tests using `label:`/`text:`; Manual host pass                           | An unnamed control, color-only state, missing keyboard path                              |
-| Canvas adapter and scene                                      | `nsh-platform.test.ts`, `editor.test.ts`, `culling.test.ts`, `scene.test.ts`; Review | A new operation without a record/replay/effect test                                      |
-| Input and lifecycle                                           | `editor.test.ts`, `App.test.tsx`; Host (manual/local); Review                        | A missing cleanup or a hand-written hit path                                             |
-| Performance                                                   | Review; Manual profiling                                                             | A second loop, per-frame scene rebuild, `usePartRender` enabled without dirty-rect tests |
-| Sandbox                                                       | NSH build/package when run; Review                                                   | A missing `capabilities` key or an unjustified host                                      |
-| Dependencies                                                  | `bun install --frozen-lockfile`; Review; ADR                                         | A range, missing lockfile change, unreviewed install script                              |
-| Tests                                                         | `bun run test`, `test:host`, `test:bench`                                            | A failing or missing test                                                                |
-| Release                                                       | `.github/workflows/release.yml` (check, test, tag/version); Review                   | A tag/version mismatch (CI); an unsigned installer or missing smoke test (Review)        |
-| Docs, ADR, changelog                                          | Review                                                                               | A missing update                                                                         |
+| Area                                                          | Enforced by                                                                                                  | A finding is                                                                         |
+| ------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------ |
+| App root and commands                                         | Scripts pass `src`; `nsh check src`; Review                                                                  | A command without `src`, a moved config or an edited `.nsh/`                         |
+| Formatting                                                    | `bun run check` (`vp check --deny-warnings`)                                                                 | Any diff or warning                                                                  |
+| Types and strict flags                                        | `nsh check src`, `vp` typeCheck                                                                              | Type error, weakened flag, unexplained suppression                                   |
+| `any`, unsafe values, assertions, promises, exhaustive unions | Oxlint in `vite.config.ts`                                                                                   | A lint error                                                                         |
+| Names, default exports, 500-line cap                          | `unicorn/filename-case`, `import/no-default-export`, `max-lines`                                             | A lint error                                                                         |
+| Layer direction and cycles                                    | `boundaries/no-upward-import`, `import/no-cycle`, `lint/boundaries.test.js`                                  | A lint error, including bare directory and unclassified imports; a failing rule test |
+| Store privacy, derivation, props, resources                   | Review; `store.test.ts`, `App.test.tsx`                                                                      | A review finding; no lint rule sees these                                            |
+| Tokens, contrast                                              | Review; Manual light/dark                                                                                    | A raw color, a new token without both schemes, a failing pair                        |
+| Accessibility                                                 | Review; App tests using `label:`/`text:`; Manual host pass                                                   | An unnamed control, color-only state, missing keyboard path                          |
+| Canvas scene and interaction                                  | `scene.test.ts`, `canvas-controller.test.ts`, `selection.test.ts`, `overlay.test.ts`, `App.test.tsx`; Review | A new gesture with no unit or app test; geometry outside `flow/`                     |
+| Input and lifecycle                                           | `canvas-controller.test.ts`, `App.test.tsx`; Host (manual/local); Review                                     | A missing cleanup, a second press path or a forgotten override clear                 |
+| Performance                                                   | Review; Manual profiling                                                                                     | A second render loop, per-frame scene rebuild or per-pointer-move document write     |
+| Sandbox                                                       | NSH build/package when run; Review                                                                           | A missing `capabilities` key or an unjustified host                                  |
+| Dependencies                                                  | `bun install --frozen-lockfile`; Review; ADR                                                                 | A range, missing lockfile change, unreviewed install script                          |
+| Tests                                                         | `bun run test`, `test:host`, `test:bench`                                                                    | A failing or missing test                                                            |
+| Release                                                       | `.github/workflows/release.yml` (check, test, tag/version); Review                                           | A tag/version mismatch (CI); an unsigned installer or missing smoke test (Review)    |
+| Docs, ADR, changelog                                          | Review                                                                                                       | A missing update                                                                     |
 
 **Exceptions.** A rule MAY be broken only through a written exception. Prefer
 a scoped override in `vite.config.ts` with a comment naming the rule, reason,
@@ -683,36 +591,9 @@ that bypasses review MUST be reviewed retroactively within one business day.
 **Adoption debt.** These current deviations MUST NOT be copied, and each MUST
 be fixed when its file is touched:
 
-- Hit paths apply the fill-time CTM; a caller that changes the CTM after
-  building a path and before filling it gets non-Canvas semantics. Bake the CTM
-  when each path command is issued when that becomes observable.
-- `src/leafer/platform/values.ts` `numberArg` can return `NaN` or `Infinity`
-  for a malformed recorded argument. Replay catches the resulting native error,
-  but a finite-argument guard would make the skip explicit.
-- Rasterized layers reference URL images by URL; NSH's SVG loader resolves
-  inline raster `data:` images only, so an `asset:`, file or remote image, or
-  a nested SVG document, inside a layer that must be rasterized is not drawn.
-  Keep plain images outside compositing layers until the loader resolves the
-  app's asset scheme.
-- A rasterized layer is decoded asynchronously: its first appearance can lag
-  the frame that changed it. Keep continuously changing layers vector.
-- A layer-wide composite (`destination-in`/`destination-out`) inside a clip
-  applies to the clip's container in the serializer, not to earlier content
-  outside it as Canvas does. Leafer's masks and blend copies do not enter a
-  clip, and a path eraser's `clearRect` is handled across the clip chain, but
-  a composite inside a clip is not; fix the serializer's clip model if that
-  becomes reachable.
-- Conic gradients inside a rasterized layer are 90 solid wedges when they
-  fill a path; a conic `stroke`, `strokeText` or `fillText` uses one color at
-  t=0.5 instead of the sweep. CSS `filter` properties are not replayed as SVG
-  filters; Porter-Duff modes other than `destination-in`, `destination-out`,
-  `copy` and `destination-over` are approximated as `source-over` there. The
-  current scene uses none of them.
-- The raster path needs an NSH host whose canvas draws SVG images; the
-  upstream changes are described in [nsh.md](nsh.md). The stock 0.4.0 host
-  refuses them, and the plain scene stays vector, so the app still runs there.
-- `getImageData` on a render canvas is synthetic, except for the get/put
-  handshake that marks a grayscale mask.
+- The canvas renders every visible card as an NSH view. The card budget and
+  hash sampling keep low-zoom scenes bounded, but a minimum-size or cluster
+  representation at very low zoom is still to be designed.
 - The workflows still use mutable action tags and pipe NSH installers to a
   shell; the tag/version check is now in `release.yml`. Vendor or checksum the
   installer scripts when CI security is next reviewed.
@@ -729,9 +610,6 @@ be fixed when its file is touched:
   credentials; until then CI produces ad-hoc-signed builds.
 - Flow is desktop-only; the app tests target the headless/desktop surface and
   do not cover web, iOS or Android. Those are not release targets.
-- The 4K dot grid records a large number of canvas operations per frame; it is
-  a measured performance target, not a functional failure. Raise the spacing
-  or cache the pattern when profiling shows a missed frame.
 - `docs/standards.md` is adopted with this change; keep it in the same commit
   as the code it governs, and update it in the PR that changes a rule.
 
@@ -741,7 +619,7 @@ be fixed when its file is touched:
 component; mount it in `src/App.tsx`. When a second page exists, create one
 `createNavStack<Route>()` at the root and render through `<NavStack>`; pages
 stay mounted, so use stable route identity and carry page data in the route.
-Share mutable state only through `src/store.ts`; keep camera and editor state
+Share mutable state only through `src/store.ts`; keep camera and scene state
 in the page. Add an `App.test.tsx` flow and update `docs/architecture.md` if
 ownership changes. (Test, Review)
 
@@ -751,26 +629,14 @@ Do not import the store, a page or `App.tsx`; the page binds readers and
 actions. Use tokens, a stable `testID`, an accessible name and the documented
 states. Test it through the page; unit-test only pure helpers. (Review, Test)
 
-**New canvas feature.** Check whether Leafer already supports it. Put scene
-data in `src/flow/data.ts`, construction in `src/flow/scene.ts`, and camera
-math in `src/leafer/camera.ts`. If a platform call is needed, implement it in
-exactly one `src/leafer/platform/` module behind the facade and add a failing
-record, replay and effect test in `src/leafer/nsh-platform.test.ts` before the
-implementation. Use Leafer's editor for interaction; never hand-draw handles
-or a second loop. Update the module table in `docs/architecture.md` and the
-coverage list in `docs/testing.md`. (Test, Review)
-
-**New adapter hook.** Identify the exact Leafer call and the module that owns
-that concern: `recording-context` and `replay` for draw calls, `path` and
-`hit-test` for geometry, `paint` for paints, `snapshot` for offscreen
-surfaces, `host` for platform hooks, `measure` for text, `frame` for the
-hidden render-mark reset, and `canvas`/`op` for shared types. Implement
-recording and replay or hit behavior there; export through `nsh-platform.ts`
-only if app code needs it. Prove it with a record, replay and effect test.
-Unsupported behavior is an explicit, tested, documented no-op, never a throw
-or a silent wrong result. Keep `installNshPlatform()` idempotent,
-`devicePixelRatio` 1, and each view's `addDrawRequester` cleanup paired with
-its mount. (Test, Review)
+**New canvas feature.** Keep pure geometry in `src/flow/selection.ts`,
+`src/flow/connection.ts` or `src/flow/overlay.ts`; the model in
+`src/flow/scene.ts`; gestures in `src/flow/canvas-controller.ts`; camera math
+in `src/flow/camera.ts`; and the view in the matching component under
+`src/components/`. Add the unit test for the new rule and an `App.test.tsx`
+flow when the user can reach it. Do not add a canvas library or a second
+render loop. Update the module list in `docs/architecture.md` and the coverage
+list in `docs/testing.md`. (Test, Review)
 
 **New dependency.** Add an ADR first for a runtime dependency. Use
 `bun add --exact <package>`, commit the updated `bun.lock`, verify
@@ -782,15 +648,14 @@ before release. Remove imports, types, tests and docs when removing a package.
 **New semantic token.** Add the role to both `light` and `dark` in
 `src/theme.json`; use it through `token()` or a token class; validate the
 actual foreground/background pair for contrast; do not add `dark:` for it. If
-Leafer nodes use it, extend `recolor` and verify with an app appearance test.
-(Review, Test, Manual)
+the grid or a canvas view uses it, verify the appearance change with an app
+test. (Review, Test, Manual)
 
 ## 14. Anti-patterns
 
 - **Architecture:** a component importing the store; a foundation importing a
-  page; a page importing another page's internals; a deep
-  `leafer/platform/*` import from app code; a second `mount()`; a new `src/`
-  directory without a boundary classification.
+  page; a page importing another page's internals; a second `mount()`; a new
+  `src/` directory without a boundary classification.
 - **State and reactivity:** exporting a signal or setter; a page-local copy of
   store state; mirroring zoom or selection into a second signal; destructuring
   props in a component body; an effect that writes the signal it reads; a
@@ -798,11 +663,10 @@ Leafer nodes use it, extend `recolor` and verify with an app appearance test.
   and expecting tracking.
 - **Types:** `any`; `as` instead of a guard; `!`; `@ts-ignore`; a union
   `default` that returns a normal fallback; `JSON.parse(text) as T`.
-- **Canvas:** hand-drawn selection handles; pixel `getImageData` hit testing;
-  imperatively mutating the canvas outside `draw`; a new Leafer call with no
-  adapter test; rebuilding the scene per frame; a second animation loop;
-  enabling `usePartRender` without dirty-rect replay; leaving a measure
-  context or draw requester pointing at a dead frame.
+- **Canvas:** screen geometry cached in a card view; hit-testing by pixel; a
+  second press path beside `CanvasController`; writing the document on every
+  pointer move; a second render loop; a canvas or scene-graph library; a scene
+  that instantiates the whole document.
 - **UI:** raw hex, `rgb()` or a palette class in app code; `dark:` for token
   colors; a `testID` used as an accessible name; color-only selection; a
   drag-only chrome action with no keyboard or single-pointer alternative; an
@@ -818,7 +682,8 @@ Leafer nodes use it, extend `recolor` and verify with an app appearance test.
 
 Local, enforced truth: `package.json`, `vite.config.ts`, `src/tsconfig.json`,
 the root `tsconfig.json`, `lint/boundaries.js`, `src/nsh.json`, `src/store.ts`,
-`src/leafer/**`, [architecture](architecture.md), [conventions](conventions.md),
+`src/flow/**`, `src/components/FlowCanvas.tsx`,
+[architecture](architecture.md), [conventions](conventions.md),
 [testing](testing.md) and [packaging](packaging.md).
 
 External references used for the rules: NSH
@@ -828,7 +693,7 @@ External references used for the rules: NSH
 [canvas](https://nsh.dev/docs/canvas),
 [testing and trace](https://nsh.dev/docs/testing-and-trace) and
 [sandbox and capabilities](https://nsh.dev/docs/sandbox-and-capabilities);
-[Leafer](https://www.leaferjs.com/); the TypeScript Handbook's
+the TypeScript Handbook's
 [Do's and Don'ts](https://www.typescriptlang.org/docs/handbook/declaration-files/do-s-and-don-ts.html);
 [WCAG 2.2](https://www.w3.org/TR/WCAG22/); Google's
 [small CLs](https://google.github.io/eng-practices/review/developer/small-cls.html)

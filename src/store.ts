@@ -15,7 +15,7 @@ export const currentTool = (): Tool => tool();
 /** The camera's scale in percent, or null before the first fit. */
 export const zoomPercent = (): number | null => zoom();
 
-/** How many scene elements the editor has selected. */
+/** How many cards are selected in the canvas. */
 export const selectedCount = (): number => selected();
 
 /** Whether the window is kept above normal windows. */
@@ -31,7 +31,7 @@ export function setZoomPercent(value: number): void {
   zoom.set(value);
 }
 
-/** Publishes how many scene elements the editor has selected. */
+/** Publishes how many cards the canvas has selected. */
 export function setSelectedCount(value: number): void {
   selected.set(value);
 }

@@ -160,6 +160,7 @@ export function SearchPalette(props: SearchPaletteProps) {
         <Text class="text-sm font-medium text-muted-foreground">Search</Text>
         <Input
           testID="search-input"
+          accessibilityLabel="Search cards"
           ref={(node) => {
             input = node;
           }}

@@ -1,6 +1,8 @@
 # Rust document core plan
 
-- **Status:** P0, P1 and P2 complete; P3 pending
+- **Status:** P0, P1 and P2 complete; P3 pending. The document core and its
+  contract are current; the canvas this plan calls a Leafer scene is now a
+  native view tree ([ADR 0004](../adr/0004-native-view-canvas.md)).
 - **Date:** 2026-11-07
 - **Related:** [ADR 0002](../adr/0002-rust-document-core.md),
   [ADR 0003](../adr/0003-orm-seaorm.md)

@@ -1,5 +1,14 @@
-import { expect, open, test } from "nsh/test";
+import { type App, expect, open, test } from "nsh/test";
 import { CONTENT } from "./flow/data";
+
+/** Opens the composer of a seed node through search. */
+const selectSeed = async (app: App, query: string, testId: string): Promise<void> => {
+  await app.keyboard.press("mod+k");
+  await app.waitUntil(() => app.shows("id:search-input"));
+  await app.type("id:search-input", query);
+  await app.waitUntil(() => app.shows(testId));
+  await app.press(testId);
+};
 
 const percentOf = (texts: string[]): number => {
   const text = texts.find((value) => /^\d+%$/.test(value));
@@ -67,7 +76,7 @@ test("shows the flow canvas", async () => {
   expect(app.shows("id:flow-canvas")).toBe(true);
   const texts = app.texts();
   expect(texts).toContain("Flow");
-  expect(texts).toContain("Leafer engine · NSH");
+  expect(texts).toContain("Native canvas · NSH");
   expect(texts).toContain("Fit");
 });
 
@@ -76,10 +85,16 @@ test("box-selects a card", async () => {
   await app.waitUntil(() => percentOf(app.texts()) > 0);
   const scale = percentOf(app.texts()) / 100;
 
-  // The canvas is fitted around the flow; its middle is the flow's middle.
+  // Start off the connector that sits between the two cards: a press on it
+  // selects the edge. A small pan leaves the box-select on empty canvas.
+  await app.press("Hand");
+  await app.drag("id:flow-canvas", { x: 0, y: 20 });
+  await app.keyboard.press("v");
+  await app.waitUntil(() => !app.texts().some((text) => text.includes("V to select")));
+
   await app.drag("id:flow-canvas", {
     x: -260 * scale,
-    y: -136 * scale,
+    y: -100 * scale,
   });
   await app.waitUntil(() => app.texts().some((text) => text.includes("1 card selected")));
   expect(app.texts().some((text) => text.includes("1 card selected"))).toBe(true);
@@ -93,6 +108,9 @@ test("adds a panel with N and deletes it with Backspace", async () => {
   await app.waitUntil(() => app.texts().some((text) => text.includes("1 card selected")));
   expect(app.texts().some((text) => text.includes("1 card selected"))).toBe(true);
 
+  // The new node's composer is open, so Delete is held back; Escape closes
+  // the composer while keeping the node selected.
+  await app.keyboard.press("escape");
   await app.keyboard.press("backspace");
   await app.waitUntil(() => !app.texts().some((text) => text.includes("card selected")));
   expect(app.texts().some((text) => text.includes("card selected"))).toBe(false);
@@ -106,13 +124,34 @@ test("adds a panel with N and deletes it with Backspace", async () => {
   expect(app.texts()).toContain("No cards match");
 });
 
+test("adds an image node with I", async () => {
+  const app = await open("./App.tsx");
+  await app.waitUntil(() => percentOf(app.texts()) > 0);
+
+  await app.keyboard.press("i");
+  await app.waitUntil(() => app.texts().some((text) => text.includes("1 card selected")));
+  await app.waitUntil(() => app.texts().includes("Model · Mock Image"));
+  expect(app.texts().some((text) => text.includes("1 card selected"))).toBe(true);
+});
+
 test("clears the selection with Escape", async () => {
   const app = await open("./App.tsx");
   await app.waitUntil(() => percentOf(app.texts()) > 0);
   const scale = percentOf(app.texts()) / 100;
 
-  await app.drag("id:flow-canvas", { x: -260 * scale, y: -136 * scale });
+  await app.press("Hand");
+  await app.drag("id:flow-canvas", { x: 0, y: 20 });
+  await app.keyboard.press("v");
+  await app.waitUntil(() => !app.texts().some((text) => text.includes("V to select")));
+
+  await app.drag("id:flow-canvas", { x: -260 * scale, y: -100 * scale });
   await app.waitUntil(() => app.texts().some((text) => text.includes("1 card selected")));
+
+  // Selecting a card opens its composer; Escape closes the sheet first and
+  // leaves the card selected, the second Escape clears the selection.
+  await app.keyboard.press("escape");
+  await app.waitUntil(() => app.texts().some((text) => text.includes("Esc to clear")));
+  expect(app.texts().some((text) => text.includes("1 card selected"))).toBe(true);
 
   await app.keyboard.press("escape");
   await app.waitUntil(() => !app.texts().some((text) => text.includes("card selected")));
@@ -209,7 +248,11 @@ test("switches back to the select tool with V", async () => {
   await app.keyboard.press("v");
   await app.waitUntil(() => !app.texts().some((text) => text.includes("V to select")));
 
-  await app.drag("id:flow-canvas", { x: -260 * scale, y: -136 * scale });
+  await app.press("Hand");
+  await app.drag("id:flow-canvas", { x: 0, y: 20 });
+  await app.keyboard.press("v");
+  await app.waitUntil(() => !app.texts().some((text) => text.includes("V to select")));
+  await app.drag("id:flow-canvas", { x: -260 * scale, y: -100 * scale });
   await app.waitUntil(() => app.texts().some((text) => text.includes("1 card selected")));
 });
 
@@ -239,13 +282,13 @@ test("searches cards and reveals the chosen one", async () => {
 
   await app.keyboard.press("mod+k");
   await app.waitUntil(() => app.shows("id:search-input"));
-  await app.type("id:search-input", "schema");
-  await app.waitUntil(() => app.shows("id:search-result-validate"));
+  await app.type("id:search-input", "Image");
+  await app.waitUntil(() => app.shows("id:search-result-seed-image"));
 
-  await app.press("id:search-filter-panel");
-  await app.waitUntil(() => app.shows("id:search-result-validate"));
+  await app.press("id:search-filter-image");
+  await app.waitUntil(() => app.shows("id:search-result-seed-image"));
 
-  await app.press("id:search-result-validate");
+  await app.press("id:search-result-seed-image");
   await app.waitUntil(() => app.texts().some((text) => text.includes("1 card selected")));
   expect(app.shows("id:search-input")).toBe(false);
 });
@@ -256,8 +299,8 @@ test("opens a search result with Enter", async () => {
 
   await app.keyboard.press("mod+k");
   await app.waitUntil(() => app.shows("id:search-input"));
-  await app.type("id:search-input", "deliver");
-  await app.waitUntil(() => app.shows("id:search-result-deliver"));
+  await app.type("id:search-input", "Image");
+  await app.waitUntil(() => app.shows("id:search-result-seed-image"));
 
   await app.submit("id:search-input");
   await app.waitUntil(() => app.texts().some((text) => text.includes("1 card selected")));
@@ -318,10 +361,132 @@ test("repaints when the system appearance changes", async () => {
   const app = await open("./App.tsx");
   await app.waitUntil(() => percentOf(app.texts()) > 0);
 
-  // Repaints the Leafer scene through the same effect a user's system uses.
+  // Repaints the native scene through the same effect a user's system uses.
   await app.setColorScheme("dark");
   await app.setColorScheme("light");
 
   expect(percentOf(app.texts())).toBeGreaterThan(0);
   expect(app.texts()).toContain("Flow");
+});
+
+test("selecting a text node opens its composer", async () => {
+  const app = await open("./App.tsx");
+  await app.waitUntil(() => percentOf(app.texts()) > 0);
+
+  await selectSeed(app, "Text", "id:search-result-seed-text");
+  await app.waitUntil(() => app.shows("id:node-composer"));
+  expect(app.shows("id:composer-prompt")).toBe(true);
+  expect(app.shows("id:composer-body")).toBe(true);
+});
+
+test("edits the prompt and runs with it", async () => {
+  const app = await open("./App.tsx");
+  await app.waitUntil(() => percentOf(app.texts()) > 0);
+
+  await selectSeed(app, "Text", "id:search-result-seed-text");
+  await app.waitUntil(() => app.shows("id:composer-prompt"));
+  await app.clear("id:composer-prompt");
+  await app.type("id:composer-prompt", "A quiet lake at dusk");
+  await app.press("id:composer-run");
+  await app.waitUntil(() =>
+    app.texts().some((text) => text.includes("[Mock Text] A quiet lake at dusk")),
+  );
+});
+
+test("runs the selected text node with the mock provider", async () => {
+  const app = await open("./App.tsx");
+  await app.waitUntil(() => percentOf(app.texts()) > 0);
+
+  await selectSeed(app, "Text", "id:search-result-seed-text");
+  await app.waitUntil(() => app.shows("id:composer-run"));
+
+  await app.press("id:composer-run");
+  await app.waitUntil(() => app.texts().some((text) => text.includes("[Mock Text]")));
+  expect(app.texts().some((text) => text.endsWith("Done"))).toBe(true);
+});
+
+test("runs the seeded image node and records its mock batch", async () => {
+  const app = await open("./App.tsx");
+  await app.waitUntil(() => percentOf(app.texts()) > 0);
+
+  await selectSeed(app, "Image", "id:search-result-seed-image");
+  await app.waitUntil(() => app.shows("id:composer-run"));
+
+  await app.press("id:composer-run");
+  await app.waitUntil(() => app.texts().some((text) => text.endsWith("Done")));
+  expect(app.texts().some((text) => text.endsWith("Done"))).toBe(true);
+});
+
+test("removes an input from the composer", async () => {
+  const app = await open("./App.tsx");
+  await app.waitUntil(() => percentOf(app.texts()) > 0);
+
+  await selectSeed(app, "Image", "id:search-result-seed-image");
+  await app.waitUntil(() => app.texts().includes("Inputs · 1"));
+
+  await app.press("label:Remove input");
+  await app.waitUntil(() => app.texts().includes("Inputs · 0"));
+  // The upstream group and its chip are gone; the text card keeps its body.
+  expect(app.texts().some((text) => text.includes("From Text"))).toBe(false);
+  expect(app.texts().some((text) => text.includes("清晨"))).toBe(true);
+});
+
+test("saves an edited text body from the composer", async () => {
+  const app = await open("./App.tsx");
+  await app.waitUntil(() => percentOf(app.texts()) > 0);
+
+  await selectSeed(app, "Text", "id:search-result-seed-text");
+  await app.waitUntil(() => app.shows("id:composer-body"));
+
+  await app.clear("id:composer-body");
+  await app.type("id:composer-body", "A fresh line");
+  await app.press("id:composer-save-body");
+  await app.waitUntil(
+    () =>
+      app.texts().includes("A fresh line") && !app.texts().some((text) => text.includes("清晨")),
+  );
+});
+
+test("switches the composer to another node", async () => {
+  const app = await open("./App.tsx");
+  await app.waitUntil(() => percentOf(app.texts()) > 0);
+
+  await selectSeed(app, "Text", "id:search-result-seed-text");
+  await app.waitUntil(() => app.shows("id:composer-body"));
+
+  await selectSeed(app, "Image", "id:search-result-seed-image");
+  await app.waitUntil(() => app.texts().includes("Inputs · 1"));
+  expect(app.shows("id:composer-body")).toBe(false);
+  // The drafts reset to the image node's settings.
+  await app.waitUntil(() => (app.value("id:composer-prompt") ?? "").includes("mountain lake"));
+});
+
+test("keeps a draft when the composer switches nodes", async () => {
+  const app = await open("./App.tsx");
+  await app.waitUntil(() => percentOf(app.texts()) > 0);
+
+  await selectSeed(app, "Text", "id:search-result-seed-text");
+  await app.waitUntil(() => app.shows("id:composer-prompt"));
+  await app.clear("id:composer-prompt");
+  await app.type("id:composer-prompt", "Keep this draft");
+
+  // A search result selects another node directly; the text node's draft
+  // must be written before its detail is replaced.
+  await selectSeed(app, "Image", "id:search-result-seed-image");
+  await app.waitUntil(() => app.texts().includes("Inputs · 1"));
+
+  await selectSeed(app, "Text", "id:search-result-seed-text");
+  await app.waitUntil(() => (app.value("id:composer-prompt") ?? "").includes("Keep this draft"));
+});
+
+test("shows why an empty-prompt run failed", async () => {
+  const app = await open("./App.tsx");
+  await app.waitUntil(() => percentOf(app.texts()) > 0);
+
+  await selectSeed(app, "Image", "id:search-result-seed-image");
+  await app.waitUntil(() => app.shows("id:composer-prompt"));
+
+  await app.clear("id:composer-prompt");
+  await app.press("id:composer-run");
+  await app.waitUntil(() => app.texts().includes("Prompt cannot be empty"));
 });

@@ -136,6 +136,7 @@ fn node_summary(node: &nodes::Model) -> NodeSummary {
         id: node.id.clone(),
         kind: node.kind.clone(),
         title: node.title.clone(),
+        body: node.body.clone(),
         x: node.x,
         y: node.y,
         width: node.width,
@@ -143,6 +144,9 @@ fn node_summary(node: &nodes::Model) -> NodeSummary {
         z: node.z,
         rev: node.rev as f64,
         data_json: node.data_json.clone(),
+        settings_json: node.settings_json.clone(),
+        status: node.status.clone(),
+        output_batch_id: node.output_batch_id.clone(),
     }
 }
 

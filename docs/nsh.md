@@ -1,6 +1,11 @@
-# Canvas SVG images: the NSH build Flow needs
+# Canvas SVG images: the NSH build Flow needed (historical)
 
-Flow's Leafer adapter rasterizes an offscreen layer as one picture when the
+> **Status: superseded.** Flow's canvas is now a native NSH view tree
+> ([ADR 0004](adr/0004-native-view-canvas.md)), so the Leafer adapter and the
+> layer-rasterization path described here no longer exist. This document is
+> kept as the record of the host changes that path required.
+
+Flow's former Leafer adapter rasterized an offscreen layer as one picture when
 layer's compositing must stay inside it (alpha masks, erasers, blend copies,
 group opacity, grayscale masks, patterned strokes and text). It serializes the
 layer to a self-contained SVG (its text and inline raster images included),

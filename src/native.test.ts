@@ -3,6 +3,7 @@
 // headless runner links the Rust crate and runs this file with the rest.
 import { expect, test } from "nsh/test";
 import { Document } from "@flow/native";
+import { IMAGE_NODE_ID, SEED_EDGE_ID, TEXT_NODE_ID, seedDocument } from "./flow/data";
 
 test("stores, searches and undoes nodes through the Rust core", async () => {
   const document = await Document.open(":memory:");
@@ -168,6 +169,28 @@ test("serves viewport scenes, bounds, edges and undo", async () => {
 
   await document.undo();
   expect(await document.edgeCount()).toBe(1);
+
+  document.dispose();
+});
+
+test("seeding connects the text node's manual result to the image node", async () => {
+  const document = await Document.open(":memory:");
+  await seedDocument(document);
+
+  const text = await document.nodeDetail(TEXT_NODE_ID);
+  expect(text?.batch?.trigger).toBe("manual");
+  expect(text?.batch?.items[0]?.text.length).toBeGreaterThan(0);
+
+  const image = await document.nodeDetail(IMAGE_NODE_ID);
+  expect(image?.inputs.length).toBe(1);
+  expect(image?.inputs[0]?.edgeId).toBe(SEED_EDGE_ID);
+  expect(image?.inputs[0]?.sourceNodeId).toBe(TEXT_NODE_ID);
+  expect(image?.inputs[0]?.sourceTitle).toBe("Text");
+  expect(image?.node.status).toBe("idle");
+
+  const undone = await document.undo();
+  expect(undone.changed.length).toBe(0);
+  expect(await document.count()).toBe(2);
 
   document.dispose();
 });

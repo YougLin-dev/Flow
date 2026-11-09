@@ -2,6 +2,8 @@ import { platform, Text, View } from "nsh";
 
 export interface SelectionBadgeProps {
   count: number;
+  /** The selected card's composer is open, so Escape closes it first. */
+  composing: boolean;
 }
 
 /** The "N cards selected" pill above the hint bar. */
@@ -17,7 +19,9 @@ export function SelectionBadge(props: SelectionBadgeProps) {
     >
       <Text class="text-xs text-card-foreground">
         {props.count === 1 ? "1 card selected" : `${props.count} cards selected`}
-        <Text class="text-muted-foreground"> · Esc to clear</Text>
+        <Text class="text-muted-foreground">
+          {props.composing ? " · Esc to close" : " · Esc to clear"}
+        </Text>
       </Text>
     </View>
   );

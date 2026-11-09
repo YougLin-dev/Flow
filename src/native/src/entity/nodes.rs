@@ -20,6 +20,12 @@ pub struct Model {
     pub height: f64,
     pub z: f64,
     pub data_json: String,
+    /// The kind's opaque settings (prompt, model, aspect, …).
+    pub settings_json: String,
+    /// idle / running / done / failed / cancelled / stale / interrupted.
+    pub status: String,
+    /// The batch this node currently shows, if it has ever produced one.
+    pub output_batch_id: Option<String>,
     pub rev: i64,
     pub created_at: i64,
     pub updated_at: i64,

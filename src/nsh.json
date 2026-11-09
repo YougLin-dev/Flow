@@ -12,6 +12,7 @@
     },
     "process": {
       "env": ["FLOW_DB_PATH"]
-    }
+    },
+    "picker": true
   }
 }
