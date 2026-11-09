@@ -1,6 +1,7 @@
 /**
- * One node card on the native canvas: header, status, body and ports. Its
- * pixel values are world-space points, so they scale with the camera.
+ * One node card on the native canvas: its title and status above the card,
+ * the body inside it and the ports on its edges. Its pixel values are
+ * world-space points, so they scale with the camera.
  */
 import { Image, Text, View } from "nsh";
 import type { NodeSummary } from "@flow/native";
@@ -25,6 +26,12 @@ const ACCENT_BG: Record<FlowAccent, string> = {
   "chart-5": "bg-chart-5",
 };
 
+/** The title row sits above the card, in world points. */
+const TITLE_HEIGHT = 20;
+const TITLE_GAP = 6;
+/** The body inset inside the card. */
+const BODY_INSET = 16;
+
 export function FlowCard(props: FlowCardProps) {
   const accent = () => nodeKind(props.node().kind).accent;
   const active = () => props.selected() || props.hovered();
@@ -33,7 +40,8 @@ export function FlowCard(props: FlowCardProps) {
   const width = () => props.rect()?.width ?? 0;
   const height = () => props.rect()?.height ?? 0;
   const body = () => props.node().body.trim();
-  const lineCount = () => Math.max(1, Math.floor((height() - 64) / 19));
+  const status = () => statusLabel(props.node().status);
+  const lineCount = () => Math.max(1, Math.floor((height() - BODY_INSET * 2) / 19));
 
   return (
     <View
@@ -46,6 +54,63 @@ export function FlowCard(props: FlowCardProps) {
         zIndex: props.node().z + 1,
       }}
     >
+      <View
+        style={{
+          position: "absolute",
+          left: left(),
+          top: top() - TITLE_HEIGHT - TITLE_GAP,
+          width: width(),
+          height: TITLE_HEIGHT,
+        }}
+      >
+        <View
+          classList={{
+            "absolute left-0 top-[3px] h-3.5 w-1 rounded-full": true,
+            [ACCENT_BG[accent()]]: true,
+          }}
+        />
+        <Text
+          class="absolute text-sm font-semibold text-card-foreground"
+          style={{
+            left: 12,
+            top: 0,
+            width: Math.max(1, width() - (status() === "" ? 12 : 92)),
+            height: TITLE_HEIGHT,
+            textAlignVertical: "center",
+            numberOfLines: 1,
+            textOverflow: "ellipsis",
+          }}
+        >
+          {props.node().title}
+        </Text>
+        <View
+          classList={{
+            "absolute h-1.5 w-1.5 rounded-full": true,
+            [statusDot(props.node().status)]: true,
+          }}
+          style={{
+            left: width() - 74,
+            top: 7,
+            visibility: status() === "" ? "hidden" : "visible",
+          }}
+        />
+        <Text
+          classList={{ "absolute text-[10px]": true, [statusText(props.node().status)]: true }}
+          style={{
+            left: width() - 64,
+            top: 0,
+            width: 56,
+            height: TITLE_HEIGHT,
+            textAlign: "right",
+            textAlignVertical: "center",
+            numberOfLines: 1,
+            textOverflow: "ellipsis",
+          }}
+        >
+          {status()}
+        </Text>
+      </View>
+
       <View
         accessibilityLabel={props.node().title}
         classList={{
@@ -61,57 +126,14 @@ export function FlowCard(props: FlowCardProps) {
           height: height(),
         }}
       >
-        <View
-          classList={{
-            "absolute left-4 top-4 h-5 w-1 rounded-full": true,
-            [ACCENT_BG[accent()]]: true,
-          }}
-        />
-        <Text
-          class="absolute text-[15px] font-semibold text-card-foreground"
-          style={{
-            left: 28,
-            top: 14,
-            width: Math.max(1, width() - 116),
-            numberOfLines: 1,
-            textOverflow: "ellipsis",
-          }}
-        >
-          {props.node().title}
-        </Text>
-        <View
-          classList={{
-            "absolute h-1.5 w-1.5 rounded-full": true,
-            [statusDot(props.node().status)]: true,
-          }}
-          style={{
-            left: width() - 74,
-            top: 23,
-            visibility: statusLabel(props.node().status) === "" ? "hidden" : "visible",
-          }}
-        />
-        <Text
-          classList={{ "absolute text-[10px]": true, [statusText(props.node().status)]: true }}
-          style={{
-            left: width() - 64,
-            top: 16,
-            width: 56,
-            textAlign: "right",
-            numberOfLines: 1,
-            textOverflow: "ellipsis",
-          }}
-        >
-          {statusLabel(props.node().status)}
-        </Text>
-
         {props.node().kind === "image" ? (
           <View
             class="absolute"
             style={{
-              left: 16,
-              top: 48,
-              width: Math.max(1, width() - 32),
-              height: Math.max(1, height() - 64),
+              left: BODY_INSET,
+              top: BODY_INSET,
+              width: Math.max(1, width() - BODY_INSET * 2),
+              height: Math.max(1, height() - BODY_INSET * 2),
               overflow: "hidden",
             }}
           >
@@ -125,8 +147,8 @@ export function FlowCard(props: FlowCardProps) {
                   style={{
                     position: "absolute",
                     ...previewCell(
-                      Math.max(1, width() - 32),
-                      Math.max(1, height() - 64),
+                      Math.max(1, width() - BODY_INSET * 2),
+                      Math.max(1, height() - BODY_INSET * 2),
                       index(),
                       props.preview()?.urls.length ?? 0,
                     ),
@@ -138,17 +160,20 @@ export function FlowCard(props: FlowCardProps) {
             </Each>
           </View>
         ) : body() === "" ? (
-          <Text class="absolute text-xs text-muted-foreground" style={{ left: 16, top: 48 }}>
+          <Text
+            class="absolute text-xs text-muted-foreground"
+            style={{ left: BODY_INSET, top: BODY_INSET }}
+          >
             No output yet
           </Text>
         ) : (
           <Text
             class="absolute text-[13px] text-card-foreground"
             style={{
-              left: 16,
-              top: 48,
-              width: Math.max(1, width() - 32),
-              height: Math.max(1, height() - 64),
+              left: BODY_INSET,
+              top: BODY_INSET,
+              width: Math.max(1, width() - BODY_INSET * 2),
+              height: Math.max(1, height() - BODY_INSET * 2),
               lineHeight: 19,
               numberOfLines: lineCount(),
               textOverflow: "ellipsis",

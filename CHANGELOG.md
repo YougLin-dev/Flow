@@ -42,6 +42,8 @@ All notable changes to Flow are recorded here. The format follows
 - Connectors render as densely sampled, overlapping line segments with rounded
   caps, and card ports are accent dots on a card-colored halo; connector
   arrowheads are gone.
+- A card's title and status now sit above the card instead of inside it, and
+  the body uses the full card area.
 - Selection no longer draws the eight resize handle dots or a square outline
   around the card: the card's own rounded accent border marks selection, and
   its border stays a resize zone. A card resizes from anywhere along an edge,

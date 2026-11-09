@@ -154,13 +154,14 @@ events and renders four kinds of children:
 - **Interaction view** — a transparent, full-size view that owns the cursor
   and dispatches presses, moves and touches to the `CanvasController`.
 
-`FlowCard` positions itself from the node's world rectangle and renders title,
-status, body text, image thumbnails (laid out inside the body box) and the
-input/output ports as accent dots on a card-colored halo. `FlowEdge` samples
-the connector cubic (`flow/connection.ts`) into densely spaced, overlapping
-straight line views with rounded caps; the overlap keeps antialiased joints
-from showing gaps, and there is no arrowhead. Both are presentational: props
-are accessors, and the page passes scene signals to them.
+`FlowCard` positions itself from the node's world rectangle and renders the
+title and status above the card, the body text or image thumbnails inside it
+(laid out inside the body box), and the input/output ports on its edges as
+accent dots on a card-colored halo. `FlowEdge` samples the connector cubic
+(`flow/connection.ts`) into densely spaced, overlapping straight line views
+with rounded caps; the overlap keeps antialiased joints from showing gaps,
+and there is no arrowhead. Both are presentational: props are accessors, and
+the page passes scene signals to them.
 
 The scene model (`flow/scene.ts`) is headless: it holds the visible nodes and
 edges, the selection, transient drag geometry (`overrides`), previews and the
