@@ -148,8 +148,9 @@ events and renders four kinds of children:
 - **Selection overlay** — the marquee box in screen space, derived from the
   controller each time the drag changes. It does not take pointer events. A
   selected card shows the same rounded accent border it shows on hover, so no
-  square outline is laid over it, and the eight resize handles are invisible
-  hit targets kept by the controller (the cursor names the edge).
+  square outline is laid over it. The border is the resize zone: corners
+  scale proportionally and any point along an edge resizes that axis, with
+  the cursor naming the side, so the card shows no handle dots.
 - **Interaction view** — a transparent, full-size view that owns the cursor
   and dispatches presses, moves and touches to the `CanvasController`.
 
@@ -182,20 +183,20 @@ pulled, the composer hides so the gesture and its target stay visible.
 `CanvasController`:
 
 - **Select** — a press selects a card (Shift toggles), starts a drag when the
-  press lands on a selected card, starts a resize when it lands on any visible
-  card's invisible resize handle (the press selects that card first), and
-  starts the connector gestures at a port. A corner handle keeps the card's
-  aspect ratio with the opposite corner fixed, scaling by the pointer's
-  projection onto the card's diagonal, so passing one edge does not snap the
-  card to its minimum. An edge handle resizes one axis. A press on empty
+  press lands on a selected card, starts a resize when it lands near any
+  visible card's border (a corner or anywhere along an edge; the press selects
+  that card first), and starts the connector gestures at a port. A corner
+  keeps the card's aspect ratio with the opposite corner fixed, scaling by the
+  pointer's projection onto the card's diagonal, so passing one edge does not
+  snap the card to its minimum. An edge resizes one axis. A press on empty
   canvas clears the selection and starts the marquee. A double-click on a text
   card opens its inline editor.
 - **Hand** — presses pan the camera; nothing is selected.
 - **Touch** — one finger behaves like the current tool; two fingers pinch-zoom
   around their center and pan with it.
 - **Hover** — mouse movement updates the hovered card and a cursor that
-  reflects the tool, any card's resize handle or a port. A card under the
-  pointer owns the hit: another card's handle never reacts through it.
+  reflects the tool, any card's resize border or a port. A card under the
+  pointer owns the hit: another card's border never reacts through it.
 
 Keyboard commands are declared in `flow/bindings.ts` (`bindFlowKeys`) and
 bound once by the page: `mod+=`/`mod+-`/`mod+0`

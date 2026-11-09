@@ -1,29 +1,21 @@
 import { expect, test } from "nsh/test";
-import { handleAt, intersects, normalizeRect, resizedRect, selectionHandles } from "./selection";
+import { handleAt, intersects, normalizeRect, resizedRect } from "./selection";
 
-test("places eight handles around a screen rectangle", () => {
-  const handles = selectionHandles({ x: 10, y: 20, width: 100, height: 60 });
-  expect(handles.map((handle) => handle.side)).toEqual([
-    "nw",
-    "n",
-    "ne",
-    "e",
-    "se",
-    "s",
-    "sw",
-    "w",
-  ]);
-  expect(handles[0]).toEqual({ side: "nw", x: 10, y: 20 });
-  expect(handles[3]).toEqual({ side: "e", x: 110, y: 50 });
-  expect(handles[5]).toEqual({ side: "s", x: 60, y: 80 });
-});
-
-test("picks the handle within reach of a point", () => {
+test("hit-tests corners and whole edges of a screen rectangle", () => {
   const rect = { x: 10, y: 20, width: 100, height: 60 };
-  expect(handleAt(rect, 11, 21)).toBe("nw");
+  expect(handleAt(rect, 10, 20)).toBe("nw");
+  expect(handleAt(rect, 105, 79)).toBe("se");
+  // Anywhere along the top edge, not only its midpoint.
+  expect(handleAt(rect, 30, 20)).toBe("n");
+  expect(handleAt(rect, 90, 21)).toBe("n");
   expect(handleAt(rect, 60, 19)).toBe("n");
-  expect(handleAt(rect, 110, 80, 2)).toBe("se");
+  expect(handleAt(rect, 9, 50)).toBe("w");
+  expect(handleAt(rect, 110, 70)).toBe("e");
+  expect(handleAt(rect, 40, 79)).toBe("s");
+  // The interior and points beyond the reach are not resize zones.
   expect(handleAt(rect, 60, 50)).toBeNull();
+  expect(handleAt(rect, 130, 50)).toBeNull();
+  expect(handleAt(rect, 110, 80, 2)).toBe("se");
 });
 
 test("normalizes a rectangle dragged in any direction", () => {

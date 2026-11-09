@@ -218,6 +218,23 @@ test("shows a resize cursor over any card's handle", () => {
   expect(controller.hovered()).toBe("a");
 });
 
+test("resizes from anywhere along an edge", () => {
+  const { scene, controller, calls } = setup([node("a", 100, 100)]);
+
+  // The top edge, away from its midpoint and corners.
+  controller.hover(170, 100);
+  expect(controller.cursor()).toBe("ns-resize");
+  expect(controller.hovered()).toBe("a");
+
+  controller.down(170, 100, false, 1);
+  expect(controller.cursor()).toBe("ns-resize");
+  controller.move(170, 90);
+  expect(scene.cardRect("a")).toEqual({ x: 100, y: 90, width: 200, height: 94 });
+
+  controller.up(170, 90);
+  expect(calls.commits).toEqual([[{ id: "a", x: 100, y: 90, width: 200, height: 94 }]]);
+});
+
 test("starts a resize from just outside a corner", () => {
   const { scene, controller } = setup([node("a", 100, 100)]);
 

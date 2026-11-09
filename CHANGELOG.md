@@ -44,12 +44,14 @@ All notable changes to Flow are recorded here. The format follows
   arrowheads are gone.
 - Selection no longer draws the eight resize handle dots or a square outline
   around the card: the card's own rounded accent border marks selection, and
-  the handles remain invisible hit targets with resize cursors. A corner drag
-  keeps the card's aspect ratio with its opposite corner fixed; an edge drag
-  still resizes one axis.
+  its border stays a resize zone. A card resizes from anywhere along an edge,
+  not only at the eight handle points; corners still win where an edge meets
+  a corner. A corner drag keeps the card's aspect ratio with its opposite
+  corner fixed; an edge drag still resizes one axis.
 - Any visible card can be resized without selecting it first: pressing its
-  handle selects the card and starts the resize, and a card under the pointer
-  keeps another card's covered handle from reacting through it.
+  border selects the card and starts the resize, hovering shows the resize
+  cursor along any edge, and a card under the pointer keeps another card's
+  covered border from reacting through it.
 
 ### Removed
 

@@ -10,37 +10,30 @@ export interface ScreenRect {
   readonly height: number;
 }
 
-export interface HandlePoint {
-  readonly side: ResizeHandle;
-  readonly x: number;
-  readonly y: number;
-}
-
-/** The eight resize handles of a screen rectangle, in a stable order. */
-export function selectionHandles(rect: ScreenRect): HandlePoint[] {
+/**
+ * The resize side under a screen point: a corner, or any point along an edge
+ * within `radius` of it. Corners win over the edges they touch.
+ */
+export function handleAt(rect: ScreenRect, x: number, y: number, radius = 7): ResizeHandle | null {
   const left = rect.x;
-  const centerX = rect.x + rect.width / 2;
   const right = rect.x + rect.width;
   const top = rect.y;
-  const centerY = rect.y + rect.height / 2;
   const bottom = rect.y + rect.height;
-  return [
-    { side: "nw", x: left, y: top },
-    { side: "n", x: centerX, y: top },
-    { side: "ne", x: right, y: top },
-    { side: "e", x: right, y: centerY },
-    { side: "se", x: right, y: bottom },
-    { side: "s", x: centerX, y: bottom },
-    { side: "sw", x: left, y: bottom },
-    { side: "w", x: left, y: centerY },
-  ];
-}
-
-/** The handle under a screen point, within `radius` points of its center. */
-export function handleAt(rect: ScreenRect, x: number, y: number, radius = 7): ResizeHandle | null {
-  for (const handle of selectionHandles(rect)) {
-    if (Math.abs(handle.x - x) <= radius && Math.abs(handle.y - y) <= radius) return handle.side;
+  if (x < left - radius || x > right + radius || y < top - radius || y > bottom + radius) {
+    return null;
   }
+  const nearLeft = Math.abs(x - left) <= radius;
+  const nearRight = Math.abs(x - right) <= radius;
+  const nearTop = Math.abs(y - top) <= radius;
+  const nearBottom = Math.abs(y - bottom) <= radius;
+  if (nearTop && nearLeft) return "nw";
+  if (nearTop && nearRight) return "ne";
+  if (nearBottom && nearRight) return "se";
+  if (nearBottom && nearLeft) return "sw";
+  if (nearTop) return "n";
+  if (nearBottom) return "s";
+  if (nearLeft) return "w";
+  if (nearRight) return "e";
   return null;
 }
 
