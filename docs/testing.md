@@ -57,12 +57,12 @@ representation at very low zoom is still to be designed.
 
 ## The test levels
 
-| Level  | Where                                                                                                                                                                                                                                                                                                                                                                       | What it proves                                                                                                               |
-| ------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------- |
-| Unit   | `flow/camera.test.ts`, `flow/scene.test.ts`, `flow/selection.test.ts`, `flow/overlay.test.ts`, `flow/canvas-controller.test.ts`, `flow/frame-connection.test.ts`, `flow/composer-state.test.ts`, `flow/grid.test.ts`, `flow/connection.test.ts`, `flow/preview-grid.test.ts`, `flow/data.test.ts`, `flow/database-path.test.ts`, `flow/node-kinds.test.ts`, `store.test.ts` | Pure logic, the scene model, gesture routing, camera math, placement, drafts, grid and preview coverage, connector geometry. |
-| Native | `native.test.ts`, `flow/node-session.native.test.ts`, Rust tests in `db.rs`, `search.rs`, `viewport.rs`                                                                                                                                                                                                                                                                     | SeaORM schema/persistence, assets, FTS5/RTree plans, commands, history, undo, runs and the composer session.                 |
-| App    | `App.test.tsx`                                                                                                                                                                                                                                                                                                                                                              | The mounted app headless: text, presses, drags, keyboard, composer and inputs.                                               |
-| Host   | `App.host.test.tsx`                                                                                                                                                                                                                                                                                                                                                         | The same app on the real window: rendering, native input, title bar, pinning and appearance repaint.                         |
+| Level  | Where                                                                                                                                                                                                                                                                                                                                                                                                                                  | What it proves                                                                                                                                                    |
+| ------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Unit   | `flow/camera.test.ts`, `flow/scene.test.ts`, `flow/selection.test.ts`, `flow/overlay.test.ts`, `flow/canvas-controller.test.ts`, `flow/frame-connection.test.ts`, `flow/right-gesture.test.ts`, `flow/context-menu.test.ts`, `flow/composer-state.test.ts`, `flow/grid.test.ts`, `flow/connection.test.ts`, `flow/preview-grid.test.ts`, `flow/data.test.ts`, `flow/database-path.test.ts`, `flow/node-kinds.test.ts`, `store.test.ts` | Pure logic, the scene model, gesture routing, camera math, placement, drafts, grid and preview coverage, connector geometry, right-button pan and menu placement. |
+| Native | `native.test.ts`, `flow/node-session.native.test.ts`, Rust tests in `db.rs`, `search.rs`, `viewport.rs`                                                                                                                                                                                                                                                                                                                                | SeaORM schema/persistence, assets, FTS5/RTree plans, commands, history, undo, runs and the composer session.                                                      |
+| App    | `App.test.tsx`                                                                                                                                                                                                                                                                                                                                                                                                                         | The mounted app headless: text, presses, drags, keyboard, composer and inputs.                                                                                    |
+| Host   | `App.host.test.tsx`                                                                                                                                                                                                                                                                                                                                                                                                                    | The same app on the real window: rendering, native input, title bar, pinning and appearance repaint.                                                              |
 
 Prefer the lowest level that can catch the bug. The scene and controller unit
 tests construct a `FlowScene` and `CanvasCamera` and drive the controller's
@@ -97,7 +97,11 @@ test("clears the selection with Escape", async () => {
   (`app.press("Fit")`). Avoid positional selectors.
 - `app.drag(target, { x, y })` moves by a delta from the element's center;
   `app.press`, `app.hover`, `app.keyboard.press`, `app.texts()` and
-  `app.screenshot()` cover the rest.
+  `app.screenshot()` cover the rest. Mouse buttons need a desktop platform:
+  open with `{ platform: "windows" }` (or another desktop) before
+  `app.rightClick`; the default headless app is a phone and has no secondary
+  button. Right-button drags cannot be driven by the test API, so that path
+  is unit-tested.
 - Wait with `app.waitUntil(predicate)`, never `setTimeout`. The viewport
   refresh and preview reads land on later turns, so a state that follows a
   drag needs a wait.
@@ -163,6 +167,10 @@ easiest observable: it is `—` before the first fit and `<n>%` afterwards.
   toggle, marquee, hand pan, resize, new connections and reconnects.
 - `flow/frame-connection.test.ts`: a multi-card frame's merged pluses, muted
   per-card zones, and the group connections pulled from either side.
+- `flow/right-gesture.ts`: the right-drag threshold and pan, the still press
+  left for the menu, and the refusal while another gesture owns the canvas.
+- `flow/context-menu.ts`: menu placement at the press and its clamping at the
+  stage edges. The menu's opening, items and Escape path are app tests.
 - `flow/composer-state.ts`: draft loading, same-node sync, reset, count
   clamping and saving settings/body.
 - `flow/grid.ts`: the tile count covers the stage at every wrapped camera

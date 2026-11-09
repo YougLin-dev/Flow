@@ -8,6 +8,13 @@ All notable changes to Flow are recorded here. The format follows
 
 ### Added
 
+- A secondary-button drag pans the canvas with any tool, without selecting,
+  box-selecting or moving a card, and a right click opens the canvas context
+  menu with Add text node and Add image node, placing the card at the pressed
+  point. The menu is a native-view popup rather than the system menu, because
+  a system menu takes the pointer and would break the right-drag pan; it waits
+  100 ms so a drag can claim the press, and a drag after it opened dismisses
+  it and pans.
 - Moved the document core to Rust: a mixed NSH crate owns SQLite with WAL,
   SeaORM entities and SeaQuery, FTS5 search and RTree viewport reads. The
   canvas reads only the viewport, sends one command per gesture, and keeps

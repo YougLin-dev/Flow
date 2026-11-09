@@ -10,6 +10,7 @@ import type { CanvasCamera } from "./camera";
 import { type BoxGeometry, framePortZone, type Point, type PortSide } from "./connection";
 import type { ConnectionPair } from "./connection-gesture";
 import { EdgeGestures } from "./edge-gestures";
+import { RightGesture } from "./right-gesture";
 import type { FlowScene } from "./scene";
 import {
   containsPoint,
@@ -87,11 +88,20 @@ export class CanvasController {
   readonly gesturing = signal(false);
   readonly cursor = signal<CanvasCursor>("default");
 
+  /** The secondary-button gesture: a drag pans, a still press opens the menu. */
+  readonly right: RightGesture;
+
   private readonly edges: EdgeGestures;
   private edgeMode = false;
   private gesture: Gesture = idle();
 
   constructor(private readonly host: CanvasHost) {
+    this.right = new RightGesture({
+      canStart: () => this.gesture.mode === "idle" && !this.edgeMode,
+      beginPan: (x, y) => this.beginPan(x, y),
+      panTo: (x, y) => this.move(x, y),
+      endPan: (x, y) => this.up(x, y),
+    });
     this.edges = new EdgeGestures({
       scene: () => this.host.scene(),
       camera: () => this.host.camera(),
@@ -195,6 +205,7 @@ export class CanvasController {
   down(x: number, y: number, shift: boolean, clickCount: number): void {
     const scene = this.host.scene();
     const camera = this.host.camera();
+    this.right.cancel();
     this.edgeMode = false;
     this.gesturing.set(false);
     this.portPlus.set(null);
@@ -314,6 +325,7 @@ export class CanvasController {
 
     if (gesture.mode === "pan") {
       this.host.panBy(dx, dy);
+      this.cursor.set("grabbing");
       return;
     }
     if (gesture.mode === "edge") {
@@ -410,6 +422,7 @@ export class CanvasController {
 
   cancel(): void {
     this.edges.cancel();
+    this.right.cancel();
     this.edgeMode = false;
     this.gesturing.set(false);
     this.portPlus.set(null);

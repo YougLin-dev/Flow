@@ -2,6 +2,7 @@ import { cleanup, effect, keymap, Picker, signal, untracked, View } from "nsh";
 import { isAvailable } from "nsh/desktop";
 import type { ChangeSet, Document, NodeBounds, SearchHit } from "@flow/native";
 import { BrandCard } from "../components/BrandCard";
+import { CanvasContextMenu } from "../components/CanvasContextMenu";
 import { FlowCanvas } from "../components/FlowCanvas";
 import { HintBar } from "../components/HintBar";
 import { InlineTextEditor } from "../components/InlineTextEditor";
@@ -17,6 +18,7 @@ import { bindFlowKeys } from "../flow/bindings";
 import { CanvasCamera } from "../flow/camera";
 import { CanvasController } from "../flow/canvas-controller";
 import { ComposerState } from "../flow/composer-state";
+import { CanvasMenuController, contextMenuPosition } from "../flow/context-menu";
 import { CONTENT } from "../flow/data";
 import { openFlowDocument } from "../flow/document-session";
 import { NodeRunner } from "../flow/execution";
@@ -188,6 +190,12 @@ export function FlowPage() {
     return inlineAnchor(rect, camera, stage());
   };
 
+  const canvasMenu = new CanvasMenuController({
+    camera: () => camera,
+    controller: () => controller,
+    addNode: (kind, x, y) => void currentSession()?.addNode(kind, x, y),
+  });
+
   const panBy = (dx: number, dy: number): void => {
     if (searchOpen()) return;
     viewport.panBy(dx, dy);
@@ -343,6 +351,7 @@ export function FlowPage() {
     panBy,
     toggleSearch: () => searchOpen.update((open) => !open),
     dismiss: () => {
+      if (canvasMenu.close()) return;
       if (searchOpen()) {
         searchOpen.set(false);
         return;
@@ -389,6 +398,7 @@ export function FlowPage() {
   });
 
   cleanup(() => {
+    canvasMenu.close();
     disposed = true;
     previews.dispose();
     viewport.dispose();
@@ -423,6 +433,10 @@ export function FlowPage() {
         }}
         onPan={(dx, dy) => viewport.panBy(dx, dy)}
         onZoom={(factor, x, y) => viewport.zoomAround(factor, x, y)}
+        onMenuPress={(at) => canvasMenu.press(at)}
+        onMenuCancel={() => {
+          canvasMenu.close();
+        }}
       />
 
       {composerOpen() ? null : <NodeToolbar onAdd={addNode} />}
@@ -508,6 +522,22 @@ export function FlowPage() {
             search={searchCards}
             onClose={() => searchOpen.set(false)}
             onSelect={selectSearchHit}
+          />
+        )}
+      </If>
+
+      <If when={canvasMenu.open()}>
+        {(press) => (
+          <CanvasContextMenu
+            left={contextMenuPosition(press(), stage()).left}
+            top={contextMenuPosition(press(), stage()).top}
+            onClose={() => {
+              canvasMenu.close();
+            }}
+            onAddText={() => canvasMenu.add("text", press())}
+            onAddImage={() => canvasMenu.add("image", press())}
+            onMove={(x, y, right) => canvasMenu.move(x, y, right)}
+            onPress={(x, y) => canvasMenu.press({ x, y })}
           />
         )}
       </If>

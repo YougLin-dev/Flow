@@ -124,6 +124,10 @@ card and, through `components/SelectionPluses.tsx`, by a multi-card frame.
 pointer events into selection, drag, resize, marquee, pan and connector
 gestures.
 `components/GridBackground.tsx` draws the dot grid in screen space.
+`components/CanvasContextMenu.tsx` is the right-click menu: Add text node and
+Add image node place the card at the pressed point. `flow/right-gesture.ts`
+decides whether a right press becomes a camera pan or leaves the press to the
+menu, and `flow/context-menu.ts` holds the menu's anchor and delay.
 
 The composer is a native panel (`components/NodeComposer.tsx`) in the same
 view tree as the rest of the app. `flow/overlay.ts` places it directly under
@@ -141,9 +145,10 @@ reconciled while the camera moves.
 
 Keyboard: `V`/`H` tools, `N`/`I` add a text or image node, `L` connect two
 selected cards, `Delete`/`Backspace` delete a selected edge or cards,
-`Mod+Z`/`Mod+Shift+Z` undo/redo, arrows pan, `Mod+K` search. `Escape` closes
-search, then the inline editor, a selected edge, the composer, and finally the
-selection.
+`Mod+Z`/`Mod+Shift+Z` undo/redo, arrows pan, `Mod+K` search. A secondary-button
+drag pans the canvas, and a right click opens the canvas menu. `Escape` closes
+the canvas menu, then search, the inline editor, a selected edge, the composer,
+and finally the selection.
 
 ## M1 non-goals
 

@@ -371,3 +371,36 @@ test("shows why an empty-prompt run failed", async () => {
   await app.press("id:composer-run");
   await app.waitUntil(() => app.texts().includes("Prompt cannot be empty"));
 });
+
+test("opens the canvas menu on a right click and adds a text node", async () => {
+  const app = await open("./App.tsx", { platform: "windows" });
+  await app.waitUntil(() => percentOf(app.texts()) > 0);
+
+  await app.rightClick("id:flow-canvas");
+  await app.waitUntil(() => app.shows("id:canvas-menu"));
+  await app.press("id:context-add-text");
+
+  await app.waitUntil(() => app.texts().some((text) => text.includes("1 card selected")));
+  await app.waitUntil(() => app.texts().includes("Model · Mock Text"));
+});
+
+test("adds an image node from the canvas menu", async () => {
+  const app = await open("./App.tsx", { platform: "windows" });
+  await app.waitUntil(() => percentOf(app.texts()) > 0);
+
+  await app.rightClick("id:flow-canvas");
+  await app.waitUntil(() => app.shows("id:canvas-menu"));
+  await app.press("id:context-add-image");
+
+  await app.waitUntil(() => app.texts().includes("Model · Mock Image"));
+});
+
+test("closes the canvas menu with Escape", async () => {
+  const app = await open("./App.tsx", { platform: "windows" });
+  await app.waitUntil(() => percentOf(app.texts()) > 0);
+
+  await app.rightClick("id:flow-canvas");
+  await app.waitUntil(() => app.shows("id:canvas-menu"));
+  await app.keyboard.press("escape");
+  await app.waitUntil(() => !app.shows("id:canvas-menu"));
+});

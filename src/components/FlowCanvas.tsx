@@ -5,12 +5,14 @@
  */
 import {
   View,
+  type ContextMenuEvent,
   type GestureResponderEvent,
   type MouseEvent as NshMouseEvent,
   type PressEvent,
 } from "nsh";
 import type { CanvasCamera } from "../flow/camera";
 import type { CanvasController } from "../flow/canvas-controller";
+import type { ContextMenuPoint } from "../flow/context-menu";
 import type { FlowScene } from "../flow/scene";
 import { FlowCard } from "./FlowCard";
 import { FlowEdges } from "./FlowEdges";
@@ -28,6 +30,8 @@ export interface FlowCanvasProps {
   readonly onSize: (size: { width: number; height: number }) => void;
   readonly onPan: (dx: number, dy: number) => void;
   readonly onZoom: (factor: number, x: number, y: number) => void;
+  readonly onMenuPress: (at: ContextMenuPoint) => void;
+  readonly onMenuCancel: () => void;
 }
 
 interface TouchPoint {
@@ -71,6 +75,8 @@ export function FlowCanvas(props: FlowCanvasProps) {
 
   const onDown = (event: PressEvent): void => {
     if (touchActive || Date.now() < suppressUntil) return;
+    props.controller.right.cancel();
+    props.onMenuCancel();
     pressed = true;
     lastX = event.position.x;
     lastY = event.position.y;
@@ -90,16 +96,36 @@ export function FlowCanvas(props: FlowCanvasProps) {
     if (touchActive) return;
     lastX = event.position.x;
     lastY = event.position.y;
-    if (pressed || event.pressedButton !== null) {
-      pressed = true;
+    if (props.controller.right.active()) {
+      if (event.pressedButton === "right") {
+        if (props.controller.right.move(lastX, lastY)) props.onMenuCancel();
+        return;
+      }
+      // The next move after a right release is the only release report NSH
+      // makes; finish the pan where the button was last seen.
+      const dragging = props.controller.right.dragging();
+      props.controller.right.end();
+      if (dragging) return;
+    }
+    // Only a press that began on this view may move a gesture: a primary press
+    // that started on an overlay keeps its press-up there.
+    if (pressed) {
       props.controller.move(lastX, lastY);
       return;
     }
     props.controller.hover(lastX, lastY);
   };
 
+  const onContextMenu = (event: ContextMenuEvent): void => {
+    if (touchActive || Date.now() < suppressUntil || pressed) return;
+    props.onMenuPress({ x: event.position.x, y: event.position.y });
+  };
+
   const onLeave = (): void => {
     if (touchActive) return;
+    // Moving onto an overlay (the menu) is a leave too; the right gesture must
+    // survive it so the overlay's moves can still pan. It ends on the first
+    // move without the button, or when the next press supersedes it.
     if (pressed) {
       // The pointer left the canvas while dragging; finish the gesture where
       // it last was instead of silently reverting the move.
@@ -112,6 +138,8 @@ export function FlowCanvas(props: FlowCanvasProps) {
   };
 
   const onTouchStart = (event: GestureResponderEvent): void => {
+    props.controller.right.cancel();
+    props.onMenuCancel();
     touchActive = true;
     if (event.touches.length > 1) {
       pressed = false;
@@ -262,6 +290,7 @@ export function FlowCanvas(props: FlowCanvasProps) {
         onPressUp={onUp}
         onMouseMove={onMove}
         onMouseLeave={onLeave}
+        onContextMenu={onContextMenu}
         onTouchStart={onTouchStart}
         onTouchMove={onTouchMove}
         onTouchEnd={onTouchEnd}

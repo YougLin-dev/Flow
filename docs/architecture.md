@@ -164,6 +164,14 @@ events and renders four kinds of children:
 - **Interaction view** — a transparent, full-size view that owns the cursor
   and dispatches presses, moves and touches to the `CanvasController`.
 
+The canvas context menu (`components/CanvasContextMenu.tsx`) is a native-view
+popup anchored at a secondary-button press: it adds a text or image card at
+the pressed world point, or closes on a primary press or Escape. It is drawn
+from ordinary views rather than opened with `Menu.popup`, because a system
+menu takes the pointer and would prevent the right-button drag from panning;
+`flow/context-menu.ts` wires the press, the menu's short opening delay and
+the item actions.
+
 `FlowCard` positions itself from the node's world rectangle and renders the
 title and status above the card, the body text or image thumbnails inside it
 (laid out inside the body box), and one round plus button outside each side
@@ -224,6 +232,12 @@ pulled, the composer hides so the gesture and its target stay visible.
   pointer in a side zone, and a cursor that reflects the tool, any card's
   resize border or a plus. A card under the pointer owns the hit: another
   card's border or plus never reacts through it.
+- **Secondary button** — holding the right button and dragging pans the
+  camera with any tool, without selecting, starting a marquee or moving a
+  card. A right click that stays put opens the canvas context menu. NSH
+  reports the right press (through `onContextMenu`) but never its release, so
+  the menu waits briefly before it opens: a drag in that window claims the
+  press, and a drag after the menu opened dismisses it and pans.
 
 Keyboard commands are declared in `flow/bindings.ts` (`bindFlowKeys`) and
 bound once by the page: `mod+=`/`mod+-`/`mod+0`

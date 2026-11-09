@@ -140,6 +140,16 @@ test("repaints when the system appearance changes", async () => {
   expect(app.texts()).toContain("Flow");
 });
 
+test("opens the canvas menu with a secondary click", async () => {
+  const app = await open("./App.tsx", { platform: "windows" });
+  await app.waitUntil(() => percentOf(app.texts()) > 0);
+
+  await app.rightClick("id:flow-canvas");
+  await app.waitUntil(() => app.shows("id:canvas-menu"));
+  await app.press("id:context-add-text");
+  await app.waitUntil(() => app.texts().some((text) => text.includes("1 card selected")));
+});
+
 test("runs the seeded image node and records its mock batch", async () => {
   const app = await openTallApp();
   await app.waitUntil(() => percentOf(app.texts()) > 0);
