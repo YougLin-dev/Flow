@@ -192,11 +192,11 @@ test("pans with the hand tool instead of selecting", () => {
   expect(controller.cursor()).toBe("grab");
 });
 
-test("resizes the selected card from its handle", () => {
+test("resizes the card from its handle without selecting it first", () => {
   const { scene, controller, calls } = setup([node("a", 100, 100)]);
-  scene.select(["a"]);
 
   controller.down(300, 184, false, 1);
+  expect(scene.selectedIds()).toEqual(["a"]);
   expect(controller.cursor()).toBe("nwse-resize");
   expect(controller.gesturing()).toBe(true);
 
@@ -208,6 +208,37 @@ test("resizes the selected card from its handle", () => {
   controller.up(350, 205);
   expect(controller.gesturing()).toBe(false);
   expect(calls.commits).toEqual([[{ id: "a", x: 100, y: 100, width: 250, height: 105 }]]);
+});
+
+test("shows a resize cursor over any card's handle", () => {
+  const { controller } = setup([node("a", 100, 100)]);
+
+  controller.hover(300, 184);
+  expect(controller.cursor()).toBe("nwse-resize");
+  expect(controller.hovered()).toBe("a");
+});
+
+test("starts a resize from just outside a corner", () => {
+  const { scene, controller } = setup([node("a", 100, 100)]);
+
+  controller.down(305, 189, false, 1);
+  expect(controller.cursor()).toBe("nwse-resize");
+  controller.move(355, 210);
+  expect(scene.cardRect("a")).toEqual({ x: 100, y: 100, width: 250, height: 105 });
+  controller.cancel();
+});
+
+test("does not resize a card through the card above it", () => {
+  const { scene, controller } = setup([node("a", 0, 0), node("b", 180, 60)]);
+
+  // (200, 84) is card a's bottom-right handle but lies inside card b, which
+  // takes the press as a drag instead of resizing the hidden card.
+  controller.down(200, 84, false, 1);
+  expect(scene.selectedIds()).toEqual(["b"]);
+  controller.move(230, 100);
+  expect(scene.cardRect("a")).toEqual({ x: 0, y: 0, width: 200, height: 84 });
+  expect(scene.cardRect("b")).toEqual({ x: 210, y: 76, width: 200, height: 84 });
+  controller.cancel();
 });
 
 test("prefers the output port over the east resize handle", () => {

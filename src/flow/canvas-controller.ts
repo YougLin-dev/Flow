@@ -93,11 +93,34 @@ export class CanvasController {
     };
   }
 
-  /** The single selected card's screen rectangle, for its resize handles. */
-  selectionRect(): ScreenRect | null {
-    const selected = this.host.scene().selection();
-    const id = selected[0];
-    return selected.length === 1 && id !== undefined ? this.screenRect(id) : null;
+  /**
+   * The card whose resize handle is under a screen point, topmost first.
+   * Handles work on every visible card, not only the selected one, so a card
+   * can be resized with one press. A card under the point owns the decision:
+   * another card's handle never reaches through it.
+   */
+  private handleAtPoint(x: number, y: number): { id: string; side: ResizeHandle } | null {
+    const scene = this.host.scene();
+    const camera = this.host.camera();
+    const world = camera.toWorld(x, y);
+    const under = scene.nodeAt(world.x, world.y);
+    if (under !== null) {
+      const rect = this.screenRect(under);
+      const side = rect ? handleAt(rect, x, y) : null;
+      return side === null ? null : { id: under, side };
+    }
+    // Outside every card: a handle reaches past its card's border, so look
+    // for the topmost one within reach.
+    let hit: { id: string; side: ResizeHandle; z: number } | null = null;
+    for (const node of scene.nodes()) {
+      const rect = this.screenRect(node.id);
+      if (!rect) continue;
+      const side = handleAt(rect, x, y);
+      if (side !== null && (hit === null || node.z >= hit.z)) {
+        hit = { id: node.id, side, z: node.z };
+      }
+    }
+    return hit === null ? null : { id: hit.id, side: hit.side };
   }
 
   down(x: number, y: number, shift: boolean, clickCount: number): void {
@@ -123,23 +146,24 @@ export class CanvasController {
       return;
     }
 
-    const selection = this.selectionRect();
-    if (selection) {
-      const handle = handleAt(selection, x, y);
-      const id = scene.selection()[0];
-      const base = id === undefined ? null : scene.cardRect(id);
-      if (handle && id !== undefined && base) {
-        this.gesturing.set(true);
-        this.gesture = {
-          ...this.gesture,
-          mode: "resize",
-          base: new Map([[id, base]]),
-          resizeId: id,
-          resizeSide: handle,
-        };
-        this.cursor.set(cursorFor(handle));
-        return;
+    const target = this.handleAtPoint(x, y);
+    const base = target === null ? null : scene.cardRect(target.id);
+    if (target && base) {
+      // A handle resizes its card without a prior selection; the press
+      // selects the card so the resize reads as acting on it.
+      if (!(scene.selection().length === 1 && scene.selection()[0] === target.id)) {
+        scene.select([target.id]);
       }
+      this.gesturing.set(true);
+      this.gesture = {
+        ...this.gesture,
+        mode: "resize",
+        base: new Map([[target.id, base]]),
+        resizeId: target.id,
+        resizeSide: target.side,
+      };
+      this.cursor.set(cursorFor(target.side));
+      return;
     }
 
     if (clickCount >= 2) {
@@ -297,14 +321,11 @@ export class CanvasController {
       this.cursor.set("crosshair");
       return;
     }
-    const selection = this.selectionRect();
-    if (selection) {
-      const handle = handleAt(selection, x, y);
-      if (handle) {
-        this.hovered.set(null);
-        this.cursor.set(cursorFor(handle));
-        return;
-      }
+    const target = this.handleAtPoint(x, y);
+    if (target) {
+      this.hovered.set(target.id);
+      this.cursor.set(cursorFor(target.side));
+      return;
     }
     this.hovered.set(scene.nodeAt(world.x, world.y));
     const tool = this.host.tool();

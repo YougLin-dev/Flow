@@ -47,11 +47,29 @@ test("resizes from the dragged edges and keeps the opposite one fixed", () => {
 });
 
 test("keeps a corner's aspect ratio and its opposite corner fixed", () => {
-  const start = { x: 100, y: 100, width: 200, height: 100 };
-  expect(resizedRect(start, "se", 40, 0)).toEqual({ x: 100, y: 100, width: 240, height: 120 });
-  expect(resizedRect(start, "nw", 0, -50)).toEqual({ x: 0, y: 50, width: 300, height: 150 });
-  expect(resizedRect(start, "ne", 0, -50)).toEqual({ x: 100, y: 50, width: 300, height: 150 });
-  expect(resizedRect(start, "sw", -40, 0)).toEqual({ x: 60, y: 100, width: 240, height: 120 });
+  const start = { x: 100, y: 100, width: 400, height: 200 };
+  expect(resizedRect(start, "se", 50, 150)).toEqual({ x: 100, y: 100, width: 500, height: 250 });
+  expect(resizedRect(start, "nw", 100, 50)).toEqual({ x: 200, y: 150, width: 300, height: 150 });
+  expect(resizedRect(start, "ne", -100, 50)).toEqual({ x: 100, y: 150, width: 300, height: 150 });
+  expect(resizedRect(start, "sw", -100, 50)).toEqual({ x: 0, y: 100, width: 500, height: 250 });
+});
+
+test("does not snap to the minimum when a corner passes one edge", () => {
+  const start = { x: 100, y: 100, width: 400, height: 400 };
+  // Just at the left edge, the pointer still half way down: half size.
+  expect(resizedRect(start, "se", -400, 0)).toEqual({ x: 100, y: 100, width: 200, height: 200 });
+  // Past the top edge while still at the right edge: a smooth 37.5%, not the
+  // minimum (30% of 400).
+  expect(resizedRect(start, "se", 0, -500)).toEqual({ x: 100, y: 100, width: 150, height: 150 });
+  // Past the left edge while still at the bottom edge: the same.
+  expect(resizedRect(start, "se", -500, 0)).toEqual({ x: 100, y: 100, width: 150, height: 150 });
+  // Past both edges: the minimum, 120 px.
+  expect(resizedRect(start, "se", -500, -500)).toEqual({
+    x: 100,
+    y: 100,
+    width: 120,
+    height: 120,
+  });
 });
 
 test("never resizes a card below its minimum", () => {

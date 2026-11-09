@@ -47,6 +47,9 @@ All notable changes to Flow are recorded here. The format follows
   the handles remain invisible hit targets with resize cursors. A corner drag
   keeps the card's aspect ratio with its opposite corner fixed; an edge drag
   still resizes one axis.
+- Any visible card can be resized without selecting it first: pressing its
+  handle selects the card and starts the resize, and a card under the pointer
+  keeps another card's covered handle from reacting through it.
 
 ### Removed
 
@@ -55,6 +58,9 @@ All notable changes to Flow are recorded here. The format follows
 
 ### Fixed
 
+- A corner resize no longer snaps to the minimum at an edge crossing: the
+  scale follows the pointer's projection onto the card's diagonal, so passing
+  the opposite top or left edge alone does not collapse the card.
 - Image thumbnails stay inside an image card's body: preview cells are
   positioned relative to the body box instead of applying its inset twice.
 - The composer hides while a card is dragged or resized, or a connector is

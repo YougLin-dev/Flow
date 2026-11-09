@@ -3,6 +3,7 @@
 
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
 
 use sea_orm::{ColumnTrait, DatabaseConnection, EntityTrait, QueryFilter};
 use sha2::{Digest, Sha256};
@@ -11,14 +12,19 @@ use crate::clock::now_ms;
 use crate::entity::assets;
 use crate::types::{AssetInput, AssetSummary};
 
+/// Makes an in-memory database's private asset directory unique even when
+/// several are opened in the same millisecond (parallel tests).
+static NEXT_ASSETS_DIR: AtomicU64 = AtomicU64::new(0);
+
 /// The directory an asset file lives in. `:memory:` databases get a private
 /// temporary directory so tests exercise the real file path.
 pub fn assets_dir_for(database_path: &str) -> PathBuf {
     if database_path == ":memory:" {
         return std::env::temp_dir().join(format!(
-            "flow-assets-{}-{}",
+            "flow-assets-{}-{}-{}",
             std::process::id(),
-            now_ms()
+            now_ms(),
+            NEXT_ASSETS_DIR.fetch_add(1, Ordering::Relaxed)
         ));
     }
     let path = Path::new(database_path);

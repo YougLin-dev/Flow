@@ -182,17 +182,20 @@ pulled, the composer hides so the gesture and its target stay visible.
 `CanvasController`:
 
 - **Select** — a press selects a card (Shift toggles), starts a drag when the
-  press lands on a selected card, starts a resize when it lands on an
-  invisible selection handle, and starts the connector gestures at a port. A
-  corner handle keeps the card's aspect ratio with the opposite corner fixed;
-  an edge handle resizes one axis. A press on empty canvas clears the
-  selection and starts the marquee. A double-click on a text card opens its
-  inline editor.
+  press lands on a selected card, starts a resize when it lands on any visible
+  card's invisible resize handle (the press selects that card first), and
+  starts the connector gestures at a port. A corner handle keeps the card's
+  aspect ratio with the opposite corner fixed, scaling by the pointer's
+  projection onto the card's diagonal, so passing one edge does not snap the
+  card to its minimum. An edge handle resizes one axis. A press on empty
+  canvas clears the selection and starts the marquee. A double-click on a text
+  card opens its inline editor.
 - **Hand** — presses pan the camera; nothing is selected.
 - **Touch** — one finger behaves like the current tool; two fingers pinch-zoom
   around their center and pan with it.
 - **Hover** — mouse movement updates the hovered card and a cursor that
-  reflects the tool, a handle or a port.
+  reflects the tool, any card's resize handle or a port. A card under the
+  pointer owns the hit: another card's handle never reacts through it.
 
 Keyboard commands are declared in `flow/bindings.ts` (`bindFlowKeys`) and
 bound once by the page: `mod+=`/`mod+-`/`mod+0`
