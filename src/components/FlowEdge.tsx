@@ -13,10 +13,15 @@ import {
   type Point,
 } from "../flow/connection";
 
+/** The dashes of a not-yet-connected preview, in world points. */
+const DASH = [7, 5];
+
 export interface FlowEdgeProps {
   readonly from: () => Point | null;
   readonly to: () => Point | null;
   readonly selected: () => boolean;
+  /** A connection being pulled, before it is written: drawn dashed. */
+  readonly dashed?: boolean;
   /** Above the cards, for the connection preview. */
   readonly zIndex?: number;
 }
@@ -43,6 +48,7 @@ export function FlowEdge(props: FlowEdgeProps) {
     cx.strokeStyle = token(props.selected() ? "chart-1" : "muted-foreground");
     cx.lineWidth = EDGE_THICKNESS;
     cx.lineCap = "round";
+    if (props.dashed === true) cx.setLineDash(DASH);
     cx.beginPath();
     cx.moveTo(from.x - origin.x, from.y - origin.y);
     cx.bezierCurveTo(

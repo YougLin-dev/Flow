@@ -290,6 +290,30 @@ test("a plus follows the pointer beside a hovered card", () => {
   expect(controller.portPlus()).toBeNull();
 });
 
+test("reads the hover from where a gesture ends, not where it began", () => {
+  const { scene, controller } = setup([node("a", 100, 100), node("b", 700, 100)]);
+  controller.hover(150, 120);
+  expect(controller.hovered()).toBe("a");
+
+  // A marquee that starts on empty canvas and ends over card b: the hover
+  // belongs to b once the gesture is over, not to the card it began over.
+  controller.down(500, 300, false, 1);
+  controller.move(750, 120);
+  controller.up(750, 120);
+
+  expect(scene.selectedIds()).toEqual(["b"]);
+  expect(controller.hovered()).toBe("b");
+
+  // A resize released beyond the card's border leaves no hover behind.
+  // The east border is used below its plus zone so the press resizes.
+  controller.down(300, 110, false, 1);
+  controller.move(350, 110);
+  controller.up(365, 110);
+  expect(controller.hovered()).toBeNull();
+  expect(controller.portPlus()).toBeNull();
+  expect(controller.cursor()).toBe("default");
+});
+
 test("opens the inline editor on a double-clicked text card", () => {
   const { controller, calls } = setup([node("a", 100, 100)]);
 

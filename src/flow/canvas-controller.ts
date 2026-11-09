@@ -293,14 +293,17 @@ export class CanvasController {
       } else {
         this.host.scene().clearOverrides();
       }
-      this.cursor.set("default");
+      // The pointer may have ended the gesture somewhere else, or on a
+      // border: read the hover state there instead of keeping the card the
+      // gesture started on (a stale hover keeps its plus showing).
+      this.hover(x, y);
       return;
     }
     if (gesture.mode === "marquee") {
       const box = normalizeRect(gesture.startX, gesture.startY, x, y);
       this.selectWithin(gesture, box);
       this.marquee.set(null);
-      this.cursor.set("default");
+      this.hover(x, y);
       return;
     }
     this.marquee.set(null);

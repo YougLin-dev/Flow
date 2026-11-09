@@ -52,12 +52,13 @@ All notable changes to Flow are recorded here. The format follows
   stays smooth and sharp at any zoom instead of showing sampled joints;
   connector arrowheads are gone. Ports are round plus buttons just
   outside a card's left and right borders instead of permanent accent dots:
-  they appear while a card is hovered or selected, ease toward the pointer in
-  a side zone and spring back when it leaves, and dragging one starts a
-  connection either way (right side forward, left side reverse). A pulled
-  connector snaps to a valid card's port, highlights that card's border like
-  hover, and unsnaps when the pointer leaves. Connectors still meet the card
-  border itself; the plus is only a drag handle.
+  they appear while a card is hovered or selected, follow the pointer in a
+  side zone through native animated values and spring back when it leaves,
+  and dragging one starts a connection either way (right side forward, left
+  side reverse). The pulled preview is dashed until the connection is written;
+  it snaps to a valid card's port, highlights that card's border like hover,
+  and unsnaps when the pointer leaves. Connectors still meet the card border
+  itself; the plus is only a drag handle.
 - A card's title and status now sit above the card instead of inside it, and
   the body uses the full card area.
 - Selection no longer draws the eight resize handle dots or a square outline
@@ -78,6 +79,13 @@ All notable changes to Flow are recorded here. The format follows
 
 ### Fixed
 
+- A hovered card's plus buttons no longer restart their follow when the
+  viewport refreshes: the hover and selection checks use the row's id instead
+  of the node record each refresh replaces, so the plus stays one instance
+  while it follows. A gesture that ends elsewhere, or the pointer leaving the
+  canvas, now re-reads the hover instead of keeping the card the gesture
+  started on, so a plus cannot stay where the pointer left it while its card
+  is still highlighted.
 - A corner resize no longer snaps to the minimum at an edge crossing: the
   scale follows the pointer's projection onto the card's diagonal, so passing
   the opposite top or left edge alone does not collapse the card.

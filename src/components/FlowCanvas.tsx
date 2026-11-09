@@ -103,8 +103,9 @@ export function FlowCanvas(props: FlowCanvasProps) {
       // it last was instead of silently reverting the move.
       pressed = false;
       props.controller.up(lastX, lastY);
-      return;
     }
+    // The pointer is gone even if a gesture just ended at its last position:
+    // a hover (and the plus it holds) must not stay behind after it leaves.
     props.controller.leave();
   };
 
@@ -204,22 +205,30 @@ export function FlowCanvas(props: FlowCanvasProps) {
       >
         <FlowEdges scene={props.scene} />
         <Each of={props.scene.nodes()} key={(node) => node.id}>
-          {(node) => (
-            <FlowCard
-              node={node}
-              rect={() => props.scene.cardRect(node().id)}
-              preview={() => props.scene.previews().get(node().id) ?? null}
-              selected={() => props.scene.selection().includes(node().id)}
-              hovered={() => props.controller.hovered() === node().id}
-              plus={() => {
-                const plus = props.controller.portPlus();
-                return plus !== null && plus.nodeId === node().id
-                  ? { side: plus.side, point: plus.point }
-                  : null;
-              }}
-              target={() => props.scene.connectionTarget() === node().id}
-            />
-          )}
+          {(node) => {
+            // The id never changes for a row. Reading it once keeps the
+            // card's signals from all depending on the node accessor: a
+            // viewport refresh replaces the node record, and a plus whose
+            // visibility read that record would be rebuilt on every refresh
+            // while it follows the pointer.
+            const id = node().id;
+            return (
+              <FlowCard
+                node={node}
+                rect={() => props.scene.cardRect(id)}
+                preview={() => props.scene.previews().get(id) ?? null}
+                selected={() => props.scene.selection().includes(id)}
+                hovered={() => props.controller.hovered() === id}
+                plus={() => {
+                  const plus = props.controller.portPlus();
+                  return plus !== null && plus.nodeId === id
+                    ? { side: plus.side, point: plus.point }
+                    : null;
+                }}
+                target={() => props.scene.connectionTarget() === id}
+              />
+            );
+          }}
         </Each>
         <If when={props.scene.connectionPreview()}>
           {(preview) => (
@@ -227,6 +236,7 @@ export function FlowCanvas(props: FlowCanvasProps) {
               from={() => preview().from}
               to={() => preview().to}
               selected={() => true}
+              dashed
               zIndex={1000}
             />
           )}

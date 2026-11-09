@@ -3,7 +3,7 @@
  * the body inside it and a plus button on each side while it is active. Its
  * pixel values are world-space points, so they scale with the camera.
  */
-import { Image, Text, token, View } from "nsh";
+import { cleanup, createAnimatedValue, effect, Image, Text, token, View } from "nsh";
 import { Plus } from "lucide";
 import type { NodeSummary } from "@flow/native";
 import { Icon } from "./Icon";
@@ -37,6 +37,10 @@ const ACCENT_BG: Record<FlowAccent, string> = {
   "chart-4": "bg-chart-4",
   "chart-5": "bg-chart-5",
 };
+
+/** The plus button's follow and snap-back springs. */
+const FOLLOW_SPRING = { stiffness: 600, damping: 48, mass: 1 } as const;
+const RETURN_SPRING = { stiffness: 300, damping: 20, mass: 1 } as const;
 
 /** The title row sits above the card, in world points. */
 const TITLE_HEIGHT = 20;
@@ -226,12 +230,41 @@ function PortPlus(props: {
   readonly base: () => Point;
   readonly follow: () => Point | null;
 }) {
-  const offset = (axis: "x" | "y"): number => {
+  // Start where the plus should be this instant: a plus mounted while the
+  // pointer already holds it appears in its followed place instead of
+  // snapping back to rest and flying out again.
+  const start = (): Point => {
     const followed = props.follow();
-    if (followed === null) return 0;
-    return followed[axis] - props.base()[axis];
+    if (followed === null) return { x: 0, y: 0 };
+    const base = props.base();
+    return { x: followed.x - base.x, y: followed.y - base.y };
   };
-  const following = () => props.follow() !== null;
+  const initial = start();
+  // Animated values, not CSS transitions: the follow retargets on every
+  // pointer move, which a style transition can stall between its frames.
+  const offsetX = createAnimatedValue(initial.x);
+  const offsetY = createAnimatedValue(initial.y);
+  let following = initial.x !== 0 || initial.y !== 0;
+  effect(() => {
+    const followed = props.follow();
+    if (followed === null) {
+      // The other side ignores the pointer; do not restart its rest spring
+      // on every move.
+      if (!following) return;
+      following = false;
+      void offsetX.spring(0, RETURN_SPRING);
+      void offsetY.spring(0, RETURN_SPRING);
+      return;
+    }
+    following = true;
+    const base = props.base();
+    void offsetX.spring(followed.x - base.x, FOLLOW_SPRING);
+    void offsetY.spring(followed.y - base.y, FOLLOW_SPRING);
+  });
+  cleanup(() => {
+    void offsetX.stop();
+    void offsetY.stop();
+  });
 
   return (
     <View
@@ -241,12 +274,7 @@ function PortPlus(props: {
         top: props.base().y - PORT_PLUS_SIZE / 2,
         width: PORT_PLUS_SIZE,
         height: PORT_PLUS_SIZE,
-        transform: [{ translateX: offset("x") }, { translateY: offset("y") }],
-        transitionProperty: "transform",
-        transitionDuration: following() ? 90 : 260,
-        transitionTimingFunction: following()
-          ? "cubic-bezier(0.2, 0, 0, 1)"
-          : "cubic-bezier(0.34, 1.56, 0.64, 1)",
+        translate: [offsetX, offsetY],
       }}
     >
       {/* The ring is a background child and flex centres the icon, so neither

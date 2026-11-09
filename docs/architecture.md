@@ -217,12 +217,13 @@ search, and Escape dismisses the top layer (search, inline editor, selected
 edge, composer, then the selection). Each command exists once.
 
 Pointer gestures above the canvas: dragging a card's right plus previews a
-forward connection and the left plus a reverse one; while the pointer is on a
-card that accepts the connection, the preview snaps to that card's port and
-the card's border highlights like hover, and the preview follows the pointer
-again when it leaves. Dragging either plus of a selected edge's endpoints
-moves that end (source or target). A press on a connector selects it;
-double-clicking a text card opens its inline editor.
+forward connection and the left plus a reverse one; the preview is dashed
+until the connection is written. While the pointer is on a card that accepts
+the connection, the preview snaps to that card's port and the card's border
+highlights like hover, and the preview follows the pointer again when it
+leaves. Dragging either plus of a selected edge's endpoints moves that end
+(source or target). A press on a connector selects it; double-clicking a text
+card opens its inline editor.
 
 ## Window chrome
 
