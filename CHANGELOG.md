@@ -112,6 +112,9 @@ All notable changes to Flow are recorded here. The format follows
   positioned relative to the body box instead of applying its inset twice.
 - The composer hides while a card is dragged or resized, or a connector is
   pulled, so the gesture and its target stay visible.
+- The composer always opens directly below the selected card, centred on it.
+  It no longer flips above or beside a card near a viewport edge or clamps
+  into the stage, so it follows the card and may extend past the window.
 - Undo history is mutated inside the same serialized database worker job as
   the write it describes; an undo can no longer pop an older entry while a
   command is still in flight and wedge the history.

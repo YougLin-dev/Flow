@@ -126,13 +126,12 @@ gestures.
 `components/GridBackground.tsx` draws the dot grid in screen space.
 
 The composer is a native panel (`components/NodeComposer.tsx`) in the same
-view tree as the rest of the app. `flow/overlay.ts` places it under the
-selected card, above it or beside it when the viewport leaves no room, and
-clamps it into the stage; the page measures the panel through `onLayout`, so
-the placement follows the selected card as the camera or the card moves. Its
-drafts live in `flow/composer-state.ts` (the signal-backed settings and
-body), written when the composer closes or the selection changes, and the
-settings are also written before a run.
+view tree as the rest of the app. `flow/overlay.ts` places it directly under
+the selected card, centred on it, so the placement follows the card as the
+camera or the card moves; it never flips above or beside the card, and it may
+extend past the viewport. Its drafts live in `flow/composer-state.ts` (the
+signal-backed settings and body), written when the composer closes or the
+selection changes, and the settings are also written before a run.
 All controls are ordinary NSH controls, so they carry names, focus, keyboard
 operation and screen-reader semantics without an alternative path.
 

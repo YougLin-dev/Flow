@@ -54,7 +54,6 @@ export function FlowPage() {
   const sessionState = signal<NodeSession | null>(null);
   const searchOpen = signal(false);
   const composerState = new ComposerState();
-  const composerHeight = signal(0);
 
   const currentSession = (): NodeSession | null => sessionState();
 
@@ -172,10 +171,7 @@ export function FlowPage() {
     if (!rect) return null;
     const size = stage();
     const width = Math.min(360, Math.max(280, size.width - 16));
-    const anchor = composerAnchor(rect, camera, size, {
-      width,
-      height: Math.max(1, composerHeight()),
-    });
+    const anchor = composerAnchor(rect, camera, width);
     return { left: anchor.left, top: anchor.top, width };
   };
 
@@ -478,9 +474,6 @@ export function FlowPage() {
                 onSaveBody={() => {
                   const node = currentSession()?.detail();
                   if (node) void currentSession()?.commitBody(node.node.id, composerState.body());
-                }}
-                onSize={(height) => {
-                  if (composerHeight() !== height) composerHeight.set(height);
                 }}
               />
             )}

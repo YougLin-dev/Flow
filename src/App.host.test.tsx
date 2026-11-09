@@ -14,6 +14,12 @@ const selectSeed = async (app: App, query: string, testId: string): Promise<void
   await app.press(testId);
 };
 
+/**
+ * The composer always sits directly below its card and a revealed card is
+ * centered, so its full sheet needs a stage taller than the default phone.
+ */
+const openTallApp = (): Promise<App> => open("./App.tsx", { width: 900, height: 1300 });
+
 const percentOf = (texts: string[]): number => {
   const text = texts.find((value) => /^\d+%$/.test(value));
   return text ? Number(text.slice(0, -1)) : Number.NaN;
@@ -135,7 +141,7 @@ test("repaints when the system appearance changes", async () => {
 });
 
 test("runs the seeded image node and records its mock batch", async () => {
-  const app = await open("./App.tsx");
+  const app = await openTallApp();
   await app.waitUntil(() => percentOf(app.texts()) > 0);
 
   await selectSeed(app, "Image", "id:search-result-seed-image");

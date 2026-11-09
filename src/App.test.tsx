@@ -10,6 +10,12 @@ const selectSeed = async (app: App, query: string, testId: string): Promise<void
   await app.press(testId);
 };
 
+/**
+ * The composer always sits directly below its card and a revealed card is
+ * centered, so its full sheet needs a stage taller than the default phone.
+ */
+const openTallApp = (): Promise<App> => open("./App.tsx", { width: 900, height: 1300 });
+
 const percentOf = (texts: string[]): number => {
   const text = texts.find((value) => /^\d+%$/.test(value));
   return text ? Number(text.slice(0, -1)) : Number.NaN;
@@ -267,11 +273,11 @@ test("selecting a text node opens its composer", async () => {
 });
 
 test("edits the prompt and runs with it", async () => {
-  const app = await open("./App.tsx");
+  const app = await openTallApp();
   await app.waitUntil(() => percentOf(app.texts()) > 0);
 
   await selectSeed(app, "Text", "id:search-result-seed-text");
-  await app.waitUntil(() => app.shows("id:composer-prompt"));
+  await app.waitUntil(() => app.shows("id:composer-run"));
   await app.clear("id:composer-prompt");
   await app.type("id:composer-prompt", "A quiet lake at dusk");
   await app.press("id:composer-run");
@@ -281,7 +287,7 @@ test("edits the prompt and runs with it", async () => {
 });
 
 test("runs the selected text node with the mock provider", async () => {
-  const app = await open("./App.tsx");
+  const app = await openTallApp();
   await app.waitUntil(() => percentOf(app.texts()) > 0);
 
   await selectSeed(app, "Text", "id:search-result-seed-text");
@@ -355,11 +361,11 @@ test("keeps a draft when the composer switches nodes", async () => {
 });
 
 test("shows why an empty-prompt run failed", async () => {
-  const app = await open("./App.tsx");
+  const app = await openTallApp();
   await app.waitUntil(() => percentOf(app.texts()) > 0);
 
   await selectSeed(app, "Image", "id:search-result-seed-image");
-  await app.waitUntil(() => app.shows("id:composer-prompt"));
+  await app.waitUntil(() => app.shows("id:composer-run"));
 
   await app.clear("id:composer-prompt");
   await app.press("id:composer-run");

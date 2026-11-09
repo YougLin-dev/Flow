@@ -20,8 +20,6 @@ export interface NodeComposerProps {
   readonly onReorderInputs: (ids: string[]) => void;
   readonly onUpload: () => void;
   readonly onSaveBody: () => void;
-  /** Reports the laid-out height, so the page can place the sheet. */
-  readonly onSize?: (height: number) => void;
 }
 
 const sectionClass = "gap-1.5";
@@ -34,7 +32,6 @@ export function NodeComposer(props: NodeComposerProps) {
       testID="node-composer"
       class="absolute z-20 gap-3 rounded-(--radius) border border-border bg-popover p-3 shadow-lg"
       style={{ left: props.left, top: props.top, width: props.width }}
-      onLayout={(event) => props.onSize?.(event.bounds.size.height)}
     >
       <View class="flex-row items-center justify-between">
         <View class="gap-0.5">

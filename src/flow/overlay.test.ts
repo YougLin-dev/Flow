@@ -4,42 +4,25 @@ import { composerAnchor, inlineAnchor } from "./overlay";
 
 const STAGE = { width: 800, height: 600 };
 
-test("places the composer under the card when it fits", () => {
+test("places the composer directly under the card", () => {
   const camera = new CanvasCamera();
-  const anchor = composerAnchor({ x: 100, y: 100, width: 200, height: 100 }, camera, STAGE, {
-    width: 360,
-    height: 300,
-  });
+  const anchor = composerAnchor({ x: 100, y: 100, width: 200, height: 100 }, camera, 360);
   expect(anchor).toEqual({ left: 20, top: 210 });
 });
 
-test("moves the composer above a card at the bottom", () => {
+test("keeps the composer below a card at the bottom of the stage", () => {
   const camera = new CanvasCamera();
-  const anchor = composerAnchor({ x: 100, y: 350, width: 200, height: 100 }, camera, STAGE, {
-    width: 240,
-    height: 200,
-  });
-  expect(anchor).toEqual({ left: 80, top: 140 });
+  const anchor = composerAnchor({ x: 100, y: 350, width: 200, height: 100 }, camera, 240);
+  // The card leaves little room below it, but the panel still opens there
+  // instead of flipping above it.
+  expect(anchor).toEqual({ left: 80, top: 460 });
 });
 
-test("moves the composer beside a tall card", () => {
+test("does not shift the composer to stay inside the stage", () => {
   const camera = new CanvasCamera();
-  const anchor = composerAnchor({ x: 100, y: 100, width: 200, height: 500 }, camera, STAGE, {
-    width: 240,
-    height: 200,
-  });
-  expect(anchor).toEqual({ left: 310, top: 100 });
-});
-
-test("clamps the composer into the stage", () => {
-  const camera = new CanvasCamera();
-  const anchor = composerAnchor(
-    { x: 0, y: 0, width: 100, height: 100 },
-    camera,
-    { width: 300, height: 300 },
-    { width: 360, height: 200 },
-  );
-  expect(anchor).toEqual({ left: 8, top: 92 });
+  const anchor = composerAnchor({ x: 0, y: 0, width: 100, height: 100 }, camera, 360);
+  // Centred on the card, even though the panel extends past the left edge.
+  expect(anchor).toEqual({ left: -130, top: 110 });
 });
 
 test("follows the camera's pan and zoom", () => {
@@ -47,25 +30,8 @@ test("follows the camera's pan and zoom", () => {
   camera.x = 50;
   camera.y = 20;
   camera.scale = 2;
-  const anchor = composerAnchor(
-    { x: 10, y: 10, width: 100, height: 50 },
-    camera,
-    { width: 900, height: 700 },
-    { width: 300, height: 200 },
-  );
+  const anchor = composerAnchor({ x: 10, y: 10, width: 100, height: 50 }, camera, 300);
   expect(anchor).toEqual({ left: 20, top: 150 });
-});
-
-test("falls back to the roomiest side when nothing fits", () => {
-  const camera = new CanvasCamera();
-  const anchor = composerAnchor(
-    { x: 300, y: 190, width: 300, height: 220 },
-    camera,
-    { width: 900, height: 600 },
-    { width: 360, height: 493 },
-  );
-  // Right has more room than below/above; the panel is clamped to the stage.
-  expect(anchor).toEqual({ left: 532, top: 99 });
 });
 
 test("lays the inline editor inside the card body", () => {

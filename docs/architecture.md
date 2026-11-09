@@ -110,11 +110,11 @@ and settings schema; `flow/execution.ts` owns its provider. Rust stores only
   `interrupted`. A changed upstream marks an existing downstream result stale;
   startup turns abandoned runs into `interrupted`.
 - The native canvas draws cards, ports, connectors and the connection preview.
-  Selecting a card opens `NodeComposer`, a native panel anchored under the
-  card (above it, then beside it, when the viewport leaves no room) and
-  clamped to the stage; it is built from the same controls as the rest of the
-  app. The inline text editor is a screen-space native overlay. The image
-  node's body shows a thumbnail grid.
+  Selecting a card opens `NodeComposer`, a native panel anchored directly
+  under the card and centred on it; the placement follows the card and never
+  flips or clamps to stay inside the viewport. It is built from the same
+  controls as the rest of the app. The inline text editor is a screen-space
+  native overlay. The image node's body shows a thumbnail grid.
 - Mock text and mock image providers exercise the run lifecycle and the
   provider seam. See [the node editor contract](node-editor.md) for the full
   M1 rules and non-goals.
@@ -195,10 +195,11 @@ and the port/edge gestures. `CanvasCamera` stores logical `x`, `y` and
 `scale`; `panBy`, `zoomAround` and `fit` rebuild the view from those values.
 
 The dot grid and the cards follow the camera, but the composer does not: its
-height is measured by layout and its position is computed in screen points
-from the selected card's current screen rectangle (`flow/overlay.ts`), so it
-stays readable at every zoom and never leaves the stage. The inline editor is
-anchored the same way. While a card is dragged or resized, or a connector is
+position is computed in screen points from the selected card's current screen
+rectangle (`flow/overlay.ts`), so it keeps its size at every zoom and tracks
+the card. It sits directly below the card, centred on it, and is allowed to
+extend past the viewport rather than move somewhere else. The inline editor
+is anchored inside the card body. While a card is dragged or resized, or a connector is
 pulled, the composer hides so the gesture and its target stay visible.
 
 ## Input

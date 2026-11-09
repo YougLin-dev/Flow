@@ -6,11 +6,6 @@ export interface StageSize {
   readonly height: number;
 }
 
-export interface ComposerSize {
-  readonly width: number;
-  readonly height: number;
-}
-
 export interface ComposerAnchor {
   readonly left: number;
   readonly top: number;
@@ -24,67 +19,24 @@ export interface InlineAnchor {
 }
 
 /**
- * Where the native composer sits, in screen points: under the card when it
- * fits, above it otherwise, then beside it, always clamped to the stage.
+ * Where the native composer sits, in screen points: directly under the card,
+ * centred on it. The placement depends only on the card, never on the stage,
+ * so the panel never flips above or beside a card near the viewport edge and
+ * may extend past the window instead.
  */
 export function composerAnchor(
   rect: BoxGeometry,
   camera: CanvasCamera,
-  stage: StageSize,
-  panel: ComposerSize,
+  panelWidth: number,
   gap = 10,
-  margin = 8,
 ): ComposerAnchor {
   const screen = camera.toScreen(rect.x, rect.y);
   const width = rect.width * camera.scale;
   const height = rect.height * camera.scale;
-  const left = screen.x;
-  const right = left + width;
-  const top = screen.y;
-  const bottom = top + height;
-  const fitsBelow = bottom + gap + panel.height <= stage.height - margin;
-  const fitsAbove = top - gap - panel.height >= margin;
-  const fitsRight = right + gap + panel.width <= stage.width - margin;
-  const fitsLeft = left - gap - panel.width >= margin;
-
-  let x = left + width / 2 - panel.width / 2;
-  let y = bottom + gap;
-  if (!fitsBelow) {
-    if (fitsAbove) {
-      y = top - gap - panel.height;
-    } else if (fitsRight) {
-      x = right + gap;
-      y = top;
-    } else if (fitsLeft) {
-      x = left - gap - panel.width;
-      y = top;
-    } else {
-      // Nothing fits (a short window): take the roomiest side so the card
-      // stays partly visible beside the panel instead of being covered.
-      const rooms = [
-        { side: "below", room: stage.height - margin - bottom - gap },
-        { side: "above", room: top - gap - margin },
-        { side: "right", room: stage.width - margin - right - gap },
-        { side: "left", room: left - gap - margin },
-      ] as const;
-      let best: (typeof rooms)[number] = rooms[0];
-      for (const candidate of rooms) {
-        if (candidate.room > best.room) best = candidate;
-      }
-      if (best.side === "above") {
-        y = top - gap - panel.height;
-      } else if (best.side === "right") {
-        x = right + gap;
-        y = top;
-      } else if (best.side === "left") {
-        x = left - gap - panel.width;
-        y = top;
-      }
-    }
-  }
-  x = Math.min(Math.max(x, margin), Math.max(margin, stage.width - margin - panel.width));
-  y = Math.min(Math.max(y, margin), Math.max(margin, stage.height - margin - panel.height));
-  return { left: x, top: y };
+  return {
+    left: screen.x + width / 2 - panelWidth / 2,
+    top: screen.y + height + gap,
+  };
 }
 
 /** The text editor's rect, laid inside a text node's card body. */
