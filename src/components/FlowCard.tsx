@@ -3,8 +3,10 @@
  * the body inside it and a plus button on each side while it is active. Its
  * pixel values are world-space points, so they scale with the camera.
  */
-import { Image, Text, View } from "nsh";
+import { Image, Text, token, View } from "nsh";
+import { Plus } from "lucide";
 import type { NodeSummary } from "@flow/native";
+import { Icon } from "./Icon";
 import {
   type BoxGeometry,
   PORT_PLUS_SIZE,
@@ -35,10 +37,6 @@ const ACCENT_BG: Record<FlowAccent, string> = {
   "chart-4": "bg-chart-4",
   "chart-5": "bg-chart-5",
 };
-
-/** The plus button's arms, in world points; integers keep it pixel-centred. */
-const PLUS_ARM = 8;
-const PLUS_THICKNESS = 2;
 
 /** The title row sits above the card, in world points. */
 const TITLE_HEIGHT = 20;
@@ -237,7 +235,7 @@ function PortPlus(props: {
 
   return (
     <View
-      class="absolute rounded-full bg-card shadow-sm"
+      class="absolute items-center justify-center rounded-full bg-card shadow-sm"
       style={{
         left: props.base().x - PORT_PLUS_SIZE / 2,
         top: props.base().y - PORT_PLUS_SIZE / 2,
@@ -251,30 +249,15 @@ function PortPlus(props: {
           : "cubic-bezier(0.34, 1.56, 0.64, 1)",
       }}
     >
-      {/* The ring is its own view: a border on the positioned parent would
-          shrink its padding box and push the absolute bars off centre. */}
+      {/* The ring is a background child and flex centres the icon, so neither
+          depends on the positioned parent's padding box (a border on it would
+          otherwise shift absolute children by the border width). The plus is
+          one canvas path, so its two bars cannot round apart. */}
       <View
         class="absolute rounded-full border border-border"
         style={{ left: 0, top: 0, width: PORT_PLUS_SIZE, height: PORT_PLUS_SIZE }}
       />
-      <View
-        classList={{ "absolute rounded-full": true, [ACCENT_BG[props.accent]]: true }}
-        style={{
-          left: (PORT_PLUS_SIZE - PLUS_ARM) / 2,
-          top: (PORT_PLUS_SIZE - PLUS_THICKNESS) / 2,
-          width: PLUS_ARM,
-          height: PLUS_THICKNESS,
-        }}
-      />
-      <View
-        classList={{ "absolute rounded-full": true, [ACCENT_BG[props.accent]]: true }}
-        style={{
-          left: (PORT_PLUS_SIZE - PLUS_THICKNESS) / 2,
-          top: (PORT_PLUS_SIZE - PLUS_ARM) / 2,
-          width: PLUS_THICKNESS,
-          height: PLUS_ARM,
-        }}
-      />
+      <Icon icon={Plus} size={PORT_PLUS_SIZE} strokeWidth={3} tint={() => token(props.accent)} />
     </View>
   );
 }
