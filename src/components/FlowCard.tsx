@@ -36,8 +36,8 @@ const ACCENT_BG: Record<FlowAccent, string> = {
   "chart-5": "bg-chart-5",
 };
 
-/** The plus button's arms, in world points. */
-const PLUS_ARM = 9;
+/** The plus button's arms, in world points; integers keep it pixel-centred. */
+const PLUS_ARM = 8;
 const PLUS_THICKNESS = 2;
 
 /** The title row sits above the card, in world points. */
@@ -237,7 +237,7 @@ function PortPlus(props: {
 
   return (
     <View
-      class="absolute rounded-full border border-border bg-card shadow-sm"
+      class="absolute rounded-full bg-card shadow-sm"
       style={{
         left: props.base().x - PORT_PLUS_SIZE / 2,
         top: props.base().y - PORT_PLUS_SIZE / 2,
@@ -251,6 +251,12 @@ function PortPlus(props: {
           : "cubic-bezier(0.34, 1.56, 0.64, 1)",
       }}
     >
+      {/* The ring is its own view: a border on the positioned parent would
+          shrink its padding box and push the absolute bars off centre. */}
+      <View
+        class="absolute rounded-full border border-border"
+        style={{ left: 0, top: 0, width: PORT_PLUS_SIZE, height: PORT_PLUS_SIZE }}
+      />
       <View
         classList={{ "absolute rounded-full": true, [ACCENT_BG[props.accent]]: true }}
         style={{
