@@ -157,7 +157,10 @@ easiest observable: it is `—` before the first fit and `<n>%` afterwards.
   win until committed, selection ignores unknown ids, ports/edges hit test in
   world coordinates, and previews only include visible cards.
 - `flow/camera.ts`: pan/zoom/fit invariants (the point under the cursor stays
-  put, content stays centered), clamping and the view signal.
+  put, content stays centered), wheel notch factors, clamping and the view
+  signal. The wheel itself is a native-component event with no test driver;
+  the real host proves the sensor is registered (an unknown name logs a
+  warning), and the notch-to-factor math is unit-tested.
 - `flow/selection.ts`: handle placement and reach, normalized rectangles,
   touching-edge intersections, and resizing that keeps the opposite edge fixed
   and never goes below the minimum.

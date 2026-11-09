@@ -8,6 +8,11 @@ All notable changes to Flow are recorded here. The format follows
 
 ### Added
 
+- The mouse wheel and touchpad zoom the canvas about the pointer: four
+  notches double or halve the scale, within the camera's limits. NSH gives a
+  window's wheel to native components rather than to views, so the canvas's
+  pointer surface is a wheel sensor registered by the Rust crate (Windows),
+  which draws nothing, takes no presses and forwards each scroll to TSX.
 - A secondary-button drag pans the canvas with any tool, without selecting,
   box-selecting or moving a card, and a right click opens the canvas context
   menu with Add text node and Add image node, placing the card at the pressed

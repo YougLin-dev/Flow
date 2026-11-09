@@ -162,7 +162,12 @@ events and renders four kinds of children:
   point along an edge resizes that axis, with the cursor naming the side, so
   the card shows no handle dots.
 - **Interaction view** — a transparent, full-size view that owns the cursor
-  and dispatches presses, moves and touches to the `CanvasController`.
+  and dispatches presses, moves and touches to the `CanvasController`. It is
+  `WheelSurface`, a native component the Rust crate registers
+  (`wheel_surface.rs`): the component draws nothing and takes no pointer, so
+  presses reach the view as on any view, while NSH hands it the mouse wheel
+  and touchpad scrolls over the canvas. The page turns each wheel event into
+  a zoom about the pointer.
 
 The canvas context menu (`components/CanvasContextMenu.tsx`) is a native-view
 popup anchored at a secondary-button press: it adds a text or image card at
@@ -232,6 +237,10 @@ pulled, the composer hides so the gesture and its target stay visible.
   pointer in a side zone, and a cursor that reflects the tool, any card's
   resize border or a plus. A card under the pointer owns the hit: another
   card's border or plus never reacts through it.
+- **Wheel** — the mouse wheel and touchpad zoom about the pointer, four
+  notches per doubling, clamped to the camera's scale range. The wheel is a
+  native-component event (the window's input never reaches TSX directly), so
+  the pointer view owns a sensor that forwards it.
 - **Secondary button** — holding the right button and dragging pans the
   camera with any tool, without selecting, starting a marquee or moving a
   card. A right click that stays put opens the canvas context menu. NSH

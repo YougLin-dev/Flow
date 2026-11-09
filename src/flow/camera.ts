@@ -29,6 +29,14 @@ export interface CameraSize {
 export const MIN_SCALE = 0.05;
 export const MAX_SCALE = 2.5;
 
+/** Wheel notches that double the view: about 19% a notch. */
+export const WHEEL_NOTCHES_PER_DOUBLING = 4;
+
+/** The zoom factor a wheel or touchpad scroll of `notches` applies. */
+export function wheelZoomFactor(notches: number): number {
+  return 2 ** (-notches / WHEEL_NOTCHES_PER_DOUBLING);
+}
+
 export class CanvasCamera {
   /** The camera's current view; read it in JSX to follow camera changes. */
   readonly view = signal<CameraView>({ x: 0, y: 0, scale: 1 });

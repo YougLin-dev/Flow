@@ -1,5 +1,11 @@
 import { expect, test } from "nsh/test";
-import { CanvasCamera, MAX_SCALE, MIN_SCALE } from "./camera";
+import {
+  CanvasCamera,
+  MAX_SCALE,
+  MIN_SCALE,
+  WHEEL_NOTCHES_PER_DOUBLING,
+  wheelZoomFactor,
+} from "./camera";
 
 test("maps screen and world points both ways", () => {
   const camera = new CanvasCamera();
@@ -64,6 +70,15 @@ test("keeps its view signal in step with its properties", () => {
   expect(camera.view().x).toBe(5);
   camera.scale = 0.5;
   expect(camera.view()).toEqual({ x: 5, y: 0, scale: 0.5 });
+});
+
+test("turns wheel notches into a zoom factor", () => {
+  expect(wheelZoomFactor(0)).toBe(1);
+  expect(wheelZoomFactor(WHEEL_NOTCHES_PER_DOUBLING)).toBe(0.5);
+  expect(wheelZoomFactor(-WHEEL_NOTCHES_PER_DOUBLING)).toBe(2);
+  // A notch down zooms out, a notch up zooms in.
+  expect(wheelZoomFactor(1)).toBeLessThan(1);
+  expect(wheelZoomFactor(-1)).toBeGreaterThan(1);
 });
 
 test("ignores non-finite or non-positive camera values", () => {

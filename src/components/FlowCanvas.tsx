@@ -4,6 +4,7 @@
  * pointer events into canvas gestures.
  */
 import {
+  nativeComponent,
   View,
   type ContextMenuEvent,
   type GestureResponderEvent,
@@ -30,9 +31,34 @@ export interface FlowCanvasProps {
   readonly onSize: (size: { width: number; height: number }) => void;
   readonly onPan: (dx: number, dy: number) => void;
   readonly onZoom: (factor: number, x: number, y: number) => void;
+  readonly onWheelZoom: (notches: number, x: number, y: number) => void;
   readonly onMenuPress: (at: ContextMenuPoint) => void;
   readonly onMenuCancel: () => void;
 }
+
+interface WheelEvent {
+  readonly x: number;
+  readonly y: number;
+  readonly notchesY: number;
+}
+
+interface WheelProps {
+  /** The sensor takes no props of its own. */
+  readonly noProps?: never;
+}
+
+/**
+ * The canvas's pointer surface. It is a native component registered by the
+ * Rust crate (`wheel_surface.rs`), which draws nothing and takes no pointer:
+ * presses reach this view's handlers as on any view, and NSH hands the mouse
+ * wheel and touchpad scrolls over it to `onWheel`. Where the component is not
+ * registered (the headless engine), it renders an empty view and the pointer
+ * handlers still work.
+ */
+const WheelSurface = nativeComponent<WheelProps, { wheel: WheelEvent }>("flow.wheel-surface", {
+  props: [],
+  events: ["wheel"],
+});
 
 interface TouchPoint {
   locationX?: number;
@@ -274,7 +300,7 @@ export function FlowCanvas(props: FlowCanvasProps) {
         </If>
       </View>
       <SelectionOverlay controller={props.controller} />
-      <View
+      <WheelSurface
         testID="flow-canvas"
         accessibilityLabel="Flow canvas"
         style={{
@@ -286,6 +312,7 @@ export function FlowCanvas(props: FlowCanvasProps) {
           backgroundColor: "transparent",
           cursor: props.controller.cursor(),
         }}
+        onWheel={(event) => props.onWheelZoom(event.notchesY, event.x, event.y)}
         onPressDown={onDown}
         onPressUp={onUp}
         onMouseMove={onMove}

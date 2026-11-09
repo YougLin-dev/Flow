@@ -15,7 +15,7 @@ import { ToolSwitch } from "../components/ToolSwitch";
 import { ZoomControls } from "../components/ZoomControls";
 import { AssetUrls } from "../flow/asset-urls";
 import { bindFlowKeys } from "../flow/bindings";
-import { CanvasCamera } from "../flow/camera";
+import { CanvasCamera, wheelZoomFactor } from "../flow/camera";
 import { CanvasController } from "../flow/canvas-controller";
 import { ComposerState } from "../flow/composer-state";
 import { CanvasMenuController, contextMenuPosition } from "../flow/context-menu";
@@ -433,6 +433,7 @@ export function FlowPage() {
         }}
         onPan={(dx, dy) => viewport.panBy(dx, dy)}
         onZoom={(factor, x, y) => viewport.zoomAround(factor, x, y)}
+        onWheelZoom={(notches, x, y) => viewport.zoomAround(wheelZoomFactor(notches), x, y)}
         onMenuPress={(at) => canvasMenu.press(at)}
         onMenuCancel={() => {
           canvasMenu.close();
