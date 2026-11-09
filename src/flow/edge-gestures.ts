@@ -1,6 +1,6 @@
 /**
  * Pointer handling for connectors: selecting an edge, dragging a new one from
- * an output port, and moving either end of the selected edge.
+ * a card's plus button, and moving either end of the selected edge.
  */
 import type { CanvasCamera } from "./camera";
 import { ConnectionGesture } from "./connection-gesture";
@@ -20,14 +20,12 @@ export interface EdgeGestureHost {
 export class EdgeGestures {
   private readonly gesture = new ConnectionGesture();
   private reconnectEdgeId: string | null = null;
-  private reconnectSide: "from" | "to" = "to";
 
   constructor(private readonly host: EdgeGestureHost) {}
 
   /** Forgets a pending reconnect, such as when the selection changes. */
   reset(): void {
     this.reconnectEdgeId = null;
-    this.reconnectSide = "to";
   }
 
   /** Consumes a press that starts an edge gesture; returns whether it did. */
@@ -36,39 +34,32 @@ export class EdgeGestures {
     const camera = this.host.camera();
     if (!scene || !camera) return false;
     const world = camera.toWorld(x, y);
-    const port = scene.portAt(world.x, world.y);
+    const zone = scene.portZoneAt(world.x, world.y);
     const selected = this.host.selectedEdge();
 
-    if (port?.side === "out") {
-      // Dragging a selected edge's source port moves that end. Selecting the
-      // edge is how the user says which edge to reconnect; a fresh drag from
-      // an unselected output port still makes a new connection.
-      const endpoints = selected === null ? null : scene.edgeEndpoints(selected);
-      if (selected !== null && endpoints?.fromId === port.nodeId) {
-        const fixed = scene.portWorld(endpoints.toId, "in");
-        if (fixed) {
+    if (zone !== null) {
+      // Dragging a selected edge's port moves that end. Selecting the edge is
+      // how the user says which edge to reconnect; a drag from any other plus
+      // starts a new connection: the right side forward, the left reverse.
+      if (selected !== null) {
+        const endpoints = scene.edgeEndpoints(selected);
+        if (zone.side === "out" && endpoints?.fromId === zone.nodeId) {
           this.reconnectEdgeId = selected;
-          this.reconnectSide = "from";
-          this.gesture.beginSource(scene, fixed);
+          this.gesture.begin(scene, endpoints.toId, "to");
+          this.host.changed();
+          return true;
+        }
+        if (zone.side === "in" && endpoints?.toId === zone.nodeId) {
+          this.reconnectEdgeId = selected;
+          this.gesture.begin(scene, endpoints.fromId, "from");
           this.host.changed();
           return true;
         }
       }
       this.reset();
-      this.gesture.begin(scene, port.nodeId);
+      this.gesture.begin(scene, zone.nodeId, zone.side === "out" ? "from" : "to");
       this.host.changed();
       return true;
-    }
-
-    if (port?.side === "in" && selected !== null) {
-      const endpoints = scene.edgeEndpoints(selected);
-      if (endpoints?.toId === port.nodeId) {
-        this.reconnectEdgeId = selected;
-        this.reconnectSide = "to";
-        this.gesture.begin(scene, endpoints.fromId);
-        this.host.changed();
-        return true;
-      }
     }
 
     if (scene.nodeAt(world.x, world.y)) {
@@ -92,20 +83,11 @@ export class EdgeGestures {
 
   up(x: number, y: number): void {
     const reconnect = this.reconnectEdgeId;
-    const side = this.reconnectSide;
     this.reset();
     const scene = this.host.scene();
     const camera = this.host.camera();
     if (!scene || !camera) return;
     const previous = reconnect === null ? null : scene.edgeEndpoints(reconnect);
-
-    if (reconnect && side === "from") {
-      const fromId = this.gesture.endSource(camera, scene, x, y);
-      if (previous && fromId && fromId !== previous.fromId) {
-        this.host.reconnectEdge(reconnect, fromId, previous.toId);
-      }
-      return;
-    }
 
     const target = this.gesture.end(camera, scene, x, y);
     if (!target) return;

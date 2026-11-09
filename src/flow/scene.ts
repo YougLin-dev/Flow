@@ -10,10 +10,10 @@ import {
   type BoxGeometry,
   distanceToConnection,
   EDGE_HIT_DISTANCE,
-  PORT_HIT_RADIUS,
   type Point,
   type PortSide,
   portPoint,
+  portZone,
 } from "./connection";
 
 /** The URLs a card's image body should show, loaded by the page. */
@@ -39,6 +39,8 @@ export class FlowScene {
   readonly selection = signal<readonly string[]>([]);
   readonly selectedEdge = signal<string | null>(null);
   readonly connectionPreview = signal<ConnectionPreview | null>(null);
+  /** The card a pulled connector is snapped to, highlighted like hover. */
+  readonly connectionTarget = signal<string | null>(null);
 
   private readonly byId = new Map<string, NodeSummary>();
   private readonly edgeById = new Map<string, EdgeSummary>();
@@ -174,21 +176,30 @@ export class FlowScene {
     return rect ? portPoint(rect, side) : null;
   }
 
-  /** The port under a world point, nearest first. */
-  portAt(x: number, y: number): { nodeId: string; side: PortSide } | null {
-    let nearest: { nodeId: string; side: PortSide; distance: number } | null = null;
+  /**
+   * The side zone under a world point, with the plus button's followed
+   * position. The topmost card owns the hit: a card under the pointer hides a
+   * lower card's plus, just as it hides the card it belongs to.
+   */
+  portZoneAt(x: number, y: number): { nodeId: string; side: PortSide; point: Point } | null {
+    let hit: { nodeId: string; side: PortSide; point: Point; z: number } | null = null;
     for (const node of this.byId.values()) {
       const rect = this.cardRect(node.id);
       if (!rect) continue;
       for (const side of ["out", "in"] as const) {
-        const point = portPoint(rect, side);
-        const distance = Math.hypot(point.x - x, point.y - y);
-        if (distance <= PORT_HIT_RADIUS && (!nearest || distance < nearest.distance)) {
-          nearest = { nodeId: node.id, side, distance };
+        const point = portZone(rect, side, x, y);
+        if (point !== null && (hit === null || node.z >= hit.z)) {
+          hit = { nodeId: node.id, side, point, z: node.z };
         }
       }
     }
-    return nearest === null ? null : { nodeId: nearest.nodeId, side: nearest.side };
+    if (hit === null) return null;
+    const under = this.nodeAt(x, y);
+    if (under !== null && under !== hit.nodeId) {
+      const underNode = this.byId.get(under);
+      if (underNode !== undefined && underNode.z >= hit.z) return null;
+    }
+    return { nodeId: hit.nodeId, side: hit.side, point: hit.point };
   }
 
   /** The kind of a card in the scene. */
@@ -239,6 +250,12 @@ export class FlowScene {
     this.connectionPreview.set({ from, to });
   }
 
+  /** Highlights the card a pulled connector would land on. */
+  setConnectionTarget(id: string | null): void {
+    if (this.connectionTarget() === id) return;
+    this.connectionTarget.set(id);
+  }
+
   /** Image cards with a current batch, for the page's preview reads. */
   previewTargets(): { id: string; batchId: string }[] {
     const targets: { id: string; batchId: string }[] = [];
@@ -266,6 +283,8 @@ export class FlowScene {
     }
     const selected = this.selectedEdge();
     if (selected !== null && !this.edgeById.has(selected)) this.selectedEdge.set(null);
+    const target = this.connectionTarget();
+    if (target !== null && !this.byId.has(target)) this.connectionTarget.set(null);
     const keep = new Set(this.selection().filter((id) => this.byId.has(id)));
     if (keep.size !== this.selection().length) this.selection.set([...keep]);
     for (const id of this.overrides().keys()) {

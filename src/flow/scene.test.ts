@@ -161,20 +161,39 @@ test("finds ports, cards and connectors in world coordinates", () => {
   scene.apply(snapshot([node("a", 0, 0), node("b", 300, 0)], [edge("a-b", "a", "b")]));
 
   expect(scene.portWorld("a", "out")).toEqual({ x: 200, y: 42 });
-  expect(scene.portAt(200, 42)).toEqual({ nodeId: "a", side: "out" });
-  expect(scene.portAt(300, 42)).toEqual({ nodeId: "b", side: "in" });
+  expect(scene.portZoneAt(210, 42)).toEqual({
+    nodeId: "a",
+    side: "out",
+    point: { x: 210, y: 42 },
+  });
+  expect(scene.portZoneAt(290, 42)).toEqual({
+    nodeId: "b",
+    side: "in",
+    point: { x: 290, y: 42 },
+  });
   expect(scene.nodeAt(100, 30)).toBe("a");
   expect(scene.nodeAt(250, 30)).toBeNull();
   expect(scene.edgeAt(250, 42)).toBe("a-b");
   expect(scene.kindOf("a")).toBe("text");
 });
 
-test("picks the nearest port when two are in reach", () => {
+test("the topmost card owns an overlapping side zone", () => {
   const scene = new FlowScene();
-  scene.apply(snapshot([node("a", 0, 0), node("b", 188, 0)]));
+  scene.apply(snapshot([node("low", 0, 0, { z: 0 }), node("high", 0, 0, { z: 5 })]));
 
-  // a's output is 10 points away, b's input only 2.
-  expect(scene.portAt(190, 42)).toEqual({ nodeId: "b", side: "in" });
+  expect(scene.portZoneAt(210, 42)).toEqual({
+    nodeId: "high",
+    side: "out",
+    point: { x: 210, y: 42 },
+  });
+});
+
+test("a card under the pointer hides a lower card's side zone", () => {
+  const scene = new FlowScene();
+  scene.apply(snapshot([node("a", 0, 0), node("cover", 190, 0, { z: 5 })]));
+
+  // (204, 42) is in a's output zone but the cover card is in front of it.
+  expect(scene.portZoneAt(204, 42)).toBeNull();
 });
 
 test("picks the topmost card under a point", () => {

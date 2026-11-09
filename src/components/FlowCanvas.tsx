@@ -104,8 +104,7 @@ export function FlowCanvas(props: FlowCanvasProps) {
       props.controller.up(lastX, lastY);
       return;
     }
-    props.controller.hovered.set(null);
-    props.controller.cursor.set("default");
+    props.controller.leave();
   };
 
   const onTouchStart = (event: GestureResponderEvent): void => {
@@ -219,6 +218,13 @@ export function FlowCanvas(props: FlowCanvasProps) {
               preview={() => props.scene.previews().get(node().id) ?? null}
               selected={() => props.scene.selection().includes(node().id)}
               hovered={() => props.controller.hovered() === node().id}
+              plus={() => {
+                const plus = props.controller.portPlus();
+                return plus !== null && plus.nodeId === node().id
+                  ? { side: plus.side, point: plus.point }
+                  : null;
+              }}
+              target={() => props.scene.connectionTarget() === node().id}
             />
           )}
         </Each>

@@ -47,7 +47,10 @@ produces images.
   keep their relative order; the rebuilt edge groups follow.
 - Inputs are ordered globally by `position`. The composer groups consecutive
   items from the same source (or the local uploads) under a source heading.
-- Selecting an edge lets a drag from either of its ports move that end.
+- Selecting an edge lets a drag from either endpoint's plus button move that
+  end; dragging any other plus starts a new connection (right side forward,
+  left side reverse), and a valid card under the pointer snaps into place
+  with its border highlighted.
 - Self-connections and duplicate edges are rejected in Rust. Provider runs never enter undo;
   document edits (connect, reconnect, delete, input changes, manual text,
   settings) do.

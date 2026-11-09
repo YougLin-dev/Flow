@@ -156,18 +156,23 @@ events and renders four kinds of children:
 
 `FlowCard` positions itself from the node's world rectangle and renders the
 title and status above the card, the body text or image thumbnails inside it
-(laid out inside the body box), and the input/output ports on its edges as
-accent dots on a card-colored halo. `FlowEdge` samples the connector cubic
+(laid out inside the body box), and one round plus button outside each side
+while the card is hovered or selected. A plus rests just outside the border;
+inside the side zone it eases toward the pointer in both axes, and it springs
+back when the pointer leaves. The plus is only a drag handle: connectors meet
+the card's own border. `FlowEdge` samples the connector cubic
 (`flow/connection.ts`) into densely spaced, overlapping straight line views
 with rounded caps; the overlap keeps antialiased joints from showing gaps,
 and there is no arrowhead. Both are presentational: props are accessors, and
 the page passes scene signals to them.
 
 The scene model (`flow/scene.ts`) is headless: it holds the visible nodes and
-edges, the selection, transient drag geometry (`overrides`), previews and the
-connection preview, and answers world-space hit questions (`nodeAt`,
-`portAt`, `edgeAt`). `CanvasController` turns pointer events into commands:
-select/toggle, drag, resize from a handle, marquee, pan with the hand tool,
+edges, the selection, transient drag geometry (`overrides`), previews, the
+connection preview and the card a pulled connector would snap to, and answers
+world-space hit questions (`nodeAt`, `portZoneAt`, `edgeAt`). A card under
+the pointer hides a lower card's plus, just as it hides the card itself.
+`CanvasController` turns pointer events into commands: select/toggle, drag,
+resize from a handle, marquee, pan with the hand tool, the following plus,
 and the port/edge gestures. `CanvasCamera` stores logical `x`, `y` and
 `scale`; `panBy`, `zoomAround` and `fit` rebuild the view from those values.
 
@@ -186,18 +191,20 @@ pulled, the composer hides so the gesture and its target stay visible.
 - **Select** — a press selects a card (Shift toggles), starts a drag when the
   press lands on a selected card, starts a resize when it lands near any
   visible card's border (a corner or anywhere along an edge; the press selects
-  that card first), and starts the connector gestures at a port. A corner
-  keeps the card's aspect ratio with the opposite corner fixed, scaling by the
-  pointer's projection onto the card's diagonal, so passing one edge does not
-  snap the card to its minimum. An edge resizes one axis. A press on empty
-  canvas clears the selection and starts the marquee. A double-click on a text
-  card opens its inline editor.
+  that card first), and starts the connector gestures in a plus's side zone.
+  A corner keeps the card's aspect ratio with the opposite corner fixed,
+  scaling by the pointer's projection onto the card's diagonal, so passing one
+  edge does not snap the card to its minimum. An edge resizes one axis. The
+  side zones keep clear of the corners, so a plus never steals a corner
+  resize. A press on empty canvas clears the selection and starts the
+  marquee. A double-click on a text card opens its inline editor.
 - **Hand** — presses pan the camera; nothing is selected.
 - **Touch** — one finger behaves like the current tool; two fingers pinch-zoom
   around their center and pan with it.
-- **Hover** — mouse movement updates the hovered card and a cursor that
-  reflects the tool, any card's resize border or a port. A card under the
-  pointer owns the hit: another card's border never reacts through it.
+- **Hover** — mouse movement updates the hovered card, the plus following the
+  pointer in a side zone, and a cursor that reflects the tool, any card's
+  resize border or a plus. A card under the pointer owns the hit: another
+  card's border or plus never reacts through it.
 
 Keyboard commands are declared in `flow/bindings.ts` (`bindFlowKeys`) and
 bound once by the page: `mod+=`/`mod+-`/`mod+0`
@@ -207,10 +214,13 @@ Delete/Backspace delete the selected edge or cards, arrows pan, `mod+k` opens
 search, and Escape dismisses the top layer (search, inline editor, selected
 edge, composer, then the selection). Each command exists once.
 
-Pointer gestures above the canvas: dragging from an output port previews and
-creates a connection; dragging either port of a selected edge moves that end
-(source or target); a press on a connector selects it; double-clicking a text
-card opens its inline editor.
+Pointer gestures above the canvas: dragging a card's right plus previews a
+forward connection and the left plus a reverse one; while the pointer is on a
+card that accepts the connection, the preview snaps to that card's port and
+the card's border highlights like hover, and the preview follows the pointer
+again when it leaves. Dragging either plus of a selected edge's endpoints
+moves that end (source or target). A press on a connector selects it;
+double-clicking a text card opens its inline editor.
 
 ## Window chrome
 

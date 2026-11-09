@@ -1,11 +1,17 @@
 /**
  * One node card on the native canvas: its title and status above the card,
- * the body inside it and the ports on its edges. Its pixel values are
- * world-space points, so they scale with the camera.
+ * the body inside it and a plus button on each side while it is active. Its
+ * pixel values are world-space points, so they scale with the camera.
  */
 import { Image, Text, View } from "nsh";
 import type { NodeSummary } from "@flow/native";
-import type { BoxGeometry } from "../flow/connection";
+import {
+  type BoxGeometry,
+  PORT_PLUS_SIZE,
+  type Point,
+  type PortSide,
+  portButtonPoint,
+} from "../flow/connection";
 import { type FlowAccent, nodeKind, statusLabel } from "../flow/node-kinds";
 import { previewCell } from "../flow/preview-grid";
 import type { PreviewView } from "../flow/scene";
@@ -16,6 +22,10 @@ export interface FlowCardProps {
   readonly preview: () => PreviewView | null;
   readonly selected: () => boolean;
   readonly hovered: () => boolean;
+  /** The side this card's plus is following the pointer on, if any. */
+  readonly plus: () => { readonly side: PortSide; readonly point: Point } | null;
+  /** True while a pulled connector is snapped to this card. */
+  readonly target: () => boolean;
 }
 
 const ACCENT_BG: Record<FlowAccent, string> = {
@@ -26,6 +36,10 @@ const ACCENT_BG: Record<FlowAccent, string> = {
   "chart-5": "bg-chart-5",
 };
 
+/** The plus button's arms, in world points. */
+const PLUS_ARM = 9;
+const PLUS_THICKNESS = 2;
+
 /** The title row sits above the card, in world points. */
 const TITLE_HEIGHT = 20;
 const TITLE_GAP = 6;
@@ -34,7 +48,7 @@ const BODY_INSET = 16;
 
 export function FlowCard(props: FlowCardProps) {
   const accent = () => nodeKind(props.node().kind).accent;
-  const active = () => props.selected() || props.hovered();
+  const active = () => props.selected() || props.hovered() || props.target();
   const left = () => props.rect()?.x ?? 0;
   const top = () => props.rect()?.y ?? 0;
   const width = () => props.rect()?.width ?? 0;
@@ -42,6 +56,15 @@ export function FlowCard(props: FlowCardProps) {
   const body = () => props.node().body.trim();
   const status = () => statusLabel(props.node().status);
   const lineCount = () => Math.max(1, Math.floor((height() - BODY_INSET * 2) / 19));
+  const plusBase = (side: PortSide): Point => {
+    const rect = props.rect();
+    return rect ? portButtonPoint(rect, side) : { x: 0, y: 0 };
+  };
+  const plusFollow = (side: PortSide): Point | null => {
+    const followed = props.plus();
+    return followed !== null && followed.side === side ? followed.point : null;
+  };
+  const showPlus = () => props.selected() || props.hovered();
 
   return (
     <View
@@ -184,45 +207,66 @@ export function FlowCard(props: FlowCardProps) {
         )}
       </View>
 
-      <Port
-        accent={accent()}
-        left={left() - PORT_SIZE / 2}
-        top={top() + height() / 2 - PORT_SIZE / 2}
-      />
-      <Port
-        accent={accent()}
-        left={left() + width() - PORT_SIZE / 2}
-        top={top() + height() / 2 - PORT_SIZE / 2}
-      />
+      {showPlus() ? (
+        <PortPlus accent={accent()} base={() => plusBase("in")} follow={() => plusFollow("in")} />
+      ) : null}
+      {showPlus() ? (
+        <PortPlus accent={accent()} base={() => plusBase("out")} follow={() => plusFollow("out")} />
+      ) : null}
     </View>
   );
 }
 
-const PORT_SIZE = 14;
-const PORT_DOT = 7;
-
 /**
- * A port's accent dot on a card-colored halo, drawn after the card so the
- * halo covers the border and the connector's end beneath it.
+ * A round plus button outside a card's border. It rests at the default
+ * anchor, eases toward the pointer while a side zone holds it, and springs
+ * back when the zone lets go. It is the connector's drag handle; the pointer
+ * never presses the view itself, the canvas controller reads the side zone.
  */
-function Port(props: { readonly accent: FlowAccent; readonly left: number; readonly top: number }) {
+function PortPlus(props: {
+  readonly accent: FlowAccent;
+  readonly base: () => Point;
+  readonly follow: () => Point | null;
+}) {
+  const offset = (axis: "x" | "y"): number => {
+    const followed = props.follow();
+    if (followed === null) return 0;
+    return followed[axis] - props.base()[axis];
+  };
+  const following = () => props.follow() !== null;
+
   return (
     <View
-      class="absolute rounded-full bg-card"
+      class="absolute rounded-full border border-border bg-card shadow-sm"
       style={{
-        left: props.left,
-        top: props.top,
-        width: PORT_SIZE,
-        height: PORT_SIZE,
+        left: props.base().x - PORT_PLUS_SIZE / 2,
+        top: props.base().y - PORT_PLUS_SIZE / 2,
+        width: PORT_PLUS_SIZE,
+        height: PORT_PLUS_SIZE,
+        transform: [{ translateX: offset("x") }, { translateY: offset("y") }],
+        transitionProperty: "transform",
+        transitionDuration: following() ? 90 : 260,
+        transitionTimingFunction: following()
+          ? "cubic-bezier(0.2, 0, 0, 1)"
+          : "cubic-bezier(0.34, 1.56, 0.64, 1)",
       }}
     >
       <View
         classList={{ "absolute rounded-full": true, [ACCENT_BG[props.accent]]: true }}
         style={{
-          left: (PORT_SIZE - PORT_DOT) / 2,
-          top: (PORT_SIZE - PORT_DOT) / 2,
-          width: PORT_DOT,
-          height: PORT_DOT,
+          left: (PORT_PLUS_SIZE - PLUS_ARM) / 2,
+          top: (PORT_PLUS_SIZE - PLUS_THICKNESS) / 2,
+          width: PLUS_ARM,
+          height: PLUS_THICKNESS,
+        }}
+      />
+      <View
+        classList={{ "absolute rounded-full": true, [ACCENT_BG[props.accent]]: true }}
+        style={{
+          left: (PORT_PLUS_SIZE - PLUS_THICKNESS) / 2,
+          top: (PORT_PLUS_SIZE - PLUS_ARM) / 2,
+          width: PLUS_THICKNESS,
+          height: PLUS_ARM,
         }}
       />
     </View>

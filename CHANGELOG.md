@@ -45,8 +45,14 @@ All notable changes to Flow are recorded here. The format follows
 - The boundary rule now fails closed when the importing module itself is
   unclassified, not only when its target is.
 - Connectors render as densely sampled, overlapping line segments with rounded
-  caps, and card ports are accent dots on a card-colored halo; connector
-  arrowheads are gone.
+  caps; connector arrowheads are gone. Ports are round plus buttons just
+  outside a card's left and right borders instead of permanent accent dots:
+  they appear while a card is hovered or selected, ease toward the pointer in
+  a side zone and spring back when it leaves, and dragging one starts a
+  connection either way (right side forward, left side reverse). A pulled
+  connector snaps to a valid card's port, highlights that card's border like
+  hover, and unsnaps when the pointer leaves. Connectors still meet the card
+  border itself; the plus is only a drag handle.
 - A card's title and status now sit above the card instead of inside it, and
   the body uses the full card area.
 - Selection no longer draws the eight resize handle dots or a square outline

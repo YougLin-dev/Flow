@@ -258,16 +258,36 @@ test("does not resize a card through the card above it", () => {
   controller.cancel();
 });
 
-test("prefers the output port over the east resize handle", () => {
+test("prefers a side zone over the east resize handle", () => {
   const { scene, controller } = setup([node("a", 100, 100)]);
   scene.select(["a"]);
 
-  // The east handle and the output port share (300, 142); the port wins.
-  controller.hover(300, 142);
+  // (305, 142) is inside both the out zone and the east handle's reach.
+  controller.hover(305, 142);
   expect(controller.cursor()).toBe("crosshair");
-  controller.down(300, 142, false, 1);
+  expect(controller.portPlus()).not.toBeNull();
+  controller.down(305, 142, false, 1);
   expect(controller.cursor()).toBe("crosshair");
   controller.cancel();
+});
+
+test("a plus follows the pointer beside a hovered card", () => {
+  const { controller } = setup([node("a", 0, 0)]);
+
+  controller.hover(210, 30);
+  expect(controller.hovered()).toBe("a");
+  expect(controller.portPlus()).toEqual({
+    nodeId: "a",
+    side: "out",
+    point: { x: 210, y: 30 },
+  });
+
+  // Past the middle of the side, or inside the card, it returns to rest.
+  controller.hover(210, 120);
+  expect(controller.portPlus()).toBeNull();
+  controller.hover(100, 30);
+  expect(controller.hovered()).toBe("a");
+  expect(controller.portPlus()).toBeNull();
 });
 
 test("opens the inline editor on a double-clicked text card", () => {
@@ -277,10 +297,10 @@ test("opens the inline editor on a double-clicked text card", () => {
   expect(calls.inline).toEqual(["a"]);
 });
 
-test("starts a connection from an output port", () => {
+test("starts a connection from an output plus", () => {
   const { scene, controller, calls } = setup([node("a", 0, 0), node("b", 300, 0)]);
 
-  controller.down(200, 42, false, 1);
+  controller.down(216, 42, false, 1);
   expect(controller.cursor()).toBe("crosshair");
   expect(controller.gesturing()).toBe(true);
   controller.move(250, 42);
@@ -292,6 +312,39 @@ test("starts a connection from an output port", () => {
   expect(scene.connectionPreview()).toBeNull();
 });
 
+test("starts a reverse connection from an input plus", () => {
+  const { controller, calls } = setup([node("a", 0, 0), node("b", 300, 0)]);
+
+  controller.down(284, 42, false, 1);
+  expect(controller.cursor()).toBe("crosshair");
+  controller.move(250, 42);
+
+  controller.up(100, 42);
+  expect(calls.connections).toEqual([{ fromId: "a", toId: "b" }]);
+});
+
+test("snaps a pulled connector to a valid card and unsnaps on leaving", () => {
+  const { scene, controller, calls } = setup([node("a", 0, 0), node("b", 300, 0)]);
+
+  controller.down(216, 42, false, 1);
+  controller.move(350, 42);
+  expect(scene.connectionTarget()).toBe("b");
+  expect(scene.connectionPreview()).toEqual({
+    from: { x: 200, y: 42 },
+    to: { x: 300, y: 42 },
+  });
+
+  // Between the cards, the preview follows the pointer again.
+  controller.move(260, 42);
+  expect(scene.connectionTarget()).toBeNull();
+  expect(scene.connectionPreview()?.to).toEqual({ x: 260, y: 42 });
+
+  controller.move(350, 42);
+  controller.up(350, 42);
+  expect(scene.connectionTarget()).toBeNull();
+  expect(calls.connections).toEqual([{ fromId: "a", toId: "b" }]);
+});
+
 test("does not rewrite an edge released on its own endpoint", () => {
   const { controller, calls } = setup(
     [node("a", 0, 0), node("b", 300, 0), node("c", 600, 0)],
@@ -301,7 +354,7 @@ test("does not rewrite an edge released on its own endpoint", () => {
   controller.down(250, 42, false, 1);
   expect(calls.edges).toContain("a-b");
 
-  controller.down(300, 42, false, 1);
+  controller.down(284, 42, false, 1);
   controller.up(300, 42);
   expect(calls.reconnects).toEqual([]);
 });
@@ -312,12 +365,28 @@ test("reconnects the selected edge's source end", () => {
     [edge("a-b", "a", "b")],
   );
 
-  // Select the edge by pressing its connector, then drag its source port.
+  // Select the edge by pressing its connector, then drag its source plus.
   controller.down(250, 42, false, 1);
   expect(calls.edges).toContain("a-b");
 
-  controller.down(200, 42, false, 1);
+  controller.down(216, 42, false, 1);
   controller.move(650, 42);
   controller.up(650, 42);
   expect(calls.reconnects).toEqual([{ edgeId: "a-b", fromId: "c", toId: "b" }]);
+});
+
+test("reconnects the selected edge's target end from its input plus", () => {
+  const { controller, calls } = setup(
+    [node("a", 0, 0), node("b", 300, 0), node("c", 600, 0)],
+    [edge("a-b", "a", "b")],
+  );
+
+  controller.down(250, 42, false, 1);
+  expect(calls.edges).toContain("a-b");
+
+  // The target's input plus sits left of its border; release on c.
+  controller.down(284, 42, false, 1);
+  controller.move(650, 42);
+  controller.up(650, 42);
+  expect(calls.reconnects).toEqual([{ edgeId: "a-b", fromId: "a", toId: "c" }]);
 });

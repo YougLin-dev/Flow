@@ -7,7 +7,7 @@
 import { signal, type ViewStyle } from "nsh";
 import type { NodeBounds } from "@flow/native";
 import type { CanvasCamera } from "./camera";
-import type { BoxGeometry } from "./connection";
+import type { BoxGeometry, Point, PortSide } from "./connection";
 import { EdgeGestures } from "./edge-gestures";
 import type { FlowScene } from "./scene";
 import {
@@ -21,6 +21,13 @@ import {
 
 export type CanvasCursor = NonNullable<ViewStyle["cursor"]>;
 export type CanvasTool = "select" | "hand";
+
+/** A card's plus button while it follows the pointer, in world coordinates. */
+export interface PortPlus {
+  readonly nodeId: string;
+  readonly side: PortSide;
+  readonly point: Point;
+}
 
 export interface CanvasHost {
   scene(): FlowScene;
@@ -59,6 +66,8 @@ export class CanvasController {
   readonly marquee = signal<ScreenRect | null>(null);
   /** The card under the pointer while no gesture runs. */
   readonly hovered = signal<string | null>(null);
+  /** The plus button following the pointer in a card's side zone. */
+  readonly portPlus = signal<PortPlus | null>(null);
   /** True while a press moves cards, resizes one or pulls a connector. */
   readonly gesturing = signal(false);
   readonly cursor = signal<CanvasCursor>("default");
@@ -128,6 +137,7 @@ export class CanvasController {
     const camera = this.host.camera();
     this.edgeMode = false;
     this.gesturing.set(false);
+    this.portPlus.set(null);
     this.gesture = { ...idle(), startX: x, startY: y, lastX: x, lastY: y };
 
     if (this.host.tool() === "hand") {
@@ -270,7 +280,7 @@ export class CanvasController {
     if (this.edgeMode) {
       this.edgeMode = false;
       this.edges.up(x, y);
-      this.cursor.set("default");
+      this.hover(x, y);
       return;
     }
     if (gesture.mode === "drag" || gesture.mode === "resize") {
@@ -302,6 +312,7 @@ export class CanvasController {
     this.edges.cancel();
     this.edgeMode = false;
     this.gesturing.set(false);
+    this.portPlus.set(null);
     if (this.gesture.mode === "drag" || this.gesture.mode === "resize") {
       this.host.scene().clearOverrides();
     }
@@ -310,25 +321,39 @@ export class CanvasController {
     this.cursor.set("default");
   }
 
+  /** Clears the pointer state when it leaves the canvas. */
+  leave(): void {
+    this.hovered.set(null);
+    this.portPlus.set(null);
+    this.cursor.set("default");
+  }
+
   /** A mouse move with no button down, updating hover and the cursor. */
   hover(x: number, y: number): void {
     const scene = this.host.scene();
     const camera = this.host.camera();
     const world = camera.toWorld(x, y);
-    // Ports take precedence over the east/west handles they overlap.
-    if (scene.portAt(world.x, world.y)) {
-      this.hovered.set(null);
-      this.cursor.set("crosshair");
-      return;
+    const tool = this.host.tool();
+    // A plus zone takes precedence over the east/west resize handles it
+    // overlaps: pressing a visible plus starts a connection.
+    if (tool === "select") {
+      const zone = scene.portZoneAt(world.x, world.y);
+      if (zone) {
+        this.hovered.set(zone.nodeId);
+        this.portPlus.set({ nodeId: zone.nodeId, side: zone.side, point: zone.point });
+        this.cursor.set("crosshair");
+        return;
+      }
     }
     const target = this.handleAtPoint(x, y);
     if (target) {
       this.hovered.set(target.id);
+      this.portPlus.set(null);
       this.cursor.set(cursorFor(target.side));
       return;
     }
     this.hovered.set(scene.nodeAt(world.x, world.y));
-    const tool = this.host.tool();
+    this.portPlus.set(null);
     this.cursor.set(tool === "hand" ? "grab" : "default");
   }
 

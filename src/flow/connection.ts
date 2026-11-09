@@ -14,7 +14,16 @@ export interface Point {
 
 export type PortSide = "in" | "out";
 
-/** The world point of a node's input (left) or output (right) port. */
+/** The gap between a card's border and its port button's centre. */
+export const PORT_GAP = 16;
+/** The plus button's diameter, in world units. */
+export const PORT_PLUS_SIZE = 16;
+/** How far outside a border the pointer may sit in a side zone. */
+export const PORT_ZONE_REACH = 28;
+/** The vertical span of a side zone around the middle of a side. */
+export const PORT_ZONE_HEIGHT = 48;
+
+/** The world point where a connector meets the card's left or right edge. */
 export function portPoint(node: BoxGeometry, side: PortSide): Point {
   return {
     x: side === "in" ? node.x : node.x + node.width,
@@ -22,8 +31,32 @@ export function portPoint(node: BoxGeometry, side: PortSide): Point {
   };
 }
 
-/** The port hit radius and connector hit distance, in world units. */
-export const PORT_HIT_RADIUS = 12;
+/** The rest position of a side's plus button, just outside the border. */
+export function portButtonPoint(node: BoxGeometry, side: PortSide): Point {
+  const anchor = portPoint(node, side);
+  return {
+    x: side === "in" ? anchor.x - PORT_GAP : anchor.x + PORT_GAP,
+    y: anchor.y,
+  };
+}
+
+/**
+ * The plus button's world position when the pointer is in a card's side
+ * zone, or null outside it. The pointer must sit just outside the border,
+ * near the middle of the side; the button then follows it in both axes.
+ */
+export function portZone(node: BoxGeometry, side: PortSide, x: number, y: number): Point | null {
+  const centerY = node.y + node.height / 2;
+  const half = Math.min(node.height / 2, PORT_ZONE_HEIGHT / 2);
+  if (y < centerY - half || y > centerY + half) return null;
+  const border = side === "in" ? node.x : node.x + node.width;
+  const outward = side === "in" ? border - x : x - border;
+  if (outward < 0 || outward > PORT_ZONE_REACH) return null;
+  const distance = Math.max(PORT_PLUS_SIZE / 2, outward);
+  return { x: side === "in" ? border - distance : border + distance, y };
+}
+
+/** The connector hit distance, in world units. */
 export const EDGE_HIT_DISTANCE = 8;
 
 /** The control-point reach of the connector's cubic curve. */

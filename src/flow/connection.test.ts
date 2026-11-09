@@ -1,10 +1,35 @@
 import { expect, test } from "nsh/test";
-import { connectionPoints, cubicAt, distanceToConnection, portPoint } from "./connection";
+import {
+  connectionPoints,
+  cubicAt,
+  distanceToConnection,
+  portButtonPoint,
+  portPoint,
+  portZone,
+} from "./connection";
 
-test("ports anchor at the middle of a card's left and right edges", () => {
+test("ports meet a card's left and right edges at their middle", () => {
   const box = { x: 40, y: 60, width: 300, height: 220 };
   expect(portPoint(box, "in")).toEqual({ x: 40, y: 170 });
   expect(portPoint(box, "out")).toEqual({ x: 340, y: 170 });
+});
+
+test("plus buttons rest just outside the border", () => {
+  const box = { x: 40, y: 60, width: 300, height: 220 };
+  expect(portButtonPoint(box, "in")).toEqual({ x: 24, y: 170 });
+  expect(portButtonPoint(box, "out")).toEqual({ x: 356, y: 170 });
+});
+
+test("a side zone follows the pointer just outside its border", () => {
+  const box = { x: 40, y: 60, width: 300, height: 220 };
+  expect(portZone(box, "out", 352, 150)).toEqual({ x: 352, y: 150 });
+  expect(portZone(box, "in", 28, 190)).toEqual({ x: 28, y: 190 });
+  // At the border the button stays clear of it instead of sitting on it.
+  expect(portZone(box, "out", 341, 150)).toEqual({ x: 348, y: 150 });
+  // Inside the card, past the reach, or past the side's middle are no zone.
+  expect(portZone(box, "out", 330, 150)).toBeNull();
+  expect(portZone(box, "out", 380, 150)).toBeNull();
+  expect(portZone(box, "out", 352, 110)).toBeNull();
 });
 
 test("samples the connector from the output port to the input", () => {

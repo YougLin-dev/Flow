@@ -308,11 +308,12 @@ selection handles, marquee boxes and the composer are screen-space geometry.
 ### 7.2 Hit testing and pointer input
 
 Hit tests MUST answer from the scene model, never from pixel sampling:
-`nodeAt` returns the topmost card by `z` (ties to the last), `portAt` the
-nearest port within the port hit radius, and `edgeAt` the connector within the
-edge hit distance. A miss returns `null`. A selected card that leaves the
-viewport stays in the scene, with its ports and connectors, while pinned.
-(Test)
+`nodeAt` returns the topmost card by `z` (ties to the last), `portZoneAt` the
+topmost card's side zone under a point with the plus's followed position (a
+card under the pointer hides a lower card's plus), and `edgeAt` the connector
+within the edge hit distance. A miss returns `null`. A selected card that
+leaves the viewport stays in the scene, with its port buttons and connectors,
+while pinned. (Test)
 
 `CanvasController` is the one pointer router: it selects and toggles cards,
 drags, resizes from a handle, box-selects, pans with the hand tool, and drives
