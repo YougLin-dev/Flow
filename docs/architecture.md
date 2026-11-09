@@ -145,9 +145,11 @@ events and renders four kinds of children:
   world coordinates: a `FlowEdge` per connector and a `FlowCard` per visible
   node. The camera's transform is the only mapping from world to screen; the
   scene never caches screen geometry on a card.
-- **Selection overlay** — screen-space borders, eight resize handles and the
-  marquee box, derived from the scene and the camera each time the camera,
-  selection or drag changes. It does not take pointer events.
+- **Selection overlay** — the marquee box in screen space, derived from the
+  controller each time the drag changes. It does not take pointer events. A
+  selected card shows the same rounded accent border it shows on hover, so no
+  square outline is laid over it, and the eight resize handles are invisible
+  hit targets kept by the controller (the cursor names the edge).
 - **Interaction view** — a transparent, full-size view that owns the cursor
   and dispatches presses, moves and touches to the `CanvasController`.
 
@@ -180,10 +182,12 @@ pulled, the composer hides so the gesture and its target stay visible.
 `CanvasController`:
 
 - **Select** — a press selects a card (Shift toggles), starts a drag when the
-  press lands on a selected card, starts a resize when it lands on a selection
-  handle, and starts the connector gestures at a port. A press on empty canvas
-  clears the selection and starts the marquee. A double-click on a text card
-  opens its inline editor.
+  press lands on a selected card, starts a resize when it lands on an
+  invisible selection handle, and starts the connector gestures at a port. A
+  corner handle keeps the card's aspect ratio with the opposite corner fixed;
+  an edge handle resizes one axis. A press on empty canvas clears the
+  selection and starts the marquee. A double-click on a text card opens its
+  inline editor.
 - **Hand** — presses pan the camera; nothing is selected.
 - **Touch** — one finger behaves like the current tool; two fingers pinch-zoom
   around their center and pan with it.

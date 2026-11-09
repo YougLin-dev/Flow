@@ -41,17 +41,27 @@ test("treats touching edges as an intersection", () => {
 test("resizes from the dragged edges and keeps the opposite one fixed", () => {
   const start = { x: 100, y: 100, width: 200, height: 100 };
   expect(resizedRect(start, "se", 40, 20)).toEqual({ x: 100, y: 100, width: 240, height: 120 });
-  expect(resizedRect(start, "nw", 40, 30)).toEqual({ x: 140, y: 120, width: 160, height: 80 });
+  expect(resizedRect(start, "nw", 20, 10)).toEqual({ x: 120, y: 110, width: 180, height: 90 });
   expect(resizedRect(start, "e", 40, 0)).toEqual({ x: 100, y: 100, width: 240, height: 100 });
   expect(resizedRect(start, "s", 0, -10)).toEqual({ x: 100, y: 100, width: 200, height: 90 });
 });
 
+test("keeps a corner's aspect ratio and its opposite corner fixed", () => {
+  const start = { x: 100, y: 100, width: 200, height: 100 };
+  expect(resizedRect(start, "se", 40, 0)).toEqual({ x: 100, y: 100, width: 240, height: 120 });
+  expect(resizedRect(start, "nw", 0, -50)).toEqual({ x: 0, y: 50, width: 300, height: 150 });
+  expect(resizedRect(start, "ne", 0, -50)).toEqual({ x: 100, y: 50, width: 300, height: 150 });
+  expect(resizedRect(start, "sw", -40, 0)).toEqual({ x: 60, y: 100, width: 240, height: 120 });
+});
+
 test("never resizes a card below its minimum", () => {
   const start = { x: 100, y: 100, width: 200, height: 100 };
+  // The minimum scale keeps both edges above their minimums and the card's
+  // aspect ratio, so a 2:1 card stops at 160×80 rather than 120×80.
   expect(resizedRect(start, "se", -1000, -1000)).toEqual({
     x: 100,
     y: 100,
-    width: 120,
+    width: 160,
     height: 80,
   });
   // Pulling the left edge past the right one stops at the minimum width.

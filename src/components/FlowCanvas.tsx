@@ -233,7 +233,7 @@ export function FlowCanvas(props: FlowCanvasProps) {
           )}
         </If>
       </View>
-      <SelectionOverlay scene={props.scene} controller={props.controller} />
+      <SelectionOverlay controller={props.controller} />
       <View
         testID="flow-canvas"
         accessibilityLabel="Flow canvas"

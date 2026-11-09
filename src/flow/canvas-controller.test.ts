@@ -200,12 +200,14 @@ test("resizes the selected card from its handle", () => {
   expect(controller.cursor()).toBe("nwse-resize");
   expect(controller.gesturing()).toBe(true);
 
-  controller.move(340, 214);
-  expect(scene.cardRect("a")).toEqual({ x: 100, y: 100, width: 240, height: 114 });
+  // The corner keeps the card's aspect ratio: the equal relative deltas
+  // scale the 200×84 card by 1.25.
+  controller.move(350, 205);
+  expect(scene.cardRect("a")).toEqual({ x: 100, y: 100, width: 250, height: 105 });
 
-  controller.up(340, 214);
+  controller.up(350, 205);
   expect(controller.gesturing()).toBe(false);
-  expect(calls.commits).toEqual([[{ id: "a", x: 100, y: 100, width: 240, height: 114 }]]);
+  expect(calls.commits).toEqual([[{ id: "a", x: 100, y: 100, width: 250, height: 105 }]]);
 });
 
 test("prefers the output port over the east resize handle", () => {

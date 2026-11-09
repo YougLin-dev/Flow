@@ -61,7 +61,11 @@ export function intersects(a: BoxGeometry, b: BoxGeometry): boolean {
   );
 }
 
-/** A card resized by a handle drag, never below its minimum size. */
+/**
+ * A card resized by a handle drag, never below its minimum size. A corner
+ * keeps the start rectangle's aspect ratio and the opposite corner fixed;
+ * an edge resizes one axis only.
+ */
 export function resizedRect(
   start: BoxGeometry,
   side: ResizeHandle,
@@ -70,21 +74,44 @@ export function resizedRect(
   minWidth = 120,
   minHeight = 80,
 ): BoxGeometry {
+  if (side === "nw" || side === "ne" || side === "se" || side === "sw") {
+    const west = side === "nw" || side === "sw";
+    const north = side === "nw" || side === "ne";
+    const horizontal = (west ? -dx : dx) / Math.max(1, start.width);
+    const vertical = (north ? -dy : dy) / Math.max(1, start.height);
+    // The axis the pointer moved further, relative to the card's size, sets
+    // the scale; the other axis follows so the card keeps its proportions.
+    const scale = 1 + (Math.abs(horizontal) >= Math.abs(vertical) ? horizontal : vertical);
+    const minScale = Math.max(
+      minWidth / Math.max(1, start.width),
+      minHeight / Math.max(1, start.height),
+    );
+    const effective = Math.max(minScale, scale);
+    const width = Math.max(1, start.width * effective);
+    const height = Math.max(1, start.height * effective);
+    return {
+      x: west ? start.x + start.width - width : start.x,
+      y: north ? start.y + start.height - height : start.y,
+      width,
+      height,
+    };
+  }
+
   let { x, y, width, height } = start;
-  if (side === "nw" || side === "w" || side === "sw") {
+  if (side === "w") {
     const right = x + width;
     const nextX = Math.min(x + dx, right - minWidth);
     width = right - nextX;
     x = nextX;
-  } else if (side === "ne" || side === "e" || side === "se") {
+  } else if (side === "e") {
     width = Math.max(minWidth, width + dx);
   }
-  if (side === "nw" || side === "n" || side === "ne") {
+  if (side === "n") {
     const bottom = y + height;
     const nextY = Math.min(y + dy, bottom - minHeight);
     height = bottom - nextY;
     y = nextY;
-  } else if (side === "sw" || side === "s" || side === "se") {
+  } else if (side === "s") {
     height = Math.max(minHeight, height + dy);
   }
   return { x, y, width, height };

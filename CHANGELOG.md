@@ -42,6 +42,11 @@ All notable changes to Flow are recorded here. The format follows
 - Connectors render as densely sampled, overlapping line segments with rounded
   caps, and card ports are accent dots on a card-colored halo; connector
   arrowheads are gone.
+- Selection no longer draws the eight resize handle dots or a square outline
+  around the card: the card's own rounded accent border marks selection, and
+  the handles remain invisible hit targets with resize cursors. A corner drag
+  keeps the card's aspect ratio with its opposite corner fixed; an edge drag
+  still resizes one axis.
 
 ### Removed
 
