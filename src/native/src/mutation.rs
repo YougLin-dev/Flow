@@ -11,12 +11,14 @@ use sea_orm::{
 
 use crate::clock::now_ms;
 use crate::constants::DOCUMENT_ID;
+use crate::edge_index;
 use crate::entity::{
     documents, edges, node_inputs, nodes, nodes_fts, nodes_rtree, result_batches, result_items,
 };
 use crate::history::{EdgeRow, HistoryOp, InputRow, NodeRow};
 use crate::types::{
-    ChangeSet, EdgeInput, InputItemInput, NodeBounds, NodeInput, ResultBatchInput, ResultItemInput,
+    ChangeSet, EdgeInput, EdgePoint, EdgeSummary, InputItemInput, NodeBounds, NodeInput,
+    ResultBatchInput, ResultItemInput,
 };
 
 /// A write and the history needed to reverse it.
@@ -271,7 +273,9 @@ pub fn insert_edges(conn: &DatabaseConnection, inputs: Vec<EdgeInput>) -> Result
 
         for input in &inputs {
             let row = insert_edge_tx(txn, input)?;
-            changed.push(row.summary());
+            let from = find_node_tx(txn, &row.from_id)?;
+            let to = find_node_tx(txn, &row.to_id)?;
+            changed.push(edge_summary(&row, &from, &to));
             forward.push(HistoryOp::InsertEdge(row.clone()));
             inverse.push(HistoryOp::DeleteEdge { id: row.id });
         }
@@ -357,7 +361,11 @@ pub fn connect_edges(
 
         for input in &inputs {
             let connected = connect_edge_tx(txn, input)?;
-            edges_changed.push(connected.edge.summary());
+            edges_changed.push(edge_summary(
+                &connected.edge,
+                &connected.source,
+                &connected.target,
+            ));
             forward.extend(connected.forward);
             desired_inverse.extend(connected.inverse);
             // Several edges may touch one target; report its final summary once.
@@ -387,9 +395,20 @@ pub fn connect_edges(
 
 struct ConnectedEdge {
     edge: EdgeRow,
+    source: nodes::Model,
     target: nodes::Model,
     forward: Vec<HistoryOp>,
     inverse: Vec<HistoryOp>,
+}
+
+/// The change set's edge summary, with both ports for a scene that holds
+/// only one of the edge's cards.
+fn edge_summary(edge: &EdgeRow, from: &nodes::Model, to: &nodes::Model) -> EdgeSummary {
+    EdgeSummary {
+        from_point: Some(EdgePoint::output(from.x, from.y, from.width, from.height)),
+        to_point: Some(EdgePoint::input(to.x, to.y, to.height)),
+        ..edge.summary()
+    }
 }
 
 /// One edge inside an open transaction: validation, the edge row, the
@@ -441,6 +460,7 @@ fn connect_edge_tx(txn: &DatabaseTransaction, input: &EdgeInput) -> Result<Conne
 
     Ok(ConnectedEdge {
         edge,
+        source,
         target,
         forward,
         inverse: desired_inverse,
@@ -456,7 +476,7 @@ pub fn update_edge(conn: &DatabaseConnection, input: EdgeInput) -> Result<Mutati
         }
         let before = find_edge_tx(txn, &input.id)?;
         let source = find_node_tx(txn, &input.from_id)?;
-        find_node_tx(txn, &input.to_id)?;
+        let target = find_node_tx(txn, &input.to_id)?;
         if already_connected_tx(txn, &input.from_id, &input.to_id, &input.id)? {
             return Err(DbErr::Custom(
                 "these nodes are already connected".to_owned(),
@@ -535,7 +555,7 @@ pub fn update_edge(conn: &DatabaseConnection, input: EdgeInput) -> Result<Mutati
                 rev: rev as f64,
                 changed,
                 removed: Vec::new(),
-                edges_changed: vec![after.summary()],
+                edges_changed: vec![edge_summary(&after, &source, &target)],
                 edges_removed: Vec::new(),
             },
             forward,
@@ -994,11 +1014,15 @@ pub fn apply_ops(conn: &DatabaseConnection, ops: &[HistoryOp]) -> Result<ChangeS
                 }
                 HistoryOp::InsertEdge(row) => {
                     insert_edge_row_tx(txn, row)?;
-                    edges_changed.push(row.summary());
+                    let from = find_node_tx(txn, &row.from_id)?;
+                    let to = find_node_tx(txn, &row.to_id)?;
+                    edges_changed.push(edge_summary(row, &from, &to));
                 }
                 HistoryOp::ReplaceEdge(row) => {
                     let row = replace_edge_row_tx(txn, row)?;
-                    edges_changed.push(row.summary());
+                    let from = find_node_tx(txn, &row.from_id)?;
+                    let to = find_node_tx(txn, &row.to_id)?;
+                    edges_changed.push(edge_summary(&row, &from, &to));
                 }
                 HistoryOp::DeleteEdge { id } => {
                     let edge = find_edge_tx(txn, id)?;
@@ -1196,6 +1220,9 @@ fn insert_indexes_tx(txn: &DatabaseTransaction, node: NodeIndex<'_>) -> Result<(
 }
 
 fn delete_node_tx(txn: &DatabaseTransaction, node: &nodes::Model) -> Result<(), DbErr> {
+    // The edge rows cascade with the node, which the edge RTree does not
+    // know about; drop their index rows first, while they still exist.
+    edge_index::remove_node_edges(txn, &node.id)?;
     nodes_rtree::Entity::delete_by_id(node.seq).exec(txn)?;
     nodes_fts::Entity::delete_by_id(node.seq).exec(txn)?;
     nodes::Entity::delete_by_id(node.seq).exec(txn)?;
@@ -1227,6 +1254,7 @@ fn update_position_tx(
         max_y: Set(updated.y + updated.height),
     })
     .exec(txn)?;
+    edge_index::sync_node_edges(txn, &updated.id)?;
 
     Ok(node_row(&updated))
 }
@@ -1260,6 +1288,7 @@ fn update_bounds_tx(
         max_y: Set(updated.y + updated.height),
     })
     .exec(txn)?;
+    edge_index::sync_node_edges(txn, &updated.id)?;
 
     Ok(node_row(&updated))
 }
@@ -1351,6 +1380,7 @@ fn insert_edge_tx(txn: &DatabaseTransaction, input: &EdgeInput) -> Result<EdgeRo
         data_json: Set(data_json.clone()),
     })
     .exec(txn)?;
+    edge_index::sync_edge(txn, &input.id)?;
 
     Ok(EdgeRow {
         id: input.id.clone(),
@@ -1375,7 +1405,7 @@ fn insert_edge_row_tx(txn: &DatabaseTransaction, row: &EdgeRow) -> Result<(), Db
         data_json: Set(row.data_json.clone()),
     })
     .exec(txn)?;
-    Ok(())
+    edge_index::sync_edge(txn, &row.id)
 }
 
 fn replace_edge_row_tx(txn: &DatabaseTransaction, row: &EdgeRow) -> Result<EdgeRow, DbErr> {
@@ -1390,10 +1420,12 @@ fn replace_edge_row_tx(txn: &DatabaseTransaction, row: &EdgeRow) -> Result<EdgeR
         ..Default::default()
     })
     .exec(txn)?;
+    edge_index::sync_edge(txn, &row.id)?;
     Ok(row.clone())
 }
 
 fn delete_edge_tx(txn: &DatabaseTransaction, id: &str) -> Result<(), DbErr> {
+    edge_index::remove_edge(txn, id)?;
     edges::Entity::delete_by_id(id.to_owned()).exec(txn)?;
     Ok(())
 }
@@ -1693,6 +1725,7 @@ fn replace_node_tx(txn: &DatabaseTransaction, row: &NodeRow) -> Result<nodes::Mo
         tags: Set(row.tags.join(" ")),
     })
     .exec(txn)?;
+    edge_index::sync_node_edges(txn, &updated.id)?;
 
     Ok(updated)
 }

@@ -22,8 +22,11 @@ Rust tests live beside the native crate in `src/native/src/`. `nsh test src`
 runs `cargo test` before the TSX tests; `bun run test:bench` runs the release
 benchmark that is ignored by the normal suite. The database tests open a real
 SeaORM/SQLite database; `search.rs` and `viewport.rs` assert that the generated
-queries keep FTS5/RTree as the outer table with `CROSS JOIN`, and the benchmark
-covers the 100k-node path plus short CJK (LIKE) and CJK trigram searches.
+queries keep FTS5/RTree as the outer table with `CROSS JOIN`,
+`edge_index.rs` checks the connector box against the UI's curve geometry, and
+`db.rs` covers a scene read between two off-screen cards plus its maintenance
+through moves, deletes and undo. The benchmark covers the 100k-node path plus
+short CJK (LIKE) and CJK trigram searches.
 
 Test paths below are relative to `src/` unless stated otherwise.
 
@@ -60,7 +63,7 @@ representation at very low zoom is still to be designed.
 | Level  | Where                                                                                                                                                                                                                                                                                                                                                                                                                                  | What it proves                                                                                                                                                    |
 | ------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Unit   | `flow/camera.test.ts`, `flow/scene.test.ts`, `flow/selection.test.ts`, `flow/overlay.test.ts`, `flow/canvas-controller.test.ts`, `flow/frame-connection.test.ts`, `flow/right-gesture.test.ts`, `flow/context-menu.test.ts`, `flow/composer-state.test.ts`, `flow/grid.test.ts`, `flow/connection.test.ts`, `flow/preview-grid.test.ts`, `flow/data.test.ts`, `flow/database-path.test.ts`, `flow/node-kinds.test.ts`, `store.test.ts` | Pure logic, the scene model, gesture routing, camera math, placement, drafts, grid and preview coverage, connector geometry, right-button pan and menu placement. |
-| Native | `native.test.ts`, `flow/node-session.native.test.ts`, Rust tests in `db.rs`, `search.rs`, `viewport.rs`                                                                                                                                                                                                                                                                                                                                | SeaORM schema/persistence, assets, FTS5/RTree plans, commands, history, undo, runs and the composer session.                                                      |
+| Native | `native.test.ts`, `flow/node-session.native.test.ts`, Rust tests in `db.rs`, `search.rs`, `viewport.rs`, `edge_index.rs`, `schema.rs`                                                                                                                                                                                                                                                                                                  | SeaORM schema/persistence, assets, FTS5/RTree plans, connector curve bounds and migrations, commands, history, undo, runs and the composer session.               |
 | App    | `App.test.tsx`                                                                                                                                                                                                                                                                                                                                                                                                                         | The mounted app headless: text, presses, drags, keyboard, composer and inputs.                                                                                    |
 | Host   | `App.host.test.tsx`                                                                                                                                                                                                                                                                                                                                                                                                                    | The same app on the real window: rendering, native input, title bar, pinning and appearance repaint.                                                              |
 
@@ -155,7 +158,10 @@ easiest observable: it is `—` before the first fit and `<n>%` afterwards.
 
 - `flow/scene.ts`: a snapshot prunes and pins, change sets apply, overrides
   win until committed, selection ignores unknown ids, ports/edges hit test in
-  world coordinates, and previews only include visible cards.
+  world coordinates, a connector keeps the ports the read carried when its
+  far card left the scene or both cards did, a selected card pinned through
+  a read that reports neither end keeps its connectors, an edge with no
+  ports and no cards is dropped, and previews only include visible cards.
 - `flow/camera.ts`: pan/zoom/fit invariants (the point under the cursor stays
   put, content stays centered), wheel notch factors, clamping and the view
   signal. The wheel itself is a native-component event with no test driver;

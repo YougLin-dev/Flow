@@ -16,7 +16,7 @@ use crate::entity::{
 
 /// Every migration that this build knows, in order. Add a new entry here and
 /// a matching arm in `apply_migration`.
-const MIGRATIONS: &[i32] = &[1, 2];
+const MIGRATIONS: &[i32] = &[1, 2, 3];
 
 /// Migration 2 is the node editor's breaking reset: all document data is
 /// discarded (the TSX side seeds the new example after opening).
@@ -27,6 +27,7 @@ const RESET_TABLES: &[&str] = &[
     "node_assets",
     "nodes_fts",
     "nodes_rtree",
+    "edges_rtree",
     "assets_fts",
     "edges",
     "nodes",
@@ -38,11 +39,17 @@ const RESET_TABLES: &[&str] = &[
 /// Keep every virtual-table statement in this one list.
 const VIRTUAL_TABLES: &[&str] = &[
     "CREATE VIRTUAL TABLE IF NOT EXISTS nodes_rtree USING rtree(id, min_x, max_x, min_y, max_y)",
+    EDGES_RTREE,
     "CREATE VIRTUAL TABLE IF NOT EXISTS nodes_fts \
      USING fts5(title, body, tags, tokenize = 'trigram')",
     "CREATE VIRTUAL TABLE IF NOT EXISTS assets_fts \
      USING fts5(id UNINDEXED, name, tags, tokenize = 'trigram')",
 ];
+
+/// The connector index. Migration 3 creates it on a version 2 database and
+/// fills it from the edge and node rows; `edge_index.rs` owns its contents.
+const EDGES_RTREE: &str =
+    "CREATE VIRTUAL TABLE IF NOT EXISTS edges_rtree USING rtree(id, min_x, max_x, min_y, max_y)";
 
 pub fn migrate(conn: &DatabaseConnection) -> Result<(), String> {
     create_table(conn, schema_migrations::Entity).map_err(|error| error.to_string())?;
@@ -77,6 +84,7 @@ fn apply_migration(conn: &DatabaseConnection, version: i32) -> Result<(), String
         match version {
             1 => migration_1(txn)?,
             2 => migration_2(txn)?,
+            3 => migration_3(txn)?,
             _ => {
                 return Err(DbErr::Custom(format!(
                     "unknown database migration {version}"
@@ -119,6 +127,18 @@ where
     create_virtual_tables(conn)?;
     create_indexes(conn)?;
     Ok(())
+}
+
+/// The connector index: a connector whose curve crosses the viewport must be
+/// read even when both of its cards are outside the node read, so each edge
+/// gets the world box of its cubic. A version 2 database already holds edges,
+/// so the index is filled from them in the same migration transaction.
+fn migration_3<C>(conn: &C) -> Result<(), DbErr>
+where
+    C: ConnectionTrait,
+{
+    conn.execute_unprepared(EDGES_RTREE)?;
+    crate::edge_index::backfill(conn)
 }
 
 fn create_document_tables<C>(conn: &C) -> Result<(), DbErr>
@@ -298,6 +318,73 @@ mod tests {
 
         let error = migrate(&conn).expect_err("legacy schema must be rejected");
         assert!(error.contains("older Flow build"), "{error}");
+    }
+
+    #[test]
+    fn migration_3_backfills_the_connector_index() {
+        use crate::types::{NodeInput, Viewport};
+
+        fn far(id: &str, x: f64) -> NodeInput {
+            NodeInput {
+                id: id.to_owned(),
+                kind: "text".to_owned(),
+                title: id.to_owned(),
+                body: String::new(),
+                tags: Vec::new(),
+                x,
+                y: 0.0,
+                width: 200.0,
+                height: 84.0,
+                z: 0.0,
+                data_json: None,
+                settings_json: None,
+            }
+        }
+
+        let conn = Database::connect("sqlite::memory:").expect("open memory database");
+        create_table(&conn, schema_migrations::Entity).expect("create migrations");
+        migration_1(&conn).expect("create version 1");
+        conn.execute_unprepared(
+            "INSERT INTO schema_migrations (version, applied_at) VALUES (1, 0), (2, 0)",
+        )
+        .expect("record version 2");
+        // A version 2 database predates the connector index.
+        conn.execute_unprepared("DROP TABLE edges_rtree")
+            .expect("drop the version 3 index");
+        conn.execute_unprepared(
+            "INSERT INTO documents (id, title, rev, created_at, updated_at) \
+             VALUES ('default', 'Flow', 0, 0, 0)",
+        )
+        .expect("insert document");
+        crate::mutation::insert_nodes(&conn, vec![far("left", -5_000.0), far("right", 5_000.0)])
+            .expect("insert nodes");
+        // Written without the new code's index maintenance, like a real
+        // version 2 database.
+        conn.execute_unprepared(
+            "INSERT INTO edges (id, document_id, from_id, to_id, from_port, to_port, kind, data_json) \
+             VALUES ('left-right', 'default', 'left', 'right', NULL, NULL, 'flow', '{}')",
+        )
+        .expect("insert edge");
+
+        migrate(&conn).expect("upgrade to version 3");
+
+        let scene = crate::scene::snapshot(
+            &conn,
+            Viewport {
+                x: 0.0,
+                y: 0.0,
+                width: 800.0,
+                height: 600.0,
+            },
+            0.0,
+        )
+        .expect("scene");
+        assert!(scene.nodes.is_empty());
+        assert_eq!(scene.edges.len(), 1);
+        assert_eq!(
+            scene.edges[0].from_point.map(|point| point.x),
+            Some(-4_800.0)
+        );
     }
 
     #[test]

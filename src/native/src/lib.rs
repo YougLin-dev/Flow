@@ -11,6 +11,7 @@ mod constants;
 mod db;
 mod detail;
 mod document;
+mod edge_index;
 mod entity;
 mod history;
 mod mutation;

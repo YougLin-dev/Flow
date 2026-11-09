@@ -465,6 +465,7 @@ fn ensure_document(conn: &DatabaseConnection) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::types::EdgePoint;
 
     fn node(id: &str, title: &str, body: &str, tags: &[&str], x: f64, y: f64) -> NodeInput {
         NodeInput {
@@ -870,6 +871,201 @@ mod tests {
         // margin; the card budget must see the visible node first.
         assert_eq!(nodes.len(), 2);
         assert_eq!(nodes[0].id, "z-inside");
+    }
+
+    #[test]
+    fn a_scene_reads_the_far_port_of_an_edge_to_an_off_screen_card() {
+        let db = Database::open(":memory:").expect("open");
+        db.insert_nodes(vec![
+            node("a", "Near", "", &[], 0.0, 0.0),
+            node("far", "Far", "", &[], 5_000.0, 0.0),
+        ])
+        .expect("insert");
+        db.connect_edge(EdgeInput {
+            id: "a-far".to_owned(),
+            from_id: "a".to_owned(),
+            to_id: "far".to_owned(),
+            from_port: None,
+            to_port: None,
+            kind: "flow".to_owned(),
+            data_json: None,
+        })
+        .expect("connect");
+
+        let scene = db
+            .scene(
+                Viewport {
+                    x: 0.0,
+                    y: 0.0,
+                    width: 400.0,
+                    height: 300.0,
+                },
+                0.0,
+            )
+            .expect("scene");
+
+        // The far card is outside the read; its port still travels with the
+        // edge so the near card's connector can be drawn to it.
+        assert_eq!(scene.nodes.len(), 1);
+        assert_eq!(scene.nodes[0].id, "a");
+        assert_eq!(scene.edges.len(), 1);
+        let edge = &scene.edges[0];
+        assert_eq!(edge.from_point, Some(EdgePoint { x: 200.0, y: 42.0 }));
+        assert_eq!(
+            edge.to_point,
+            Some(EdgePoint {
+                x: 5_000.0,
+                y: 42.0
+            })
+        );
+    }
+
+    fn connect(db: &Database, id: &str, from: &str, to: &str) {
+        db.connect_edge(EdgeInput {
+            id: id.to_owned(),
+            from_id: from.to_owned(),
+            to_id: to.to_owned(),
+            from_port: None,
+            to_port: None,
+            kind: "flow".to_owned(),
+            data_json: None,
+        })
+        .expect("connect");
+    }
+
+    fn scene_between(db: &Database, x: f64, y: f64, width: f64, height: f64) -> SceneSnapshot {
+        db.scene(
+            Viewport {
+                x,
+                y,
+                width,
+                height,
+            },
+            0.0,
+        )
+        .expect("scene")
+    }
+
+    #[test]
+    fn a_scene_reads_a_connector_between_two_off_screen_cards() {
+        let db = Database::open(":memory:").expect("open");
+        db.insert_nodes(vec![
+            node("left", "Left", "", &[], -5_000.0, 0.0),
+            node("right", "Right", "", &[], 5_000.0, 0.0),
+        ])
+        .expect("insert");
+        connect(&db, "left-right", "left", "right");
+
+        // Both cards are far outside the read; the connector's curve crosses
+        // it, so the edge RTree reports it with both endpoint ports.
+        let scene = scene_between(&db, 0.0, 0.0, 800.0, 600.0);
+        assert!(scene.nodes.is_empty());
+        assert_eq!(scene.edges.len(), 1);
+        let edge = &scene.edges[0];
+        assert_eq!(edge.id, "left-right");
+        assert_eq!(
+            edge.from_point,
+            Some(EdgePoint {
+                x: -4_800.0,
+                y: 42.0
+            })
+        );
+        assert_eq!(
+            edge.to_point,
+            Some(EdgePoint {
+                x: 5_000.0,
+                y: 42.0
+            })
+        );
+    }
+
+    #[test]
+    fn moving_a_card_moves_its_connector_in_the_edge_index() {
+        let db = Database::open(":memory:").expect("open");
+        db.insert_nodes(vec![
+            node("left", "Left", "", &[], -5_000.0, 0.0),
+            node("right", "Right", "", &[], 5_000.0, 0.0),
+        ])
+        .expect("insert");
+        connect(&db, "left-right", "left", "right");
+
+        db.move_nodes(vec!["left".to_owned()], 9_000.0, 0.0)
+            .expect("move");
+
+        // The old crossing no longer exists; the moved connector is indexed
+        // between the cards' new positions.
+        assert!(scene_between(&db, 0.0, 0.0, 800.0, 600.0).edges.is_empty());
+        let scene = scene_between(&db, 4_250.0, 0.0, 400.0, 600.0);
+        assert!(scene.nodes.is_empty());
+        assert_eq!(scene.edges.len(), 1);
+        assert_eq!(
+            scene.edges[0].from_point,
+            Some(EdgePoint {
+                x: 4_200.0,
+                y: 42.0
+            })
+        );
+    }
+
+    #[test]
+    fn deleting_and_undoing_edges_keeps_the_edge_index_in_step() {
+        let db = Database::open(":memory:").expect("open");
+        db.insert_nodes(vec![
+            node("left", "Left", "", &[], -5_000.0, 0.0),
+            node("right", "Right", "", &[], 5_000.0, 0.0),
+        ])
+        .expect("insert");
+        connect(&db, "left-right", "left", "right");
+
+        db.delete_edges(vec!["left-right".to_owned()])
+            .expect("delete edge");
+        assert!(scene_between(&db, 0.0, 0.0, 800.0, 600.0).edges.is_empty());
+
+        let undone = db.undo().expect("undo delete");
+        // The change set itself carries both ports, so the scene redraws the
+        // restored connector before the next viewport read arrives.
+        assert_eq!(
+            undone.edges_changed[0].from_point,
+            Some(EdgePoint {
+                x: -4_800.0,
+                y: 42.0
+            })
+        );
+        assert_eq!(
+            undone.edges_changed[0].to_point,
+            Some(EdgePoint {
+                x: 5_000.0,
+                y: 42.0
+            })
+        );
+        assert_eq!(scene_between(&db, 0.0, 0.0, 800.0, 600.0).edges.len(), 1);
+    }
+
+    #[test]
+    fn undoing_a_node_delete_restores_the_connector_index() {
+        let db = Database::open(":memory:").expect("open");
+        db.insert_nodes(vec![
+            node("left", "Left", "", &[], -5_000.0, 0.0),
+            node("right", "Right", "", &[], 5_000.0, 0.0),
+        ])
+        .expect("insert");
+        connect(&db, "left-right", "left", "right");
+
+        db.delete_nodes(vec!["left".to_owned()]).expect("delete");
+        assert!(scene_between(&db, 0.0, 0.0, 800.0, 600.0).edges.is_empty());
+
+        // Undo restores the node before its edges (the history inverse is
+        // reversed again on apply), so the edge insert indexes the curve.
+        db.undo().expect("undo delete");
+        let scene = scene_between(&db, 0.0, 0.0, 800.0, 600.0);
+        assert_eq!(scene.edges.len(), 1);
+        assert_eq!(
+            scene.edges[0].from_point,
+            Some(EdgePoint {
+                x: -4_800.0,
+                y: 42.0
+            })
+        );
     }
 
     #[test]

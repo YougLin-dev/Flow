@@ -1,7 +1,7 @@
-//! Scene reads: the viewport's nodes, the edges that touch them, and the
-//! whole document's bounds for Fit.
+//! Scene reads: the viewport's nodes, the edges that touch them or whose
+//! curve crosses the viewport, and the whole document's bounds for Fit.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 use sea_orm::sea_query::{Alias, Expr, ExprTrait, Query};
 use sea_orm::{
@@ -10,8 +10,9 @@ use sea_orm::{
 
 use crate::constants::DOCUMENT_ID;
 use crate::document;
+use crate::edge_index;
 use crate::entity::{edges, nodes};
-use crate::types::{EdgeSummary, NodeSummary, SceneSnapshot, Viewport};
+use crate::types::{EdgePoint, EdgeSummary, NodeSummary, SceneSnapshot, Viewport};
 use crate::viewport;
 
 /// Edges are queried in chunks so the `IN` list stays below SQLite's
@@ -23,8 +24,8 @@ pub fn snapshot(
     rect: Viewport,
     margin: f64,
 ) -> Result<SceneSnapshot, String> {
-    let nodes = viewport::viewport(conn, rect, margin)?;
-    let edges = edges_for_nodes(conn, &nodes)?;
+    let nodes = viewport::viewport(conn, rect.clone(), margin)?;
+    let edges = edges_for_scene(conn, &nodes, &rect, margin)?;
     let rev = document::current_rev(conn).map_err(|error| error.to_string())?;
 
     Ok(SceneSnapshot {
@@ -99,36 +100,85 @@ pub fn bounds(conn: &DatabaseConnection) -> Result<Viewport, String> {
     }
 }
 
-fn edges_for_nodes(
+fn edges_for_scene(
     conn: &DatabaseConnection,
     nodes: &[NodeSummary],
+    rect: &Viewport,
+    margin: f64,
 ) -> Result<Vec<EdgeSummary>, String> {
-    if nodes.is_empty() {
-        return Ok(Vec::new());
-    }
+    let mut found: BTreeMap<String, edges::Model> = BTreeMap::new();
 
-    let ids: Vec<String> = nodes.iter().map(|node| node.id.clone()).collect();
-    let mut found = BTreeMap::new();
+    // Edges touching a card the node read returned. This runs before the UI
+    // applies its own card cap, so a capped-out card's connectors still
+    // travel in the snapshot with both ports.
+    if !nodes.is_empty() {
+        let ids: Vec<String> = nodes.iter().map(|node| node.id.clone()).collect();
+        for chunk in ids.chunks(EDGE_CHUNK) {
+            let rows = edges::Entity::find()
+                .filter(edges::Column::DocumentId.eq(DOCUMENT_ID))
+                .filter(
+                    Condition::any()
+                        .add(edges::Column::FromId.is_in(chunk.to_vec()))
+                        .add(edges::Column::ToId.is_in(chunk.to_vec())),
+                )
+                .all(conn)
+                .map_err(|error| error.to_string())?;
 
-    for chunk in ids.chunks(EDGE_CHUNK) {
-        let rows = edges::Entity::find()
-            .filter(edges::Column::DocumentId.eq(DOCUMENT_ID))
-            .filter(
-                Condition::any()
-                    .add(edges::Column::FromId.is_in(chunk.to_vec()))
-                    .add(edges::Column::ToId.is_in(chunk.to_vec())),
-            )
-            .all(conn)
-            .map_err(|error| error.to_string())?;
-
-        for row in rows {
-            found
-                .entry(row.id.clone())
-                .or_insert_with(|| edge_summary(&row));
+            for row in rows {
+                found.insert(row.id.clone(), row);
+            }
         }
     }
 
-    Ok(found.into_values().collect())
+    // Edges whose curve crosses the viewport while both of their cards are
+    // outside the node read. The curve's box, not its endpoints, decides.
+    for row in edge_index::viewport(conn, rect, margin).map_err(|error| error.to_string())? {
+        found.insert(row.id.clone(), row);
+    }
+
+    // Every connector touching the viewport carries both ports, so a scene
+    // that holds only one of its cards can still draw it to the far end. The
+    // far cards themselves are not returned: they stay out of the view tree
+    // and the card budget.
+    let mut ports: BTreeMap<String, (EdgePoint, EdgePoint)> = BTreeMap::new();
+    for node in nodes {
+        ports.insert(
+            node.id.clone(),
+            node_ports(node.x, node.y, node.width, node.height),
+        );
+    }
+    let missing: Vec<String> = found
+        .values()
+        .flat_map(|edge| [edge.from_id.clone(), edge.to_id.clone()])
+        .filter(|id| !ports.contains_key(id))
+        .collect::<BTreeSet<_>>()
+        .into_iter()
+        .collect();
+    for chunk in missing.chunks(EDGE_CHUNK) {
+        let rows = nodes::Entity::find()
+            .filter(nodes::Column::DocumentId.eq(DOCUMENT_ID))
+            .filter(nodes::Column::Id.is_in(chunk.to_vec()))
+            .all(conn)
+            .map_err(|error| error.to_string())?;
+        for row in rows {
+            ports.insert(
+                row.id.clone(),
+                node_ports(row.x, row.y, row.width, row.height),
+            );
+        }
+    }
+
+    Ok(found
+        .into_values()
+        .map(|edge| edge_summary(&edge, &ports))
+        .collect())
+}
+
+fn node_ports(x: f64, y: f64, width: f64, height: f64) -> (EdgePoint, EdgePoint) {
+    (
+        EdgePoint::output(x, y, width, height),
+        EdgePoint::input(x, y, height),
+    )
 }
 
 fn node_summary(node: &nodes::Model) -> NodeSummary {
@@ -150,7 +200,10 @@ fn node_summary(node: &nodes::Model) -> NodeSummary {
     }
 }
 
-fn edge_summary(edge: &edges::Model) -> EdgeSummary {
+fn edge_summary(
+    edge: &edges::Model,
+    ports: &BTreeMap<String, (EdgePoint, EdgePoint)>,
+) -> EdgeSummary {
     EdgeSummary {
         id: edge.id.clone(),
         from_id: edge.from_id.clone(),
@@ -159,6 +212,8 @@ fn edge_summary(edge: &edges::Model) -> EdgeSummary {
         to_port: edge.to_port.clone(),
         kind: edge.kind.clone(),
         data_json: edge.data_json.clone(),
+        from_point: ports.get(&edge.from_id).map(|port| port.0),
+        to_point: ports.get(&edge.to_id).map(|port| port.1),
     }
 }
 

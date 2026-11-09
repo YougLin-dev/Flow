@@ -108,9 +108,10 @@ module may open SQLite or write SQL. Database calls cross the boundary in
 batches, not per node or per frame. (Review)
 
 Ordinary database work uses SeaORM entities and SeaQuery in `src/native/`;
-handwritten SQL is limited to the FTS5/RTree virtual-table adapter and
-migrations. Do not build query strings by interpolating values, and do not add
-a second database driver or ORM. (Review)
+handwritten SQL is limited to the FTS5/RTree virtual-table adapters
+(`schema.rs`, `search.rs`, `edge_index.rs`) and migrations. Do not build query
+strings by interpolating values, and do not add a second database driver or
+ORM. (Review)
 
 ### 3.3 Facades and internals
 

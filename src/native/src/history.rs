@@ -66,6 +66,8 @@ impl EdgeRow {
             to_port: self.to_port.clone(),
             kind: self.kind.clone(),
             data_json: self.data_json.clone(),
+            from_point: None,
+            to_point: None,
         }
     }
 }

@@ -45,9 +45,9 @@ export function FlowEdges(props: FlowEdgesProps) {
     cx.lineWidth = EDGE_THICKNESS;
     cx.lineCap = "round";
     for (const edge of edges) {
-      const from = props.scene.portWorld(edge.fromId, "out");
-      const to = props.scene.portWorld(edge.toId, "in");
-      if (!from || !to) continue;
+      const ports = props.scene.edgePorts(edge);
+      if (!ports) continue;
+      const { from, to } = ports;
       const { c1, c2 } = connectorControls(from, to);
       cx.strokeStyle = edge.id === selected ? accent : normal;
       cx.beginPath();
@@ -81,7 +81,6 @@ export function FlowEdges(props: FlowEdgesProps) {
 
 /** The world box one connector's cubic covers, or null when it has no ends. */
 function edgeBox(scene: FlowScene, edge: EdgeSummary): BoxGeometry | null {
-  const from = scene.portWorld(edge.fromId, "out");
-  const to = scene.portWorld(edge.toId, "in");
-  return from && to ? connectionBounds(from, to) : null;
+  const ports = scene.edgePorts(edge);
+  return ports ? connectionBounds(ports.from, ports.to) : null;
 }

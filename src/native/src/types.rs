@@ -60,6 +60,31 @@ pub struct EdgeInput {
     pub data_json: Option<String>,
 }
 
+/// A connector endpoint's world point.
+#[derive(Debug, Clone, Copy, PartialEq, JsObject)]
+pub struct EdgePoint {
+    pub x: f64,
+    pub y: f64,
+}
+
+impl EdgePoint {
+    /// The output port: the middle of a node's right edge.
+    pub fn output(x: f64, y: f64, width: f64, height: f64) -> Self {
+        Self {
+            x: x + width,
+            y: y + height / 2.0,
+        }
+    }
+
+    /// The input port: the middle of a node's left edge.
+    pub fn input(x: f64, y: f64, height: f64) -> Self {
+        Self {
+            x,
+            y: y + height / 2.0,
+        }
+    }
+}
+
 /// The part of an edge a viewport or change set needs.
 #[derive(Debug, Clone, PartialEq, JsObject)]
 pub struct EdgeSummary {
@@ -70,6 +95,10 @@ pub struct EdgeSummary {
     pub to_port: Option<String>,
     pub kind: String,
     pub data_json: String,
+    /// The from card's output port, when the read knows that card.
+    pub from_point: Option<EdgePoint>,
+    /// The to card's input port, when the read knows that card.
+    pub to_point: Option<EdgePoint>,
 }
 
 /// A node's persisted geometry, used to finish a drag or resize.

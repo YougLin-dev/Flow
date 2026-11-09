@@ -66,6 +66,111 @@ test("caps a snapshot but keeps the selected cards and their connector", () => {
   expect(scene.edgeCount()).toBe(1);
 });
 
+test("keeps a connector whose far card left the scene", () => {
+  const scene = new FlowScene();
+  scene.apply(
+    snapshot([node("a", 0, 0)], [{ ...edge("a-b", "a", "b"), toPoint: { x: 2_000, y: 300 } }]),
+  );
+
+  // Only the near card is loaded; the edge's far anchor still draws it.
+  expect(scene.cardRect("b")).toBeNull();
+  expect(scene.edgeCount()).toBe(1);
+  const first = scene.edges()[0];
+  if (!first) throw new Error("the edge was pruned");
+  expect(scene.edgePorts(first)).toEqual({
+    from: { x: 200, y: 42 },
+    to: { x: 2_000, y: 300 },
+  });
+  expect(scene.edgeAt(2_000, 300)).toBe("a-b");
+
+  // A moved near card moves its port; the far anchor stays put.
+  scene.applyChangeSet({
+    changed: [node("a", 0, 100)],
+    removed: [],
+    edgesChanged: [],
+    edgesRemoved: [],
+  });
+  expect(scene.edgePorts(first)?.from).toEqual({ x: 200, y: 142 });
+  expect(scene.edgePorts(first)?.to).toEqual({ x: 2_000, y: 300 });
+});
+
+test("keeps a connector whose cards both left the scene", () => {
+  const scene = new FlowScene();
+  scene.apply(
+    snapshot(
+      [],
+      [
+        {
+          ...edge("a-b", "a", "b"),
+          fromPoint: { x: 0, y: 0 },
+          toPoint: { x: 2_000, y: 300 },
+        },
+      ],
+    ),
+  );
+
+  // The curve crosses the viewport, so the read returned the edge with both
+  // ports even though neither card is instantiated.
+  expect(scene.cardCount()).toBe(0);
+  expect(scene.edgeCount()).toBe(1);
+  expect(scene.edgeAt(1_000, 150)).toBe("a-b");
+});
+
+test("drops a connector that has neither card nor ports", () => {
+  const scene = new FlowScene();
+  scene.apply(snapshot([], [edge("a-b", "a", "b")]));
+  expect(scene.edgeCount()).toBe(0);
+});
+
+test("keeps a selected card's connector when a read finds neither card", () => {
+  const scene = new FlowScene();
+  scene.apply(
+    snapshot([node("a", 0, 0)], [{ ...edge("a-b", "a", "b"), toPoint: { x: 2_000, y: 300 } }]),
+  );
+  scene.select(["a"]);
+  scene.setOverrides(new Map([["a", { x: 0, y: 100, width: 200, height: 84 }]]));
+
+  // A viewport read lands during the drag. It only sees committed geometry:
+  // neither card, nor the committed connector box, is inside its rect. The
+  // selected card stays pinned, and its far-anchored connector stays with it.
+  scene.apply(snapshot([], []));
+  expect(scene.cardRect("a")).not.toBeNull();
+  expect(scene.edgeCount()).toBe(1);
+  const first = scene.edges()[0];
+  if (!first) throw new Error("the edge was pruned");
+  expect(scene.edgePorts(first)).toEqual({
+    from: { x: 200, y: 142 },
+    to: { x: 2_000, y: 300 },
+  });
+
+  // Releasing the drag keeps it too; the next read catches up.
+  scene.applyChangeSet({
+    changed: [node("a", 0, 100)],
+    removed: [],
+    edgesChanged: [],
+    edgesRemoved: [],
+  });
+  expect(scene.edgeCount()).toBe(1);
+});
+
+test("keeps a far anchor when a change set reports its edge", () => {
+  const scene = new FlowScene();
+  scene.apply(
+    snapshot([node("a", 0, 0)], [{ ...edge("a-b", "a", "b"), toPoint: { x: 2_000, y: 300 } }]),
+  );
+
+  scene.applyChangeSet({
+    changed: [],
+    removed: [],
+    edgesChanged: [edge("a-b", "a", "b")],
+    edgesRemoved: [],
+  });
+  expect(scene.edgeCount()).toBe(1);
+  const first = scene.edges()[0];
+  if (!first) throw new Error("the edge was pruned");
+  expect(scene.edgePorts(first)?.to).toEqual({ x: 2_000, y: 300 });
+});
+
 test("applies a change set and keeps edges to existing cards", () => {
   const scene = new FlowScene();
   scene.apply(snapshot([node("a", 0, 0)]));

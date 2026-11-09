@@ -110,6 +110,21 @@ All notable changes to Flow are recorded here. The format follows
 
 ### Fixed
 
+- A connector no longer disappears when its cards leave the viewport read.
+  Every edge touching the viewport carries both endpoint ports, so it is
+  drawn and hit-tested while either card is loaded, and a second RTree stores
+  each connector's curve bounds (schema version 3, filled from existing
+  edges), so a long connector is drawn even when both of its cards are
+  outside the read while its curve crosses the visible area. Neither case
+  adds the far card to the scene or the view tree.
+- A selected card pinned in the scene keeps its connectors through a
+  viewport read that no longer reports either end, such as a read landing
+  while the card is dragged: one pinned endpoint plus the carried far port is
+  enough to keep the line drawn, and releasing the drag no longer leaves it
+  missing.
+- Undo and redo change sets carry both endpoint ports for a restored or
+  replaced connector, so it reappears at once instead of after the next
+  viewport read when its cards are outside the scene.
 - A hovered card's plus buttons no longer restart their follow when the
   viewport refreshes: the hover and selection checks use the row's id instead
   of the node record each refresh replaces, so the plus stays one instance

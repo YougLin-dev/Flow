@@ -10,7 +10,8 @@ This document records the M1 contract; the long-term direction is still
 Schema version 2 is a deliberate reset. `migration_2` drops every document
 table, including the version 1 nodes and edges, and recreates the current
 schema; there is no data migration. The TSX side seeds the text → image
-example into an empty database (`flow/data.ts`).
+example into an empty database (`flow/data.ts`). Version 3 keeps the
+document and adds the connector RTree, filled from the existing edges.
 
 | Table            | Role                                                                   |
 | ---------------- | ---------------------------------------------------------------------- |

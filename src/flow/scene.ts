@@ -72,11 +72,13 @@ export class FlowScene {
       this.dropOverride(id);
     }
 
-    // A selection pinned past the viewport keeps the connectors between its
-    // cards even when the snapshot no longer reports them.
+    // A selected card is pinned past the viewport, so keep its connectors
+    // even when the snapshot no longer reports them: the edge carries the
+    // far port, and the pinned card supplies the near one. A mid-drag read
+    // sees only committed geometry, which may lie outside its rect.
     const pinned = new Set(this.selection());
     const keptEdges = [...this.edgeById.values()].filter(
-      (edge) => pinned.has(edge.fromId) && pinned.has(edge.toId),
+      (edge) => pinned.has(edge.fromId) || pinned.has(edge.toId),
     );
     this.edgeById.clear();
     for (const edge of snapshot.edges) this.edgeById.set(edge.id, edge);
@@ -102,7 +104,21 @@ export class FlowScene {
       this.applied.delete(id);
       this.dropOverride(id);
     }
-    for (const edge of changes.edgesChanged) this.edgeById.set(edge.id, edge);
+    for (const edge of changes.edgesChanged) {
+      // A command's edge carries no far anchors; keep the ones the viewport
+      // read resolved for it, so a reconnect does not blank the connector.
+      const previous = this.edgeById.get(edge.id);
+      this.edgeById.set(
+        edge.id,
+        previous === undefined
+          ? edge
+          : {
+              ...edge,
+              fromPoint: edge.fromPoint ?? previous.fromPoint ?? null,
+              toPoint: edge.toPoint ?? previous.toPoint ?? null,
+            },
+      );
+    }
     for (const id of changes.edgesRemoved) this.edgeById.delete(id);
     this.prune();
   }
@@ -308,10 +324,9 @@ export class FlowScene {
   edgeAt(x: number, y: number): string | null {
     let nearest: { id: string; distance: number } | null = null;
     for (const edge of this.edgeById.values()) {
-      const from = this.portWorld(edge.fromId, "out");
-      const to = this.portWorld(edge.toId, "in");
-      if (!from || !to) continue;
-      const distance = distanceToConnection(from, to, { x, y });
+      const ports = this.edgePorts(edge);
+      if (!ports) continue;
+      const distance = distanceToConnection(ports.from, ports.to, { x, y });
       if (distance <= EDGE_HIT_DISTANCE && (!nearest || distance < nearest.distance)) {
         nearest = { id: edge.id, distance };
       }
@@ -323,6 +338,16 @@ export class FlowScene {
   edgeEndpoints(id: string): { fromId: string; toId: string } | null {
     const edge = this.edgeById.get(id);
     return edge ? { fromId: edge.fromId, toId: edge.toId } : null;
+  }
+
+  /**
+   * A connector's endpoints: a live card's port when its card is in the
+   * scene, else the port the read carried for the card beyond it.
+   */
+  edgePorts(edge: EdgeSummary): { from: Point; to: Point } | null {
+    const from = this.portWorld(edge.fromId, "out") ?? edge.fromPoint;
+    const to = this.portWorld(edge.toId, "in") ?? edge.toPoint;
+    return from && to ? { from, to } : null;
   }
 
   /** The first preview line, for the single-connector gesture. */
@@ -387,7 +412,10 @@ export class FlowScene {
 
   private prune(): void {
     for (const [id, edge] of this.edgeById) {
-      if (!this.byId.has(edge.fromId) || !this.byId.has(edge.toId)) this.edgeById.delete(id);
+      // The read carries both ports for every connector it reports, including
+      // one whose curve crosses the viewport while both of its cards are
+      // outside the read. Without either port there is nothing to draw.
+      if (this.edgePorts(edge) === null) this.edgeById.delete(id);
     }
     const selected = this.selectedEdge();
     if (selected !== null && !this.edgeById.has(selected)) this.selectedEdge.set(null);

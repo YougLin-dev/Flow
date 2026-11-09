@@ -48,15 +48,24 @@ export class EdgeGestures {
       // starts a new connection: the right side forward, the left reverse.
       if (selected !== null) {
         const endpoints = scene.edgeEndpoints(selected);
-        if (zone.side === "out" && endpoints?.fromId === zone.nodeId) {
+        // The far end of an edge to an off-screen card is not in the scene;
+        // it has no card to validate a reconnect against, so the press
+        // starts a new connection from this plus instead.
+        if (
+          zone.side === "out" &&
+          endpoints?.fromId === zone.nodeId &&
+          this.gesture.begin(scene, [endpoints.toId], "to", world)
+        ) {
           this.reconnectEdgeId = selected;
-          this.gesture.begin(scene, [endpoints.toId], "to", world);
           this.host.changed();
           return true;
         }
-        if (zone.side === "in" && endpoints?.toId === zone.nodeId) {
+        if (
+          zone.side === "in" &&
+          endpoints?.toId === zone.nodeId &&
+          this.gesture.begin(scene, [endpoints.fromId], "from", world)
+        ) {
           this.reconnectEdgeId = selected;
-          this.gesture.begin(scene, [endpoints.fromId], "from", world);
           this.host.changed();
           return true;
         }

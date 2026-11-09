@@ -45,18 +45,21 @@ SQLite or write SQL. The canvas stays in TSX and owns only the scene model and
 its views.
 
 - `src/nsh.json` declares `"rust": "native"`; `App.tsx` remains the app entry.
-- The database is SQLite with WAL, FTS5 (trigram tokenizer) and an RTree
-  viewport index. Node, FTS and RTree rows change in one transaction.
+- The database is SQLite with WAL, FTS5 (trigram tokenizer) and two RTree
+  viewport indexes: node bounds and connector curve bounds. Node, edge, FTS
+  and RTree rows change in one transaction.
 - Schema version 2 is the node editor's breaking reset: the migration drops
   the version 1 document and recreates the tables (there is no data
-  migration). The core also stores immutable result batches/items, ordered
-  node inputs and content-addressed asset bytes under `<database dir>/assets/`.
-  Its commands cover settings, manual text, connect/reconnect, input changes,
-  runs and crash recovery. [The node editor contract](node-editor.md) records
-  the data model and semantics.
+  migration). Version 3 adds the connector index and fills it from the
+  existing edges. The core also stores immutable result batches/items,
+  ordered node inputs and content-addressed asset bytes under
+  `<database dir>/assets/`. Its commands cover settings, manual text,
+  connect/reconnect, input changes, runs and crash recovery.
+  [The node editor contract](node-editor.md) records the data model and
+  semantics.
 - Ordinary tables are SeaORM entities; SeaQuery builds dynamic filters and
-  joins. Only the FTS5/RTree virtual-table adapter (`schema.rs`/`search.rs`)
-  contains static SQLite SQL.
+  joins. Only the FTS5/RTree virtual-table adapters (`schema.rs`, `search.rs`,
+  `edge_index.rs`) contain static SQLite SQL.
 - Database work runs on NSH's blocking pool, then through a handle to one
   dedicated database worker thread. That thread owns the connection, which
   keeps the single-writer design and avoids sending SeaORM's sync Rusqlite
@@ -74,10 +77,21 @@ its views.
   rectangle, never transformed bounds.
 - Viewport reads are throttled to 80 ms and capped at low zoom (300/800/2000
   cards); selected cards stay in the scene when they leave the viewport.
-  Nodes inside `rect` sort before margin-only nodes so prefetching cannot
-  consume the budget, and a deterministic hash of the internal sequence
-  spreads a capped low-zoom sample across the rectangle instead of one
-  insertion strip. `bounds()` serves Fit without reading every node into TSX.
+  A connector is read when either of its cards is loaded or when the box
+  around its cubic intersects the viewport, so it stays drawn while one card
+  is beyond the read and also when both cards are beyond it but the curve
+  crosses the visible area. Every read edge carries both endpoint ports; the
+  far cards are not instantiated as views. A selected card pinned in the
+  scene keeps its connectors even when a read omits them, so a mid-drag
+  read, which sees only committed geometry, cannot blank the line. The
+  connector index
+  (`edge_index.rs`) is maintained in the same transaction as every edge
+  write and every node move, resize or undo, and mirrors the UI's
+  `connectionBounds` in `flow/connection.ts`. Nodes inside `rect` sort
+  before margin-only nodes so prefetching cannot consume the budget, and a
+  deterministic hash of the internal sequence spreads a capped low-zoom
+  sample across the rectangle instead of one insertion strip. `bounds()`
+  serves Fit without reading every node into TSX.
 - The search palette (`components/SearchPalette.tsx`) is mounted only while
   open. It debounces input, calls `Document.search` with the selected kind
   filter, and renders FTS snippets; opening a hit calls `getNode(id)`, fits
