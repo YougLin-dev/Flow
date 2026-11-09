@@ -179,6 +179,9 @@ easiest observable: it is `—` before the first fit and `<n>%` afterwards.
 - `flow/node-kinds.ts` and `flow/connection.ts`: direct unit tests for settings
   parsing/clamping, connection rules, port points, sampled curves and hit
   distances.
+- `flow/icon-shape.ts`: direct unit tests for Lucide node conversion — paths,
+  circles, ellipses, rects with corner radii, lines, polylines/polygons and
+  malformed values.
 - `flow/node-session.ts` and `flow/execution.ts`: `node-session.native.test.ts`
   drives the real Rust document through a mock picker and the mock providers:
   runs, stale propagation, manual text, inline editing and uploads. Provider

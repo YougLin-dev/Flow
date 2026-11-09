@@ -1,5 +1,7 @@
-import { Text } from "nsh";
+import { Search } from "lucide";
+import { Text, token } from "nsh";
 import { Button } from "nsh/base";
+import { Icon } from "./Icon";
 
 export interface SearchButtonProps {
   /** The platform's label for the search shortcut, such as `⌘K`. */
@@ -16,6 +18,7 @@ export function SearchButton(props: SearchButtonProps) {
       onPress={props.onPress}
       class="absolute top-4 left-4 flex-row items-center gap-2 rounded-full border border-border bg-card px-3 py-1.5 active:bg-muted focus:bg-accent"
     >
+      <Icon icon={Search} size={15} tint={() => token("card-foreground")} />
       <Text class="text-sm text-card-foreground">Search</Text>
       <Text class="text-xs text-muted-foreground">{props.shortcut}</Text>
     </Button>

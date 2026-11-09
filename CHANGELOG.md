@@ -24,6 +24,10 @@ All notable changes to Flow are recorded here. The format follows
   variable declared in `src/nsh.json`.
 - `bun run test:100k` seeds 100,000 nodes and drives the real desktop host
   through pan, zoom, search, reveal and Fit.
+- Interface icons come from [Lucide](https://lucide.dev/) (`lucide` 1.70.0,
+  ISC), drawn by a small native-canvas `Icon` view; the zoom, search, tool and
+  add-node controls use them instead of text glyphs. The dependency decision
+  is [ADR 0006](docs/adr/0006-lucide-icons.md).
 - The engineering standard in `docs/standards.md`, an ADR template and this
   changelog.
 

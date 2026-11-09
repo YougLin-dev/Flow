@@ -142,7 +142,7 @@ test("zooms with the controls", async () => {
   await app.waitUntil(() => percentOf(app.texts()) > 0);
   const fitted = percentOf(app.texts());
 
-  await app.press("+");
+  await app.press("label:Zoom in");
   await app.waitUntil(() => percentOf(app.texts()) > fitted);
   const zoomed = percentOf(app.texts());
   expect(zoomed).toBeGreaterThan(fitted);

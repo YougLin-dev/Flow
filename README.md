@@ -93,6 +93,7 @@ src/                   the NSH app: its root, entry, config and assets
   components/
     FlowCanvas.tsx     the canvas: world-space cards and edges, gestures
     FlowCard.tsx       one card: title, status, body, ports
+    Icon.tsx           one Lucide icon, drawn as a native canvas path
     FlowEdges.tsx      every connector, stroked as one native-canvas layer
     FlowEdge.tsx       the connection preview, one canvas stroke
     GridBackground.tsx the dot-grid backdrop
@@ -116,6 +117,7 @@ src/                   the NSH app: its root, entry, config and assets
     grid.ts            the dot grid's screen-space tile layout
     canvas-controller.ts pointer gestures: select, drag, resize, marquee, connect
     selection.ts       selection handles, resize and marquee geometry
+    icon-shape.ts      Lucide icon nodes as one SVG path
     overlay.ts         composer and inline-editor placement
     composer-state.ts  the composer's drafts
   native/              mixed NSH Rust crate (SQLite/FTS5/RTree document core)

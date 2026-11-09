@@ -23,6 +23,9 @@
     "test:100k": "bun scripts/smoke-100k.mjs",
     "package": "bun scripts/package.mjs"
   },
+  "dependencies": {
+    "lucide": "1.70.0"
+  },
   "devDependencies": {
     "@crabnebula/packager": "0.11.2",
     "vite-plus": "1.5.0"
