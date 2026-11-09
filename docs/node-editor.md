@@ -117,7 +117,9 @@ The canvas is a native NSH view tree. `components/FlowCanvas.tsx` holds the
 world-space cards and edges, the screen-space selection frame and marquee
 overlay and the interaction surface; `components/FlowCard.tsx` renders one
 card, `components/FlowEdges.tsx` strokes the viewport's connectors in one
-native canvas and `components/FlowEdge.tsx` the connection preview.
+native canvas and `components/FlowPreviews.tsx` the pulled connection
+previews. `components/PortPlus.tsx` is the round plus handle, used both by a
+card and, through `components/SelectionPluses.tsx`, by a multi-card frame.
 `flow/scene.ts` is the headless model, and `flow/canvas-controller.ts` turns
 pointer events into selection, drag, resize, marquee, pan and connector
 gestures.

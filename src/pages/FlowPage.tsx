@@ -145,7 +145,7 @@ export function FlowPage() {
     selectEdge,
     reconnectEdge: (edgeId, fromId, toId) =>
       void currentSession()?.reconnectEdge(edgeId, fromId, toId),
-    connectNodes: (fromId, toId) => void currentSession()?.connectNodes(fromId, toId),
+    connectNodes: (pairs) => void currentSession()?.connectNodes(pairs),
     openInline: (nodeId) => {
       const session = currentSession();
       if (!session || session.inlineId() === nodeId) return;
@@ -318,7 +318,7 @@ export function FlowPage() {
     const selected = scene.selection();
     if (selected.length !== 2) return;
     const [from, to] = selected;
-    if (from && to) void currentSession()?.connectNodes(from, to);
+    if (from && to) void currentSession()?.connectNodes([{ fromId: from, toId: to }]);
   };
 
   const undoRedo = async (direction: "undo" | "redo"): Promise<void> => {

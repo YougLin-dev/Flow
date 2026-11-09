@@ -39,7 +39,8 @@ export class FlowScene {
   /** The document ids of the selected cards. */
   readonly selection = signal<readonly string[]>([]);
   readonly selectedEdge = signal<string | null>(null);
-  readonly connectionPreview = signal<ConnectionPreview | null>(null);
+  /** The temporary connectors while one or more ends are dragged. */
+  readonly connectionPreviews = signal<readonly ConnectionPreview[] | null>(null);
   /** The card a pulled connector is snapped to, highlighted like hover. */
   readonly connectionTarget = signal<string | null>(null);
 
@@ -203,6 +204,12 @@ export class FlowScene {
   /** Above every card, including an elevated selection: a pulled connector. */
   previewZ(): number {
     this.nodes();
+    return this.baseZ + this.selectionRanks().size + 3;
+  }
+
+  /** Above the elevated selection and its frame: the merged plus buttons. */
+  framePlusZ(): number {
+    this.nodes();
     return this.baseZ + this.selectionRanks().size + 2;
   }
 
@@ -318,13 +325,37 @@ export class FlowScene {
     return edge ? { fromId: edge.fromId, toId: edge.toId } : null;
   }
 
-  /** Draws the temporary connector while the user drags from a port. */
-  setConnectionPreview(from: Point | null, to: Point | null): void {
-    if (!from || !to) {
-      if (this.connectionPreview() !== null) this.connectionPreview.set(null);
+  /** The first preview line, for the single-connector gesture. */
+  connectionPreview(): ConnectionPreview | null {
+    return this.connectionPreviews()?.[0] ?? null;
+  }
+
+  /** Draws the temporary connectors while one or more ends are dragged. */
+  setConnectionPreviews(previews: readonly ConnectionPreview[] | null): void {
+    if (!previews || previews.length === 0) {
+      if (this.connectionPreviews() !== null) this.connectionPreviews.set(null);
       return;
     }
-    this.connectionPreview.set({ from, to });
+    const current = this.connectionPreviews();
+    if (current !== null && samePreviews(current, previews)) return;
+    this.connectionPreviews.set(previews);
+  }
+
+  /** Draws one temporary connector while a single end is dragged. */
+  setConnectionPreview(from: Point | null, to: Point | null): void {
+    if (!from || !to) {
+      this.setConnectionPreviews(null);
+      return;
+    }
+    this.setConnectionPreviews([{ from, to }]);
+  }
+
+  /** Whether a connector from `fromId` to `toId` is already in the scene. */
+  hasEdge(fromId: string, toId: string): boolean {
+    for (const edge of this.edgeById.values()) {
+      if (edge.fromId === fromId && edge.toId === toId) return true;
+    }
+    return false;
   }
 
   /** Highlights the card a pulled connector would land on. */
@@ -395,4 +426,22 @@ function sameRect(a: BoxGeometry, b: BoxGeometry): boolean {
     Math.abs(a.width - b.width) <= 0.01 &&
     Math.abs(a.height - b.height) <= 0.01
   );
+}
+
+function samePreviews(a: readonly ConnectionPreview[], b: readonly ConnectionPreview[]): boolean {
+  if (a.length !== b.length) return false;
+  for (let index = 0; index < a.length; index += 1) {
+    const first = a[index];
+    const second = b[index];
+    if (!first || !second) return false;
+    if (
+      first.from.x !== second.from.x ||
+      first.from.y !== second.from.y ||
+      first.to.x !== second.to.x ||
+      first.to.y !== second.to.y
+    ) {
+      return false;
+    }
+  }
+  return true;
 }

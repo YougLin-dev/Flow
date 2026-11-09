@@ -148,8 +148,9 @@ test("raises selected cards above unselected ones for drawing and hits", () => {
   scene.select(["b", "a"]);
   expect(scene.cardZ("a")).toBeGreaterThan(scene.cardZ("b"));
   expect(scene.selectionBounds()).toEqual({ x: 0, y: -26, width: 250, height: 150 });
-  // Even the pulled connector stays above the elevated selection.
-  expect(scene.previewZ()).toBeGreaterThan(scene.cardZ("a"));
+  // Merged frame pluses sit above the selection; the preview stays above them.
+  expect(scene.framePlusZ()).toBeGreaterThan(scene.cardZ("a"));
+  expect(scene.previewZ()).toBeGreaterThan(scene.framePlusZ());
 });
 
 test("raises a card in the same update as its selection", () => {
@@ -260,7 +261,30 @@ test("publishes and clears the connection preview", () => {
   const scene = new FlowScene();
   scene.setConnectionPreview({ x: 1, y: 2 }, { x: 3, y: 4 });
   expect(scene.connectionPreview()).toEqual({ from: { x: 1, y: 2 }, to: { x: 3, y: 4 } });
+  expect(scene.connectionPreviews()).toEqual([{ from: { x: 1, y: 2 }, to: { x: 3, y: 4 } }]);
 
-  scene.setConnectionPreview(null, null);
+  // A group drag publishes one line per fixed end.
+  scene.setConnectionPreviews([
+    { from: { x: 1, y: 2 }, to: { x: 3, y: 4 } },
+    { from: { x: 5, y: 6 }, to: { x: 7, y: 8 } },
+  ]);
+  expect(scene.connectionPreviews()).toHaveLength(2);
+  // An equal write keeps the signal's value, so the canvas does not redraw.
+  const current = scene.connectionPreviews();
+  scene.setConnectionPreviews([
+    { from: { x: 1, y: 2 }, to: { x: 3, y: 4 } },
+    { from: { x: 5, y: 6 }, to: { x: 7, y: 8 } },
+  ]);
+  expect(scene.connectionPreviews()).toBe(current);
+
+  scene.setConnectionPreviews([]);
   expect(scene.connectionPreview()).toBeNull();
+  expect(scene.connectionPreviews()).toBeNull();
+});
+
+test("knows whether a pair is already connected", () => {
+  const scene = new FlowScene();
+  scene.apply(snapshot([node("a", 0, 0), node("b", 300, 0)], [edge("a-b", "a", "b")]));
+  expect(scene.hasEdge("a", "b")).toBe(true);
+  expect(scene.hasEdge("b", "a")).toBe(false);
 });

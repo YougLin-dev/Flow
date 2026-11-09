@@ -8,12 +8,14 @@ import type { PickedImage, PickImagesOptions } from "nsh";
 import type {
   ChangeSet,
   Document,
+  EdgeInput,
   NodeDetail,
   NodeInput,
   ResultBatchInput,
   ResultItemInput,
 } from "@flow/native";
 import type { AssetUrls } from "./asset-urls";
+import type { ConnectionPair } from "./connection-gesture";
 import type { NodeRunner } from "./execution";
 import {
   canConnect,
@@ -297,15 +299,18 @@ export class NodeSession {
     }
   }
 
-  async connectNodes(fromId: string, toId: string): Promise<void> {
+  /** Connects one or more pairs in one write; duplicates and bad pairs skip. */
+  async connectNodes(pairs: readonly ConnectionPair[]): Promise<void> {
     const document = this.host.document();
     const scene = this.host.scene();
-    if (!document || !scene || fromId === toId || this.host.isDisposed()) return;
-    const fromKind = scene.kindOf(fromId);
-    const toKind = scene.kindOf(toId);
-    if (!fromKind || !toKind || !canConnect(fromKind, toKind)) return;
-    try {
-      const changes = await document.connectEdge({
+    if (!document || !scene || this.host.isDisposed()) return;
+    const edges: EdgeInput[] = [];
+    for (const { fromId, toId } of pairs) {
+      if (fromId === toId || scene.hasEdge(fromId, toId)) continue;
+      const fromKind = scene.kindOf(fromId);
+      const toKind = scene.kindOf(toId);
+      if (!fromKind || !toKind || !canConnect(fromKind, toKind)) continue;
+      edges.push({
         id: `edge-${crypto.randomUUID()}`,
         fromId,
         toId,
@@ -313,6 +318,11 @@ export class NodeSession {
         toPort: "in",
         kind: "flow",
       });
+    }
+    if (edges.length === 0) return;
+    const only = edges.length === 1 ? edges[0] : null;
+    try {
+      const changes = only ? await document.connectEdge(only) : await document.connectEdges(edges);
       if (this.host.isDisposed()) return;
       this.host.applyChanges(changes);
       this.host.schedulePreviews();

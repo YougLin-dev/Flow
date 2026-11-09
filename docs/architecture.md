@@ -150,7 +150,9 @@ events and renders four kinds of children:
   moves as one group; its padding and border are divided by the camera's scale
   to stay one screen point wide. A press anywhere inside the frame—on empty
   space or a card border—drags the whole selection and shows the move cursor;
-  a press outside it starts a new marquee.
+  a press outside it starts a new marquee. A multi-card frame replaces the
+  cards' own pluses with one merged plus on each side: the left one is the
+  group's input handle, the right one its output handle.
 - **Selection overlay** — the marquee box in screen space, derived from the
   controller each time the drag changes. It does not take pointer events. The
   cards the box covers take the selected accent border while it sweeps, and
@@ -165,24 +167,26 @@ events and renders four kinds of children:
 `FlowCard` positions itself from the node's world rectangle and renders the
 title and status above the card, the body text or image thumbnails inside it
 (laid out inside the body box), and one round plus button outside each side
-while the card is hovered or selected. A plus rests just outside the border;
-inside the side zone it eases toward the pointer in both axes, and it springs
-back when the pointer leaves. The plus is only a drag handle: connectors meet
-the card's own border. `FlowEdges` strokes every connector's cubic from
-`flow/connection.ts` in one native-canvas layer with round caps; the canvas
-rasterizer draws at the transformed resolution, so the lines stay smooth and
-sharp at every camera scale instead of showing sampled joints, and there is no
-arrowhead. The connection preview is a single-edge `FlowEdge` canvas above the
-cards. Both are presentational: props are accessors, and the page passes
-scene signals to them.
+while the card is hovered or selected. On a multi-card frame those per-card
+pluses give way to the frame's merged ones. A plus rests just outside the
+border; inside the side zone it eases toward the pointer in both axes, and it
+springs back when the pointer leaves. The plus is only a drag handle:
+connectors meet the card's own border. `FlowEdges` strokes every connector's
+cubic from `flow/connection.ts` in one native-canvas layer with round caps;
+the canvas rasterizer draws at the transformed resolution, so the lines stay
+smooth and sharp at every camera scale instead of showing sampled joints, and
+there is no arrowhead. The pulled connectors are one dashed `FlowPreviews`
+canvas above the cards, holding one line per fixed end, so a group drag pulls
+a line from every selected card. Both are presentational: props are
+accessors, and the page passes scene signals to them.
 
 The scene model (`flow/scene.ts`) is headless: it holds the visible nodes and
 edges, the selection, transient drag geometry (`overrides`), previews, the
-connection preview and the card a pulled connector would snap to, and answers
+connection previews and the card a pulled connector would snap to, and answers
 world-space hit questions (`nodeAt`, `portZoneAt`, `edgeAt`). Selected cards
 stack above every unselected one in selection order, so a pressed card comes
 to the front at once and a marquee brings its whole group forward; hit
-testing uses the same depth, and the connection preview stays above them all.
+testing uses the same depth, and the connection previews stay above them all.
 A card under the pointer hides a lower card's plus, just as it hides the card
 itself.
 `CanvasController` turns pointer events into commands: select/toggle, drag,

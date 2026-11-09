@@ -13,11 +13,12 @@ import type { CanvasCamera } from "../flow/camera";
 import type { CanvasController } from "../flow/canvas-controller";
 import type { FlowScene } from "../flow/scene";
 import { FlowCard } from "./FlowCard";
-import { FlowEdge } from "./FlowEdge";
 import { FlowEdges } from "./FlowEdges";
+import { FlowPreviews } from "./FlowPreviews";
 import { GridBackground } from "./GridBackground";
 import { SelectionFrame } from "./SelectionFrame";
 import { SelectionOverlay } from "./SelectionOverlay";
+import { SelectionPluses } from "./SelectionPluses";
 
 export interface FlowCanvasProps {
   readonly scene: FlowScene;
@@ -225,6 +226,9 @@ export function FlowCanvas(props: FlowCanvasProps) {
                 selected={() => props.scene.selection().includes(id)}
                 previewed={() => props.controller.marqueePreview().has(id)}
                 hovered={() => props.controller.hovered() === id}
+                plusSuppressed={() =>
+                  props.controller.multiFrame() && props.scene.selection().includes(id)
+                }
                 plus={() => {
                   const plus = props.controller.portPlus();
                   return plus !== null && plus.nodeId === id
@@ -236,16 +240,9 @@ export function FlowCanvas(props: FlowCanvasProps) {
             );
           }}
         </Each>
-        <If when={props.scene.connectionPreview()}>
-          {(preview) => (
-            <FlowEdge
-              from={() => preview().from}
-              to={() => preview().to}
-              selected={() => true}
-              dashed
-              zIndex={props.scene.previewZ()}
-            />
-          )}
+        <SelectionPluses scene={props.scene} camera={props.camera} controller={props.controller} />
+        <If when={props.scene.connectionPreviews()}>
+          {(previews) => <FlowPreviews previews={previews} zIndex={props.scene.previewZ()} />}
         </If>
       </View>
       <SelectionOverlay controller={props.controller} />

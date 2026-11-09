@@ -76,7 +76,7 @@ function setup(
       scene.selectEdge(id);
     },
     reconnectEdge: (edgeId, fromId, toId) => calls.reconnects.push({ edgeId, fromId, toId }),
-    connectNodes: (fromId, toId) => calls.connections.push({ fromId, toId }),
+    connectNodes: (pairs) => calls.connections.push(...pairs),
     openInline: (nodeId) => calls.inline.push(nodeId),
     onCardPress: (nodeId) => calls.cards.push(nodeId),
   };

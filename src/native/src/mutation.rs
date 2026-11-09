@@ -340,67 +340,111 @@ pub fn delete_edges(conn: &DatabaseConnection, ids: Vec<String>) -> Result<Mutat
 /// Inserts an edge and snapshots every item of the source's current batch
 /// into the target's input list.
 pub fn connect_edge(conn: &DatabaseConnection, input: EdgeInput) -> Result<Mutation, String> {
+    connect_edges(conn, vec![input])
+}
+
+/// Connects several pairs in one transaction and one history step. Every edge
+/// snapshots its source's current batch into its target's input list.
+pub fn connect_edges(
+    conn: &DatabaseConnection,
+    inputs: Vec<EdgeInput>,
+) -> Result<Mutation, String> {
     conn.transaction::<_, _, DbErr>(|txn| {
-        if input.from_id == input.to_id {
-            return Err(DbErr::Custom("a node cannot connect to itself".to_owned()));
-        }
-        let source = find_node_tx(txn, &input.from_id)?;
-        find_node_tx(txn, &input.to_id)?;
-        if already_connected_tx(txn, &input.from_id, &input.to_id, &input.id)? {
-            return Err(DbErr::Custom(
-                "these nodes are already connected".to_owned(),
-            ));
-        }
-
-        let edge = insert_edge_tx(txn, &input)?;
-        let mut changed = Vec::new();
-        let mut forward = vec![HistoryOp::InsertEdge(edge.clone())];
+        let mut changed_by_id: BTreeMap<String, nodes::Model> = BTreeMap::new();
+        let mut forward = Vec::new();
         let mut desired_inverse = Vec::new();
-        let mut position = max_input_position_tx(txn, &input.to_id)?;
+        let mut edges_changed = Vec::with_capacity(inputs.len());
 
-        if let Some(batch_id) = &source.output_batch_id {
-            for item in items_for_batch_tx(txn, batch_id)? {
-                let row = InputRow {
-                    id: format!("input-{}-{}", edge.id, item.id),
-                    node_id: input.to_id.clone(),
-                    position,
-                    kind: item.kind.clone(),
-                    origin: "edge".to_owned(),
-                    edge_id: Some(edge.id.clone()),
-                    item_id: Some(item.id.clone()),
-                    asset_id: item.asset_id.clone(),
-                    text: item.text.clone(),
-                    meta_json: item.meta_json.clone(),
-                    created_at: now_ms(),
-                };
-                insert_input_row_tx(txn, &row)?;
-                forward.push(HistoryOp::InsertInput(row.clone()));
-                desired_inverse.push(HistoryOp::DeleteInput { id: row.id });
-                position += 1;
-            }
+        for input in &inputs {
+            let connected = connect_edge_tx(txn, input)?;
+            edges_changed.push(connected.edge.summary());
+            forward.extend(connected.forward);
+            desired_inverse.extend(connected.inverse);
+            // Several edges may touch one target; report its final summary once.
+            changed_by_id.insert(connected.target.id.clone(), connected.target);
         }
 
-        changed.push(node_row(&touch_node_tx(txn, &input.to_id)?).summary());
-
-        desired_inverse.push(HistoryOp::DeleteEdge {
-            id: edge.id.clone(),
-        });
-        desired_inverse.reverse();
-
+        let mut inverse = desired_inverse;
+        inverse.reverse();
         let rev = bump_document_rev(txn)?;
         Ok(Mutation {
             changes: ChangeSet {
                 rev: rev as f64,
-                changed,
+                changed: changed_by_id
+                    .values()
+                    .map(|model| node_row(model).summary())
+                    .collect(),
                 removed: Vec::new(),
-                edges_changed: vec![edge.summary()],
+                edges_changed,
                 edges_removed: Vec::new(),
             },
             forward,
-            inverse: desired_inverse,
+            inverse,
         })
     })
     .map_err(|error| error.to_string())
+}
+
+struct ConnectedEdge {
+    edge: EdgeRow,
+    target: nodes::Model,
+    forward: Vec<HistoryOp>,
+    inverse: Vec<HistoryOp>,
+}
+
+/// One edge inside an open transaction: validation, the edge row, the
+/// source's snapshotted inputs, the target touch and their history ops.
+fn connect_edge_tx(txn: &DatabaseTransaction, input: &EdgeInput) -> Result<ConnectedEdge, DbErr> {
+    if input.from_id == input.to_id {
+        return Err(DbErr::Custom("a node cannot connect to itself".to_owned()));
+    }
+    let source = find_node_tx(txn, &input.from_id)?;
+    find_node_tx(txn, &input.to_id)?;
+    if already_connected_tx(txn, &input.from_id, &input.to_id, &input.id)? {
+        return Err(DbErr::Custom(
+            "these nodes are already connected".to_owned(),
+        ));
+    }
+
+    let edge = insert_edge_tx(txn, input)?;
+    let mut forward = vec![HistoryOp::InsertEdge(edge.clone())];
+    let mut desired_inverse = Vec::new();
+    let mut position = max_input_position_tx(txn, &input.to_id)?;
+
+    if let Some(batch_id) = &source.output_batch_id {
+        for item in items_for_batch_tx(txn, batch_id)? {
+            let row = InputRow {
+                id: format!("input-{}-{}", edge.id, item.id),
+                node_id: input.to_id.clone(),
+                position,
+                kind: item.kind.clone(),
+                origin: "edge".to_owned(),
+                edge_id: Some(edge.id.clone()),
+                item_id: Some(item.id.clone()),
+                asset_id: item.asset_id.clone(),
+                text: item.text.clone(),
+                meta_json: item.meta_json.clone(),
+                created_at: now_ms(),
+            };
+            insert_input_row_tx(txn, &row)?;
+            forward.push(HistoryOp::InsertInput(row.clone()));
+            desired_inverse.push(HistoryOp::DeleteInput { id: row.id });
+            position += 1;
+        }
+    }
+
+    let target = touch_node_tx(txn, &input.to_id)?;
+    desired_inverse.push(HistoryOp::DeleteEdge {
+        id: edge.id.clone(),
+    });
+    desired_inverse.reverse();
+
+    Ok(ConnectedEdge {
+        edge,
+        target,
+        forward,
+        inverse: desired_inverse,
+    })
 }
 
 /// Reconnects an edge: its inputs from the old target are removed and the

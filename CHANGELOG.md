@@ -81,6 +81,11 @@ All notable changes to Flow are recorded here. The format follows
   whole selection, including the empty space between its cards and their
   borders, instead of starting a new box or resizing one card; the frame
   shows the move cursor throughout.
+- A multi-card frame replaces the cards' own plus buttons with one merged
+  plus on each side. Dragging the right plus pulls a dashed line from every
+  selected card and connects them all to the release target; the left plus
+  connects the target to every selected card. The whole group is written in
+  one Rust command, so one undo removes it in one step.
 - Any visible card can be resized without selecting it first: pressing its
   border selects the card and starts the resize, hovering shows the resize
   cursor along any edge, and a card under the pointer keeps another card's

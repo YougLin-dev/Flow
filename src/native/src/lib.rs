@@ -116,6 +116,15 @@ impl Document {
         off_thread(move || db.connect_edge(edge).map(|mutation| mutation.changes)).await
     }
 
+    /// Connects several pairs in one transaction and undo step.
+    pub async fn connect_edges(
+        this: Instance<Self>,
+        edges: Vec<EdgeInput>,
+    ) -> Result<ChangeSet, String> {
+        let db = this.with(|document| document.db.clone());
+        off_thread(move || db.connect_edges(edges).map(|mutation| mutation.changes)).await
+    }
+
     /// Reconnects an edge and rebuilds the target's snapshot for it.
     pub async fn update_edge(this: Instance<Self>, edge: EdgeInput) -> Result<ChangeSet, String> {
         let db = this.with(|document| document.db.clone());

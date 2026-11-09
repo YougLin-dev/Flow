@@ -110,6 +110,11 @@ impl Database {
         self.run_mutation(move |conn| mutation::connect_edge(conn, edge))
     }
 
+    /// Connects several edges in one transaction and one history step.
+    pub fn connect_edges(&self, edges: Vec<EdgeInput>) -> Result<Mutation, String> {
+        self.run_mutation(move |conn| mutation::connect_edges(conn, edges))
+    }
+
     pub fn update_edge(&self, edge: EdgeInput) -> Result<Mutation, String> {
         self.run_mutation(move |conn| mutation::update_edge(conn, edge))
     }
@@ -709,6 +714,85 @@ mod tests {
         };
         assert!(own.contains("cannot connect to itself"), "{own}");
         assert_eq!(db.edge_count().expect("edge count"), 1);
+    }
+
+    #[test]
+    fn connects_several_sources_in_one_history_step() {
+        let db = Database::open(":memory:").expect("open");
+        db.insert_nodes(vec![
+            node("a", "A", "", &[], 0.0, 0.0),
+            node("b", "B", "", &[], 0.0, 200.0),
+            node("c", "C", "", &[], 400.0, 100.0),
+        ])
+        .expect("insert nodes");
+
+        // One output item per source exercises the snapshot path for each.
+        for (source, item) in [("a", "item-a"), ("b", "item-b")] {
+            db.save_run(
+                ResultBatchInput {
+                    id: format!("batch-{source}"),
+                    node_id: source.to_owned(),
+                    trigger: "manual".to_owned(),
+                    provider: "manual".to_owned(),
+                    model: String::new(),
+                    params_json: "{}".to_owned(),
+                    status: "done".to_owned(),
+                    error: None,
+                },
+                vec![ResultItemInput {
+                    id: item.to_owned(),
+                    position: 0.0,
+                    kind: "text".to_owned(),
+                    text: item.to_owned(),
+                    asset_id: None,
+                    meta_json: None,
+                }],
+            )
+            .expect("save run");
+        }
+
+        let edge = |id: &str, from: &str| EdgeInput {
+            id: id.to_owned(),
+            from_id: from.to_owned(),
+            to_id: "c".to_owned(),
+            from_port: Some("out".to_owned()),
+            to_port: Some("in".to_owned()),
+            kind: "flow".to_owned(),
+            data_json: None,
+        };
+        let mutation = db
+            .connect_edges(vec![edge("a-c", "a"), edge("b-c", "b")])
+            .expect("connect many");
+        assert_eq!(mutation.changes.edges_changed.len(), 2);
+        // Both edges touch one target: its summary appears once.
+        assert_eq!(mutation.changes.changed.len(), 1);
+        assert_eq!(db.edge_count().expect("edges"), 2);
+        assert_eq!(
+            db.node_detail("c".to_owned())
+                .expect("detail")
+                .expect("c detail")
+                .inputs
+                .len(),
+            2
+        );
+
+        // One undo removes both edges and their snapshotted inputs.
+        let undone = db.undo().expect("undo");
+        assert_eq!(undone.edges_removed.len(), 2);
+        assert_eq!(db.edge_count().expect("edges after undo"), 0);
+        assert_eq!(
+            db.node_detail("c".to_owned())
+                .expect("detail")
+                .expect("c detail")
+                .inputs
+                .len(),
+            0
+        );
+
+        // One redo restores both edges.
+        let redone = db.redo().expect("redo");
+        assert_eq!(redone.edges_changed.len(), 2);
+        assert_eq!(db.edge_count().expect("edges after redo"), 2);
     }
 
     #[test]

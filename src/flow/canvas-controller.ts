@@ -7,7 +7,8 @@
 import { signal, type ViewStyle } from "nsh";
 import type { NodeBounds } from "@flow/native";
 import type { CanvasCamera } from "./camera";
-import type { BoxGeometry, Point, PortSide } from "./connection";
+import { type BoxGeometry, framePortZone, type Point, type PortSide } from "./connection";
+import type { ConnectionPair } from "./connection-gesture";
 import { EdgeGestures } from "./edge-gestures";
 import type { FlowScene } from "./scene";
 import {
@@ -31,6 +32,12 @@ export interface PortPlus {
   readonly point: Point;
 }
 
+/** A merged plus button on a multi-card selection frame, in world coordinates. */
+export interface FramePlus {
+  readonly side: PortSide;
+  readonly point: Point;
+}
+
 export interface CanvasHost {
   scene(): FlowScene;
   camera(): CanvasCamera;
@@ -40,7 +47,7 @@ export interface CanvasHost {
   commitBounds(bounds: readonly NodeBounds[]): void;
   selectEdge(id: string | null): void;
   reconnectEdge(edgeId: string, fromId: string, toId: string): void;
-  connectNodes(fromId: string, toId: string): void;
+  connectNodes(pairs: readonly ConnectionPair[]): void;
   openInline(nodeId: string): void;
   /** A card was pressed (it may already be selected): show its composer. */
   onCardPress(nodeId: string): void;
@@ -74,6 +81,8 @@ export class CanvasController {
   readonly hovered = signal<string | null>(null);
   /** The plus button following the pointer in a card's side zone. */
   readonly portPlus = signal<PortPlus | null>(null);
+  /** The merged frame plus following the pointer in a frame's side zone. */
+  readonly framePlus = signal<FramePlus | null>(null);
   /** True while a press moves cards, resizes one or pulls a connector. */
   readonly gesturing = signal(false);
   readonly cursor = signal<CanvasCursor>("default");
@@ -89,7 +98,7 @@ export class CanvasController {
       selectedEdge: () => this.host.scene().selectedEdge(),
       selectEdge: (id) => this.host.selectEdge(id),
       reconnectEdge: (edgeId, fromId, toId) => this.host.reconnectEdge(edgeId, fromId, toId),
-      connectNodes: (fromId, toId) => this.host.connectNodes(fromId, toId),
+      connectNodes: (pairs) => this.host.connectNodes(pairs),
       changed: () => undefined,
     });
   }
@@ -132,6 +141,26 @@ export class CanvasController {
     return bounds !== null && containsPoint(bounds, x, y, SELECTION_FRAME_PADDING);
   }
 
+  /** True while a marquee's frame spans two or more selected cards. */
+  multiFrame(): boolean {
+    return this.marqueeSelected() && this.host.scene().selection().length > 1;
+  }
+
+  /** The merged plus zone under a screen point, on a multi-card frame. */
+  private framePlusAt(x: number, y: number): FramePlus | null {
+    if (!this.multiFrame()) return null;
+    const bounds = this.host.scene().selectionBounds();
+    if (!bounds) return null;
+    const camera = this.host.camera();
+    const world = camera.toWorld(x, y);
+    const padding = SELECTION_FRAME_PADDING / camera.scale;
+    for (const side of ["in", "out"] as const) {
+      const point = framePortZone(bounds, side, world.x, world.y, padding);
+      if (point !== null) return { side, point };
+    }
+    return null;
+  }
+
   /**
    * The card whose resize handle is under a screen point, topmost first.
    * Handles work on every visible card, not only the selected one, so a card
@@ -169,8 +198,26 @@ export class CanvasController {
     this.edgeMode = false;
     this.gesturing.set(false);
     this.portPlus.set(null);
+    this.framePlus.set(null);
     this.clearPreview();
     this.gesture = { ...idle(), startX: x, startY: y, lastX: x, lastY: y };
+
+    // The merged plus is a connector handle for the whole selection. Test it
+    // before a press outside the frame would dismiss that frame.
+    if (this.host.tool() === "select") {
+      const framePlus = this.framePlusAt(x, y);
+      if (
+        framePlus !== null &&
+        this.edges.beginGroup(x, y, framePlus.side === "out" ? "from" : "to")
+      ) {
+        this.edgeMode = true;
+        this.gesturing.set(true);
+        this.gesture = { ...this.gesture, mode: "edge" };
+        this.cursor.set("crosshair");
+        return;
+      }
+    }
+
     // The frame belongs to the area the marquee swept: it stays while the
     // pointer acts inside it and disappears on a press outside.
     const insideFrame = this.frameContains(x, y);
@@ -183,8 +230,11 @@ export class CanvasController {
 
     // Ports come before resize handles: a selected card's east and west
     // handles sit exactly on its ports, and a connection is the more common
-    // gesture at that point.
-    if (this.edges.down(x, y)) {
+    // gesture at that point. A framed selection hides its per-card pluses,
+    // so their zones must not start a connection either.
+    const portAllowed = (nodeId: string): boolean =>
+      !(this.multiFrame() && scene.selection().includes(nodeId));
+    if (this.edges.down(x, y, portAllowed)) {
       this.edgeMode = true;
       this.gesturing.set(true);
       this.gesture = { ...this.gesture, mode: "edge" };
@@ -363,6 +413,7 @@ export class CanvasController {
     this.edgeMode = false;
     this.gesturing.set(false);
     this.portPlus.set(null);
+    this.framePlus.set(null);
     if (this.gesture.mode === "drag" || this.gesture.mode === "resize") {
       this.host.scene().clearOverrides();
     }
@@ -377,6 +428,7 @@ export class CanvasController {
   leave(): void {
     this.hovered.set(null);
     this.portPlus.set(null);
+    this.framePlus.set(null);
     this.cursor.set("default");
   }
 
@@ -386,11 +438,25 @@ export class CanvasController {
     const camera = this.host.camera();
     const world = camera.toWorld(x, y);
     const tool = this.host.tool();
-    // A plus zone takes precedence over the east/west resize handles it
-    // overlaps: pressing a visible plus starts a connection.
-    if (tool === "select") {
+    if (tool !== "select") {
+      this.framePlus.set(null);
+    } else {
+      // The merged plus belongs to the frame's side zones, ahead of every
+      // per-card zone or resize handle it overlaps.
+      const framePlus = this.framePlusAt(x, y);
+      if (framePlus !== null) {
+        this.framePlus.set(framePlus);
+        this.hovered.set(null);
+        this.portPlus.set(null);
+        this.cursor.set("crosshair");
+        return;
+      }
+      this.framePlus.set(null);
+      // A plus zone takes precedence over the east/west resize handles it
+      // overlaps: pressing a visible plus starts a connection. A framed
+      // selection hides its per-card pluses, so their zones are muted.
       const zone = scene.portZoneAt(world.x, world.y);
-      if (zone) {
+      if (zone && !(this.multiFrame() && scene.selection().includes(zone.nodeId))) {
         this.hovered.set(zone.nodeId);
         this.portPlus.set({ nodeId: zone.nodeId, side: zone.side, point: zone.point });
         this.cursor.set("crosshair");

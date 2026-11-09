@@ -11,6 +11,7 @@ import {
   connectorControls,
   EDGE_PADDING,
   EDGE_THICKNESS,
+  mergeBounds,
 } from "../flow/connection";
 import type { FlowScene } from "../flow/scene";
 
@@ -23,7 +24,7 @@ export function FlowEdges(props: FlowEdgesProps) {
     let union: BoxGeometry | null = null;
     for (const edge of props.scene.edges()) {
       const bounds = edgeBox(props.scene, edge);
-      if (bounds !== null) union = union === null ? bounds : grow(union, bounds);
+      if (bounds !== null) union = union === null ? bounds : mergeBounds(union, bounds);
     }
     return union;
   };
@@ -83,16 +84,4 @@ function edgeBox(scene: FlowScene, edge: EdgeSummary): BoxGeometry | null {
   const from = scene.portWorld(edge.fromId, "out");
   const to = scene.portWorld(edge.toId, "in");
   return from && to ? connectionBounds(from, to) : null;
-}
-
-/** The box holding both boxes. */
-function grow(a: BoxGeometry, b: BoxGeometry): BoxGeometry {
-  const x = Math.min(a.x, b.x);
-  const y = Math.min(a.y, b.y);
-  return {
-    x,
-    y,
-    width: Math.max(a.x + a.width, b.x + b.width) - x,
-    height: Math.max(a.y + a.height, b.y + b.height) - y,
-  };
 }

@@ -5,6 +5,7 @@ import { IMAGE_NODE_ID, TEXT_NODE_ID, seedDocument } from "./data";
 import { NodeRunner } from "./execution";
 import { parseSettings } from "./node-kinds";
 import { NodeSession, type NodeSessionHost } from "./node-session";
+import { FlowScene } from "./scene";
 
 /** Polls native async work: `app.waitUntil` only exists in an app test. */
 function until(check: () => boolean, timeout = 5000): Promise<void> {
@@ -26,6 +27,7 @@ function until(check: () => boolean, timeout = 5000): Promise<void> {
 function makeSession(
   document: Document,
   pickImages: NodeSessionHost["pickImages"] = async () => [],
+  scene: FlowScene | null = null,
 ): {
   session: NodeSession;
   runner: NodeRunner;
@@ -39,7 +41,7 @@ function makeSession(
   });
   const host: NodeSessionHost = {
     document: () => document,
-    scene: () => null,
+    scene: () => scene,
     assets: () => assets,
     runner: () => runner,
     pickImages,
@@ -360,6 +362,63 @@ test("closes the composer when its node is removed", async () => {
   });
   expect(session.composerId()).toBeNull();
   expect(session.detail()).toBeNull();
+
+  runner.dispose();
+  assets.dispose();
+  document.dispose();
+});
+
+test("connects several sources in one undo step", async () => {
+  const document = await Document.open(":memory:");
+  await seedDocument(document);
+  const extra = "extra-text";
+  const target = "group-target";
+  await document.insertNodes([
+    {
+      id: extra,
+      kind: "text",
+      title: "Extra",
+      body: "",
+      tags: [],
+      x: 80,
+      y: 400,
+      width: 300,
+      height: 220,
+      z: 0,
+    },
+    {
+      id: target,
+      kind: "text",
+      title: "Target",
+      body: "",
+      tags: [],
+      x: 520,
+      y: 400,
+      width: 300,
+      height: 220,
+      z: 0,
+    },
+  ]);
+  const scene = new FlowScene();
+  scene.apply(
+    await document.scene({ x: -100_000, y: -100_000, width: 200_000, height: 200_000 }, 1000),
+  );
+  const { session, runner, assets } = makeSession(document, async () => [], scene);
+
+  await session.connectNodes([
+    { fromId: TEXT_NODE_ID, toId: target },
+    { fromId: extra, toId: target },
+  ]);
+
+  // The seed edge plus the two group edges; the seeded text node contributes
+  // one snapshotted input, the extra node none.
+  expect(await document.edgeCount()).toBe(3);
+  expect((await document.nodeDetail(target))?.inputs.length).toBe(1);
+
+  // One undo removes the whole group connection.
+  await document.undo();
+  expect(await document.edgeCount()).toBe(1);
+  expect((await document.nodeDetail(target))?.inputs.length).toBe(0);
 
   runner.dispose();
   assets.dispose();

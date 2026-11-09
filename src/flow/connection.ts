@@ -56,11 +56,30 @@ export function portZone(node: BoxGeometry, side: PortSide, x: number, y: number
   return { x: side === "in" ? border - distance : border + distance, y };
 }
 
+/** The merged plus's followed position in a selection frame's side zone. */
+export function framePortZone(
+  bounds: BoxGeometry,
+  side: PortSide,
+  x: number,
+  y: number,
+  padding: number,
+): Point | null {
+  const frame = {
+    x: bounds.x - padding,
+    y: bounds.y - padding,
+    width: bounds.width + padding * 2,
+    height: bounds.height + padding * 2,
+  };
+  return portZone(frame, side, x, y);
+}
+
 /** The connector's stroke width and hit distance, in world units. */
 export const EDGE_THICKNESS = 2;
 export const EDGE_HIT_DISTANCE = 8;
 /** The room a connector canvas leaves around its cubic for the stroke. */
 export const EDGE_PADDING = 4;
+/** The dashes of a connector being pulled, before it is written. */
+export const EDGE_DASH = [7, 5];
 
 /** The control-point reach of the connector's cubic curve. */
 function controlReach(from: Point, to: Point): number {
@@ -88,6 +107,18 @@ export function connectionBounds(from: Point, to: Point): BoxGeometry {
     y,
     width: Math.max(from.x, c1.x, c2.x, to.x) - x,
     height: Math.max(from.y, c1.y, c2.y, to.y) - y,
+  };
+}
+
+/** The box holding both boxes. */
+export function mergeBounds(a: BoxGeometry, b: BoxGeometry): BoxGeometry {
+  const x = Math.min(a.x, b.x);
+  const y = Math.min(a.y, b.y);
+  return {
+    x,
+    y,
+    width: Math.max(a.x + a.width, b.x + b.width) - x,
+    height: Math.max(a.y + a.height, b.y + b.height) - y,
   };
 }
 
