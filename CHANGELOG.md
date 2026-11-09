@@ -29,6 +29,11 @@ All notable changes to Flow are recorded here. The format follows
 
 ### Changed
 
+- `bun run test:host` now runs only the `*.host.test.tsx` platform tests
+  instead of repeating every headless test file on the native host. The app's
+  window, native-input, rendering and desktop-API checks moved to
+  `App.host.test.tsx`; all other tests stay headless in `bun run test`.
+
 - `bun run test:host` runs each app test file in its own host process;
   `native.test.ts` stays in the headless suite because the host cannot load
   the native module from a test bundle.

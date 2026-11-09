@@ -42,7 +42,7 @@ repository root.
 | `bun run dev`        | Runs the app on this machine (`nsh run src`).                             |
 | `bun run build`      | Builds the bundle for deployment (`nsh build src`, output in `.nsh/out`). |
 | `bun run test`       | Runs Rust unit tests plus every app test (`*.test.ts(x)`) headless.       |
-| `bun run test:host`  | Runs the tests on this machine's development host (real input).           |
+| `bun run test:host`  | Runs the platform tests (`*.host.test.tsx`) on this machine's host.       |
 | `bun run test:lint`  | Runs the dependency-boundary rule's tests (`bun test lint`).              |
 | `bun run test:bench` | Runs the ignored 100k SQLite/FTS5/RTree benchmark.                        |
 | `bun run test:100k`  | Seeds 100k nodes and drives the real host UI against them.                |
@@ -53,10 +53,12 @@ repository root.
 | `bun run check:fix`  | Same, applying every automatic fix.                                       |
 | `bun run package`    | Builds the native installer for this OS (`docs/packaging.md`).            |
 
-`bun run test:host` runs each test file in its own native host process;
-`src/native.test.ts` stays in the headless suite because the host cannot load
-`@flow/native` before an app registers it. `bun run test:100k` is a real-host
-smoke and writes screenshots under `.nsh/bench/` for manual review.
+`bun run test:host` runs only the `*.host.test.tsx` platform tests, each in its
+own native host process; `bun run test` already runs them headless along with
+every other test. Modules that import `@flow/native` stay headless-only
+(`*.native.test.ts`), because the host cannot load the module before an app
+registers it. `bun run test:100k` is a real-host smoke and writes screenshots
+under `.nsh/bench/` for manual review.
 
 `bun run check` is what CI runs. `vp check` (Vite+) drives the formatter,
 Oxlint (type-aware, with full type checking) and the TypeScript check, and then
@@ -78,7 +80,8 @@ vite.config.ts         Vite+ lint/format: type-aware, no `any`
 tsconfig.json          extends the app's TS settings, includes src/
 src/                   the NSH app: its root, entry, config and assets
   App.tsx              entry: mount(App); the shell composes the title bar and page
-  App.test.tsx         end-to-end app tests
+  App.test.tsx         end-to-end app tests (headless)
+  App.host.test.tsx    platform tests also run on the real host
   nsh.json             app metadata (name, id, version, icon, theme)
   theme.json           design tokens (light and dark)
   tsconfig.json        NSH's TypeScript settings

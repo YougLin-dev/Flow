@@ -248,5 +248,5 @@ unrestricted to allow-list; keep it in place.
 - **A new canvas feature** — keep pure geometry in `flow/selection.ts` or
   `flow/overlay.ts`, the model in `flow/scene.ts`, gestures in
   `flow/canvas-controller.ts`, and the view in the matching component. Add a
-  unit test for the geometry or controller path and an `App.test.tsx` flow
-  when the user can reach it.
+  unit test for the geometry or controller path and an app test flow when the
+  user can reach it (a platform-sensitive one goes in `App.host.test.tsx`).

@@ -10,8 +10,8 @@ native-view canvas. Read [the engineering standard](docs/standards.md),
 Run `bun run check` (format + lint + type check + Rust format/clippy +
 boundary-rule tests; file names and dependency direction are lint rules) and
 `bun run test` (Rust unit tests plus TSX tests) before you finish.
-`bun run check:fix` applies safe fixes. `bun run test:host` also drives the
-real desktop host on this OS. `bun run test:bench` runs the ignored 100k
+`bun run check:fix` applies safe fixes. `bun run test:host` repeats the
+platform tests (`*.host.test.tsx`) on this OS's real desktop host. `bun run test:bench` runs the ignored 100k
 SQLite/search benchmark.
 
 ## Invariants
@@ -51,4 +51,5 @@ SQLite/search benchmark.
   `*.test.ts(x)` beside the code — enforced by `unicorn/filename-case` with
   per-extension overrides in `vite.config.ts`.
 - **Tests:** one behaviour, `app.waitUntil` instead of sleeps, stable
-  `testID`s, clean up controllers and document sessions you create.
+  `testID`s, clean up controllers and document sessions you create. Only
+  platform tests use the `.host.test.tsx` suffix; everything else is headless.
