@@ -16,6 +16,7 @@ import { FlowCard } from "./FlowCard";
 import { FlowEdge } from "./FlowEdge";
 import { FlowEdges } from "./FlowEdges";
 import { GridBackground } from "./GridBackground";
+import { SelectionFrame } from "./SelectionFrame";
 import { SelectionOverlay } from "./SelectionOverlay";
 
 export interface FlowCanvasProps {
@@ -204,6 +205,9 @@ export function FlowCanvas(props: FlowCanvasProps) {
         }}
       >
         <FlowEdges scene={props.scene} />
+        {/* The frame shares the world's stacking: above unselected cards and
+            below the selected ones, so the swept area moves as one group. */}
+        <SelectionFrame scene={props.scene} camera={props.camera} controller={props.controller} />
         <Each of={props.scene.nodes()} key={(node) => node.id}>
           {(node) => {
             // The id never changes for a row. Reading it once keeps the
@@ -216,8 +220,10 @@ export function FlowCanvas(props: FlowCanvasProps) {
               <FlowCard
                 node={node}
                 rect={() => props.scene.cardRect(id)}
+                zIndex={() => props.scene.cardZ(id)}
                 preview={() => props.scene.previews().get(id) ?? null}
                 selected={() => props.scene.selection().includes(id)}
+                previewed={() => props.controller.marqueePreview().has(id)}
                 hovered={() => props.controller.hovered() === id}
                 plus={() => {
                   const plus = props.controller.portPlus();
@@ -237,7 +243,7 @@ export function FlowCanvas(props: FlowCanvasProps) {
               to={() => preview().to}
               selected={() => true}
               dashed
-              zIndex={1000}
+              zIndex={props.scene.previewZ()}
             />
           )}
         </If>

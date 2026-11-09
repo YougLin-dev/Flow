@@ -15,6 +15,7 @@ import {
   portPoint,
   portZone,
 } from "./connection";
+import { CARD_TITLE_BAND } from "./card-layout";
 
 /** The URLs a card's image body should show, loaded by the page. */
 export interface PreviewView {
@@ -45,6 +46,11 @@ export class FlowScene {
   private readonly byId = new Map<string, NodeSummary>();
   private readonly edgeById = new Map<string, EdgeSummary>();
   private readonly applied = new Map<string, BoxGeometry>();
+  /** The selection the ranks were built from, and its 1-based ranks. */
+  private ranksFor: readonly string[] | null = null;
+  private readonly ranks = new Map<string, number>();
+  /** A stacking base above every card's own z; selected cards start here. */
+  private baseZ = 1;
 
   /** Reconciles the scene with one viewport snapshot. */
   apply(snapshot: SceneSnapshot, options: { maxCards?: number } = {}): void {
@@ -170,6 +176,75 @@ export class FlowScene {
     return node ? rectOfNode(node) : null;
   }
 
+  /**
+   * A card's stacking depth: selected cards sit above every unselected one,
+   * in the order they joined the selection. Hit tests use the same depth, so
+   * the card that draws on top is also the card that takes the press.
+   */
+  cardDepth(id: string): number {
+    const rank = this.selectionRanks().get(id);
+    if (rank !== undefined) return this.baseZ + rank;
+    return this.byId.get(id)?.z ?? 0;
+  }
+
+  /** The zIndex a card draws at; the selected group is above everything. */
+  cardZ(id: string): number {
+    // Track snapshot replacement and selection changes.
+    this.nodes();
+    return this.cardDepth(id) + 1;
+  }
+
+  /** Between unselected cards and the elevated selection: the frame. */
+  frameZ(): number {
+    this.nodes();
+    return this.baseZ + 1;
+  }
+
+  /** Above every card, including an elevated selection: a pulled connector. */
+  previewZ(): number {
+    this.nodes();
+    return this.baseZ + this.selectionRanks().size + 2;
+  }
+
+  /**
+   * The world rectangle around the selected cards, titles included, or null
+   * when none are selected. The selection frame draws it with the world.
+   */
+  selectionBounds(): BoxGeometry | null {
+    this.nodes();
+    const ids = this.selection();
+    if (ids.length === 0) return null;
+    let left = Number.POSITIVE_INFINITY;
+    let top = Number.POSITIVE_INFINITY;
+    let right = Number.NEGATIVE_INFINITY;
+    let bottom = Number.NEGATIVE_INFINITY;
+    for (const id of ids) {
+      const rect = this.cardRect(id);
+      if (!rect) continue;
+      left = Math.min(left, rect.x);
+      top = Math.min(top, rect.y - CARD_TITLE_BAND);
+      right = Math.max(right, rect.x + rect.width);
+      bottom = Math.max(bottom, rect.y + rect.height);
+    }
+    if (!Number.isFinite(left) || !Number.isFinite(top)) return null;
+    return { x: left, y: top, width: right - left, height: bottom - top };
+  }
+
+  /**
+   * The selection ranks, rebuilt when the selection's signal value changes.
+   * A depth read always matches the selection the app is showing, even when
+   * a binding runs in the middle of the selection write.
+   */
+  private selectionRanks(): ReadonlyMap<string, number> {
+    const selection = this.selection();
+    if (selection !== this.ranksFor) {
+      this.ranksFor = selection;
+      this.ranks.clear();
+      selection.forEach((id, index) => this.ranks.set(id, index + 1));
+    }
+    return this.ranks;
+  }
+
   /** The world point of a card's input or output port. */
   portWorld(id: string, side: PortSide): Point | null {
     const rect = this.cardRect(id);
@@ -186,18 +261,18 @@ export class FlowScene {
     for (const node of this.byId.values()) {
       const rect = this.cardRect(node.id);
       if (!rect) continue;
+      const depth = this.cardDepth(node.id);
       for (const side of ["out", "in"] as const) {
         const point = portZone(rect, side, x, y);
-        if (point !== null && (hit === null || node.z >= hit.z)) {
-          hit = { nodeId: node.id, side, point, z: node.z };
+        if (point !== null && (hit === null || depth >= hit.z)) {
+          hit = { nodeId: node.id, side, point, z: depth };
         }
       }
     }
     if (hit === null) return null;
     const under = this.nodeAt(x, y);
     if (under !== null && under !== hit.nodeId) {
-      const underNode = this.byId.get(under);
-      if (underNode !== undefined && underNode.z >= hit.z) return null;
+      if (this.cardDepth(under) >= hit.z) return null;
     }
     return { nodeId: hit.nodeId, side: hit.side, point: hit.point };
   }
@@ -215,7 +290,9 @@ export class FlowScene {
       if (!rect) continue;
       const inside =
         x >= rect.x && x <= rect.x + rect.width && y >= rect.y && y <= rect.y + rect.height;
-      if (inside && (hit === null || node.z >= hit.z)) hit = { id: node.id, z: node.z };
+      if (!inside) continue;
+      const depth = this.cardDepth(node.id);
+      if (hit === null || depth >= hit.z) hit = { id: node.id, z: depth };
     }
     return hit?.id ?? null;
   }
@@ -287,6 +364,10 @@ export class FlowScene {
     if (target !== null && !this.byId.has(target)) this.connectionTarget.set(null);
     const keep = new Set(this.selection().filter((id) => this.byId.has(id)));
     if (keep.size !== this.selection().length) this.selection.set([...keep]);
+    // The elevation base follows the highest document z in the scene.
+    let maxZ = 0;
+    for (const node of this.byId.values()) if (node.z > maxZ) maxZ = node.z;
+    this.baseZ = maxZ + 1;
     for (const id of this.overrides().keys()) {
       if (!this.byId.has(id)) this.dropOverride(id);
     }

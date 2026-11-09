@@ -11,12 +11,14 @@ import type { BoxGeometry, Point, PortSide } from "./connection";
 import { EdgeGestures } from "./edge-gestures";
 import type { FlowScene } from "./scene";
 import {
+  containsPoint,
   handleAt,
   intersects,
   normalizeRect,
   type ResizeHandle,
   resizedRect,
   type ScreenRect,
+  SELECTION_FRAME_PADDING,
 } from "./selection";
 
 export type CanvasCursor = NonNullable<ViewStyle["cursor"]>;
@@ -64,6 +66,10 @@ const DRAG_THRESHOLD = 2;
 export class CanvasController {
   /** The box the user is dragging with the marquee, in screen points. */
   readonly marquee = signal<ScreenRect | null>(null);
+  /** The cards a marquee in progress covers: what releasing would select. */
+  readonly marqueePreview = signal<ReadonlySet<string>>(new Set());
+  /** True after a marquee made a selection, so its frame stays shown. */
+  readonly marqueeSelected = signal(false);
   /** The card under the pointer while no gesture runs. */
   readonly hovered = signal<string | null>(null);
   /** The plus button following the pointer in a card's side zone. */
@@ -103,6 +109,30 @@ export class CanvasController {
   }
 
   /**
+   * The screen rectangle around the selected cards, titles included, or null
+   * when none are selected. It decides where the selection frame is pressed.
+   */
+  selectionBounds(): ScreenRect | null {
+    const bounds = this.host.scene().selectionBounds();
+    if (!bounds) return null;
+    const camera = this.host.camera();
+    const topLeft = camera.toScreen(bounds.x, bounds.y);
+    return {
+      x: topLeft.x,
+      y: topLeft.y,
+      width: bounds.width * camera.scale,
+      height: bounds.height * camera.scale,
+    };
+  }
+
+  /** Whether a screen point is inside the frame a marquee left around its selection. */
+  private frameContains(x: number, y: number): boolean {
+    if (!this.marqueeSelected()) return false;
+    const bounds = this.selectionBounds();
+    return bounds !== null && containsPoint(bounds, x, y, SELECTION_FRAME_PADDING);
+  }
+
+  /**
    * The card whose resize handle is under a screen point, topmost first.
    * Handles work on every visible card, not only the selected one, so a card
    * can be resized with one press. A card under the point owns the decision:
@@ -125,8 +155,9 @@ export class CanvasController {
       const rect = this.screenRect(node.id);
       if (!rect) continue;
       const side = handleAt(rect, x, y);
-      if (side !== null && (hit === null || node.z >= hit.z)) {
-        hit = { id: node.id, side, z: node.z };
+      const depth = scene.cardDepth(node.id);
+      if (side !== null && (hit === null || depth >= hit.z)) {
+        hit = { id: node.id, side, z: depth };
       }
     }
     return hit === null ? null : { id: hit.id, side: hit.side };
@@ -138,7 +169,12 @@ export class CanvasController {
     this.edgeMode = false;
     this.gesturing.set(false);
     this.portPlus.set(null);
+    this.clearPreview();
     this.gesture = { ...idle(), startX: x, startY: y, lastX: x, lastY: y };
+    // The frame belongs to the area the marquee swept: it stays while the
+    // pointer acts inside it and disappears on a press outside.
+    const insideFrame = this.frameContains(x, y);
+    if (!insideFrame) this.marqueeSelected.set(false);
 
     if (this.host.tool() === "hand") {
       this.beginPan(x, y);
@@ -153,6 +189,21 @@ export class CanvasController {
       this.gesturing.set(true);
       this.gesture = { ...this.gesture, mode: "edge" };
       this.cursor.set("crosshair");
+      return;
+    }
+
+    const world = camera.toWorld(x, y);
+    const id = scene.nodeAt(world.x, world.y);
+    if (clickCount >= 2 && id !== null && scene.kindOf(id) === "text") {
+      this.host.openInline(id);
+      return;
+    }
+
+    // The frame a marquee left is one drag surface: a press anywhere inside
+    // it moves the whole selection, even on a card's border, instead of
+    // resizing one card, replacing the selection or starting a new box.
+    if (insideFrame) {
+      this.startDrag();
       return;
     }
 
@@ -176,17 +227,6 @@ export class CanvasController {
       return;
     }
 
-    if (clickCount >= 2) {
-      const world = camera.toWorld(x, y);
-      const id = scene.nodeAt(world.x, world.y);
-      if (id !== null && scene.kindOf(id) === "text") {
-        this.host.openInline(id);
-        return;
-      }
-    }
-
-    const world = camera.toWorld(x, y);
-    const id = scene.nodeAt(world.x, world.y);
     if (id !== null) {
       if (shift) scene.toggleSelected(id);
       else if (!scene.selection().includes(id)) scene.select([id]);
@@ -231,7 +271,12 @@ export class CanvasController {
       return;
     }
     if (gesture.mode === "marquee") {
-      this.marquee.set(normalizeRect(gesture.startX, gesture.startY, x, y));
+      const box = normalizeRect(gesture.startX, gesture.startY, x, y);
+      this.marquee.set(box);
+      // The covered cards light up as the box sweeps: the preview is the
+      // release's selection, written only when the covered set changes.
+      if (box.width < 1 && box.height < 1) this.clearPreview();
+      else this.setPreview(this.idsWithin(gesture, box));
       return;
     }
     if (gesture.mode === "drag") {
@@ -301,8 +346,10 @@ export class CanvasController {
     }
     if (gesture.mode === "marquee") {
       const box = normalizeRect(gesture.startX, gesture.startY, x, y);
-      this.selectWithin(gesture, box);
+      const ids = this.selectWithin(gesture, box);
       this.marquee.set(null);
+      this.clearPreview();
+      this.marqueeSelected.set(ids.length > 0);
       this.hover(x, y);
       return;
     }
@@ -321,6 +368,8 @@ export class CanvasController {
     }
     this.gesture = idle();
     this.marquee.set(null);
+    this.clearPreview();
+    this.marqueeSelected.set(false);
     this.cursor.set("default");
   }
 
@@ -348,6 +397,15 @@ export class CanvasController {
         return;
       }
     }
+    // The frame a marquee left is one drag surface: card bodies and borders
+    // inside it all move the whole selection, so the move cursor is shown
+    // everywhere but the explicit port buttons above.
+    if (tool === "select" && this.frameContains(x, y)) {
+      this.hovered.set(scene.nodeAt(world.x, world.y));
+      this.portPlus.set(null);
+      this.cursor.set("grab");
+      return;
+    }
     const target = this.handleAtPoint(x, y);
     if (target) {
       this.hovered.set(target.id);
@@ -355,7 +413,8 @@ export class CanvasController {
       this.cursor.set(cursorFor(target.side));
       return;
     }
-    this.hovered.set(scene.nodeAt(world.x, world.y));
+    const id = scene.nodeAt(world.x, world.y);
+    this.hovered.set(id);
     this.portPlus.set(null);
     this.cursor.set(tool === "hand" ? "grab" : "default");
   }
@@ -379,10 +438,17 @@ export class CanvasController {
     this.cursor.set("grabbing");
   }
 
-  private selectWithin(gesture: Gesture, box: ScreenRect): void {
+  private selectWithin(gesture: Gesture, box: ScreenRect): readonly string[] {
+    if (box.width < 1 && box.height < 1) return [];
+    const ids = this.idsWithin(gesture, box);
+    this.host.scene().select(ids);
+    return ids;
+  }
+
+  /** The ids a marquee released at `box` selects: the final set, not just additions. */
+  private idsWithin(gesture: Gesture, box: ScreenRect): readonly string[] {
     const scene = this.host.scene();
     const camera = this.host.camera();
-    if (box.width < 1 && box.height < 1) return;
     const topLeft = camera.toWorld(box.x, box.y);
     const bottomRight = camera.toWorld(box.x + box.width, box.y + box.height);
     const world = {
@@ -396,7 +462,19 @@ export class CanvasController {
       const rect = scene.cardRect(node.id);
       if (rect && intersects(rect, world) && !ids.includes(node.id)) ids.push(node.id);
     }
-    scene.select(ids);
+    return ids;
+  }
+
+  /** Writes a preview only when the covered set changed, keeping rows still. */
+  private setPreview(ids: readonly string[]): void {
+    const current = this.marqueePreview();
+    if (ids.length === current.size && ids.every((id) => current.has(id))) return;
+    this.marqueePreview.set(new Set(ids));
+  }
+
+  private clearPreview(): void {
+    if (this.marqueePreview().size === 0) return;
+    this.marqueePreview.set(new Set());
   }
 }
 

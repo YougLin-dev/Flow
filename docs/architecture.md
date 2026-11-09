@@ -142,15 +142,23 @@ events and renders four kinds of children:
   current `grid-dot` token when the appearance changes.
 - **World** — a zero-size view translated and scaled by the camera
   (`transform: translate(x, y) scale(s)`, origin `0 0`). Its children are in
-  world coordinates: one `FlowEdges` canvas for every connector and a
-  `FlowCard` per visible node. The camera's transform is the only mapping from
-  world to screen; the scene never caches screen geometry on a card.
+  world coordinates: one `FlowEdges` canvas for every connector, the selection
+  frame and a `FlowCard` per visible node. The camera's transform is the only
+  mapping from world to screen; the scene never caches screen geometry on a
+  card. The frame and the cards share one stacking order: the frame draws
+  above every unselected card and below the selected ones, so a swept area
+  moves as one group; its padding and border are divided by the camera's scale
+  to stay one screen point wide. A press anywhere inside the frame—on empty
+  space or a card border—drags the whole selection and shows the move cursor;
+  a press outside it starts a new marquee.
 - **Selection overlay** — the marquee box in screen space, derived from the
-  controller each time the drag changes. It does not take pointer events. A
-  selected card shows the same rounded accent border it shows on hover, so no
-  square outline is laid over it. The border is the resize zone: corners
-  scale proportionally and any point along an edge resizes that axis, with
-  the cursor naming the side, so the card shows no handle dots.
+  controller each time the drag changes. It does not take pointer events. The
+  cards the box covers take the selected accent border while it sweeps, and
+  the frame above appears on release. A selected card itself shows the same
+  rounded accent border it shows on hover, so no square outline is laid over
+  it. The border is the resize zone: corners scale proportionally and any
+  point along an edge resizes that axis, with the cursor naming the side, so
+  the card shows no handle dots.
 - **Interaction view** — a transparent, full-size view that owns the cursor
   and dispatches presses, moves and touches to the `CanvasController`.
 
@@ -171,8 +179,12 @@ scene signals to them.
 The scene model (`flow/scene.ts`) is headless: it holds the visible nodes and
 edges, the selection, transient drag geometry (`overrides`), previews, the
 connection preview and the card a pulled connector would snap to, and answers
-world-space hit questions (`nodeAt`, `portZoneAt`, `edgeAt`). A card under
-the pointer hides a lower card's plus, just as it hides the card itself.
+world-space hit questions (`nodeAt`, `portZoneAt`, `edgeAt`). Selected cards
+stack above every unselected one in selection order, so a pressed card comes
+to the front at once and a marquee brings its whole group forward; hit
+testing uses the same depth, and the connection preview stays above them all.
+A card under the pointer hides a lower card's plus, just as it hides the card
+itself.
 `CanvasController` turns pointer events into commands: select/toggle, drag,
 resize from a handle, marquee, pan with the hand tool, the following plus,
 and the port/edge gestures. `CanvasCamera` stores logical `x`, `y` and

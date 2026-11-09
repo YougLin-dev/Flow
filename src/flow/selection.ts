@@ -10,6 +10,19 @@ export interface ScreenRect {
   readonly height: number;
 }
 
+/** Space between a selection's frame and the cards it surrounds, in screen points. */
+export const SELECTION_FRAME_PADDING = 6;
+
+/** Whether a screen point lies inside a rectangle, expanded by a margin. */
+export function containsPoint(rect: ScreenRect, x: number, y: number, margin = 0): boolean {
+  return (
+    x >= rect.x - margin &&
+    x <= rect.x + rect.width + margin &&
+    y >= rect.y - margin &&
+    y <= rect.y + rect.height + margin
+  );
+}
+
 /**
  * The resize side under a screen point: a corner, or any point along an edge
  * within `radius` of it. Corners win over the edges they touch.

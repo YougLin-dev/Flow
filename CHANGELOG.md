@@ -67,6 +67,20 @@ All notable changes to Flow are recorded here. The format follows
   not only at the eight handle points; corners still win where an edge meets
   a corner. A corner drag keeps the card's aspect ratio with its opposite
   corner fixed; an edge drag still resizes one axis.
+- Clicking a card raises it above every unselected card as soon as the press
+  selects it, and a marquee raises the whole selected group in selection
+  order. Hit testing follows the same stacking, so the card that draws on top
+  is the card that takes the press, and the pulled connector stays above even
+  a large elevated selection.
+- Box selection previews its result while the pointer drags: every card the
+  box covers takes the selected accent border immediately. Releasing keeps a
+  translucent accent frame around the selected cards, matching the marquee's
+  fill and border; it includes their title rows, draws above every unselected
+  card and below the selected ones so the swept area moves as one group, and
+  clears on a press outside it. Pressing anywhere inside the frame drags the
+  whole selection, including the empty space between its cards and their
+  borders, instead of starting a new box or resizing one card; the frame
+  shows the move cursor throughout.
 - Any visible card can be resized without selecting it first: pressing its
   border selects the card and starts the resize, hovering shows the resize
   cursor along any edge, and a card under the pointer keeps another card's

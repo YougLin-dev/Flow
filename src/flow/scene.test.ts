@@ -127,6 +127,46 @@ test("selects, toggles and ignores unknown cards", () => {
   expect(scene.selectedIds()).toEqual([]);
 });
 
+test("raises selected cards above unselected ones for drawing and hits", () => {
+  const scene = new FlowScene();
+  scene.apply(snapshot([node("a", 0, 0, { z: 5 }), node("b", 50, 40)]));
+
+  // The document z still decides between unselected cards.
+  expect(scene.nodeAt(60, 50)).toBe("a");
+  expect(scene.cardZ("a")).toBeGreaterThan(scene.cardZ("b"));
+
+  // Selecting b lifts it above every unselected card, whatever its z.
+  scene.select(["b"]);
+  expect(scene.cardZ("b")).toBeGreaterThan(scene.cardZ("a"));
+  expect(scene.frameZ()).toBeGreaterThan(scene.cardZ("a"));
+  expect(scene.frameZ()).toBeLessThan(scene.cardZ("b"));
+  expect(scene.nodeAt(60, 50)).toBe("b");
+  // The frame's world bounds include the card's title row.
+  expect(scene.selectionBounds()).toEqual({ x: 50, y: 14, width: 200, height: 110 });
+
+  // The selected group stacks in selection order: the last one draws on top.
+  scene.select(["b", "a"]);
+  expect(scene.cardZ("a")).toBeGreaterThan(scene.cardZ("b"));
+  expect(scene.selectionBounds()).toEqual({ x: 0, y: -26, width: 250, height: 150 });
+  // Even the pulled connector stays above the elevated selection.
+  expect(scene.previewZ()).toBeGreaterThan(scene.cardZ("a"));
+});
+
+test("raises a card in the same update as its selection", () => {
+  const scene = new FlowScene();
+  scene.apply(snapshot([node("a", 0, 0), node("b", 300, 0)]));
+
+  const zs: number[] = [];
+  effect(() => {
+    zs.push(scene.cardZ("b"));
+  });
+
+  scene.select(["b"]);
+  // The binding reading the depth sees the elevated value at once, without
+  // waiting for a later render to catch up with the selection.
+  expect(zs.at(-1)).toBeGreaterThan(scene.cardZ("a"));
+});
+
 test("keeps transient geometry ahead of the document until it is committed", () => {
   const scene = new FlowScene();
   scene.apply(snapshot([node("a", 40, 40)]));

@@ -47,6 +47,8 @@ test("box-selects a card", async () => {
   });
   await app.waitUntil(() => app.texts().some((text) => text.includes("1 card selected")));
   expect(app.texts().some((text) => text.includes("1 card selected"))).toBe(true);
+  // The released marquee keeps a frame around the cards it selected.
+  expect(app.shows("id:selection-frame")).toBe(true);
 });
 
 test("zooms with the platform modifier", async () => {

@@ -7,6 +7,7 @@ import { cleanup, createAnimatedValue, effect, Image, Text, token, View } from "
 import { Plus } from "lucide";
 import type { NodeSummary } from "@flow/native";
 import { Icon } from "./Icon";
+import { CARD_TITLE_GAP, CARD_TITLE_HEIGHT } from "../flow/card-layout";
 import {
   type BoxGeometry,
   PORT_PLUS_SIZE,
@@ -21,8 +22,12 @@ import type { PreviewView } from "../flow/scene";
 export interface FlowCardProps {
   readonly node: () => NodeSummary;
   readonly rect: () => BoxGeometry | null;
+  /** The card's draw order: selected cards sit above every other card. */
+  readonly zIndex: () => number;
   readonly preview: () => PreviewView | null;
   readonly selected: () => boolean;
+  /** True while a marquee in progress covers this card. */
+  readonly previewed: () => boolean;
   readonly hovered: () => boolean;
   /** The side this card's plus is following the pointer on, if any. */
   readonly plus: () => { readonly side: PortSide; readonly point: Point } | null;
@@ -42,15 +47,12 @@ const ACCENT_BG: Record<FlowAccent, string> = {
 const FOLLOW_SPRING = { stiffness: 600, damping: 48, mass: 1 } as const;
 const RETURN_SPRING = { stiffness: 300, damping: 20, mass: 1 } as const;
 
-/** The title row sits above the card, in world points. */
-const TITLE_HEIGHT = 20;
-const TITLE_GAP = 6;
 /** The body inset inside the card. */
 const BODY_INSET = 16;
 
 export function FlowCard(props: FlowCardProps) {
   const accent = () => nodeKind(props.node().kind).accent;
-  const active = () => props.selected() || props.hovered() || props.target();
+  const active = () => props.selected() || props.previewed() || props.hovered() || props.target();
   const left = () => props.rect()?.x ?? 0;
   const top = () => props.rect()?.y ?? 0;
   const width = () => props.rect()?.width ?? 0;
@@ -76,16 +78,16 @@ export function FlowCard(props: FlowCardProps) {
         top: 0,
         width: 0,
         height: 0,
-        zIndex: props.node().z + 1,
+        zIndex: props.zIndex(),
       }}
     >
       <View
         style={{
           position: "absolute",
           left: left(),
-          top: top() - TITLE_HEIGHT - TITLE_GAP,
+          top: top() - CARD_TITLE_HEIGHT - CARD_TITLE_GAP,
           width: width(),
-          height: TITLE_HEIGHT,
+          height: CARD_TITLE_HEIGHT,
         }}
       >
         <View
@@ -100,7 +102,7 @@ export function FlowCard(props: FlowCardProps) {
             left: 12,
             top: 0,
             width: Math.max(1, width() - (status() === "" ? 12 : 92)),
-            height: TITLE_HEIGHT,
+            height: CARD_TITLE_HEIGHT,
             textAlignVertical: "center",
             numberOfLines: 1,
             textOverflow: "ellipsis",
@@ -125,7 +127,7 @@ export function FlowCard(props: FlowCardProps) {
             left: width() - 64,
             top: 0,
             width: 56,
-            height: TITLE_HEIGHT,
+            height: CARD_TITLE_HEIGHT,
             textAlign: "right",
             textAlignVertical: "center",
             numberOfLines: 1,

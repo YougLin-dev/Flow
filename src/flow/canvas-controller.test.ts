@@ -176,6 +176,151 @@ test("box-selects only the cards the marquee covers", () => {
   expect(controller.marquee()).toBeNull();
 });
 
+test("previews the cards a marquee covers before it is released", () => {
+  const { scene, controller } = setup([node("a", 100, 100), node("b", 400, 100)]);
+
+  controller.down(50, 50, false, 1);
+  expect(controller.marqueePreview().size).toBe(0);
+  expect(scene.selectedIds()).toEqual([]);
+
+  controller.move(250, 120);
+  expect(controller.marqueePreview().has("a")).toBe(true);
+  // A preview is not a commit: the selection changes only on release.
+  expect(scene.selectedIds()).toEqual([]);
+
+  // The same covered set keeps the signal's value instead of rerendering rows.
+  const preview = controller.marqueePreview();
+  controller.move(260, 130);
+  expect(controller.marqueePreview()).toBe(preview);
+
+  controller.move(500, 220);
+  expect([...controller.marqueePreview()]).toEqual(["a", "b"]);
+
+  controller.up(500, 220);
+  expect(scene.selectedIds()).toEqual(["a", "b"]);
+  expect(controller.marqueePreview().size).toBe(0);
+});
+
+test("a shift marquee previews the selection it adds to", () => {
+  const { scene, controller } = setup([node("a", 100, 100), node("b", 400, 100)]);
+  scene.select(["a"]);
+
+  controller.down(350, 50, true, 1);
+  controller.move(500, 220);
+  expect([...controller.marqueePreview()]).toEqual(["a", "b"]);
+
+  controller.up(500, 220);
+  expect(scene.selectedIds()).toEqual(["a", "b"]);
+});
+
+test("drops a marquee preview when the gesture is cancelled", () => {
+  const { controller } = setup([node("a", 100, 100)]);
+
+  controller.down(50, 50, false, 1);
+  controller.move(250, 120);
+  expect(controller.marqueePreview().size).toBe(1);
+
+  controller.cancel();
+  expect(controller.marqueePreview().size).toBe(0);
+  expect(controller.marqueeSelected()).toBe(false);
+});
+
+test("keeps a marquee's frame while the pointer acts inside it", () => {
+  const { controller } = setup([node("a", 100, 100), node("b", 400, 100)]);
+
+  controller.down(50, 50, false, 1);
+  controller.move(650, 220);
+  controller.up(650, 220);
+  expect(controller.marqueeSelected()).toBe(true);
+  // The union includes each card's title row above its body.
+  expect(controller.selectionBounds()).toEqual({ x: 100, y: 74, width: 500, height: 110 });
+
+  // Pressing a selected card keeps the frame: it drags the whole group
+  // instead of replacing the selection with a click selection.
+  controller.down(150, 120, false, 1);
+  expect(controller.marqueeSelected()).toBe(true);
+  controller.move(200, 170);
+  expect(controller.selectionBounds()).toEqual({ x: 150, y: 124, width: 500, height: 110 });
+  controller.up(200, 170);
+  expect(controller.marqueeSelected()).toBe(true);
+});
+
+test("drags a marquee selection from the empty space inside its frame", () => {
+  const { scene, controller, calls } = setup([node("a", 100, 100), node("b", 400, 100)]);
+
+  controller.down(50, 50, false, 1);
+  controller.move(650, 220);
+  controller.up(650, 220);
+  expect(scene.selectedIds()).toEqual(["a", "b"]);
+
+  // The gap between the cards is inside the frame: it drags the selection.
+  controller.hover(350, 150);
+  expect(controller.cursor()).toBe("grab");
+
+  controller.down(350, 150, false, 1);
+  expect(scene.selectedIds()).toEqual(["a", "b"]);
+  expect(controller.marquee()).toBeNull();
+  expect(controller.gesturing()).toBe(true);
+
+  controller.move(450, 200);
+  expect(scene.cardRect("a")).toEqual({ x: 200, y: 150, width: 200, height: 84 });
+  expect(scene.cardRect("b")).toEqual({ x: 500, y: 150, width: 200, height: 84 });
+
+  controller.up(450, 200);
+  expect(calls.commits).toEqual([
+    [
+      { id: "a", x: 200, y: 150, width: 200, height: 84 },
+      { id: "b", x: 500, y: 150, width: 200, height: 84 },
+    ],
+  ]);
+  expect(scene.selectedIds()).toEqual(["a", "b"]);
+});
+
+test("drags a marquee selection from a card border inside its frame", () => {
+  const { scene, controller } = setup([node("a", 100, 100), node("b", 400, 100)]);
+
+  controller.down(50, 50, false, 1);
+  controller.move(650, 220);
+  controller.up(650, 220);
+
+  // (300, 110) is card a's east border, above its plus zone. Inside the
+  // frame it belongs to the group drag surface, not the resize handle.
+  controller.hover(300, 110);
+  expect(controller.cursor()).toBe("grab");
+
+  controller.down(300, 110, false, 1);
+  expect(controller.gesturing()).toBe(true);
+  controller.move(350, 160);
+  expect(scene.cardRect("a")).toEqual({ x: 150, y: 150, width: 200, height: 84 });
+  expect(scene.cardRect("b")).toEqual({ x: 450, y: 150, width: 200, height: 84 });
+  controller.up(350, 160);
+});
+
+test("a press outside the frame clears the marquee selection", () => {
+  const { scene, controller } = setup([node("a", 100, 100), node("b", 400, 100)]);
+
+  controller.down(50, 50, false, 1);
+  controller.move(650, 220);
+  controller.up(650, 220);
+  expect(scene.selectedIds()).toEqual(["a", "b"]);
+
+  controller.down(50, 50, false, 1);
+  expect(scene.selectedIds()).toEqual([]);
+  expect(controller.marqueeSelected()).toBe(false);
+  expect(controller.marquee()).not.toBeNull();
+  controller.cancel();
+});
+
+test("reports selection bounds in screen space", () => {
+  const { scene, camera, controller } = setup([node("a", 100, 100), node("b", 400, 100)]);
+  scene.select(["a", "b"]);
+  camera.x = 10;
+  camera.y = 20;
+  camera.scale = 2;
+
+  expect(controller.selectionBounds()).toEqual({ x: 210, y: 168, width: 1000, height: 220 });
+});
+
 test("pans with the hand tool instead of selecting", () => {
   const { scene, controller, calls, useTool } = setup([node("a", 100, 100)]);
   useTool("hand");
