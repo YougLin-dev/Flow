@@ -6,6 +6,7 @@ import { Image, Text, View } from "nsh";
 import type { NodeSummary } from "@flow/native";
 import type { BoxGeometry } from "../flow/connection";
 import { type FlowAccent, nodeKind, statusLabel } from "../flow/node-kinds";
+import { previewCell } from "../flow/preview-grid";
 import type { PreviewView } from "../flow/scene";
 
 export interface FlowCardProps {
@@ -24,17 +25,11 @@ const ACCENT_BG: Record<FlowAccent, string> = {
   "chart-5": "bg-chart-5",
 };
 
-const ACCENT_BORDER: Record<FlowAccent, string> = {
-  "chart-1": "border-chart-1",
-  "chart-2": "border-chart-2",
-  "chart-3": "border-chart-3",
-  "chart-4": "border-chart-4",
-  "chart-5": "border-chart-5",
-};
-
 export function FlowCard(props: FlowCardProps) {
   const accent = () => nodeKind(props.node().kind).accent;
   const active = () => props.selected() || props.hovered();
+  const left = () => props.rect()?.x ?? 0;
+  const top = () => props.rect()?.y ?? 0;
   const width = () => props.rect()?.width ?? 0;
   const height = () => props.rect()?.height ?? 0;
   const body = () => props.node().body.trim();
@@ -42,125 +37,168 @@ export function FlowCard(props: FlowCardProps) {
 
   return (
     <View
-      accessibilityLabel={props.node().title}
-      classList={{
-        "absolute rounded-2xl border bg-card shadow-lg": true,
-        "border-chart-1": active(),
-        "border-border": !active(),
-      }}
       style={{
         position: "absolute",
-        left: props.rect()?.x ?? 0,
-        top: props.rect()?.y ?? 0,
-        width: width(),
-        height: height(),
+        left: 0,
+        top: 0,
+        width: 0,
+        height: 0,
         zIndex: props.node().z + 1,
       }}
     >
       <View
+        accessibilityLabel={props.node().title}
         classList={{
-          "absolute left-4 top-4 h-5 w-1 rounded-full": true,
-          [ACCENT_BG[accent()]]: true,
+          "absolute rounded-2xl border bg-card shadow-lg": true,
+          "border-chart-1": active(),
+          "border-border": !active(),
         }}
-      />
-      <Text
-        class="absolute text-[15px] font-semibold text-card-foreground"
         style={{
-          left: 28,
-          top: 14,
-          width: Math.max(1, width() - 116),
-          numberOfLines: 1,
-          textOverflow: "ellipsis",
+          position: "absolute",
+          left: left(),
+          top: top(),
+          width: width(),
+          height: height(),
         }}
       >
-        {props.node().title}
-      </Text>
-      <View
-        classList={{
-          "absolute h-1.5 w-1.5 rounded-full": true,
-          [statusDot(props.node().status)]: true,
-        }}
-        style={{
-          left: width() - 74,
-          top: 23,
-          visibility: statusLabel(props.node().status) === "" ? "hidden" : "visible",
-        }}
-      />
-      <Text
-        classList={{ "absolute text-[10px]": true, [statusText(props.node().status)]: true }}
-        style={{
-          left: width() - 64,
-          top: 16,
-          width: 56,
-          textAlign: "right",
-          numberOfLines: 1,
-          textOverflow: "ellipsis",
-        }}
-      >
-        {statusLabel(props.node().status)}
-      </Text>
-
-      {props.node().kind === "image" ? (
         <View
-          class="absolute"
-          style={{
-            left: 16,
-            top: 48,
-            width: Math.max(1, width() - 32),
-            height: Math.max(1, height() - 64),
+          classList={{
+            "absolute left-4 top-4 h-5 w-1 rounded-full": true,
+            [ACCENT_BG[accent()]]: true,
           }}
-        >
-          {props.preview() === null || props.preview()?.urls.length === 0 ? (
-            <Text class="text-xs text-muted-foreground">No output yet</Text>
-          ) : null}
-          <Each of={props.preview()?.urls ?? []} key="index">
-            {(url, index) => (
-              <Image
-                src={url()}
-                style={{
-                  position: "absolute",
-                  ...cellOf(width(), height(), index(), props.preview()?.urls.length ?? 0),
-                  borderRadius: 8,
-                  objectFit: "cover",
-                }}
-              />
-            )}
-          </Each>
-        </View>
-      ) : body() === "" ? (
-        <Text class="absolute text-xs text-muted-foreground" style={{ left: 16, top: 48 }}>
-          No output yet
-        </Text>
-      ) : (
+        />
         <Text
-          class="absolute text-[13px] text-card-foreground"
+          class="absolute text-[15px] font-semibold text-card-foreground"
           style={{
-            left: 16,
-            top: 48,
-            width: Math.max(1, width() - 32),
-            height: Math.max(1, height() - 64),
-            lineHeight: 19,
-            numberOfLines: lineCount(),
+            left: 28,
+            top: 14,
+            width: Math.max(1, width() - 116),
+            numberOfLines: 1,
             textOverflow: "ellipsis",
           }}
         >
-          {truncate(props.node().body, 600)}
+          {props.node().title}
         </Text>
-      )}
+        <View
+          classList={{
+            "absolute h-1.5 w-1.5 rounded-full": true,
+            [statusDot(props.node().status)]: true,
+          }}
+          style={{
+            left: width() - 74,
+            top: 23,
+            visibility: statusLabel(props.node().status) === "" ? "hidden" : "visible",
+          }}
+        />
+        <Text
+          classList={{ "absolute text-[10px]": true, [statusText(props.node().status)]: true }}
+          style={{
+            left: width() - 64,
+            top: 16,
+            width: 56,
+            textAlign: "right",
+            numberOfLines: 1,
+            textOverflow: "ellipsis",
+          }}
+        >
+          {statusLabel(props.node().status)}
+        </Text>
 
-      <View
-        classList={{
-          "absolute h-3 w-3 rounded-full border-2 bg-card": true,
-          [ACCENT_BORDER[accent()]]: true,
-        }}
-        style={{ left: -6, top: height() / 2 - 6 }}
+        {props.node().kind === "image" ? (
+          <View
+            class="absolute"
+            style={{
+              left: 16,
+              top: 48,
+              width: Math.max(1, width() - 32),
+              height: Math.max(1, height() - 64),
+              overflow: "hidden",
+            }}
+          >
+            {props.preview() === null || props.preview()?.urls.length === 0 ? (
+              <Text class="text-xs text-muted-foreground">No output yet</Text>
+            ) : null}
+            <Each of={props.preview()?.urls ?? []} key="index">
+              {(url, index) => (
+                <Image
+                  src={url()}
+                  style={{
+                    position: "absolute",
+                    ...previewCell(
+                      Math.max(1, width() - 32),
+                      Math.max(1, height() - 64),
+                      index(),
+                      props.preview()?.urls.length ?? 0,
+                    ),
+                    borderRadius: 8,
+                    objectFit: "cover",
+                  }}
+                />
+              )}
+            </Each>
+          </View>
+        ) : body() === "" ? (
+          <Text class="absolute text-xs text-muted-foreground" style={{ left: 16, top: 48 }}>
+            No output yet
+          </Text>
+        ) : (
+          <Text
+            class="absolute text-[13px] text-card-foreground"
+            style={{
+              left: 16,
+              top: 48,
+              width: Math.max(1, width() - 32),
+              height: Math.max(1, height() - 64),
+              lineHeight: 19,
+              numberOfLines: lineCount(),
+              textOverflow: "ellipsis",
+            }}
+          >
+            {truncate(props.node().body, 600)}
+          </Text>
+        )}
+      </View>
+
+      <Port
+        accent={accent()}
+        left={left() - PORT_SIZE / 2}
+        top={top() + height() / 2 - PORT_SIZE / 2}
       />
+      <Port
+        accent={accent()}
+        left={left() + width() - PORT_SIZE / 2}
+        top={top() + height() / 2 - PORT_SIZE / 2}
+      />
+    </View>
+  );
+}
+
+const PORT_SIZE = 14;
+const PORT_DOT = 7;
+
+/**
+ * A port's accent dot on a card-colored halo, drawn after the card so the
+ * halo covers the border and the connector's end beneath it.
+ */
+function Port(props: { readonly accent: FlowAccent; readonly left: number; readonly top: number }) {
+  return (
+    <View
+      class="absolute rounded-full bg-card"
+      style={{
+        left: props.left,
+        top: props.top,
+        width: PORT_SIZE,
+        height: PORT_SIZE,
+      }}
+    >
       <View
-        classList={{
-          "absolute h-3 w-3 rounded-full border-2 bg-card": true,
-          [ACCENT_BORDER[accent()]]: true,
+        classList={{ "absolute rounded-full": true, [ACCENT_BG[props.accent]]: true }}
+        style={{
+          left: (PORT_SIZE - PORT_DOT) / 2,
+          top: (PORT_SIZE - PORT_DOT) / 2,
+          width: PORT_DOT,
+          height: PORT_DOT,
         }}
-        style={{ left: width() - 6, top: height() / 2 - 6 }}
       />
     </View>
   );
@@ -194,27 +232,6 @@ function statusText(status: string): string {
     default:
       return "text-muted-foreground";
   }
-}
-
-function cellOf(
-  width: number,
-  height: number,
-  index: number,
-  count: number,
-): { left: number; top: number; width: number; height: number } {
-  const gap = 8;
-  const areaWidth = Math.max(1, width - 32);
-  const areaHeight = Math.max(1, height - 64);
-  const columns = count <= 1 ? 1 : 2;
-  const rows = Math.min(2, Math.ceil(count / columns));
-  const cellWidth = (areaWidth - gap * (columns - 1)) / columns;
-  const cellHeight = (areaHeight - gap * (rows - 1)) / Math.max(1, rows);
-  return {
-    left: 16 + (index % columns) * (cellWidth + gap),
-    top: 48 + Math.floor(index / columns) * (cellHeight + gap),
-    width: Math.max(1, cellWidth),
-    height: Math.max(1, cellHeight),
-  };
 }
 
 function truncate(text: string, limit: number): string {

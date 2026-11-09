@@ -59,6 +59,8 @@ export class CanvasController {
   readonly marquee = signal<ScreenRect | null>(null);
   /** The card under the pointer while no gesture runs. */
   readonly hovered = signal<string | null>(null);
+  /** True while a press moves cards, resizes one or pulls a connector. */
+  readonly gesturing = signal(false);
   readonly cursor = signal<CanvasCursor>("default");
 
   private readonly edges: EdgeGestures;
@@ -102,6 +104,7 @@ export class CanvasController {
     const scene = this.host.scene();
     const camera = this.host.camera();
     this.edgeMode = false;
+    this.gesturing.set(false);
     this.gesture = { ...idle(), startX: x, startY: y, lastX: x, lastY: y };
 
     if (this.host.tool() === "hand") {
@@ -114,6 +117,7 @@ export class CanvasController {
     // gesture at that point.
     if (this.edges.down(x, y)) {
       this.edgeMode = true;
+      this.gesturing.set(true);
       this.gesture = { ...this.gesture, mode: "edge" };
       this.cursor.set("crosshair");
       return;
@@ -125,6 +129,7 @@ export class CanvasController {
       const id = scene.selection()[0];
       const base = id === undefined ? null : scene.cardRect(id);
       if (handle && id !== undefined && base) {
+        this.gesturing.set(true);
         this.gesture = {
           ...this.gesture,
           mode: "resize",
@@ -237,6 +242,7 @@ export class CanvasController {
   up(x: number, y: number): void {
     const gesture = this.gesture;
     this.gesture = idle();
+    this.gesturing.set(false);
     if (this.edgeMode) {
       this.edgeMode = false;
       this.edges.up(x, y);
@@ -271,6 +277,7 @@ export class CanvasController {
   cancel(): void {
     this.edges.cancel();
     this.edgeMode = false;
+    this.gesturing.set(false);
     if (this.gesture.mode === "drag" || this.gesture.mode === "resize") {
       this.host.scene().clearOverrides();
     }
@@ -317,6 +324,7 @@ export class CanvasController {
       const rect = scene.cardRect(id);
       if (rect) base.set(id, rect);
     }
+    this.gesturing.set(true);
     this.gesture = { ...this.gesture, mode: "drag", base };
     this.host.selectEdge(null);
     this.cursor.set("grabbing");

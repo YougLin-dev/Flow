@@ -1,6 +1,7 @@
 /**
- * A connector on the native canvas, in sampled straight segments. Geometry
- * is in world-space points, so the line scales with the camera.
+ * A connector on the native canvas, drawn as densely sampled, overlapping
+ * straight segments with rounded caps. Geometry is in world-space points, so
+ * the line scales with the camera.
  */
 import { View } from "nsh";
 import { connectionPoints, type Point } from "../flow/connection";
@@ -20,13 +21,26 @@ interface Segment {
   readonly angle: number;
 }
 
-const THICKNESS = 1.5;
-const STEPS = 16;
+const THICKNESS = 2;
+/** World points one segment spans; shorter segments read as a smooth curve. */
+const STEP_LENGTH = 10;
+const MIN_STEPS = 16;
+const MAX_STEPS = 64;
+/** Each segment reaches past its joint, so antialiased ends cannot leave gaps. */
+const OVERLAP = 0.75;
 
 /** The connector's samples, in world coordinates. */
 export function edgeSegments(from: Point | null, to: Point | null): Segment[] {
   if (!from || !to) return [];
-  const points = connectionPoints(from, to, STEPS);
+  const rough = connectionPoints(from, to, MIN_STEPS);
+  let length = 0;
+  for (let index = 0; index + 1 < rough.length; index += 1) {
+    const a = rough[index];
+    const b = rough[index + 1];
+    if (a && b) length += Math.hypot(b.x - a.x, b.y - a.y);
+  }
+  const steps = Math.min(MAX_STEPS, Math.max(MIN_STEPS, Math.ceil(length / STEP_LENGTH)));
+  const points = connectionPoints(from, to, steps);
   const segments: Segment[] = [];
   for (let index = 0; index + 1 < points.length; index += 1) {
     const a = points[index];
@@ -37,7 +51,7 @@ export function edgeSegments(from: Point | null, to: Point | null): Segment[] {
     segments.push({
       x: a.x,
       y: a.y - THICKNESS / 2,
-      length: Math.hypot(dx, dy),
+      length: Math.hypot(dx, dy) + OVERLAP,
       angle: (Math.atan2(dy, dx) * 180) / Math.PI,
     });
   }
@@ -67,47 +81,13 @@ export function FlowEdge(props: FlowEdgeProps) {
               top: segment().y,
               width: segment().length,
               height: THICKNESS,
+              borderRadius: THICKNESS / 2,
               transform: [{ rotate: `${segment().angle}deg` }],
               transformOrigin: "0 50%",
-              opacity: 0.9,
             }}
           />
         )}
       </Each>
-      <If when={props.to()}>
-        {(to) => (
-          <View
-            classList={{ absolute: true, [tone()]: true }}
-            style={{
-              position: "absolute",
-              left: to().x - 11,
-              top: to().y - 5.75,
-              width: 12.6,
-              height: THICKNESS,
-              transform: [{ rotate: "22.62deg" }],
-              transformOrigin: "0 50%",
-              opacity: 0.9,
-            }}
-          />
-        )}
-      </If>
-      <If when={props.to()}>
-        {(to) => (
-          <View
-            classList={{ absolute: true, [tone()]: true }}
-            style={{
-              position: "absolute",
-              left: to().x - 11,
-              top: to().y + 4.25,
-              width: 12.6,
-              height: THICKNESS,
-              transform: [{ rotate: "-22.62deg" }],
-              transformOrigin: "0 50%",
-              opacity: 0.9,
-            }}
-          />
-        )}
-      </If>
     </View>
   );
 }

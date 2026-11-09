@@ -152,10 +152,12 @@ events and renders four kinds of children:
   and dispatches presses, moves and touches to the `CanvasController`.
 
 `FlowCard` positions itself from the node's world rectangle and renders title,
-status, body text and the input/output ports. `FlowEdge` samples the connector
-cubic (`flow/connection.ts`) into straight rotated line views and draws an
-arrowhead at the input end. Both are presentational: props are accessors, and
-the page passes scene signals to them.
+status, body text, image thumbnails (laid out inside the body box) and the
+input/output ports as accent dots on a card-colored halo. `FlowEdge` samples
+the connector cubic (`flow/connection.ts`) into densely spaced, overlapping
+straight line views with rounded caps; the overlap keeps antialiased joints
+from showing gaps, and there is no arrowhead. Both are presentational: props
+are accessors, and the page passes scene signals to them.
 
 The scene model (`flow/scene.ts`) is headless: it holds the visible nodes and
 edges, the selection, transient drag geometry (`overrides`), previews and the
@@ -169,7 +171,8 @@ The dot grid and the cards follow the camera, but the composer does not: its
 height is measured by layout and its position is computed in screen points
 from the selected card's current screen rectangle (`flow/overlay.ts`), so it
 stays readable at every zoom and never leaves the stage. The inline editor is
-anchored the same way.
+anchored the same way. While a card is dragged or resized, or a connector is
+pulled, the composer hides so the gesture and its target stay visible.
 
 ## Input
 

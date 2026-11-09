@@ -163,6 +163,9 @@ export function FlowPage() {
   });
 
   const composerPosition = (): { left: number; top: number; width: number } | null => {
+    // Keep the canvas readable while a card is dragged or resized or a
+    // connector is pulled; the composer comes back when the gesture ends.
+    if (controller.gesturing()) return null;
     const id = currentSession()?.composerId() ?? null;
     if (id === null) return null;
     const rect = scene.cardRect(id);

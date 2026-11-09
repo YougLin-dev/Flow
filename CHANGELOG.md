@@ -39,6 +39,9 @@ All notable changes to Flow are recorded here. The format follows
   screen-reader-accessible without a separate inspector.
 - The boundary rule now fails closed when the importing module itself is
   unclassified, not only when its target is.
+- Connectors render as densely sampled, overlapping line segments with rounded
+  caps, and card ports are accent dots on a card-colored halo; connector
+  arrowheads are gone.
 
 ### Removed
 
@@ -47,6 +50,10 @@ All notable changes to Flow are recorded here. The format follows
 
 ### Fixed
 
+- Image thumbnails stay inside an image card's body: preview cells are
+  positioned relative to the body box instead of applying its inset twice.
+- The composer hides while a card is dragged or resized, or a connector is
+  pulled, so the gesture and its target stay visible.
 - Undo history is mutated inside the same serialized database worker job as
   the write it describes; an undo can no longer pop an older entry while a
   command is still in flight and wedge the history.

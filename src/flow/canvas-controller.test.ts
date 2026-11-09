@@ -97,12 +97,14 @@ test("selects a card on press and commits a dragged position", () => {
   controller.down(150, 120, false, 1);
   expect(scene.selectedIds()).toEqual(["a"]);
   expect(calls.cards).toEqual(["a"]);
+  expect(controller.gesturing()).toBe(true);
   expect(controller.cursor()).toBe("grabbing");
 
   controller.move(190, 160);
   expect(scene.cardRect("a")).toEqual({ x: 140, y: 140, width: 200, height: 84 });
 
   controller.up(190, 160);
+  expect(controller.gesturing()).toBe(false);
   expect(calls.commits).toEqual([[{ id: "a", x: 140, y: 140, width: 200, height: 84 }]]);
 });
 
@@ -128,6 +130,7 @@ test("cancels a drag without committing it", () => {
 
   controller.cancel();
   expect(scene.overrides().size).toBe(0);
+  expect(controller.gesturing()).toBe(false);
   expect(scene.cardRect("a")).toEqual({ x: 100, y: 100, width: 200, height: 84 });
   expect(calls.commits).toEqual([]);
   expect(controller.cursor()).toBe("default");
@@ -195,11 +198,13 @@ test("resizes the selected card from its handle", () => {
 
   controller.down(300, 184, false, 1);
   expect(controller.cursor()).toBe("nwse-resize");
+  expect(controller.gesturing()).toBe(true);
 
   controller.move(340, 214);
   expect(scene.cardRect("a")).toEqual({ x: 100, y: 100, width: 240, height: 114 });
 
   controller.up(340, 214);
+  expect(controller.gesturing()).toBe(false);
   expect(calls.commits).toEqual([[{ id: "a", x: 100, y: 100, width: 240, height: 114 }]]);
 });
 
@@ -227,10 +232,12 @@ test("starts a connection from an output port", () => {
 
   controller.down(200, 42, false, 1);
   expect(controller.cursor()).toBe("crosshair");
+  expect(controller.gesturing()).toBe(true);
   controller.move(250, 42);
   expect(scene.connectionPreview()).not.toBeNull();
 
   controller.up(350, 42);
+  expect(controller.gesturing()).toBe(false);
   expect(calls.connections).toEqual([{ fromId: "a", toId: "b" }]);
   expect(scene.connectionPreview()).toBeNull();
 });
