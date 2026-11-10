@@ -14,15 +14,8 @@ import {
   token,
 } from "nsh";
 import type { EdgeSummary } from "@flow/native";
-import {
-  type BoxGeometry,
-  connectionBounds,
-  connectorControls,
-  EDGE_PADDING,
-  EDGE_THICKNESS,
-  mergeBounds,
-  splitConnector,
-} from "../flow/connection";
+import { type Point, connectorControls, EDGE_THICKNESS, splitConnector } from "../flow/connection";
+import { connectorLayerBox } from "../flow/edge-layer";
 import {
   edgeFlows,
   FLOW_REST_ALPHA,
@@ -43,18 +36,10 @@ const FLOW_THICKNESS = EDGE_THICKNESS + 1;
  * record. The comet comes back when the gesture ends. */
 const GESTURE_FLOW_EDGES = 4;
 
-/** How coarse the canvas box is, in world points: fine enough that rounding
- * it outward never shows, coarse enough that moving a card does not resize
- * the canvas surface every pointer move. */
-const BOX_STEP = 64;
-
-/** `box` rounded outward to whole `BOX_STEP`s, never clipping what it holds. */
-function roundOut(box: BoxGeometry): BoxGeometry {
-  const x = Math.floor(box.x / BOX_STEP) * BOX_STEP;
-  const y = Math.floor(box.y / BOX_STEP) * BOX_STEP;
-  const right = Math.ceil((box.x + box.width) / BOX_STEP) * BOX_STEP;
-  const bottom = Math.ceil((box.y + box.height) / BOX_STEP) * BOX_STEP;
-  return { x, y, width: right - x, height: bottom - y };
+/** A connector's resolved ports, shared by its baseline and comet strokes. */
+interface DrawableEdge {
+  readonly edge: EdgeSummary;
+  readonly ports: { from: Point; to: Point };
 }
 
 export interface FlowEdgesProps {
@@ -99,23 +84,7 @@ export function FlowEdges(props: FlowEdgesProps) {
     wave.interpolate(flowPass(index)),
   );
 
-  /** The world box the canvas covers: the connectors' union with their
-   * padding, rounded outward to whole steps, so a dragged card redraws the
-   * connectors without resizing the canvas surface on every pointer move. */
-  const box = (): BoxGeometry | null => {
-    let union: BoxGeometry | null = null;
-    for (const edge of props.scene.edges()) {
-      const bounds = edgeBox(props.scene, edge);
-      if (bounds !== null) union = union === null ? bounds : mergeBounds(union, bounds);
-    }
-    if (union === null) return null;
-    return roundOut({
-      x: union.x - EDGE_PADDING,
-      y: union.y - EDGE_PADDING,
-      width: union.width + EDGE_PADDING * 2,
-      height: union.height + EDGE_PADDING * 2,
-    });
-  };
+  const box = connectorLayerBox(props.scene);
   const left = () => box()?.x ?? 0;
   const top = () => box()?.y ?? 0;
   const width = () => box()?.width ?? 0;
@@ -123,8 +92,15 @@ export function FlowEdges(props: FlowEdgesProps) {
 
   const draw = (cx: CanvasRenderingContext2D): void => {
     const edges = props.scene.edges();
-    if (edges.length === 0) return;
-    const origin = { x: left(), y: top() };
+    const drawable: DrawableEdge[] = [];
+    for (const edge of edges) {
+      const ports = props.scene.edgePorts(edge);
+      if (ports) drawable.push({ edge, ports });
+    }
+    if (drawable.length === 0) return;
+    const current = box();
+    if (current === null) return;
+    const origin = { x: current.x, y: current.y };
     // Read the scheme so a theme switch redraws every connector's color.
     colorScheme();
     const normal = token("muted-foreground");
@@ -137,9 +113,7 @@ export function FlowEdges(props: FlowEdgesProps) {
     const flowing = new Set(props.scene.selection());
     cx.lineCap = "round";
     let flowingEdges = 0;
-    for (const edge of edges) {
-      const ports = props.scene.edgePorts(edge);
-      if (!ports) continue;
+    for (const { edge, ports } of drawable) {
       const { from, to } = ports;
       const { c1, c2 } = connectorControls(from, to);
       // A selected card's connectors rest brighter and thicker than the
@@ -186,10 +160,8 @@ export function FlowEdges(props: FlowEdgesProps) {
     cx.strokeStyle = flowColor;
     cx.lineCap = "butt";
     cx.lineWidth = FLOW_THICKNESS;
-    for (const edge of edges) {
+    for (const { edge, ports } of drawable) {
       if (!edgeFlows(edge, flowing)) continue;
-      const ports = props.scene.edgePorts(edge);
-      if (!ports) continue;
       const pieces = splitConnector(ports.from, ports.to, FLOW_SEGMENTS);
       for (let i = 0; i < pieces.length; i += 1) {
         const piece = pieces[i];
@@ -224,10 +196,4 @@ export function FlowEdges(props: FlowEdgesProps) {
       draw={draw}
     />
   );
-}
-
-/** The world box one connector's cubic covers, or null when it has no ends. */
-function edgeBox(scene: FlowScene, edge: EdgeSummary): BoxGeometry | null {
-  const ports = scene.edgePorts(edge);
-  return ports ? connectionBounds(ports.from, ports.to) : null;
 }
