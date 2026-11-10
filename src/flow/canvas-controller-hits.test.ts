@@ -109,3 +109,47 @@ test("an additive marquee keeps selection order and selects each card once", () 
   expect(fresh).toEqual(["a", "b"]);
   expect(new Set(fresh).size).toBe(fresh.length);
 });
+
+test("shows a resize cursor over a handle just outside a card", () => {
+  const { controller } = setup([node("a", 100, 100)]);
+
+  // (305, 189) is five points beyond the card's southeast corner.
+  controller.hover(305, 189);
+  expect(controller.cursor()).toBe("nwse-resize");
+  expect(controller.hovered()).toBe("a");
+
+  // The card body itself is not a handle.
+  controller.hover(150, 120);
+  expect(controller.cursor()).toBe("default");
+  expect(controller.hovered()).toBe("a");
+});
+
+test("keeps an outside handle's seven screen points at every zoom", () => {
+  for (const scale of [0.5, 2]) {
+    const { scene, camera, controller } = setup([node("a", 100, 100)]);
+    scene.select([]);
+    camera.scale = scale;
+    const x = 200 * scale;
+    const top = 100 * scale;
+
+    // Five screen points above the north border is inside the handle reach.
+    controller.hover(x, top - 5);
+    expect(controller.cursor()).toBe("ns-resize");
+    expect(controller.hovered()).toBe("a");
+
+    // Eight screen points above is past the reach and outside the card.
+    controller.hover(x, top - 8);
+    expect(controller.cursor()).toBe("default");
+    expect(controller.hovered()).toBeNull();
+  }
+});
+
+test("a top card hides a lower card's plus during hover", () => {
+  const { controller } = setup([node("a", 0, 0), node("cover", 190, 0, { z: 5 })]);
+
+  // (204, 42) is inside a's output zone and cover's body.
+  controller.hover(204, 42);
+  expect(controller.portPlus()).toBeNull();
+  expect(controller.hovered()).toBe("cover");
+  expect(controller.cursor()).toBe("default");
+});

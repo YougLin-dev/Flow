@@ -415,7 +415,11 @@ export class FlowScene {
    * position. The topmost card owns the hit: a card under the pointer hides a
    * lower card's plus, just as it hides the card it belongs to.
    */
-  portZoneAt(x: number, y: number): { nodeId: string; side: PortSide; point: Point } | null {
+  portZoneAt(
+    x: number,
+    y: number,
+    under?: string | null,
+  ): { nodeId: string; side: PortSide; point: Point } | null {
     let hit: { nodeId: string; side: PortSide; point: Point; z: number } | null = null;
     for (const node of this.byId.values()) {
       const rect = this.cardRect(node.id);
@@ -429,9 +433,9 @@ export class FlowScene {
       }
     }
     if (hit === null) return null;
-    const under = this.nodeAt(x, y);
-    if (under !== null && under !== hit.nodeId) {
-      if (this.cardDepth(under) >= hit.z) return null;
+    const covered = under === undefined ? this.nodeAt(x, y) : under;
+    if (covered !== null && covered !== hit.nodeId) {
+      if (this.cardDepth(covered) >= hit.z) return null;
     }
     return { nodeId: hit.nodeId, side: hit.side, point: hit.point };
   }

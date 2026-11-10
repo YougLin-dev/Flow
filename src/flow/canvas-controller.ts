@@ -132,7 +132,11 @@ export class CanvasController {
    */
   selectionBounds(): ScreenRect | null {
     const bounds = this.host.scene().selectionBounds();
-    if (!bounds) return null;
+    return bounds ? this.frameScreenRect(bounds) : null;
+  }
+
+  /** A world frame's bounds in screen points, titles included. */
+  private frameScreenRect(bounds: BoxGeometry): ScreenRect {
     const camera = this.host.camera();
     const topLeft = camera.toScreen(bounds.x, bounds.y);
     return {
@@ -144,12 +148,16 @@ export class CanvasController {
   }
 
   /** Whether a screen point is inside the frame a marquee left around its selection. */
-  private frameContains(x: number, y: number): boolean {
+  private frameContains(
+    x: number,
+    y: number,
+    framed = this.multiFrame(),
+    bounds = framed ? this.host.scene().selectionBounds() : null,
+  ): boolean {
     // The frame is a multi-card selection's affordance: with one card left
     // (a shift press, a delete) it is a normal selection again.
-    if (!this.multiFrame()) return false;
-    const bounds = this.selectionBounds();
-    return bounds !== null && containsPoint(bounds, x, y, SELECTION_FRAME_PADDING);
+    if (!framed || bounds === null) return false;
+    return containsPoint(this.frameScreenRect(bounds), x, y, SELECTION_FRAME_PADDING);
   }
 
   /** True while a marquee's frame spans two or more selected cards. */
@@ -158,10 +166,8 @@ export class CanvasController {
   }
 
   /** The merged plus zone under a screen point, on a multi-card frame. */
-  private framePlusAt(x: number, y: number): FramePlus | null {
-    if (!this.multiFrame()) return null;
-    const bounds = this.host.scene().selectionBounds();
-    if (!bounds) return null;
+  private framePlusAt(x: number, y: number, bounds: BoxGeometry | null): FramePlus | null {
+    if (bounds === null) return null;
     const camera = this.host.camera();
     const world = camera.toWorld(x, y);
     const padding = SELECTION_FRAME_PADDING / camera.scale;
@@ -185,11 +191,13 @@ export class CanvasController {
       this.framePlus.set(null);
       this.clearPreview();
       this.gesture = { ...idle(), startX: x, startY: y, lastX: x, lastY: y };
+      const framed = this.multiFrame();
+      const frameBounds = framed ? scene.selectionBounds() : null;
 
       // The merged plus is a connector handle for the whole selection. Test it
       // before a press outside the frame would dismiss that frame.
       if (this.host.tool() === "select") {
-        const framePlus = this.framePlusAt(x, y);
+        const framePlus = this.framePlusAt(x, y, frameBounds);
         if (
           framePlus !== null &&
           this.edges.beginGroup(x, y, framePlus.side === "out" ? "from" : "to")
@@ -204,7 +212,7 @@ export class CanvasController {
 
       // The frame belongs to the area the marquee swept: it stays while the
       // pointer acts inside it and disappears on a press outside.
-      const insideFrame = this.frameContains(x, y);
+      const insideFrame = this.frameContains(x, y, framed, frameBounds);
       if (!insideFrame) this.marqueeSelected.set(false);
 
       if (this.host.tool() === "hand") {
@@ -451,12 +459,17 @@ export class CanvasController {
       const camera = this.host.camera();
       const world = camera.toWorld(x, y);
       const tool = this.host.tool();
+      // One card pass serves the plus occlusion, the frame hover and the
+      // resting hover; the frame is also decided once for this pointer event.
+      const under = scene.nodeAt(world.x, world.y);
+      const framed = tool === "select" && this.multiFrame();
+      const frameBounds = framed ? scene.selectionBounds() : null;
       if (tool !== "select") {
         this.framePlus.set(null);
       } else {
         // The merged plus belongs to the frame's side zones, ahead of every
         // per-card zone or resize handle it overlaps.
-        const framePlus = this.framePlusAt(x, y);
+        const framePlus = this.framePlusAt(x, y, frameBounds);
         if (framePlus !== null) {
           this.framePlus.set(framePlus);
           this.setHovered(null);
@@ -468,8 +481,8 @@ export class CanvasController {
         // A plus zone takes precedence over the east/west resize handles it
         // overlaps: pressing a visible plus starts a connection. A framed
         // selection hides its per-card pluses, so their zones are muted.
-        const zone = scene.portZoneAt(world.x, world.y);
-        if (zone && !(this.multiFrame() && scene.selection().includes(zone.nodeId))) {
+        const zone = scene.portZoneAt(world.x, world.y, under);
+        if (zone && !(framed && scene.selection().includes(zone.nodeId))) {
           this.setHovered(zone.nodeId);
           this.portPlus.set({ nodeId: zone.nodeId, side: zone.side, point: zone.point });
           this.cursor.set("crosshair");
@@ -479,21 +492,20 @@ export class CanvasController {
       // The frame a marquee left is one drag surface: card bodies and borders
       // inside it all move the whole selection, so the move cursor is shown
       // everywhere but the explicit port buttons above.
-      if (tool === "select" && this.frameContains(x, y)) {
-        this.setHovered(scene.nodeAt(world.x, world.y));
+      if (tool === "select" && this.frameContains(x, y, framed, frameBounds)) {
+        this.setHovered(under);
         this.portPlus.set(null);
         this.cursor.set("grab");
         return;
       }
-      const target = handleAtPoint(scene, camera, scene.nodes(), x, y);
+      const target = handleAtPoint(scene, camera, scene.nodes(), x, y, under);
       if (target) {
         this.setHovered(target.id);
         this.portPlus.set(null);
         this.cursor.set(cursorForHandle(target.side));
         return;
       }
-      const id = scene.nodeAt(world.x, world.y);
-      this.setHovered(id);
+      this.setHovered(under);
       this.portPlus.set(null);
       this.cursor.set(tool === "hand" ? "grab" : "default");
     });

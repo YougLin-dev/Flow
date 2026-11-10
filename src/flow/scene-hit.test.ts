@@ -206,6 +206,21 @@ test("forgets a pair pruned for missing anchors without a reactive read", () => 
   expect(scene.hasEdge("a", "b")).toBe(false);
 });
 
+test("takes an explicit card as the side zone's occluder", () => {
+  const scene = new FlowScene();
+  scene.apply(snapshot([node("a", 0, 0), node("cover", 190, 0, { z: 5 })]));
+
+  // (204, 42) is in a's output zone but inside the cover card.
+  expect(scene.portZoneAt(204, 42, "a")).toEqual({
+    nodeId: "a",
+    side: "out",
+    point: { x: 208, y: 42 },
+  });
+  expect(scene.portZoneAt(204, 42, "cover")).toBeNull();
+  // Omitting the argument recomputes the same covering card.
+  expect(scene.portZoneAt(204, 42)).toBeNull();
+});
+
 test("keeps oddly named node pairs distinct in the pair index", () => {
   const scene = new FlowScene();
   const trickyFrom = 'a\u0000,b:c"';

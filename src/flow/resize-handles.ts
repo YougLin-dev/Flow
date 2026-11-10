@@ -30,21 +30,24 @@ export function handleAtPoint(
   nodes: readonly NodeSummary[],
   x: number,
   y: number,
+  under?: string | null,
 ): { id: string; side: ResizeHandle } | null {
   const world = camera.toWorld(x, y);
-  const under = scene.nodeAt(world.x, world.y);
-  if (under !== null) {
-    const rect = screenRect(scene, camera, under);
+  const card = under === undefined ? scene.nodeAt(world.x, world.y) : under;
+  if (card !== null) {
+    const rect = screenRect(scene, camera, card);
     const side = rect ? handleAt(rect, x, y) : null;
-    return side === null ? null : { id: under, side };
+    return side === null ? null : { id: card, side };
   }
   // Outside every card: a handle reaches past its card's border, so look
-  // for the topmost one within reach.
+  // for the topmost one within reach. Comparing world geometry with the
+  // handle's screen reach avoids a screen rectangle per candidate.
+  const radius = 7 / camera.scale;
   let hit: { id: string; side: ResizeHandle; z: number } | null = null;
   for (const node of nodes) {
-    const rect = screenRect(scene, camera, node.id);
+    const rect = scene.cardRect(node.id);
     if (!rect) continue;
-    const side = handleAt(rect, x, y);
+    const side = handleAt(rect, world.x, world.y, radius);
     const depth = scene.cardDepth(node.id);
     if (side !== null && (hit === null || depth >= hit.z)) {
       hit = { id: node.id, side, z: depth };
