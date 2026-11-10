@@ -61,6 +61,12 @@ All notable changes to Flow are recorded here. The format follows
 
 ### Changed
 
+- Hit testing behaves as before but does less work: a connector press skips
+  exact curve sampling for edges whose padded control-point box cannot reach
+  the pointer, connection checks read a lazily rebuilt pair index instead of
+  walking every edge, and hover resolves the card under the pointer once
+  while the outside-handle fallback avoids a screen rectangle per candidate.
+
 - Viewport reads and command results now keep unchanged card and connector
   records identical, so a read that changes nothing wakes no card, composer,
   frame or connector binding. A card's geometry is published through one
