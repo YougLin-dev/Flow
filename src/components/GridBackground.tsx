@@ -1,7 +1,7 @@
 /** The canvas' dot grid, as tiled static SVG images that cover the stage. */
 import { colorScheme, Image, signal, token, View } from "nsh";
 import type { CanvasCamera } from "../flow/camera";
-import { gridLayout } from "../flow/grid";
+import { gridLayout, wrappedGridOffset } from "../flow/grid";
 
 export interface GridBackgroundProps {
   readonly camera: CanvasCamera;
@@ -46,7 +46,7 @@ export function GridBackground(props: GridBackgroundProps) {
     }));
   };
 
-  const wrap = (value: number): number => ((value % TILE) + TILE) % TILE;
+  const wrap = (value: number): number => wrappedGridOffset(value, TILE) - TILE;
 
   return (
     <View
@@ -65,20 +65,34 @@ export function GridBackground(props: GridBackgroundProps) {
         size.set({ width, height });
       }}
     >
-      <Each of={tiles()} key={(tile) => `${tile.column}-${tile.row}`}>
-        {(tile) => (
-          <Image
-            src={source()}
-            style={{
-              position: "absolute",
-              left: wrap(props.camera.x) - TILE + tile().column * TILE,
-              top: wrap(props.camera.y) - TILE + tile().row * TILE,
-              width: TILE,
-              height: TILE,
-            }}
-          />
-        )}
-      </Each>
+      {/* One moving container carries both camera offsets; the tiles below
+          keep static positions and never read the camera themselves. */}
+      <View
+        style={{
+          position: "absolute",
+          left: wrap(props.camera.x),
+          top: wrap(props.camera.y),
+          width: 0,
+          height: 0,
+          overflow: "visible",
+          pointerEvents: "none",
+        }}
+      >
+        <Each of={tiles()} key={(tile) => `${tile.column}-${tile.row}`}>
+          {(tile) => (
+            <Image
+              src={source()}
+              style={{
+                position: "absolute",
+                left: tile().column * TILE,
+                top: tile().row * TILE,
+                width: TILE,
+                height: TILE,
+              }}
+            />
+          )}
+        </Each>
+      </View>
     </View>
   );
 }
