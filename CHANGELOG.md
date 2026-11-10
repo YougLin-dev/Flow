@@ -70,6 +70,10 @@ All notable changes to Flow are recorded here. The format follows
 
 ### Changed
 
+- The canvas keeps at most one viewport read (and one preview read) in
+  flight; a pan or zoom that arrives while a read is pending coalesces into
+  one follow-up instead of queuing on the document worker.
+
 - Hit testing behaves as before but does less work: a connector press skips
   exact curve sampling for edges whose padded control-point box cannot reach
   the pointer, connection checks read a lazily rebuilt pair index instead of
