@@ -2,7 +2,11 @@ import { expect, test } from "nsh/test";
 import type { Document, EdgeSummary, NodeSummary, SceneSnapshot, Viewport } from "@flow/native";
 import { CanvasCamera, type CameraScheduler } from "./camera";
 import { FlowScene } from "./scene";
-import { ViewportController, type ViewportHost } from "./viewport-controller";
+import {
+  ViewportController,
+  type ViewportHost,
+  type ViewportScheduler,
+} from "./viewport-controller";
 
 function node(id: string, x: number, y: number, overrides: Partial<NodeSummary> = {}): NodeSummary {
   return {
@@ -34,11 +38,19 @@ interface DeferredRead {
   readonly resolve: (snapshot: SceneSnapshot) => void;
 }
 
-function stubDocument(deferreds: DeferredRead[]): Document {
+interface DeferredBounds {
+  readonly resolve: (bounds: Viewport) => void;
+}
+
+function stubDocument(deferreds: DeferredRead[], boundsDeferreds: DeferredBounds[] = []): Document {
   const stub = {
     scene: (rect: Viewport, margin: number): Promise<SceneSnapshot> =>
       new Promise((resolve) => {
         deferreds.push({ rect, margin, resolve });
+      }),
+    bounds: (): Promise<Viewport> =>
+      new Promise((resolve) => {
+        boundsDeferreds.push({ resolve });
       }),
   };
   return stub as unknown as Document;
@@ -50,11 +62,40 @@ const inertScheduler: CameraScheduler = {
   cancel: () => {},
 };
 
+/** Records the controller's one timer so tests drive it without waiting. */
+class FakeViewportScheduler implements ViewportScheduler {
+  private callbacks = new Map<number, () => void>();
+  private nextId = 1;
+
+  setTimeout(callback: () => void, _delay: number): number {
+    const id = this.nextId;
+    this.nextId += 1;
+    this.callbacks.set(id, callback);
+    return id;
+  }
+
+  clearTimeout(id: number): void {
+    this.callbacks.delete(id);
+  }
+
+  get armed(): number {
+    return this.callbacks.size;
+  }
+
+  runDue(): void {
+    const callbacks = [...this.callbacks.values()];
+    this.callbacks.clear();
+    for (const callback of callbacks) callback();
+  }
+}
+
 interface Fixture {
   readonly controller: ViewportController;
   readonly camera: CanvasCamera;
   readonly scene: FlowScene;
   readonly deferreds: DeferredRead[];
+  readonly boundsDeferreds: DeferredBounds[];
+  readonly scheduler: FakeViewportScheduler;
   dispose(): void;
 }
 
@@ -62,7 +103,9 @@ function setup(): Fixture {
   const camera = new CanvasCamera({ scheduler: inertScheduler });
   const scene = new FlowScene();
   const deferreds: DeferredRead[] = [];
-  const document = stubDocument(deferreds);
+  const boundsDeferreds: DeferredBounds[] = [];
+  const scheduler = new FakeViewportScheduler();
+  const document = stubDocument(deferreds, boundsDeferreds);
   let disposed = false;
   const host: ViewportHost = {
     camera: () => camera,
@@ -73,13 +116,15 @@ function setup(): Fixture {
     publishZoom: () => {},
     isDisposed: () => disposed,
   };
-  const controller = new ViewportController(host);
+  const controller = new ViewportController(host, scheduler);
   controller.setSize(800, 600);
   return {
     controller,
     camera,
     scene,
     deferreds,
+    boundsDeferreds,
+    scheduler,
     dispose: () => {
       disposed = true;
       controller.dispose();
@@ -90,6 +135,12 @@ function setup(): Fixture {
 function take(deferreds: DeferredRead[], index: number): DeferredRead {
   const read = deferreds[index];
   if (!read) throw new Error(`Expected scene read ${index}, found ${deferreds.length}.`);
+  return read;
+}
+
+function takeBounds(deferreds: DeferredBounds[], index: number): DeferredBounds {
+  const read = deferreds[index];
+  if (!read) throw new Error(`Expected bounds read ${index}, found ${deferreds.length}.`);
   return read;
 }
 
@@ -209,4 +260,134 @@ test("disposing mid-drain resolves joined callers without a follow-up read", asy
   } finally {
     fixture.dispose();
   }
+});
+
+test("coalesces automatic fits into the newest stage size", async () => {
+  const fixture = setup();
+  const { controller, camera, deferreds, boundsDeferreds, scheduler } = fixture;
+  try {
+    controller.onResize(800, 600);
+    controller.onResize(1024, 700);
+    expect(scheduler.armed).toBe(1);
+
+    scheduler.runDue();
+    expect(boundsDeferreds).toHaveLength(1);
+    expect(deferreds).toHaveLength(0);
+
+    const bounds = { x: 0, y: 0, width: 1000, height: 1000 };
+    takeBounds(boundsDeferreds, 0).resolve(bounds);
+    await flushRead();
+
+    expect(boundsDeferreds).toHaveLength(1);
+    expect(deferreds).toHaveLength(1);
+    const expected = new CanvasCamera({ scheduler: inertScheduler });
+    const expectedScale = expected.fit(bounds, { width: 1024, height: 700 });
+    expected.dispose();
+    expect(camera.scale).toBe(expectedScale);
+    expect(take(deferreds, 0).rect).toEqual(camera.visibleBounds({ width: 1024, height: 700 }));
+
+    take(deferreds, 0).resolve(snapshot([node("a", 0, 0)], 1));
+    await flushRead();
+    expect(deferreds).toHaveLength(1);
+  } finally {
+    fixture.dispose();
+  }
+});
+
+test("a manually moved camera does not refit on resize", async () => {
+  const fixture = setup();
+  const { controller, deferreds, boundsDeferreds, scheduler } = fixture;
+  try {
+    controller.userMoved();
+    controller.onResize(1024, 700);
+    expect(scheduler.armed).toBe(1);
+
+    scheduler.runDue();
+    expect(boundsDeferreds).toHaveLength(0);
+    expect(deferreds).toHaveLength(1);
+
+    take(deferreds, 0).resolve(snapshot([node("a", 0, 0)], 1));
+    await flushRead();
+    expect(deferreds).toHaveLength(1);
+  } finally {
+    fixture.dispose();
+  }
+});
+
+test("a pending fit cannot apply stale bounds", async () => {
+  const fixture = setup();
+  const { controller, camera, deferreds, boundsDeferreds } = fixture;
+  try {
+    controller.onResize(1024, 700);
+    const first = controller.refresh();
+    const joined = controller.refresh();
+    let firstSettled = false;
+    let joinedSettled = false;
+    void first.then(() => {
+      firstSettled = true;
+    });
+    void joined.then(() => {
+      joinedSettled = true;
+    });
+
+    expect(boundsDeferreds).toHaveLength(1);
+    expect(deferreds).toHaveLength(0);
+
+    controller.onResize(1280, 800);
+    takeBounds(boundsDeferreds, 0).resolve({ x: 0, y: 0, width: 1000, height: 1000 });
+    await flushRead();
+
+    // The first fit's bounds are stale; the camera stays put for this read.
+    expect(camera.scale).toBe(1);
+    expect(deferreds).toHaveLength(1);
+    expect(firstSettled).toBe(false);
+    expect(joinedSettled).toBe(false);
+
+    take(deferreds, 0).resolve(snapshot([node("a", 0, 0)], 1));
+    await flushRead();
+
+    // The resize that arrived during the read owns the next fit.
+    expect(boundsDeferreds).toHaveLength(2);
+    expect(firstSettled).toBe(false);
+    expect(joinedSettled).toBe(false);
+
+    const newest = { x: 0, y: 0, width: 2000, height: 1200 };
+    takeBounds(boundsDeferreds, 1).resolve(newest);
+    await flushRead();
+
+    const expected = new CanvasCamera({ scheduler: inertScheduler });
+    const expectedScale = expected.fit(newest, { width: 1280, height: 800 });
+    expected.dispose();
+    expect(camera.scale).toBe(expectedScale);
+    expect(take(deferreds, 1).rect).toEqual(camera.visibleBounds({ width: 1280, height: 800 }));
+    expect(firstSettled).toBe(false);
+    expect(joinedSettled).toBe(false);
+
+    take(deferreds, 1).resolve(snapshot([node("a", 10, 0)], 2));
+    await Promise.all([first, joined]);
+    expect(firstSettled).toBe(true);
+    expect(joinedSettled).toBe(true);
+    expect(deferreds).toHaveLength(2);
+    expect(boundsDeferreds).toHaveLength(2);
+  } finally {
+    fixture.dispose();
+  }
+});
+
+test("disposal cancels a pending automatic fit", async () => {
+  const fixture = setup();
+  const { controller, camera, deferreds, boundsDeferreds, scheduler } = fixture;
+  controller.onResize(1024, 700);
+  expect(scheduler.armed).toBe(1);
+
+  fixture.dispose();
+  expect(scheduler.armed).toBe(0);
+
+  scheduler.runDue();
+  await flushRead();
+
+  expect(boundsDeferreds).toHaveLength(0);
+  expect(deferreds).toHaveLength(0);
+  expect(camera.scale).toBe(1);
+  expect(camera.view()).toEqual({ x: 0, y: 0, scale: 1 });
 });

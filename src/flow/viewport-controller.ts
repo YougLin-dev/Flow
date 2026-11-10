@@ -20,12 +20,25 @@ export interface ViewportHost {
   isDisposed(): boolean;
 }
 
+/** The one timer the controller owns; tests inject a deterministic driver. */
+export interface ViewportScheduler {
+  setTimeout(callback: () => void, delay: number): number;
+  clearTimeout(id: number): void;
+}
+
+const SYSTEM_SCHEDULER: ViewportScheduler = {
+  setTimeout: (callback, delay) => setTimeout(callback, delay),
+  clearTimeout: (id) => clearTimeout(id),
+};
+
 export class ViewportController {
   private width = 1;
   private height = 1;
-  private timer: ReturnType<typeof setTimeout> | null = null;
+  private timer: number | null = null;
   private generation = 0;
   private cameraGeneration = 0;
+  private fitGeneration = 0;
+  private pendingFitGeneration: number | null = null;
   private zoomFrame = 0;
   private lastRev = 0;
   private userCamera = false;
@@ -33,7 +46,10 @@ export class ViewportController {
   private dirty = false;
   private pendingResolvers: Array<() => void> = [];
 
-  constructor(private readonly host: ViewportHost) {}
+  constructor(
+    private readonly host: ViewportHost,
+    private readonly scheduler: ViewportScheduler = SYSTEM_SCHEDULER,
+  ) {}
 
   setSize(width: number, height: number): void {
     this.width = width;
@@ -49,11 +65,15 @@ export class ViewportController {
   userMoved(): void {
     this.userCamera = true;
     this.cameraGeneration += 1;
+    // A pan or zoom supersedes an automatic fit already queued or awaiting
+    // its bounds read.
+    this.fitGeneration += 1;
+    this.pendingFitGeneration = null;
   }
 
   schedule(): void {
     if (this.timer !== null || this.host.isDisposed()) return;
-    this.timer = setTimeout(() => {
+    this.timer = this.scheduler.setTimeout(() => {
       this.timer = null;
       if (!this.host.isDisposed()) void this.refresh();
     }, VIEWPORT_DELAY_MS);
@@ -84,9 +104,18 @@ export class ViewportController {
   private async runReads(document: Document, scene: FlowScene): Promise<void> {
     while (true) {
       if (this.host.isDisposed()) break;
-      // Clear the flag before awaiting so a request arriving during this read
-      // marks the loop dirty again.
+      // Clear the flags before awaiting so a request arriving during this
+      // read marks the loop dirty again.
       this.dirty = false;
+      const pendingFit = this.pendingFitGeneration;
+      this.pendingFitGeneration = null;
+      if (pendingFit !== null && !this.userCamera) {
+        // Apply the newest automatic fit before the scene read; `false` keeps
+        // this same drain as the only timer and read path.
+        // eslint-disable-next-line no-await-in-loop
+        await this.fitToDocument(true, false, pendingFit);
+        if (this.host.isDisposed()) break;
+      }
       const { rect, margin } = this.visibleRect();
       const generation = ++this.generation;
       // The card budget is read before the await so the read and the client
@@ -112,6 +141,9 @@ export class ViewportController {
         if (!this.host.isDisposed()) console.error("Flow could not read the viewport", error);
       }
       if (this.host.isDisposed()) break;
+      // A resize arrived during the read: the newest fit must be applied
+      // before joined callers observe the drain's settlement.
+      if (this.pendingFitGeneration !== null) this.dirty = true;
       if (!this.dirty) break;
     }
     this.finishReads();
@@ -131,7 +163,11 @@ export class ViewportController {
     this.publishZoom(scale);
   }
 
-  async fitToDocument(announce = true, schedule = true): Promise<void> {
+  async fitToDocument(
+    announce = true,
+    schedule = true,
+    expectedFit: number | null = null,
+  ): Promise<void> {
     const document = this.host.document();
     const camera = this.host.camera();
     if (!document || !camera || this.host.isDisposed()) return;
@@ -144,6 +180,16 @@ export class ViewportController {
       if (!this.host.isDisposed()) console.error("Flow could not read the document bounds", error);
     }
     if (this.host.isDisposed() || generation !== this.cameraGeneration) return;
+    if (expectedFit !== null) {
+      // The newest resize or an explicit fit has superseded this automatic
+      // fit while its bounds read was pending.
+      if (expectedFit !== this.fitGeneration || this.userCamera) return;
+    } else {
+      // An explicit fit supersedes any automatic fit already queued or
+      // awaiting its own bounds read.
+      this.fitGeneration += 1;
+      this.pendingFitGeneration = null;
+    }
     this.userCamera = false;
     const scale = this.fit(bounds);
     if (announce) this.publishZoom(scale);
@@ -161,7 +207,15 @@ export class ViewportController {
 
   onResize(width: number, height: number): void {
     this.setSize(width, height);
-    if (!this.userCamera) void this.fitToDocument();
+    if (this.userCamera) {
+      this.schedule();
+      return;
+    }
+    // One newest fit token: repeated resizes before the timer replace it, so
+    // the drain reads bounds once at the final stage size.
+    this.fitGeneration += 1;
+    this.pendingFitGeneration = this.fitGeneration;
+    if (this.inFlight !== null) this.dirty = true;
     else this.schedule();
   }
 
@@ -186,8 +240,9 @@ export class ViewportController {
 
   dispose(): void {
     cancelAnimationFrame(this.zoomFrame);
-    if (this.timer !== null) clearTimeout(this.timer);
+    if (this.timer !== null) this.scheduler.clearTimeout(this.timer);
     this.timer = null;
+    this.pendingFitGeneration = null;
     this.host.camera()?.dispose();
   }
 
