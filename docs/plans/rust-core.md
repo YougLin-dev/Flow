@@ -499,6 +499,32 @@ scene scale=0.15: n=5 avg=702.79ms p95=728.40ms max=728.40ms scale=0.1500 rect=(
 scene scale=0.40: n=5 avg=49.41ms p95=51.26ms max=51.26ms scale=0.4000 rect=(8470.0,68502.0,5040.0,2940.0) margin=1260.0 nodes=1440 edges=1480
 ```
 
+**After 011** (per-read card budget, two-phase node read, capped reads skip
+the crossing-connector index, port-only far lookup):
+
+```text
+legacy viewport scale=1.0000 (reference; edges and images present): n=5 avg=0.59ms p95=0.69ms max=0.69ms rect=(0.0,0.0,1920.0,1080.0) margin=120.0 nodes=90
+legacy scene scale=1.0000 (reference; edges and images present): n=5 avg=23.90ms p95=24.64ms max=24.64ms scale=1.0000 rect=(0.0,0.0,1920.0,1080.0) margin=120.0 nodes=90 edges=90
+scene fit=0.0500: n=5 avg=77.87ms p95=80.17ms max=80.17ms scale=0.0500 rect=(-9170.0,58212.0,40320.0,23520.0) margin=10080.0 nodes=300 edges=595
+scene scale=0.15: n=5 avg=152.73ms p95=189.68ms max=189.68ms scale=0.1500 rect=(4270.0,66052.0,13440.0,7840.0) margin=3360.0 nodes=800 edges=1600
+scene scale=0.40: n=5 avg=51.84ms p95=53.79ms max=53.79ms scale=0.4000 rect=(8470.0,68502.0,5040.0,2940.0) margin=1260.0 nodes=1440 edges=1480
+```
+
+The Fit and 0.15 reads now stop at the same card budget the canvas keeps
+(300 and 800) and, because they reach it, skip the edge RTree half: the Fit
+snapshot drops from 2,000 nodes + 30,888 edges to 300 + 595, and from
+2,472.65 ms to 77.87 ms. At 0.40 the 2,000-card budget is larger than the
+1,440 in-rect cards, so the read stays uncapped and keeps the RTree half and
+1,480 connectors; its time is unchanged within run noise. The legacy 90-node
+read is also uncapped, so its shape is unchanged.
+
+The two-phase split was kept on a paired node-only comparison from the same
+benchmark run (same worker and budget, five alternating samples): Fit
+17.78 ms two-phase vs 19.24 ms single statement, 0.15 11.43 ms vs 12.99 ms,
+0.40 9.00 ms vs 7.45 ms, and the 90-row legacy read 0.64 ms vs 0.51 ms. The
+narrow sorter pays when the candidate set is large and the budget binds; the
+second `IN` query costs about 1.5 ms when it does not.
+
 ## Phases
 
 ### P0 — mixed scaffold and storage spike (done)
