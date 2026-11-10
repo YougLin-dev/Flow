@@ -1,7 +1,6 @@
 import { expect, test } from "nsh/test";
 import { effect } from "nsh";
 import type { EdgeSummary, NodeSummary, SceneSnapshot } from "@flow/native";
-import type { BoxGeometry } from "./connection";
 import { FlowScene } from "./scene";
 
 function node(id: string, x: number, y: number, overrides: Partial<NodeSummary> = {}): NodeSummary {
@@ -30,12 +29,6 @@ function edge(id: string, fromId: string, toId: string): EdgeSummary {
 
 function snapshot(nodes: NodeSummary[], edges: EdgeSummary[] = []): SceneSnapshot {
   return { rev: 1, nodes, edges };
-}
-
-function rect(scene: FlowScene, id: string): BoxGeometry {
-  const value = scene.cardRect(id);
-  if (!value) throw new Error(`The scene has no card "${id}".`);
-  return value;
 }
 
 test("an identical snapshot wakes no list or geometry reader", () => {

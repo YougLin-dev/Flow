@@ -61,6 +61,12 @@ All notable changes to Flow are recorded here. The format follows
 
 ### Changed
 
+- Viewport reads and command results now keep unchanged card and connector
+  records identical, so a read that changes nothing wakes no card, composer,
+  frame or connector binding. A card's geometry is published through one
+  signal per card, so a change set wakes only the cards it actually moved,
+  and an unchanged image preview is neither reloaded nor republished.
+
 - Selection, hover, marquee-preview and connection-target changes now rebuild
   only the cards whose own state flipped, rather than every visible card's
   plus buttons and border. In a 2000-card measurement this reduced hover
