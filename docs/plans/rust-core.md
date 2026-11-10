@@ -525,6 +525,22 @@ benchmark run (same worker and budget, five alternating samples): Fit
 narrow sorter pays when the candidate set is large and the budget binds; the
 second `IN` query costs about 1.5 ms when it does not.
 
+### Gesture commit SQL (plan 012)
+
+Measured 2026-11-11 on branch `advisor/012-gesture-commit-sql` from `498f81e`,
+release build, same machine and `100k-grid-edges-images-v1` fixture as the
+table above. The lines below are copied verbatim from `bun run test:bench`
+(`cargo test --release`, ignored benchmark).
+
+**before 012** (per-card UPDATE + re-SELECT; each card syncs its own incident
+connectors, so a connector whose two ends both moved is boxed twice):
+
+```text
+setNodeBounds moved=1000: n=3 avg=514.29ms p95=553.23ms max=553.23ms nodes=1000 samples=3
+undo moved=1000: n=3 avg=498.78ms p95=515.48ms max=515.48ms nodes=1000 samples=3
+redo moved=1000: n=3 avg=531.06ms p95=554.38ms max=554.38ms nodes=1000 samples=3
+```
+
 ## Phases
 
 ### P0 — mixed scaffold and storage spike (done)
