@@ -1,15 +1,15 @@
 import { expect, test } from "nsh/test";
 import type { EdgeSummary } from "@flow/native";
 import {
+  cometRuns,
+  cometShown,
   edgeFlows,
-  FLOW_CYCLE_MS,
   FLOW_HEAD_ALPHA,
   FLOW_SEGMENTS,
-  FLOW_STEP_MS,
   FLOW_TRAIL,
   type FlowPass,
+  flowingEdgeCount,
   flowPass,
-  flowWave,
 } from "./edge-flow";
 
 function edge(fromId: string, toId: string): EdgeSummary {
@@ -79,24 +79,45 @@ test("flows a connector between two selected cards", () => {
   expect(edgeFlows(edge("a", "b"), new Set(["a", "b"]))).toBe(true);
 });
 
-test("the wave steps from nothing lit to the tail leaving, then starts over", () => {
-  expect(flowWave(0)).toBe(1);
-  expect(Math.abs(flowWave(FLOW_CYCLE_MS / 2)) < 1e-9).toBe(true);
-  expect(Math.abs(flowWave(FLOW_CYCLE_MS) - 1) < 1e-9).toBe(true);
-  // A clock that jumps backwards keeps the phase on the cycle instead of
-  // overshooting its start.
-  expect(Math.abs(flowWave(-FLOW_CYCLE_MS / 2)) < 1e-9).toBe(true);
-  // Within a cycle the wave only moves toward the tail, and a step's jump
-  // is a small share of its body, so the light reads as moving rather than
-  // jumping.
-  let previous = flowWave(0);
-  for (let elapsed = FLOW_STEP_MS; elapsed < FLOW_CYCLE_MS; elapsed += FLOW_STEP_MS) {
-    const next = flowWave(elapsed);
-    expect(next).toBeLessThan(previous);
-    expect(previous - next).toBeLessThan(0.1);
-    previous = next;
+test("counts only connectors touching the selection, once each", () => {
+  const edges = [edge("a", "b"), edge("c", "a"), edge("a", "d"), edge("c", "d")];
+  expect(flowingEdgeCount(edges, new Set())).toBe(0);
+  expect(flowingEdgeCount(edges, new Set(["e"]))).toBe(0);
+  expect(flowingEdgeCount(edges, new Set(["a"]))).toBe(3);
+  expect(flowingEdgeCount([edge("a", "b")], new Set(["a", "b"]))).toBe(1);
+  expect(flowingEdgeCount(edges, new Set(["a", "b", "c"]))).toBe(4);
+});
+
+test("runs the comet only for flowing connectors with motion allowed", () => {
+  expect(cometRuns(0, false)).toBe(false);
+  expect(cometRuns(1, true)).toBe(false);
+  expect(cometRuns(0, true)).toBe(false);
+  expect(cometRuns(1, false)).toBe(true);
+});
+
+test("suppresses the comet above the limit during camera or card movement", () => {
+  for (const activity of [
+    { dragging: true, paused: false },
+    { dragging: false, paused: true },
+    { dragging: true, paused: true },
+  ]) {
+    expect(cometShown({ flowing: 5, reducedMotion: false, limit: 4, ...activity })).toBe(false);
+    expect(cometShown({ flowing: 4, reducedMotion: false, limit: 4, ...activity })).toBe(true);
   }
-  expect(previous).toBeLessThan(-0.9);
+  expect(
+    cometShown({
+      flowing: 5,
+      reducedMotion: false,
+      dragging: false,
+      paused: false,
+      limit: 4,
+    }),
+  ).toBe(true);
+  for (const flowing of [0, 1, 4, 5]) {
+    expect(
+      cometShown({ flowing, reducedMotion: true, dragging: false, paused: false, limit: 4 }),
+    ).toBe(false);
+  }
 });
 
 test("a piece lights when the comet's head reaches it and fades behind it", () => {

@@ -13,10 +13,9 @@ import type { EdgeSummary } from "@flow/native";
  * target, and the next one starts. */
 export const FLOW_CYCLE_MS = 1200;
 
-/** How far apart the wave steps, in ms: a step updates the canvas's animated
- * values, so the canvas repaints about 30 times a second instead of on every
- * display frame. */
-export const FLOW_STEP_MS = 33;
+/** Native CSS `steps()` count, approximating the former 33 ms cadence rather
+ * than running a timer interval. */
+export const FLOW_STEPS = 36;
 
 /** The light's alpha at the comet's head; the trail fades from there. */
 export const FLOW_HEAD_ALPHA = 0.9;
@@ -34,15 +33,6 @@ export const FLOW_SEGMENTS = 48;
  * head's alpha there and fades to nothing this far behind it, so a step
  * repaints the trail's pieces, not the whole curve. */
 export const FLOW_TRAIL = 0.24;
-
-/** The wave's position `elapsed` ms into a cycle: 1 (nothing lit) falls
- * through 0 (the comet under way) to -1 (its tail left through the
- * target), then the next comet starts. */
-export function flowWave(elapsed: number): number {
-  const cycle = FLOW_CYCLE_MS;
-  const phase = ((elapsed % cycle) + cycle) % cycle;
-  return 1 - (2 * phase) / cycle;
-}
 
 /** One piece's alpha over the wave, as an `interpolate` range. */
 export interface FlowPass {
@@ -67,4 +57,34 @@ export function flowPass(index: number, segments = FLOW_SEGMENTS, trail = FLOW_T
 /** Whether `edge` has a selected card at either end. */
 export function edgeFlows(edge: EdgeSummary, selected: ReadonlySet<string>): boolean {
   return selected.has(edge.fromId) || selected.has(edge.toId);
+}
+
+/** Counts distinct connectors touching the selection. */
+export function flowingEdgeCount(
+  edges: readonly EdgeSummary[],
+  selected: ReadonlySet<string>,
+): number {
+  return edges.filter((edge) => edgeFlows(edge, selected)).length;
+}
+
+/** Whether the native phase should run; draw suppression must not stop it. */
+export function cometRuns(flowing: number, reducedMotion: boolean): boolean {
+  return flowing > 0 && !reducedMotion;
+}
+
+/** Inputs for choosing between animated comet strokes and resting highlights. */
+export interface CometShownOptions {
+  readonly flowing: number;
+  readonly reducedMotion: boolean;
+  readonly dragging: boolean;
+  readonly paused: boolean;
+  readonly limit: number;
+}
+
+/** Whether expensive animated strokes should be recorded in this draw. */
+export function cometShown(options: CometShownOptions): boolean {
+  return (
+    cometRuns(options.flowing, options.reducedMotion) &&
+    !(options.flowing > options.limit && (options.dragging || options.paused))
+  );
 }
