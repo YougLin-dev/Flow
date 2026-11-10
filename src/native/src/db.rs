@@ -882,6 +882,60 @@ mod tests {
     }
 
     #[test]
+    fn two_phase_scene_matches_the_single_statement_reference() {
+        let db = Database::open(":memory:").expect("open");
+        let dense: Vec<NodeInput> = (0..12)
+            .map(|i| {
+                let mut input = node(
+                    &format!("dense-{i:02}"),
+                    &format!("Dense {i}"),
+                    "",
+                    &[],
+                    (i % 4) as f64 * 210.0,
+                    (i / 4) as f64 * 130.0,
+                );
+                input.z = (i % 3) as f64;
+                input
+            })
+            .collect();
+        db.insert_nodes(dense).expect("insert dense nodes");
+
+        let rect = Viewport {
+            x: 0.0,
+            y: 0.0,
+            width: 800.0,
+            height: 600.0,
+        };
+        let snapshot = db.scene(rect.clone(), 0.0, 5).expect("two-phase scene");
+        // Run the legacy single statement on the same worker/connection so
+        // the RTree and every ordering input are identical.
+        let reference = db
+            .run(move |conn| {
+                let statement = viewport::viewport_statement_reference(rect, 0.0, 5);
+                viewport::rows_from_statement(conn, &statement)
+            })
+            .expect("legacy reference read");
+
+        assert_eq!(snapshot.nodes.len(), 5);
+        assert_eq!(reference.len(), 5);
+        let scene_rows: Vec<(&str, f64, f64)> = snapshot
+            .nodes
+            .iter()
+            .map(|node| (node.id.as_str(), node.z, node.rev))
+            .collect();
+        let reference_rows: Vec<(&str, f64, f64)> = reference
+            .iter()
+            .map(|node| (node.id.as_str(), node.z, node.rev))
+            .collect();
+        let scene_ids: Vec<&str> = scene_rows.iter().map(|row| row.0).collect();
+        let reference_ids: Vec<&str> = reference_rows.iter().map(|row| row.0).collect();
+        assert_eq!(
+            scene_rows, reference_rows,
+            "two-phase order {scene_ids:?} differs from the single statement {reference_ids:?}"
+        );
+    }
+
+    #[test]
     fn a_scene_reads_the_far_port_of_an_edge_to_an_off_screen_card() {
         let db = Database::open(":memory:").expect("open");
         db.insert_nodes(vec![
