@@ -29,6 +29,9 @@ export class ViewportController {
   private zoomFrame = 0;
   private lastRev = 0;
   private userCamera = false;
+  private inFlight: Promise<void> | null = null;
+  private dirty = false;
+  private pendingResolvers: Array<() => void> = [];
 
   constructor(private readonly host: ViewportHost) {}
 
@@ -56,25 +59,69 @@ export class ViewportController {
     }, VIEWPORT_DELAY_MS);
   }
 
-  async refresh(): Promise<void> {
+  refresh(): Promise<void> {
     const document = this.host.document();
     const scene = this.host.scene();
-    if (!document || !scene || this.host.isDisposed()) return;
-    const generation = ++this.generation;
-    const { rect, margin } = this.visibleRect();
-    try {
-      const snapshot = await document.scene(rect, margin);
-      if (this.host.isDisposed() || generation !== this.generation) return;
-      if (snapshot.rev < this.lastRev) return;
-      this.lastRev = snapshot.rev;
-      const camera = this.host.camera();
-      const scale = camera?.scale ?? 1;
-      const maxCards = scale < 0.15 ? 300 : scale < 0.4 ? 800 : 2_000;
-      scene.apply(snapshot, { maxCards });
-      this.host.schedulePreviews();
-    } catch (error) {
-      if (!this.host.isDisposed()) console.error("Flow could not read the viewport", error);
+    if (!document || !scene || this.host.isDisposed()) return Promise.resolve();
+    if (this.inFlight !== null) {
+      // Join the active drain; one follow-up will read the newest rect.
+      this.dirty = true;
+      return new Promise<void>((resolve) => {
+        this.pendingResolvers.push(resolve);
+      });
     }
+    // Publish the drain before starting it: a read that settles synchronously
+    // would otherwise clear `inFlight` before it was ever assigned.
+    const drain = new Promise<void>((resolve) => {
+      this.pendingResolvers.push(resolve);
+    });
+    this.inFlight = drain;
+    void this.runReads(document, scene);
+    return drain;
+  }
+
+  /** One queued drain: a current read plus at most one per newer request. */
+  private async runReads(document: Document, scene: FlowScene): Promise<void> {
+    while (true) {
+      if (this.host.isDisposed()) break;
+      // Clear the flag before awaiting so a request arriving during this read
+      // marks the loop dirty again.
+      this.dirty = false;
+      const { rect, margin } = this.visibleRect();
+      const generation = ++this.generation;
+      try {
+        // The drain is deliberately sequential: one read, then at most one
+        // follow-up for the newest rect.
+        // eslint-disable-next-line no-await-in-loop
+        const snapshot = await document.scene(rect, margin);
+        if (
+          !this.host.isDisposed() &&
+          generation === this.generation &&
+          snapshot.rev >= this.lastRev
+        ) {
+          this.lastRev = snapshot.rev;
+          const camera = this.host.camera();
+          const scale = camera?.scale ?? 1;
+          const maxCards = scale < 0.15 ? 300 : scale < 0.4 ? 800 : 2_000;
+          scene.apply(snapshot, { maxCards });
+          this.host.schedulePreviews();
+        }
+      } catch (error) {
+        if (!this.host.isDisposed()) console.error("Flow could not read the viewport", error);
+      }
+      if (this.host.isDisposed()) break;
+      if (!this.dirty) break;
+    }
+    this.finishReads();
+  }
+
+  private finishReads(): void {
+    this.inFlight = null;
+    const resolvers = this.pendingResolvers;
+    this.pendingResolvers = [];
+    // Callers observe settlement, not proof that an outdated revision was
+    // applied: a dropped read resolves here once its request finishes.
+    for (const resolve of resolvers) resolve();
   }
 
   /** Publishes the camera's current scale, deferred to the next frame. */
