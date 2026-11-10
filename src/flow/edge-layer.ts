@@ -1,11 +1,6 @@
 /** The shared connector canvas's box, derived once for its styles and drawing. */
 import { type Accessor, computed } from "nsh";
-import {
-  type BoxGeometry,
-  connectionBounds,
-  EDGE_PADDING,
-  mergeBounds,
-} from "./connection";
+import { type BoxGeometry, connectionBounds, EDGE_PADDING, mergeBounds } from "./connection";
 import type { FlowScene } from "./scene";
 
 /** How coarse the canvas box is, in world points: fine enough that rounding
@@ -36,9 +31,7 @@ function roundOut(box: BoxGeometry): BoxGeometry {
 }
 
 /** The union of the usable connector boxes, padded and rounded outward. */
-export function connectorLayerBounds(
-  boxes: readonly (BoxGeometry | null)[],
-): BoxGeometry | null {
+export function connectorLayerBounds(boxes: readonly (BoxGeometry | null)[]): BoxGeometry | null {
   let union: BoxGeometry | null = null;
   for (const bounds of boxes) {
     if (bounds !== null) union = union === null ? bounds : mergeBounds(union, bounds);

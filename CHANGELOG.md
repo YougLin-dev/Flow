@@ -61,6 +61,11 @@ All notable changes to Flow are recorded here. The format follows
 
 ### Changed
 
+- The shared connector layer computes its padded and rounded canvas box once
+  per geometry change instead of separately for every style binding and the
+  drawing origin, and resolves each connector's ports once per draw for both
+  its resting line and flowing comet.
+
 - Dragging a selection updates the connectors, the selection frame and the
   merged pluses once per pointer move instead of once per moved card, and
   releasing a box selection no longer mounts and immediately unmounts every

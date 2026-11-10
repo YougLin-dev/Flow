@@ -1,12 +1,7 @@
 import { type Accessor, effect } from "nsh";
 import { expect, test } from "nsh/test";
 import type { EdgeSummary, NodeSummary, SceneSnapshot } from "@flow/native";
-import {
-  type BoxGeometry,
-  type Point,
-  connectionBounds,
-  connectorControls,
-} from "./connection";
+import { type BoxGeometry, type Point, connectionBounds, connectorControls } from "./connection";
 import { connectorLayerBounds, connectorLayerBox } from "./edge-layer";
 import { FlowScene } from "./scene";
 
@@ -39,17 +34,15 @@ function snapshot(nodes: NodeSummary[], edges: EdgeSummary[]): SceneSnapshot {
 
 function sceneBounds(scene: FlowScene): BoxGeometry | null {
   return connectorLayerBounds(
-    scene.edges().map((edge) => {
-      const ports = scene.edgePorts(edge);
+    scene.edges().map((connector) => {
+      const ports = scene.edgePorts(connector);
       return ports === null ? null : connectionBounds(ports.from, ports.to);
     }),
   );
 }
 
 function move(scene: FlowScene, x: number): void {
-  scene.setOverrides(
-    new Map([["a", { x, y: 40, width: 200, height: 84 }]]),
-  );
+  scene.setOverrides(new Map([["a", { x, y: 40, width: 200, height: 84 }]]));
 }
 
 interface BoxReaders {
@@ -66,19 +59,19 @@ function readBox(box: Accessor<BoxGeometry | null>): BoxReaders {
   let width = 0;
   let height = 0;
   effect(() => {
-    box()?.x ?? 0;
+    void (box()?.x ?? 0);
     left += 1;
   });
   effect(() => {
-    box()?.y ?? 0;
+    void (box()?.y ?? 0);
     top += 1;
   });
   effect(() => {
-    box()?.width ?? 0;
+    void (box()?.width ?? 0);
     width += 1;
   });
   effect(() => {
-    box()?.height ?? 0;
+    void (box()?.height ?? 0);
     height += 1;
   });
   return {
@@ -101,9 +94,9 @@ function expectReaderRuns(readers: BoxReaders, count: number): void {
 class CountingScene extends FlowScene {
   traversals = 0;
 
-  override edgePorts(edge: EdgeSummary): { from: Point; to: Point } | null {
+  override edgePorts(connector: EdgeSummary): { from: Point; to: Point } | null {
     this.traversals += 1;
-    return super.edgePorts(edge);
+    return super.edgePorts(connector);
   }
 }
 
@@ -133,9 +126,7 @@ test("unresolved connector boxes do not contribute to the layer box", () => {
   const present = connectionBounds(ports.from, ports.to);
 
   expect(connectorLayerBounds([null, null])).toBeNull();
-  expect(connectorLayerBounds([null, present, null])).toEqual(
-    connectorLayerBounds([present]),
-  );
+  expect(connectorLayerBounds([null, present, null])).toEqual(connectorLayerBounds([present]));
 });
 
 test("padding and 64-point rounding contain the complete connector box", () => {
@@ -152,12 +143,7 @@ test("padding and 64-point rounding contain the complete connector box", () => {
 
 test("negative coordinates and handles beyond both ports round outward", () => {
   const scene = new FlowScene();
-  scene.apply(
-    snapshot(
-      [node("a", -300, 0), node("b", -100, 140)],
-      [edge("a-b", "a", "b")],
-    ),
-  );
+  scene.apply(snapshot([node("a", -300, 0), node("b", -100, 140)], [edge("a-b", "a", "b")]));
   const connector = scene.edges()[0];
   if (!connector) throw new Error("The fixture must have a connector.");
   const ports = scene.edgePorts(connector);
