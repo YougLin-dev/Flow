@@ -375,10 +375,10 @@ starting P1. A fast database with an unvirtualized Leafer scene still fails.
 
 ### P0 measured results
 
-Measured on Windows in a release build, with an in-memory 100k-node database
-and 1000-node insert transactions. The numbers are from the ORM-refactored
-code; the raw-SQL P0 spike was similar for inserts and slightly faster for
-viewport reads.
+Measured on Windows in a release build, with an in-memory, node-only 100k-node
+database (no connectors or images) and 1000-node insert transactions. The
+numbers are from the ORM-refactored code; the raw-SQL P0 spike was similar for
+inserts and slightly faster for viewport reads.
 
 | Operation                                          | Measured                                    |
 | -------------------------------------------------- | ------------------------------------------- |
@@ -406,9 +406,79 @@ instead of 10 milliseconds. Keep the `CROSS JOIN` and its regression test.
 The 100k build, viewport, scene and bounds reads are within their targets.
 Common-term search sits at roughly 210–270 ms p95 and therefore sometimes
 crosses the 250 ms target; it is debounced, and selective and CJK queries are
-well inside it. File-open, 1,000-node commit and undo timings at 100k are not
-printed by the benchmark yet; the reopen test covers persistence and schema
-creation with a small document.
+well inside it. The file-backed `100k-grid-edges-images-v1` table below prints
+open/migrate, 1,000-node commit/undo/redo, scene, preview and recovery timings;
+the ordinary reopen test still covers persistence and schema creation with a
+small document.
+
+### Full fixture: `100k-grid-edges-images-v1`
+
+Measured 2026-11-11 on branch `advisor/009-bench-coverage` at `59d5b6e`
+(base `6ea781f`), with NSH pinned at `f0b4659`, using:
+
+```sh
+cargo test --manifest-path src/native/Cargo.toml --release \
+  db::tests::hundred_thousand_nodes_benchmark -- --ignored --nocapture --test-threads=1
+```
+
+- **Machine**: Windows 11 Pro 10.0.26300 (x64), Intel Core i7-14650HX
+  (16 cores / 24 logical, 2.2 GHz base), 32 GiB RAM. No other repository
+  build or test ran during the run.
+- **Profile and storage**: `cargo test --release` (optimized Rust, no LTO
+  flags of its own), a file-backed SQLite database in the OS temp directory
+  with WAL and an `assets/` tree beside it. The database was just seeded and
+  the page cache had seen it, so reopen is a warm-file reopen, not a cold OS
+  start.
+- **Fixture**: 100,000 nodes in the 100x1,000 grid; 99,000 right-neighbor
+  edges (99 per row, none across rows); 2,000 image nodes (`i % 50 == 0`)
+  each with one four-item image batch, 8,000 image items and 2,000
+  content-addressed 2x2 PNG assets. Recovery samples add 100 transient
+  running batches on row-end text nodes; those batches are not part of the
+  seed counts.
+- **Seeding** (open, 100 node batches, 100 edge batches, 2,000 asset
+  imports and 2,000 image batches): 58.8 s. This is fixture construction,
+  not a target.
+- **Fit**: `camera.fit` computes raw 0.007031 from the document bounds
+  (21,980 x 139,944) and clamps it to the 0.05 minimum. Scene requests use
+  the centered camera, the 48-point Fit padding, and the viewport
+  controller's `max(width, height) * 0.25` margin.
+- Scene rows are native read rows before the UI's card cap (2,000 is the
+  hard node read limit). Edges include connectors touching returned cards
+  and connectors whose curve crosses the request.
+- Timings cover only the direct synchronous Rust database method. They do
+  not include TSX-to-Rust transfer, view mounting, image decoding or
+  painting; use the real-host recipe under "Measuring performance" in
+  `docs/testing.md` for those.
+- Every scene, preview and search scenario runs one warmup outside its five
+  timed samples; the common-term search uses 20 samples. Each move cycle
+  reads its starting geometry and resets with `set_node_bounds` outside the
+  move, undo and redo spans, so only the three public calls are timed.
+
+| Scenario                      | Request / scale                                            | Rows                                      |                avg |         p95 |         max |
+| ----------------------------- | ---------------------------------------------------------- | ----------------------------------------- | -----------------: | ----------: | ----------: |
+| `bounds()` (Fit source)       | whole document                                             | 100,000 nodes                             |           84.95 ms |           — |           — |
+| legacy `viewport()` reference | (0,0,1920,1080), margin 120                                | 90 nodes                                  |            0.56 ms |     0.85 ms |     0.85 ms |
+| legacy `scene()` reference    | (0,0,1920,1080), margin 120                                | 90 nodes + 90 edges                       |           24.79 ms |    26.23 ms |    26.23 ms |
+| `scene()` Fit                 | scale 0.0500, rect (-9170,58212,40320,23520), margin 10080 | 2,000 nodes + 30,888 edges                |        2,466.10 ms | 2,519.83 ms | 2,519.83 ms |
+| `scene()`                     | scale 0.15, rect (4270,66052,13440,7840), margin 3360      | 2,000 nodes + 9,672 edges                 |          699.60 ms |   730.71 ms |   730.71 ms |
+| `scene()`                     | scale 0.40, rect (8470,68502,5040,2940), margin 1260       | 1,440 nodes + 1,480 edges                 |           50.05 ms |    51.95 ms |    51.95 ms |
+| `previews()`                  | 2,000 image ids                                            | 2,000 previews, 8,000 items, 2,000 assets |          261.97 ms |   332.72 ms |   332.72 ms |
+| `setNodeBounds moved=1000`    | 1,000 contiguous nodes, 3 cycles                           | 1,000 changed                             |          607.83 ms |   666.61 ms |   666.61 ms |
+| `undo()`                      | same command, 3 cycles                                     | 1,000 changed                             |          504.66 ms |   549.03 ms |   549.03 ms |
+| `redo()`                      | same command, 3 cycles                                     | 1,000 changed                             |          515.83 ms |   534.61 ms |   534.61 ms |
+| `open()` + migration          | two opens of the seeded file                               | 100,000 nodes + 99,000 edges              | 160.54 / 126.04 ms |           — |           — |
+| `recover_runs()`              | 100 running row-end nodes                                  | 100 recovered; second call 0              |  94.09 / 103.21 ms |           — |           — |
+| `open()` + recover            | same two iterations                                        | 100 recovered                             | 254.62 / 229.25 ms |           — |           — |
+| search `generator`            | common term, 20 hits                                       | 20 samples                                |          239.59 ms |   265.59 ms |   275.37 ms |
+| search `Node 99999`           | selective, 1 hit                                           | 5 samples                                 |           12.54 ms |    12.83 ms |    12.83 ms |
+| search `图片`                 | short CJK, 20 hits                                         | 5 samples                                 |           41.24 ms |    42.20 ms |    42.20 ms |
+| search `生成器`               | CJK trigram, 20 hits                                       | 5 samples                                 |           51.49 ms |    54.94 ms |    54.94 ms |
+
+These are local manual measurements and SHOULD targets, not CI thresholds;
+the benchmark asserts counts and output validity, never elapsed time. Follow-up
+read, write, preview or startup work should compare its before/after numbers on
+this exact fixture version (or name a new version) and report the row shapes,
+rather than mixing them with the older in-memory node-only table.
 
 ## Phases
 

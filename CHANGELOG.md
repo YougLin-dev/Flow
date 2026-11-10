@@ -52,6 +52,15 @@ All notable changes to Flow are recorded here. The format follows
   without it no measuring loop runs.
 - `bun run test:100k` seeds 100,000 nodes and drives the real desktop host
   through pan, zoom, search, reveal and Fit.
+- The ignored 100k benchmark now builds a versioned, file-backed fixture with
+  100,000 grid nodes, 99,000 within-row connectors and 2,000 image batches
+  linked to real PNG assets. It prints avg/p95/max with row counts for Fit,
+  0.15 and 0.40 scene reads, previews, public 1,000-node set/undo/redo
+  cycles, open/migrate and recovery, and the existing searches, with its
+  measured table in `docs/plans/rust-core.md`. `bun run test:100k` now traces
+  its development-host run, logs timestamped phases, and shares the text
+  graph while deliberately omitting the image batches. These are measurement
+  changes, not performance gains.
 - Interface icons come from [Lucide](https://lucide.dev/) (`lucide` 1.70.0,
   ISC), drawn by a small native-canvas `Icon` view; the zoom, search, tool and
   add-node controls use them instead of text glyphs. The dependency decision

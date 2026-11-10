@@ -25,8 +25,24 @@ SeaORM/SQLite database; `search.rs` and `viewport.rs` assert that the generated
 queries keep FTS5/RTree as the outer table with `CROSS JOIN`,
 `edge_index.rs` checks the connector box against the UI's curve geometry, and
 `db.rs` covers a scene read between two off-screen cards plus its maintenance
-through moves, deletes and undo. The benchmark covers the 100k-node path plus
-short CJK (LIKE) and CJK trigram searches.
+through moves, deletes and undo.
+
+The benchmark is manual evidence, not part of the gate. `bun run test:bench`
+runs every ignored test; run the 100k fixture alone with:
+
+```sh
+cargo test --manifest-path src/native/Cargo.toml --release \
+  db::tests::hundred_thousand_nodes_benchmark -- --ignored --nocapture --test-threads=1
+```
+
+The `100k-grid-edges-images-v1` fixture is file-backed and builds 100,000 grid
+nodes, 99,000 within-row connectors, and 2,000 image nodes with four-item
+image batches linked to real PNG assets. It prints avg/p95/max with row counts
+for Fit, 0.15 and 0.40 scene reads (nodes and edges), previews, public
+1,000-node set/undo/redo cycles, open/migrate plus recovery, and the common
+and CJK searches. It asserts counts, geometry and stable row shapes, never
+timings. The measured table, with its machine and build provenance, is in
+[`plans/rust-core.md`](plans/rust-core.md#full-fixture-100k-grid-edges-images-v1).
 
 Test paths below are relative to `src/` unless stated otherwise.
 
@@ -47,16 +63,25 @@ in the fast gate; the host run only repeats the platform-sensitive checks.
 Pure unit tests are never sent to the host: they cannot observe a platform
 difference, so a second run there would only cost time.
 
-`bun run test:100k` is a real-host smoke, not part of `bun run test`: it seeds
-100,000 nodes into `.nsh/bench/flow-100k.db` through an ignored Rust test,
-points the app at it with `FLOW_DB_PATH`, then pans, zooms, searches for the
-last node, reveals and selects it, fits the document and saves screenshots
-(`flow-100k-reveal.png`, `flow-100k-overview.png`). It exercises the whole
-path — RTree viewport reads, card budget, hash sampling and search — against
-the real window; review the screenshots manually and treat their artifacts as
-git-ignored evidence. At the Fit scale (~5%) each card is only a few pixels
-tall; the smoke checks the 6% overview instead. A minimum-size or cluster
-representation at very low zoom is still to be designed.
+`bun run test:100k` is a real-host smoke, not part of `bun run test`: an
+ignored Rust seed writes the same 100,000-node / 99,000-edge text graph as the
+release benchmark's `100k-grid-edges-images-v1` fixture into
+`.nsh/bench/flow-100k.db`, but deliberately leaves its 2,000 image nodes as
+text and stores no image batches. (At this commit image previews are data URLs
+that QuickJS and native `Image` decode; that separate cost would mask graph
+and canvas work. The Rust benchmark still reads the persisted image assets.)
+The smoke points the app at the database with `FLOW_DB_PATH`, then pans,
+zooms, searches for the last node, reveals and selects it, closes that card's
+composer, fits the document and saves screenshots (`flow-100k-reveal.png`,
+`flow-100k-overview.png`). It runs `nsh test` with `--target`, `--trace`,
+`--fps` and `--verbose`, so it emits timestamped `100k smoke marker:` phase
+lines, mount batches per step, engine `nsh::perf` records and `nsh::fps`
+monitor lines. That is a **development-host** profile, not the release Rust
+benchmark: it includes test-host setup and paint, and its wall times are
+observations, not thresholds. Review the screenshots manually and treat their
+artifacts as git-ignored evidence. At the Fit scale (~5%) each card is only a
+few pixels tall; the smoke checks the 6% overview instead. A minimum-size or
+cluster representation at very low zoom is still to be designed.
 
 ## Measuring performance
 
@@ -113,6 +138,18 @@ rather than assuming percentile distributions. Headless traces exclude
 Windows presentation and real-input/paint work: they provide engine work
 counts, not substitutes for release-host measurements.
 
+The real-host `bun run test:100k` smoke passes `--trace`, `--fps` and
+`--verbose` to `nsh test`; `--verbose` is required because the nonverbose
+logger suppresses `nsh::fps` monitor records. Host `--trace` prints mount
+batches under the step they came in and the time of each commit. Treat commit
+and `event js` as separate `nsh::perf` records while the batches identify the
+steps; do not promise every composite under a step. `--fps` real-host
+frame/paint/canvas records supplement a headless `nsh test <file> --trace`
+trace. The smoke uses a development host and is a separate profile from the
+release Rust benchmark; use `bun run dev:release -- --fps -v` (above) for
+release-host measurements, and record the fixture revision with any
+comparison.
+
 On system time, endless native animations do not block an app-test step's
 quiet wait. Manual-clock settling instead checks whether the engine is idle;
 reading an animated native value through an action may advance the clock by
@@ -133,10 +170,12 @@ response metrics:
   `fps shown/refresh` and `over`; do not infer smoothness from `fps` alone.
   Repeat while idle to measure baseline engine wakeups.
 - **Large document/low zoom**: run `bun run test:100k`, review its ignored
-  screenshots, and inspect the pan, zoom, search-reveal, and Fit costs. Its
-  database is synthetic; record which fixture revision generated it when
-  comparing runs. Future benchmark additions are manual evidence, not CI
-  timing gates.
+  screenshots, and inspect the timestamped phases plus the pan, zoom,
+  search-reveal, Fit and trace/fps costs. Its database is the text-only
+  variant of the synthetic `100k-grid-edges-images-v1` fixture; the ignored
+  release Rust benchmark covers the image-rich file-backed variant. Record
+  which fixture revision and host profile generated a run when comparing.
+  Future benchmark additions are manual evidence, not CI timing gates.
 
 ### Before baseline
 
@@ -316,7 +355,8 @@ easiest observable: it is `—` before the first fit and `<n>%` afterwards.
   Escape and the selection that follows a hit. Kind filtering itself is
   asserted through the Rust search tests; the palette's arrow bindings are
   wired to the visible active row but are not asserted through the native view
-  tree. The real-host 100k smoke exercises the camera reveal.
+  tree. The real-host 100k smoke exercises the camera reveal and records
+  timestamped phases plus trace/fps evidence.
 - `flow/node-kinds.ts` and `flow/connection.ts`: direct unit tests for settings
   parsing/clamping, connection rules, port points, sampled curves and hit
   distances.
