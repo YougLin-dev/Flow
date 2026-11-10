@@ -176,6 +176,20 @@ test("box-selects only the cards the marquee covers", () => {
   expect(controller.marquee()).toBeNull();
 });
 
+test("a marquee that ends with one card leaves a normal selection", () => {
+  const { scene, controller } = setup([node("a", 100, 100), node("b", 400, 100)]);
+
+  controller.down(50, 50, false, 1);
+  controller.move(250, 120);
+  controller.up(250, 120);
+
+  expect(scene.selectedIds()).toEqual(["a"]);
+  // No group frame: the card takes the selection a press gives it, and its
+  // own pluses stay.
+  expect(controller.marqueeSelected()).toBe(false);
+  expect(controller.multiFrame()).toBe(false);
+});
+
 test("previews the cards a marquee covers before it is released", () => {
   const { scene, controller } = setup([node("a", 100, 100), node("b", 400, 100)]);
 

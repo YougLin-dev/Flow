@@ -1,9 +1,10 @@
 /**
- * The frame around a marquee's selection, drawn with the world so it shares
- * its stacking: above the unselected cards and below the selected ones, the
- * whole swept area reads as one group. The fill marks the region without
- * tinting the selected cards. A press anywhere inside the frame drags the
- * whole selection; a press outside it starts over.
+ * The frame around a marquee's multi-card selection, drawn with the world so
+ * it shares its stacking: above the unselected cards and below the selected
+ * ones, the whole swept area reads as one group. The fill marks the region
+ * without tinting the selected cards. A press anywhere inside the frame
+ * drags the whole selection; a press outside it starts over. A marquee that
+ * ends with one card shows no frame: that card is a normal selection.
  */
 import { View } from "nsh";
 import type { CanvasCamera } from "../flow/camera";
@@ -19,7 +20,7 @@ export interface SelectionFrameProps {
 
 export function SelectionFrame(props: SelectionFrameProps) {
   return (
-    <If when={props.controller.marqueeSelected() ? props.scene.selectionBounds() : null}>
+    <If when={props.controller.multiFrame() ? props.scene.selectionBounds() : null}>
       {(box) => (
         <View
           testID="selection-frame"

@@ -162,15 +162,18 @@ events and renders four kinds of children:
   card. The frame and the cards share one stacking order: the frame draws
   above every unselected card and below the selected ones, so a swept area
   moves as one group; its padding and border are divided by the camera's scale
-  to stay one screen point wide. A press anywhere inside the frame—on empty
-  space or a card border—drags the whole selection and shows the move cursor;
-  a press outside it starts a new marquee. A multi-card frame replaces the
+  to stay one screen point wide. The frame exists only for a marquee that ends
+  with more than one card: a single card is selected as a press selects it,
+  with no frame of its own. A press anywhere inside the frame—on empty space
+  or a card border—drags the whole selection and shows the move cursor; a
+  press outside it starts a new marquee. A multi-card frame replaces the
   cards' own pluses with one merged plus on each side: the left one is the
   group's input handle, the right one its output handle.
 - **Selection overlay** — the marquee box in screen space, derived from the
   controller each time the drag changes. It does not take pointer events. The
   cards the box covers take the selected accent border while it sweeps, and
-  the frame above appears on release. A selected card itself shows the same
+  the frame above appears on release when the box selected more than one
+  card. A selected card itself shows the same
   rounded accent border it shows on hover, so no square outline is laid over
   it. The border is the resize zone: corners scale proportionally and any
   point along an edge resizes that axis, with the cursor naming the side, so

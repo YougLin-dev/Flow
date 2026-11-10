@@ -90,14 +90,15 @@ All notable changes to Flow are recorded here. The format follows
   is the card that takes the press, and the pulled connector stays above even
   a large elevated selection.
 - Box selection previews its result while the pointer drags: every card the
-  box covers takes the selected accent border immediately. Releasing keeps a
-  translucent accent frame around the selected cards, matching the marquee's
-  fill and border; it includes their title rows, draws above every unselected
-  card and below the selected ones so the swept area moves as one group, and
-  clears on a press outside it. Pressing anywhere inside the frame drags the
-  whole selection, including the empty space between its cards and their
-  borders, instead of starting a new box or resizing one card; the frame
-  shows the move cursor throughout.
+  box covers takes the selected accent border immediately. Releasing over more
+  than one card keeps a translucent accent frame around them, matching the
+  marquee's fill and border; it includes their title rows, draws above every
+  unselected card and below the selected ones so the swept area moves as one
+  group, and clears on a press outside it. Pressing anywhere inside the frame
+  drags the whole selection, including the empty space between its cards and
+  their borders, instead of starting a new box or resizing one card; the
+  frame shows the move cursor throughout. A box that ends with a single card
+  is just that card's selection: no frame, no group drag, its own pluses.
 - A multi-card frame replaces the cards' own plus buttons with one merged
   plus on each side. Dragging the right plus pulls a dashed line from every
   selected card and connects them all to the release target; the left plus

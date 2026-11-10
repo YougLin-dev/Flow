@@ -146,7 +146,9 @@ export class CanvasController {
 
   /** Whether a screen point is inside the frame a marquee left around its selection. */
   private frameContains(x: number, y: number): boolean {
-    if (!this.marqueeSelected()) return false;
+    // The frame is a multi-card selection's affordance: with one card left
+    // (a shift press, a delete) it is a normal selection again.
+    if (!this.multiFrame()) return false;
     const bounds = this.selectionBounds();
     return bounds !== null && containsPoint(bounds, x, y, SELECTION_FRAME_PADDING);
   }
@@ -411,7 +413,9 @@ export class CanvasController {
       const ids = this.selectWithin(gesture, box);
       this.marquee.set(null);
       this.clearPreview();
-      this.marqueeSelected.set(ids.length > 0);
+      // One card is a normal selection: the frame, its merged pluses and
+      // its group drag are a multi-card selection's affordance.
+      this.marqueeSelected.set(ids.length > 1);
       this.hover(x, y);
       return;
     }

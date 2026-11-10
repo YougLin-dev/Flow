@@ -173,7 +173,8 @@ easiest observable: it is `—` before the first fit and `<n>%` afterwards.
 - `flow/overlay.ts`: placement directly under the card, no viewport clamping
   and camera pan/zoom.
 - `flow/canvas-controller.ts`: card press and drag commit, cancel, Shift
-  toggle, marquee, hand pan, resize, new connections and reconnects.
+  toggle, marquee (a single-card box leaving a normal selection), hand pan,
+  resize, new connections and reconnects.
 - `flow/frame-connection.test.ts`: a multi-card frame's merged pluses, muted
   per-card zones, and the group connections pulled from either side.
 - `flow/right-gesture.ts`: the right-drag threshold and pan, the still press
