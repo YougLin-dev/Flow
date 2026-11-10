@@ -8,6 +8,9 @@ All notable changes to Flow are recorded here. The format follows
 
 ### Added
 
+- `bun run dev:release` runs the development app against the same persistent
+  `.nsh/dev` document on an optimized host for meaningful performance checks.
+
 - The mouse wheel and touchpad zoom the canvas about the pointer: four
   notches double or halve the scale, within the camera's limits. NSH gives a
   window's wheel to native components rather than to views, so the canvas's

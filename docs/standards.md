@@ -379,8 +379,8 @@ A gesture updates transient overrides; the document write happens once on
 release, and viewport reads stay throttled. Avoid allocating in pointer move
 handlers beyond the override map, and never add a second render or layout
 loop. Frame budgets (about 10 ms of app work and 16.7 ms per frame at 60 Hz,
-50 ms input-to-feedback) are SHOULD targets measured manually on the reference
-host; they MUST NOT be asserted in CI without a stable benchmark. (Review,
+50 ms input-to-feedback) are SHOULD targets [measured manually on the reference host](testing.md#measuring-performance);
+they MUST NOT be asserted in CI without a stable benchmark. (Review,
 Manual profiling; the `perf` lint category is only a warning.)
 
 ### 8.3 Security and the sandbox

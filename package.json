@@ -6,6 +6,7 @@
   "type": "module",
   "scripts": {
     "dev": "bun scripts/dev.mjs",
+    "dev:release": "bun scripts/dev.mjs --release",
     "build": "nsh build src",
     "check": "nsh check src && vp check --deny-warnings && bun run test:lint && bun run check:rust",
     "check:fix": "nsh check src && vp check --fix --deny-warnings && bun run test:lint && bun run fmt:rust && bun run check:rust",

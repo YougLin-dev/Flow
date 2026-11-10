@@ -58,6 +58,101 @@ git-ignored evidence. At the Fit scale (~5%) each card is only a few pixels
 tall; the smoke checks the 6% overview instead. A minimum-size or cluster
 representation at very low zoom is still to be designed.
 
+## Measuring performance
+
+Use `bun run dev:release -- --fps -v` on the real desktop for performance
+investigations. This optimizes the generated host and app Rust core; normal
+`bun dev` leaves those hot crates at `-O0`. It uses the same persistent
+`.nsh/dev` document as `bun dev`. Record the machine, OS, commit, window size,
+display refresh rate, host profile, document/card/connector counts, and
+selection size with every measurement.
+
+Let startup settle and discard cold readings. After a short warmup, observe
+for several seconds and repeat the same gesture several times. Report ranges
+and work counts; do not promote one noisy run to an optimization result.
+The monitor excludes its first four frames and four commits as cold. Each
+four-number duration is **mean/p50/p95/max in milliseconds**:
+
+- `fps shown/refresh` is the number of refreshes that changed something per
+  second over the last second, followed by the display's refresh rate. Low
+  `fps` while idle is not slowness. This host's monitor closes frames on each
+  refresh.
+- `frame` is main-thread work per shown frame, excluding presentation; `tick`
+  is the compositor-paced ticker (animations and frame callbacks); `drain`
+  applies arriving engine batches; `paint` draws the Direct2D tree;
+  `present` queues the swap-chain frame; `canvas` is canvas recording and
+  replay within paint; `gap` is time between shown frames.
+- `over` is the percentage of retained shown frames whose main-thread work
+  exceeded one refresh, not a count of dropped input events.
+- `commits` is engine wake-ups that produced commits per second over the last
+  second. `js` is app code (handlers, timers, microtasks, list binds, and
+  render decoding); `core` applies ops, expands components, typesets, lays
+  out, and diffs to mount items. `items` is mean mount items per commit.
+- `engine` is the engine-thread busy share over the last second; `cpu` is
+  process CPU over wall time as a percentage of one core (150% is 1.5 cores
+  busy); `mem` is the working set in MB on Windows.
+
+The two FPS mechanisms are separate: `--fps -v` enables the Windows `nsh::fps`
+monitor and its logging. `FLOW_FPS=1` separately mounts the app's `FrameRate`
+overlay (`FLOW_FPS=1 bun run dev:release -- --fps -v` enables both). `FrameRate`
+asks for continuous display frames, so leave `FLOW_FPS` unset when measuring
+idle wakeups or comparing the app's unforced frame rate.
+
+Headless tracing is a separate mechanism:
+
+```sh
+nsh test src/App.test.tsx --filter "clears the selection with Escape" --trace
+```
+
+It prints mount batches with item counts under named steps, such as
+`── press(Fit): N items`, and logs engine `nsh::perf` records separately.
+Those records include per-commit op counts, total core-side commit duration,
+list-binding JS time, mount items, and node counts; event-handler JS time is
+a separate `event js` record. Compare counts and timings across repeated runs
+rather than assuming percentile distributions. Headless traces exclude
+Windows presentation and real-input/paint work: they provide engine work
+counts, not substitutes for release-host measurements.
+
+The budgets in [§8.2](standards.md#82-performance) are manual SHOULD targets,
+not CI assertions without a stable benchmark. Record these scenarios and their
+response metrics:
+
+- **Framed group drag**: reveal enough cards, drag a rectangle around several
+  to select them, and drag the group by its selection frame. Record
+  card/connector/selection counts, `commits`, `js`, `items`, `frame`, `paint`,
+  `canvas`, and `engine` before and after a change.
+- **Pan/zoom with selected cards**: keep the same group selected, pan with the
+  hand tool, and zoom around the pointer. Record the same fields plus
+  `fps shown/refresh` and `over`; do not infer smoothness from `fps` alone.
+  Repeat while idle to measure baseline engine wakeups.
+- **Large document/low zoom**: run `bun run test:100k`, review its ignored
+  screenshots, and inspect the pan, zoom, search-reveal, and Fit costs. Its
+  database is synthetic; record which fixture revision generated it when
+  comparing runs. Future benchmark additions are manual evidence, not CI
+  timing gates.
+
+### Before baseline
+
+These observations are to reproduce, not thresholds or CI assertions:
+
+- Advisor probe of the real development document (11 cards, 26 connectors),
+  1800×1180 release/LTO Windows host at Flow `1956ebb` / NSH `f0b4659`: all
+  cards selected with 26 flowing connectors cost about 2.5 ms main-thread work
+  per comet wave step (paint 2.4–2.7 ms, canvas about 0.8 ms). The same probe
+  on the debug dev host measured about 6.2 ms/step. A separate optimized
+  headless 11-card group-drag probe measured unbatched `setOverrides` at
+  about 6 ms JS versus about 0.6 ms batched; a separate debug-host observation
+  was about 14 ms. These distinct setups are not a universal 2.5× multiplier
+  on every operation.
+- A `bun dev -- --fps -v` log on the **debug dev host** with a 240 Hz display:
+  dragging the framed 11-card selection reported 70–75/240 fps, 67 commits/s,
+  13–15 ms JS per commit, 48–56 mount items per commit, and 97–100% engine
+  busy. These debug readings prompted this measurement recipe; re-measure in
+  release before choosing follow-up work.
+- The separate [release-database baseline](plans/rust-core.md#p0-measured-results)
+  has its own provenance; do not use its older search figures as canvas-host
+  evidence.
+
 ## The test levels
 
 | Level  | Where                                                                                                                                                                                                                                                                                                                                                                                                                                                            | What it proves                                                                                                                                                    |

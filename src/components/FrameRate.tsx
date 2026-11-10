@@ -6,8 +6,8 @@ const SAMPLE_MS = 500;
 /** The rate the app renders at, floating above the tool switch. Every
  * `requestAnimationFrame` callback asks for the next frame, so this is the
  * display's real rate — and while the meter runs the app renders even when
- * it has nothing else to draw. `FLOW_FPS=1` shows it; without it no loop
- * runs. */
+ * it has nothing else: it forces a frame on every refresh and must be off
+ * while measuring idle cost. `FLOW_FPS=1` shows it; without it no loop runs. */
 export function FrameRate() {
   const fps = signal(0);
   let frames = 0;
