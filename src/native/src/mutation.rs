@@ -962,6 +962,43 @@ pub fn apply_ops(conn: &DatabaseConnection, ops: &[HistoryOp]) -> Result<ChangeS
         let mut edges_removed = Vec::new();
         let mut touched = BTreeSet::new();
 
+        // An all-Bounds run is one gesture's undo or redo. Applying the whole
+        // run at the end lets the edge index see every final rect in one pass;
+        // a mixed run keeps its recorded order so unrelated ops cannot move
+        // around a geometry write.
+        let coalesced_bounds = if ops.iter().all(|op| matches!(op, HistoryOp::Bounds { .. })) {
+            let mut collected: Vec<NodeBounds> = Vec::new();
+            for op in ops {
+                let HistoryOp::Bounds {
+                    id,
+                    x,
+                    y,
+                    width,
+                    height,
+                } = op
+                else {
+                    continue;
+                };
+                let bounds = NodeBounds {
+                    id: id.clone(),
+                    x: *x,
+                    y: *y,
+                    width: *width,
+                    height: *height,
+                };
+                match collected
+                    .iter_mut()
+                    .find(|existing| existing.id == bounds.id)
+                {
+                    Some(existing) => *existing = bounds,
+                    None => collected.push(bounds),
+                }
+            }
+            collected
+        } else {
+            Vec::new()
+        };
+
         for op in ops {
             match op {
                 HistoryOp::Insert(row) => {
@@ -992,9 +1029,19 @@ pub fn apply_ops(conn: &DatabaseConnection, ops: &[HistoryOp]) -> Result<ChangeS
                     width,
                     height,
                 } => {
-                    let before = find_node_tx(txn, id)?;
-                    let row = update_bounds_tx(txn, &before, *x, *y, *width, *height)?;
-                    changed.push(row.summary());
+                    if coalesced_bounds.is_empty() {
+                        let bounds = [NodeBounds {
+                            id: id.clone(),
+                            x: *x,
+                            y: *y,
+                            width: *width,
+                            height: *height,
+                        }];
+                        let (rows, _) = set_node_bounds_batched(txn, &bounds)?;
+                        for row in rows {
+                            changed.push(row.summary());
+                        }
+                    }
                 }
                 HistoryOp::Text {
                     id,
@@ -1060,6 +1107,13 @@ pub fn apply_ops(conn: &DatabaseConnection, ops: &[HistoryOp]) -> Result<ChangeS
                         changed.push(node_row(&touch_node_tx(txn, node_id)?).summary());
                     }
                 }
+            }
+        }
+
+        if !coalesced_bounds.is_empty() {
+            let (rows, _) = set_node_bounds_batched(txn, &coalesced_bounds)?;
+            for row in rows {
+                changed.push(row.summary());
             }
         }
 
@@ -1238,40 +1292,6 @@ fn update_position_tx(
         seq: Unchanged(before.seq),
         x: Set(x),
         y: Set(y),
-        rev: Set(before.rev + 1),
-        updated_at: Set(now_ms()),
-        ..Default::default()
-    })
-    .exec(txn)?;
-
-    nodes_rtree::Entity::delete_by_id(updated.seq).exec(txn)?;
-    nodes_rtree::Entity::insert(nodes_rtree::ActiveModel {
-        id: Set(updated.seq),
-        min_x: Set(updated.x),
-        max_x: Set(updated.x + updated.width),
-        min_y: Set(updated.y),
-        max_y: Set(updated.y + updated.height),
-    })
-    .exec(txn)?;
-    edge_index::sync_node_edges(txn, &updated.id)?;
-
-    Ok(node_row(&updated))
-}
-
-fn update_bounds_tx(
-    txn: &DatabaseTransaction,
-    before: &nodes::Model,
-    x: f64,
-    y: f64,
-    width: f64,
-    height: f64,
-) -> Result<NodeRow, DbErr> {
-    let updated = nodes::Entity::update(nodes::ActiveModel {
-        seq: Unchanged(before.seq),
-        x: Set(x),
-        y: Set(y),
-        width: Set(width),
-        height: Set(height),
         rev: Set(before.rev + 1),
         updated_at: Set(now_ms()),
         ..Default::default()
