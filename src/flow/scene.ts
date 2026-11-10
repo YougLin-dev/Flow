@@ -8,6 +8,7 @@ import { batch, signal, type Signal, untracked } from "nsh";
 import type { EdgeSummary, NodeBounds, NodeSummary, SceneSnapshot } from "@flow/native";
 import {
   type BoxGeometry,
+  connectionBounds,
   distanceToConnection,
   EDGE_HIT_DISTANCE,
   type Point,
@@ -18,6 +19,7 @@ import {
 import { CARD_TITLE_BAND } from "./card-layout";
 import { KeyedFlags } from "./keyed-flags";
 import { sameEdge, sameNode, samePreviewMap, samePreviewView } from "./record-equality";
+import { containsPoint } from "./selection";
 
 /** The URLs a card's image body should show, loaded by the page. */
 export interface PreviewView {
@@ -444,6 +446,11 @@ export class FlowScene {
     for (const edge of this.edgeById.values()) {
       const ports = this.edgePorts(edge);
       if (!ports) continue;
+      // A cubic and its samples lie inside the control-point box; a point
+      // beyond the hit distance of that box cannot reach the curve. The exact
+      // sample still decides, and the box comparison stays inclusive.
+      const box = connectionBounds(ports.from, ports.to);
+      if (!containsPoint(box, x, y, EDGE_HIT_DISTANCE)) continue;
       const distance = distanceToConnection(ports.from, ports.to, { x, y });
       if (distance <= EDGE_HIT_DISTANCE && (!nearest || distance < nearest.distance)) {
         nearest = { id: edge.id, distance };
