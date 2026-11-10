@@ -11,10 +11,10 @@ import type {
   EdgeInput,
   NodeDetail,
   NodeInput,
+  NodeSummary,
   ResultBatchInput,
   ResultItemInput,
 } from "@flow/native";
-import type { AssetUrls } from "./asset-urls";
 import type { ConnectionPair } from "./connection-gesture";
 import type { NodeRunner } from "./execution";
 import {
@@ -27,10 +27,16 @@ import {
 } from "./node-kinds";
 import type { FlowScene } from "./scene";
 
+/** The asset URL cache the composer reads; `AssetUrls` implements it. */
+export interface AssetUrlSource {
+  url(id: string, mime: string): Promise<string | null>;
+  get(id: string): string | null;
+}
+
 export interface NodeSessionHost {
   document(): Document | null;
   scene(): FlowScene | null;
-  assets(): AssetUrls | null;
+  assets(): AssetUrlSource | null;
   runner(): NodeRunner | null;
   /** Shows the platform's image picker; a test host can answer it. */
   pickImages(options: PickImagesOptions): Promise<PickedImage[]>;
@@ -54,14 +60,37 @@ export class NodeSession {
 
   constructor(private readonly host: NodeSessionHost) {}
 
-  /** Reloads a composer whose node a command changed. */
+  /**
+   * Reloads a composer whose node a command changed. A summary that differs
+   * only in x, y, width or height keeps the loaded detail: the composer
+   * renders content, not card geometry. Content fields and revisions always
+   * reload, and so does every connector change: a connection feeds the
+   * composer's inputs, and a removed edge has already left the scene, so its
+   * endpoints cannot be matched to decide whether it touched this card.
+   */
   onChanges(changes: ChangeSet): void {
     const id = this.composerId();
     if (id !== null) {
       // A removed node has no detail to reload; close before the page's
       // selection effect tries to save drafts back into a deleted row.
-      if (changes.removed.includes(id)) this.closeComposer();
-      else if (changes.changed.some((node) => node.id === id)) void this.loadComposer(id);
+      if (changes.removed.includes(id)) {
+        this.closeComposer();
+      } else {
+        const current = this.detail();
+        let reload = false;
+        if (current === null || current.node.id !== id) {
+          reload = true;
+        } else {
+          for (const node of changes.changed) {
+            if (node.id === id && !canSkipDetailReload(current.node, node)) reload = true;
+          }
+        }
+        if (changes.edgesChanged.some((edge) => edge.fromId === id || edge.toId === id)) {
+          reload = true;
+        }
+        if (changes.edgesRemoved.length > 0) reload = true;
+        if (reload) void this.loadComposer(id);
+      }
     }
     const inline = this.inlineId();
     if (inline !== null && changes.removed.includes(inline)) this.closeInline();
@@ -365,12 +394,19 @@ export class NodeSession {
     }
   }
 
+  /** Reads one node's detail; tests observe the read through a subclass. */
+  protected async nodeDetail(id: string): Promise<NodeDetail | null> {
+    const document = this.host.document();
+    if (!document || this.host.isDisposed()) return null;
+    return document.nodeDetail(id);
+  }
+
   private async loadComposer(id: string): Promise<void> {
     const document = this.host.document();
     if (!document || this.host.isDisposed()) return;
     const generation = ++this.generation;
     try {
-      const detail = await document.nodeDetail(id);
+      const detail = await this.nodeDetail(id);
       if (this.host.isDisposed() || generation !== this.generation || this.composerId() !== id) {
         return;
       }
@@ -380,17 +416,18 @@ export class NodeSession {
       }
       this.detail.set(detail);
       this.running.set(this.host.runner()?.isRunning(id) ?? false);
+      // Cache URLs even after a newer load superseded this one: an asset
+      // that resolves late must still notify the composer's readers.
       await this.ensureAssets(detail);
-      if (generation !== this.generation) return;
-      this.assetVersion.update((value) => value + 1);
     } catch (error) {
       console.error("Flow could not read the node detail", error);
     }
   }
 
-  private async ensureAssets(detail: NodeDetail): Promise<void> {
+  /** Loads the detail's asset URLs, returning whether any URL was new. */
+  private async ensureAssets(detail: NodeDetail): Promise<boolean> {
     const assets = this.host.assets();
-    if (!assets) return;
+    if (!assets) return false;
     const wanted = new Map<string, string>();
     const collect = (id: string | null | undefined, mime: string | null | undefined): void => {
       if (id && mime) wanted.set(id, mime);
@@ -400,11 +437,41 @@ export class NodeSession {
       collect(input.assetId, input.asset?.mime);
       collect(input.item?.assetId, input.item?.asset?.mime);
     }
+    let inserted = false;
     await Promise.all(
       [...wanted].map(async ([id, mime]) => {
         const url = await assets.url(id, mime);
-        if (url) this.urls.set(id, url);
+        if (url && this.cacheUrl(id, url)) inserted = true;
       }),
     );
+    return inserted;
   }
+
+  /** Caches a newly available asset URL and wakes its readers once. */
+  private cacheUrl(id: string, url: string): boolean {
+    if (this.urls.has(id)) return false;
+    this.urls.set(id, url);
+    this.assetVersion.update((value) => value + 1);
+    return true;
+  }
+}
+
+/**
+ * Whether an incoming summary differs from the open detail's node only in
+ * the fields the composer does not render: its card bounds. Identical
+ * summaries skip too. Every other field, including z and rev, is content.
+ */
+function canSkipDetailReload(current: NodeSummary, incoming: NodeSummary): boolean {
+  const sameContent =
+    current.id === incoming.id &&
+    current.kind === incoming.kind &&
+    current.title === incoming.title &&
+    current.body === incoming.body &&
+    current.z === incoming.z &&
+    current.rev === incoming.rev &&
+    current.dataJson === incoming.dataJson &&
+    current.settingsJson === incoming.settingsJson &&
+    current.status === incoming.status &&
+    (current.outputBatchId ?? null) === (incoming.outputBatchId ?? null);
+  return sameContent;
 }
