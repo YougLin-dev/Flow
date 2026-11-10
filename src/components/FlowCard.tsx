@@ -166,13 +166,12 @@ export function FlowCard(props: FlowCardProps) {
         </Text>
       </View>
 
+      {/* The body container carries only the geometry and the accessible name;
+          the decoration lives in a childless absolute plate so the Windows
+          renderer can skip its paint when it is outside the damage rect
+          (nsh-platform-windows render.rs skips childless views only). */}
       <View
         accessibilityLabel={content.title()}
-        classList={{
-          "absolute rounded-2xl border bg-card shadow-lg": true,
-          "border-chart-1": active(),
-          "border-border": !active(),
-        }}
         style={{
           position: "absolute",
           left: layout().body.x,
@@ -181,6 +180,13 @@ export function FlowCard(props: FlowCardProps) {
           height: layout().body.height,
         }}
       >
+        <View
+          classList={{
+            "absolute left-0 top-0 h-full w-full rounded-2xl border bg-card shadow-lg": true,
+            "border-chart-1": active(),
+            "border-border": !active(),
+          }}
+        />
         {content.image() ? (
           <View
             class="absolute"
