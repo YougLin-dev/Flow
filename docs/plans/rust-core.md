@@ -411,6 +411,55 @@ open/migrate, 1,000-node commit/undo/redo, scene, preview and recovery timings;
 the ordinary reopen test still covers persistence and schema creation with a
 small document.
 
+### Rejected: rank-first common-term search (plan 015)
+
+Measured 2026-11-11 on branch `advisor/015-search-rank-first` from `69a1146`,
+release build, on Windows 11 Pro 10.0.26300 (x64), Intel Core i7-14650HX
+(16 cores / 24 logical, 2.2 GHz base), 32 GiB RAM, with NSH pinned at
+`f0b4659`. The fixture is the same `100k-grid-edges-images-v1` database from
+the table above, including plan 009's 2,000 image nodes, batches and assets.
+The query is `generator` with default filters and limit 20. The ignored
+benchmark read one unchanged seeded database through both adapters with no
+intervening write, asserted every sample's full `SearchHit` vector matched the
+reference (IDs, kinds, titles, snippets, order and `score.to_bits()`), and ran
+one warmup plus 20 samples per side, the same `n=20` pattern as plan 009. The
+equality assertion passed, so the experiment changed no result.
+
+**existing statement** (one all-snippets statement):
+
+```text
+search generator reference(all snippets): n=20 avg=270.25ms p95=293.04ms max=303.39ms hits=20 query="generator" limit=20
+```
+
+**experiment** (a rank-only statement plus one detail statement for the
+retained rowids):
+
+```text
+search generator rank-first(snippet limit): n=20 avg=1361.41ms p95=1462.85ms max=1536.14ms hits=20 query="generator" limit=20
+```
+
+The experiment was 5.0x slower at the average and 5.0x at p95. An independent
+reviewer re-run on the same fixture measured reference avg 279.22 ms / p95
+304.80 ms versus rank-first avg 1399.23 ms / p95 1495.67 ms, confirming the
+same order. A one-off phase diagnostic with temporary instrumentation (text
+graph only, `include_images=false`) measured the rank statement at 214–221 ms
+— the same cost as the single statement — and the detail statement at
+44.83 ms for one retained rowid, 913.88 ms for 20 and 9,454.84 ms for 200:
+SQLite re-runs the FTS5 match for each `rowid IN` value. The single statement
+also already defers `snippet()` evaluation to the rows the sorter returns,
+because limits 1, 20 and 200 measured 216.70, 219.21 and 230.16 ms. The
+premise that the existing statement tokenizes every match's body does not hold
+for this query shape, so the second match scan was pure overhead. The
+rank-first experiment was reverted; the existing single statement remains the
+production path.
+
+Plan 009's image nodes, batches and assets make these absolute numbers
+incomparable with the older in-memory, node-only P0 numbers above; the paired
+comparison on one unchanged database is the correct comparison after a fixture
+change. A future attempt must avoid re-running `MATCH` per retained rowid and
+should first re-measure how much snippet work the single statement already
+defers.
+
 ### Full fixture: `100k-grid-edges-images-v1`
 
 Measured 2026-11-11 on branch `advisor/009-bench-coverage` at `59d5b6e`
