@@ -1312,14 +1312,16 @@ fn update_position_tx(
     Ok(node_row(&updated))
 }
 
+/// The post-update rows plus each row's pre-update state and target bounds,
+/// both in input order.
+type BoundsBatch = (Vec<NodeRow>, Vec<(NodeRow, NodeBounds)>);
+
 /// Writes every moved card's new geometry with one UPDATE each (no SeaORM
-/// re-SELECT), one node RTree rewrite, and one batched edge-index sync. The
-/// returned pairs are the pre-update row and the target bounds in input order;
-/// the returned rows are the post-update rows in the same order.
+/// re-SELECT), one node RTree rewrite, and one batched edge-index sync.
 fn set_node_bounds_batched(
     txn: &DatabaseTransaction,
     bounds: &[NodeBounds],
-) -> Result<(Vec<NodeRow>, Vec<(NodeRow, NodeBounds)>), DbErr> {
+) -> Result<BoundsBatch, DbErr> {
     let ids: Vec<String> = bounds.iter().map(|next| next.id.clone()).collect();
     let mut nodes_by_id: HashMap<String, nodes::Model> = HashMap::new();
     for chunk in ids.chunks(400) {
