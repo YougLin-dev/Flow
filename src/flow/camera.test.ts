@@ -1,11 +1,58 @@
 import { expect, test } from "nsh/test";
 import {
+  CAMERA_MOVE_SETTLE_MS,
   CanvasCamera,
   MAX_SCALE,
   MIN_SCALE,
   WHEEL_NOTCHES_PER_DOUBLING,
   wheelZoomFactor,
+  type CameraScheduler,
+  type CameraTimer,
 } from "./camera";
+
+class FakeCameraScheduler implements CameraScheduler {
+  lastDelay: number | null = null;
+  writes = 0;
+  cancels = 0;
+  private callback: (() => void) | null = null;
+  private canceled: (() => void) | null = null;
+
+  schedule(callback: () => void, delay: number): CameraTimer {
+    this.writes += 1;
+    this.lastDelay = delay;
+    this.callback = callback;
+    return { cancel: () => this.cancelCallback(callback) };
+  }
+
+  cancel(timer: CameraTimer): void {
+    timer.cancel();
+  }
+
+  get active(): boolean {
+    return this.callback !== null;
+  }
+
+  get pendingCallback(): (() => void) | null {
+    return this.callback;
+  }
+
+  fire(): void {
+    const callback = this.callback;
+    this.callback = null;
+    callback?.();
+  }
+
+  /** Invokes a retained canceled callback to prove disposal gates its work. */
+  fireCanceled(): void {
+    this.canceled?.();
+  }
+
+  private cancelCallback(callback: () => void): void {
+    this.cancels += 1;
+    if (this.callback === callback) this.callback = null;
+    this.canceled = callback;
+  }
+}
 
 test("maps screen and world points both ways", () => {
   const camera = new CanvasCamera();
@@ -91,4 +138,116 @@ test("ignores non-finite or non-positive camera values", () => {
   camera.x = 10;
   camera.scale = -2;
   expect(camera.view()).toEqual({ x: 10, y: 0, scale: 1 });
+  camera.dispose();
+});
+
+test("marks camera writes and settles once through the fake scheduler", () => {
+  const scheduler = new FakeCameraScheduler();
+  const camera = new CanvasCamera({ scheduler });
+  try {
+    expect(camera.moving()).toBe(false);
+    camera.panBy(10, 0);
+    expect(camera.moving()).toBe(true);
+    expect(scheduler.lastDelay).toBe(CAMERA_MOVE_SETTLE_MS);
+    const previous = scheduler.pendingCallback;
+    camera.panBy(0, 10);
+    expect(scheduler.writes).toBe(2);
+    expect(scheduler.cancels).toBe(1);
+    previous?.();
+    expect(camera.moving()).toBe(true);
+    scheduler.fire();
+    expect(camera.moving()).toBe(false);
+    expect(scheduler.active).toBe(false);
+  } finally {
+    camera.dispose();
+  }
+});
+
+test("direct properties, zoom, and fit start camera movement", () => {
+  const scheduler = new FakeCameraScheduler();
+  const camera = new CanvasCamera({ scheduler });
+  try {
+    for (const write of [
+      () => {
+        camera.x = 1;
+      },
+      () => {
+        camera.y = 1;
+      },
+      () => {
+        camera.scale = 1.5;
+      },
+      () => {
+        camera.zoomAround(1.2, 0, 0);
+      },
+      () => {
+        camera.fit({ x: 0, y: 0, width: 100, height: 100 }, { width: 400, height: 400 });
+      },
+    ]) {
+      scheduler.fire();
+      expect(camera.moving()).toBe(false);
+      write();
+      expect(camera.moving()).toBe(true);
+    }
+  } finally {
+    camera.dispose();
+  }
+});
+
+test("rejected and no-op camera mutations do not extend movement", () => {
+  const scheduler = new FakeCameraScheduler();
+  const camera = new CanvasCamera({ scheduler });
+  try {
+    camera.panBy(0, 0);
+    camera.x = Number.NaN;
+    camera.y = Number.POSITIVE_INFINITY;
+    camera.scale = 0;
+    camera.x = 0;
+    camera.y = 0;
+    camera.scale = 1;
+    expect(camera.zoomAround(Number.NaN, 0, 0)).toBe(false);
+    expect(camera.zoomAround(0, 0, 0)).toBe(false);
+    expect(camera.zoomAround(1, 0, 0)).toBe(false);
+    camera.fit({ x: 0, y: 0, width: 0, height: 100 }, { width: 400, height: 400 });
+    camera.fit({ x: Number.NaN, y: 0, width: 100, height: 100 }, { width: 400, height: 400 });
+    expect(scheduler.writes).toBe(0);
+    camera.zoomAround(1000, 0, 0);
+    const afterZoom = scheduler.writes;
+    expect(camera.zoomAround(1000, 0, 0)).toBe(false);
+    expect(scheduler.writes).toBe(afterZoom);
+  } finally {
+    camera.dispose();
+  }
+});
+
+test("dispose cancels movement and safely ignores repeated disposal", () => {
+  const scheduler = new FakeCameraScheduler();
+  const camera = new CanvasCamera({ scheduler });
+  camera.panBy(10, 0);
+  const canceled = scheduler.pendingCallback;
+  camera.dispose();
+  expect(scheduler.active).toBe(false);
+  expect(camera.moving()).toBe(false);
+  const cancels = scheduler.cancels;
+  camera.dispose();
+  expect(scheduler.cancels).toBe(cancels);
+  canceled?.();
+  scheduler.fireCanceled();
+  expect(camera.moving()).toBe(false);
+});
+
+test("a new camera write re-arms after the settle callback", () => {
+  const scheduler = new FakeCameraScheduler();
+  const camera = new CanvasCamera({ scheduler });
+  try {
+    camera.panBy(10, 0);
+    scheduler.fire();
+    camera.panBy(10, 0);
+    expect(camera.moving()).toBe(true);
+    expect(scheduler.writes).toBe(2);
+    scheduler.fire();
+    expect(camera.moving()).toBe(false);
+  } finally {
+    camera.dispose();
+  }
 });

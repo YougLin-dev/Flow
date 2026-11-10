@@ -5,7 +5,7 @@
  * moves the content natively. The camera is a signal, so a change re-renders
  * the container and everything positioned from it.
  */
-import { signal } from "nsh";
+import { signal, type Accessor } from "nsh";
 
 export interface CameraView {
   readonly x: number;
@@ -25,6 +25,33 @@ export interface CameraSize {
   height: number;
 }
 
+/** An owned settle timeout without exposing a platform timer to the camera. */
+export interface CameraTimer {
+  cancel(): void;
+}
+
+/** The minimal clock needed to settle camera movement deterministically. */
+export interface CameraScheduler {
+  schedule(callback: () => void, delay: number): CameraTimer;
+  cancel(timer: CameraTimer): void;
+}
+
+export interface CameraOptions {
+  readonly scheduler?: CameraScheduler;
+  readonly settleMs?: number;
+}
+
+const systemScheduler: CameraScheduler = {
+  schedule: (callback, delay) => {
+    const handle = setTimeout(callback, delay);
+    return { cancel: () => clearTimeout(handle) };
+  },
+  cancel: (timer) => timer.cancel(),
+};
+
+/** How long after its last write the camera is still considered moving. */
+export const CAMERA_MOVE_SETTLE_MS = 150;
+
 /** The scale range both fitting and manual zooming share. */
 export const MIN_SCALE = 0.05;
 export const MAX_SCALE = 2.5;
@@ -40,6 +67,19 @@ export function wheelZoomFactor(notches: number): number {
 export class CanvasCamera {
   /** The camera's current view; read it in JSX to follow camera changes. */
   readonly view = signal<CameraView>({ x: 0, y: 0, scale: 1 });
+  private readonly movingState = signal(false);
+  /** Whether a camera write is recent enough to suppress expensive overlays. */
+  readonly moving: Accessor<boolean>;
+  private readonly scheduler: CameraScheduler;
+  private readonly settleMs: number;
+  private movingGeneration = 0;
+  private settleTimer: CameraTimer | null = null;
+
+  constructor(options: CameraOptions = {}) {
+    this.moving = () => this.movingState();
+    this.scheduler = options.scheduler ?? systemScheduler;
+    this.settleMs = options.settleMs ?? CAMERA_MOVE_SETTLE_MS;
+  }
 
   get x(): number {
     return this.view().x;
@@ -94,6 +134,7 @@ export class CanvasCamera {
     const view = this.view();
     if (dx === 0 && dy === 0) return;
     this.view.set({ ...view, x: view.x + dx, y: view.y + dy });
+    this.changed();
   }
 
   /**
@@ -109,6 +150,7 @@ export class CanvasCamera {
     if (next === before || (factor < 1 ? next > before : next < before)) return false;
     const k = next / before;
     this.view.set({ x: x - (x - this.x) * k, y: y - (y - this.y) * k, scale: next });
+    this.changed();
     return true;
   }
 
@@ -134,6 +176,7 @@ export class CanvasCamera {
       y: size.height / 2 - (bounds.y + bounds.height / 2) * scale,
       scale,
     });
+    this.changed();
     return scale;
   }
 
@@ -146,5 +189,24 @@ export class CanvasCamera {
     if (!Number.isFinite(scale) || scale <= 0) return;
     if (x === view.x && y === view.y && scale === view.scale) return;
     this.view.set({ x, y, scale });
+    this.changed();
+  }
+
+  private changed(): void {
+    this.movingState.set(true);
+    if (this.settleTimer !== null) this.scheduler.cancel(this.settleTimer);
+    const generation = ++this.movingGeneration;
+    this.settleTimer = this.scheduler.schedule(() => {
+      if (generation !== this.movingGeneration) return;
+      this.settleTimer = null;
+      this.movingState.set(false);
+    }, this.settleMs);
+  }
+
+  dispose(): void {
+    this.movingGeneration += 1;
+    if (this.settleTimer !== null) this.scheduler.cancel(this.settleTimer);
+    this.settleTimer = null;
+    this.movingState.set(false);
   }
 }

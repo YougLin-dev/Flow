@@ -139,6 +139,7 @@ export class ViewportController {
     cancelAnimationFrame(this.zoomFrame);
     if (this.timer !== null) clearTimeout(this.timer);
     this.timer = null;
+    this.host.camera()?.dispose();
   }
 
   private visibleRect(): { rect: Viewport; margin: number } {
