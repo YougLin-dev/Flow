@@ -70,7 +70,9 @@ export function FlowCard(props: FlowCardProps) {
   const layout = () => cardLocalLayout(size());
 
   const accent = content.accent;
-  const active = () => props.selected() || props.previewed() || props.hovered() || props.target();
+  const active = computed(
+    () => props.selected() || props.previewed() || props.hovered() || props.target(),
+  );
   const body = content.body;
   const status = content.status;
   const statusText = content.statusText;
@@ -81,7 +83,7 @@ export function FlowCard(props: FlowCardProps) {
     const followed = props.plus();
     return followed !== null && followed.side === side ? toCardLocal(followed.point, pos()) : null;
   };
-  const showPlus = () => !props.plusSuppressed() && (props.selected() || props.hovered());
+  const showPlus = computed(() => !props.plusSuppressed() && (props.selected() || props.hovered()));
 
   return (
     <View
@@ -177,9 +179,9 @@ export function FlowCard(props: FlowCardProps) {
               overflow: "hidden",
             }}
           >
-            {props.preview() === null || props.preview()?.urls.length === 0 ? (
+            <If when={props.preview() === null || props.preview()?.urls.length === 0}>
               <Text class="text-xs text-muted-foreground">No output yet</Text>
-            ) : null}
+            </If>
             <Each of={props.preview()?.urls ?? []} key="index">
               {(url, index) => (
                 <Image
@@ -199,37 +201,42 @@ export function FlowCard(props: FlowCardProps) {
               )}
             </Each>
           </View>
-        ) : body() === "" ? (
-          <Text
-            class="absolute text-xs text-muted-foreground"
-            style={{ left: BODY_INSET, top: BODY_INSET }}
-          >
-            No output yet
-          </Text>
         ) : (
-          <Text
-            class="absolute text-[13px] text-card-foreground"
-            style={{
-              left: BODY_INSET,
-              top: BODY_INSET,
-              width: Math.max(1, size().width - BODY_INSET * 2),
-              height: Math.max(1, size().height - BODY_INSET * 2),
-              lineHeight: 19,
-              numberOfLines: lineCount(),
-              textOverflow: "ellipsis",
-            }}
-          >
-            {truncate(body(), 600)}
-          </Text>
+          <>
+            {body() !== "" ? (
+              <Text
+                class="absolute text-[13px] text-card-foreground"
+                style={{
+                  left: BODY_INSET,
+                  top: BODY_INSET,
+                  width: Math.max(1, size().width - BODY_INSET * 2),
+                  height: Math.max(1, size().height - BODY_INSET * 2),
+                  lineHeight: 19,
+                  numberOfLines: lineCount(),
+                  textOverflow: "ellipsis",
+                }}
+              >
+                {truncate(body(), 600)}
+              </Text>
+            ) : null}
+            <If when={body() === ""}>
+              <Text
+                class="absolute text-xs text-muted-foreground"
+                style={{ left: BODY_INSET, top: BODY_INSET }}
+              >
+                No output yet
+              </Text>
+            </If>
+          </>
         )}
       </View>
 
-      {showPlus() ? (
+      <If when={showPlus()}>
         <PortPlus accent={accent()} base={() => plusBase("in")} follow={() => plusFollow("in")} />
-      ) : null}
-      {showPlus() ? (
+      </If>
+      <If when={showPlus()}>
         <PortPlus accent={accent()} base={() => plusBase("out")} follow={() => plusFollow("out")} />
-      ) : null}
+      </If>
     </View>
   );
 }

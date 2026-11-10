@@ -262,6 +262,11 @@ export class FlowScene {
     return this.cardDepth(id) + 1;
   }
 
+  /** Whether `id` is in the current selection (ranks-map lookup, O(1)). */
+  isSelected(id: string): boolean {
+    return this.selectionRanks().has(id);
+  }
+
   /** Between unselected cards and the elevated selection: the frame. */
   frameZ(): number {
     this.nodes();

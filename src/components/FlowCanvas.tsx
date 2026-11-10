@@ -292,12 +292,10 @@ export function FlowCanvas(props: FlowCanvasProps) {
                 rect={() => props.scene.cardRect(id)}
                 zIndex={() => props.scene.cardZ(id)}
                 preview={() => props.scene.previews().get(id) ?? null}
-                selected={() => props.scene.selection().includes(id)}
+                selected={() => props.scene.isSelected(id)}
                 previewed={() => props.controller.marqueePreview().has(id)}
                 hovered={() => props.controller.hovered() === id}
-                plusSuppressed={() =>
-                  props.controller.multiFrame() && props.scene.selection().includes(id)
-                }
+                plusSuppressed={() => props.controller.multiFrame() && props.scene.isSelected(id)}
                 plus={() => {
                   const plus = props.controller.portPlus();
                   return plus !== null && plus.nodeId === id

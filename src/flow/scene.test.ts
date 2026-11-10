@@ -207,6 +207,37 @@ test("notifies geometry bindings when a change set moves a card", () => {
   expect(xs.at(-1)).toBe(90);
 });
 
+test("isSelected answers from the selection ranks", () => {
+  const scene = new FlowScene();
+  scene.apply(snapshot([node("a", 0, 0), node("b", 300, 0)]));
+
+  scene.select(["b", "a"]);
+  expect(scene.isSelected("a")).toBe(true);
+  expect(scene.isSelected("b")).toBe(true);
+  expect(scene.isSelected("c")).toBe(false);
+
+  scene.select([]);
+  expect(scene.isSelected("a")).toBe(false);
+  expect(scene.isSelected("b")).toBe(false);
+  scene.select(["missing-id"]);
+  expect(scene.isSelected("missing-id")).toBe(false);
+  expect(scene.selectedIds()).toEqual([]);
+});
+
+test("isSelected stays consistent through a snapshot that prunes the scene", () => {
+  const scene = new FlowScene();
+  scene.apply(snapshot([node("a", 0, 0), node("b", 300, 0)]));
+  scene.select(["a", "b"]);
+
+  scene.apply(snapshot([node("c", 600, 0)]));
+  expect(scene.isSelected("a")).toBe(true);
+  expect(scene.isSelected("b")).toBe(true);
+
+  scene.applyChangeSet({ changed: [], removed: ["a"], edgesChanged: [], edgesRemoved: [] });
+  expect(scene.isSelected("a")).toBe(false);
+  expect(scene.isSelected("b")).toBe(true);
+});
+
 test("selecting a card clears the selected edge", () => {
   const scene = new FlowScene();
   scene.apply(snapshot([node("a", 0, 0), node("b", 300, 0)], [edge("a-b", "a", "b")]));
