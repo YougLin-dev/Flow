@@ -5,7 +5,8 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use sea_orm::sea_query::{Alias, Expr, ExprTrait, Query};
 use sea_orm::{
-    ColumnTrait, Condition, ConnectionTrait, DatabaseConnection, EntityTrait, QueryFilter,
+    ColumnTrait, Condition, ConnectionTrait, DatabaseConnection, EntityTrait, FromQueryResult,
+    QueryFilter,
 };
 
 use crate::constants::DOCUMENT_ID;
@@ -18,6 +19,17 @@ use crate::viewport;
 /// Edges are queried in chunks so the `IN` list stays below SQLite's
 /// parameter limit.
 const EDGE_CHUNK: usize = 400;
+
+/// The far end of a connector whose card is outside the node read. Only the
+/// card's ports matter here, so this avoids fetching the whole node row.
+#[derive(FromQueryResult)]
+struct FarEndpoint {
+    id: String,
+    x: f64,
+    y: f64,
+    width: f64,
+    height: f64,
+}
 
 pub fn snapshot(
     conn: &DatabaseConnection,
@@ -167,15 +179,27 @@ fn edges_for_scene(
         .into_iter()
         .collect();
     for chunk in missing.chunks(EDGE_CHUNK) {
-        let rows = nodes::Entity::find()
-            .filter(nodes::Column::DocumentId.eq(DOCUMENT_ID))
-            .filter(nodes::Column::Id.is_in(chunk.to_vec()))
-            .all(conn)
+        let mut statement = Query::select();
+        statement
+            .columns([
+                (nodes::Entity, nodes::Column::Id),
+                (nodes::Entity, nodes::Column::X),
+                (nodes::Entity, nodes::Column::Y),
+                (nodes::Entity, nodes::Column::Width),
+                (nodes::Entity, nodes::Column::Height),
+            ])
+            .from(nodes::Entity)
+            .and_where(Expr::col((nodes::Entity, nodes::Column::DocumentId)).eq(DOCUMENT_ID))
+            .and_where(Expr::col((nodes::Entity, nodes::Column::Id)).is_in(chunk.to_vec()));
+        let rows = conn
+            .query_all(&statement)
             .map_err(|error| error.to_string())?;
         for row in rows {
+            let endpoint =
+                FarEndpoint::from_query_result(&row, "").map_err(|error| error.to_string())?;
             ports.insert(
-                row.id.clone(),
-                node_ports(row.x, row.y, row.width, row.height),
+                endpoint.id,
+                node_ports(endpoint.x, endpoint.y, endpoint.width, endpoint.height),
             );
         }
     }
