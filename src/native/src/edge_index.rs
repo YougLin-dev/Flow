@@ -6,6 +6,8 @@
 //! The box mirrors `connectionBounds` in `src/flow/connection.ts`; every edge
 //! or node write that changes it refreshes the row in the same transaction.
 
+use std::collections::{BTreeMap, BTreeSet, HashMap};
+
 use sea_orm::sea_query::{Condition, Expr, ExprTrait, Order, Query, SelectStatement, Value};
 use sea_orm::{
     ColumnTrait, ConnectionTrait, DbBackend, DbErr, EntityTrait, FromQueryResult, QueryFilter, Set,
@@ -122,6 +124,71 @@ pub fn sync_node_edges(conn: &impl ConnectionTrait, node_id: &str) -> Result<(),
         };
         match (from, to) {
             (Some(from), Some(to)) => write_bounds(conn, &edge, &from, &to)?,
+            _ => remove_edge(conn, &edge.id)?,
+        }
+    }
+    Ok(())
+}
+
+/// Recomputes every connector touching any of the moved nodes after a batched
+/// geometry write. The union of incident edges is loaded once per chunk, and
+/// the far endpoints that were not moved are resolved with one chunked `IN`
+/// query, so a connector whose two cards both moved is written exactly once.
+pub fn sync_edges_for_nodes(
+    conn: &impl ConnectionTrait,
+    nodes_by_id: &HashMap<String, nodes::Model>,
+) -> Result<(), DbErr> {
+    if nodes_by_id.is_empty() {
+        return Ok(());
+    }
+
+    let ids: Vec<String> = nodes_by_id.keys().cloned().collect();
+    let mut edges_by_id: BTreeMap<String, edges::Model> = BTreeMap::new();
+    for chunk in ids.chunks(400) {
+        let in_chunk = chunk.to_vec();
+        let rows = edges::Entity::find()
+            .filter(edges::Column::DocumentId.eq(DOCUMENT_ID))
+            .filter(
+                Condition::any()
+                    .add(edges::Column::FromId.is_in(in_chunk.clone()))
+                    .add(edges::Column::ToId.is_in(in_chunk)),
+            )
+            .all(conn)?;
+        for edge in rows {
+            edges_by_id.insert(edge.id.clone(), edge);
+        }
+    }
+
+    let mut far_ids: BTreeSet<String> = BTreeSet::new();
+    for edge in edges_by_id.values() {
+        if !nodes_by_id.contains_key(&edge.from_id) {
+            far_ids.insert(edge.from_id.clone());
+        }
+        if !nodes_by_id.contains_key(&edge.to_id) {
+            far_ids.insert(edge.to_id.clone());
+        }
+    }
+    let far_ids: Vec<String> = far_ids.into_iter().collect();
+    let mut far_by_id: HashMap<String, nodes::Model> = HashMap::new();
+    for chunk in far_ids.chunks(400) {
+        let rows = nodes::Entity::find()
+            .filter(nodes::Column::DocumentId.eq(DOCUMENT_ID))
+            .filter(nodes::Column::Id.is_in(chunk.to_vec()))
+            .all(conn)?;
+        for node in rows {
+            far_by_id.insert(node.id.clone(), node);
+        }
+    }
+
+    for edge in edges_by_id.values() {
+        let from = nodes_by_id
+            .get(&edge.from_id)
+            .or_else(|| far_by_id.get(&edge.from_id));
+        let to = nodes_by_id
+            .get(&edge.to_id)
+            .or_else(|| far_by_id.get(&edge.to_id));
+        match (from, to) {
+            (Some(from), Some(to)) => write_bounds(conn, edge, from, to)?,
             _ => remove_edge(conn, &edge.id)?,
         }
     }

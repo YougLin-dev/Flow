@@ -1,8 +1,9 @@
 //! Document writes. Every user action is one transaction; the transaction
 //! returns both the visible change set and the operations that undo it.
 
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 
+use sea_orm::sea_query::Expr;
 use sea_orm::{
     ActiveValue::{NotSet, Set, Unchanged},
     ColumnTrait, Condition, DatabaseConnection, DatabaseTransaction, DbErr, EntityTrait,
@@ -108,14 +109,12 @@ pub fn set_node_bounds(
     bounds: Vec<NodeBounds>,
 ) -> Result<Mutation, String> {
     conn.transaction::<_, _, DbErr>(|txn| {
-        let mut changed = Vec::with_capacity(bounds.len());
-        let mut forward = Vec::with_capacity(bounds.len());
-        let mut inverse = Vec::with_capacity(bounds.len());
+        let (changed_rows, pairs) = set_node_bounds_batched(txn, &bounds)?;
+        let changed = changed_rows.iter().map(|row| row.summary()).collect();
+        let mut forward = Vec::with_capacity(pairs.len());
+        let mut inverse = Vec::with_capacity(pairs.len());
 
-        for next in &bounds {
-            let before = find_node_tx(txn, &next.id)?;
-            let row = update_bounds_tx(txn, &before, next.x, next.y, next.width, next.height)?;
-            changed.push(row.summary());
+        for (before, next) in &pairs {
             forward.push(HistoryOp::Bounds {
                 id: next.id.clone(),
                 x: next.x,
@@ -124,7 +123,7 @@ pub fn set_node_bounds(
                 height: next.height,
             });
             inverse.push(HistoryOp::Bounds {
-                id: next.id.clone(),
+                id: before.id.clone(),
                 x: before.x,
                 y: before.y,
                 width: before.width,
@@ -1291,6 +1290,106 @@ fn update_bounds_tx(
     edge_index::sync_node_edges(txn, &updated.id)?;
 
     Ok(node_row(&updated))
+}
+
+/// Writes every moved card's new geometry with one UPDATE each (no SeaORM
+/// re-SELECT), one node RTree rewrite, and one batched edge-index sync. The
+/// returned pairs are the pre-update row and the target bounds in input order;
+/// the returned rows are the post-update rows in the same order.
+fn set_node_bounds_batched(
+    txn: &DatabaseTransaction,
+    bounds: &[NodeBounds],
+) -> Result<(Vec<NodeRow>, Vec<(NodeRow, NodeBounds)>), DbErr> {
+    let ids: Vec<String> = bounds.iter().map(|next| next.id.clone()).collect();
+    let mut nodes_by_id: HashMap<String, nodes::Model> = HashMap::new();
+    for chunk in ids.chunks(400) {
+        let rows = nodes::Entity::find()
+            .filter(nodes::Column::DocumentId.eq(DOCUMENT_ID))
+            .filter(nodes::Column::Id.is_in(chunk.to_vec()))
+            .all(txn)?;
+        for row in rows {
+            nodes_by_id.insert(row.id.clone(), row);
+        }
+    }
+    for id in &ids {
+        if !nodes_by_id.contains_key(id) {
+            return Err(DbErr::RecordNotFound(format!("node {id} was not found")));
+        }
+    }
+
+    let mut changed = Vec::with_capacity(bounds.len());
+    let mut pairs = Vec::with_capacity(bounds.len());
+    let mut updated_by_id: HashMap<String, nodes::Model> =
+        HashMap::with_capacity(nodes_by_id.len());
+
+    for next in bounds {
+        let before = nodes_by_id
+            .get(&next.id)
+            .cloned()
+            .ok_or_else(|| DbErr::RecordNotFound(format!("node {} was not found", next.id)))?;
+        let now = now_ms();
+        let new_rev = before.rev + 1;
+
+        // `update_many` emits one UPDATE. `update(ActiveModel)` would follow
+        // it with a SELECT of the updated row that this path does not need.
+        nodes::Entity::update_many()
+            .col_expr(nodes::Column::X, Expr::value(next.x))
+            .col_expr(nodes::Column::Y, Expr::value(next.y))
+            .col_expr(nodes::Column::Width, Expr::value(next.width))
+            .col_expr(nodes::Column::Height, Expr::value(next.height))
+            .col_expr(nodes::Column::Rev, Expr::value(new_rev))
+            .col_expr(nodes::Column::UpdatedAt, Expr::value(now))
+            .filter(nodes::Column::Seq.eq(before.seq))
+            .exec(txn)?;
+
+        // Every field other than the four geometry fields is copied from the
+        // row that was just read, so the change set matches the old
+        // re-SELECT path without paying for the read.
+        let mut row = node_row(&before);
+        let before_row = row.clone();
+        row.x = next.x;
+        row.y = next.y;
+        row.width = next.width;
+        row.height = next.height;
+        row.rev = new_rev;
+        row.updated_at = now;
+        changed.push(row);
+        pairs.push((
+            before_row,
+            NodeBounds {
+                id: next.id.clone(),
+                x: next.x,
+                y: next.y,
+                width: next.width,
+                height: next.height,
+            },
+        ));
+
+        nodes_rtree::Entity::delete_by_id(before.seq).exec(txn)?;
+        nodes_rtree::Entity::insert(nodes_rtree::ActiveModel {
+            id: Set(before.seq),
+            min_x: Set(next.x),
+            max_x: Set(next.x + next.width),
+            min_y: Set(next.y),
+            max_y: Set(next.y + next.height),
+        })
+        .exec(txn)?;
+
+        // The edge index must see the post-move geometry, with the original
+        // row kept for the history pair above.
+        let mut updated = before;
+        updated.x = next.x;
+        updated.y = next.y;
+        updated.width = next.width;
+        updated.height = next.height;
+        updated.rev = new_rev;
+        updated.updated_at = now;
+        nodes_by_id.insert(next.id.clone(), updated.clone());
+        updated_by_id.insert(next.id.clone(), updated);
+    }
+
+    edge_index::sync_edges_for_nodes(txn, &updated_by_id)?;
+    Ok((changed, pairs))
 }
 
 fn update_text_tx(
