@@ -54,7 +54,7 @@ export class NodeSession {
   readonly inlineId = signal<string | null>(null);
   readonly inlineText = signal("");
 
-  private readonly urls = new Map<string, string>();
+  private readonly announced = new Set<string>();
   private generation = 0;
   private inlineGeneration = 0;
 
@@ -131,7 +131,15 @@ export class NodeSession {
   /** Asset URLs for the composer's current images. */
   assetUrls(): Record<string, string> {
     this.assetVersion();
-    return Object.fromEntries(this.urls);
+    const detail = this.detail();
+    const assets = this.host.assets();
+    if (detail === null || assets === null) return {};
+    const entries: Array<readonly [string, string]> = [];
+    for (const id of assetIds(detail)) {
+      const url = assets.get(id);
+      if (url !== null) entries.push([id, url]);
+    }
+    return Object.fromEntries(entries);
   }
 
   async saveSettings(id: string, settings: NodeSettings): Promise<void> {
@@ -440,20 +448,34 @@ export class NodeSession {
     let inserted = false;
     await Promise.all(
       [...wanted].map(async ([id, mime]) => {
+        const previous = assets.get(id);
         const url = await assets.url(id, mime);
-        if (url && this.cacheUrl(id, url)) inserted = true;
+        if (url && previous === null && this.noteAssetUrl(id)) inserted = true;
       }),
     );
     return inserted;
   }
 
-  /** Caches a newly available asset URL and wakes its readers once. */
-  private cacheUrl(id: string, url: string): boolean {
-    if (this.urls.has(id)) return false;
-    this.urls.set(id, url);
+  /** Announces a URL this session has not announced yet. */
+  private noteAssetUrl(id: string): boolean {
+    if (this.announced.has(id)) return false;
+    this.announced.add(id);
     this.assetVersion.update((value) => value + 1);
     return true;
   }
+}
+
+/** The asset IDs a detail's composer shows, matching `ensureAssets`. */
+function assetIds(detail: NodeDetail): Set<string> {
+  const ids = new Set<string>();
+  for (const item of detail.batch?.items ?? []) {
+    if (item.assetId) ids.add(item.assetId);
+  }
+  for (const input of detail.inputs) {
+    if (input.assetId) ids.add(input.assetId);
+    if (input.item?.assetId) ids.add(input.item.assetId);
+  }
+  return ids;
 }
 
 /**

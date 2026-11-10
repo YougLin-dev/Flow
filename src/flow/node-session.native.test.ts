@@ -73,8 +73,25 @@ test("runs the mock image provider and stores an immutable batch", async () => {
   expect(after?.batch?.items.length).toBe(2);
   expect(after?.batch?.items.every((item) => item.kind === "image")).toBe(true);
   expect(after?.batch?.items[0]?.asset?.mime).toBe("image/svg+xml");
-  await until(() => Object.keys(session.assetUrls()).length > 0);
-  expect(Object.keys(session.assetUrls()).length).toBeGreaterThan(0);
+  const assetIds = new Set<string>();
+  for (const item of after?.batch?.items ?? []) {
+    if (item.assetId) assetIds.add(item.assetId);
+  }
+  for (const input of after?.inputs ?? []) {
+    if (input.assetId) assetIds.add(input.assetId);
+    if (input.item?.assetId) assetIds.add(input.item.assetId);
+  }
+  expect(assetIds.size).toBeGreaterThan(0);
+  await until(() => [...assetIds].every((id) => assets.get(id) !== null));
+  const firstUrls = session.assetUrls();
+  const secondUrls = session.assetUrls();
+  for (const id of assetIds) {
+    const cached = assets.get(id);
+    if (cached === null) throw new Error(`the asset URL for ${id} did not load`);
+    expect(cached.startsWith("blob:")).toBe(true);
+    expect(firstUrls[id]).toBe(cached);
+    expect(secondUrls[id]).toBe(cached);
+  }
   expect((await document.assetBytes(after?.batch?.items[0]?.assetId ?? "")).length).toBeGreaterThan(
     0,
   );
