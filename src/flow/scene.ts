@@ -54,6 +54,8 @@ export class FlowScene {
 
   private readonly byId = new Map<string, NodeSummary>();
   private readonly edgeById = new Map<string, EdgeSummary>();
+  /** The directional pairs the edge map holds, built on the first query. */
+  private edgePairs: Set<string> | null = null;
   private readonly applied = new Map<string, BoxGeometry>();
   private readonly selectedFlags = new KeyedFlags();
   private readonly targetFlags = new KeyedFlags();
@@ -67,6 +69,7 @@ export class FlowScene {
   apply(snapshot: SceneSnapshot, options: { maxCards?: number } = {}): void {
     // Readers must never see new nodes with old edges.
     batch(() => {
+      const before = this.edgePairs === null ? null : topologyPairs(this.edgeById.values());
       const maxCards = options.maxCards ?? Number.POSITIVE_INFINITY;
       const nodes =
         snapshot.nodes.length > maxCards ? snapshot.nodes.slice(0, maxCards) : snapshot.nodes;
@@ -110,6 +113,11 @@ export class FlowScene {
       for (const [id, edge] of retained) this.edgeById.set(id, edge);
       for (const edge of keptEdges) this.edgeById.set(edge.id, edge);
       this.prune();
+      // Keep the lazy index when the read left its pairs alone; anchors and
+      // record identity do not change which pairs are connected.
+      if (before !== null && !samePairs(before, topologyPairs(this.edgeById.values()))) {
+        this.edgePairs = null;
+      }
     });
   }
 
@@ -142,6 +150,12 @@ export class FlowScene {
         // A command's edge carries no far anchors; keep the ones the viewport
         // read resolved for it, so a reconnect does not blank the connector.
         const previous = this.edgeById.get(edge.id);
+        if (
+          this.edgePairs !== null &&
+          (previous === undefined || previous.fromId !== edge.fromId || previous.toId !== edge.toId)
+        ) {
+          this.edgePairs = null;
+        }
         const merged =
           previous === undefined
             ? edge
@@ -155,7 +169,9 @@ export class FlowScene {
           previous !== undefined && sameEdge(previous, merged) ? previous : merged,
         );
       }
-      for (const id of changes.edgesRemoved) this.edgeById.delete(id);
+      for (const id of changes.edgesRemoved) {
+        if (this.edgeById.delete(id)) this.edgePairs = null;
+      }
       this.prune();
     });
   }
@@ -502,10 +518,15 @@ export class FlowScene {
 
   /** Whether a connector from `fromId` to `toId` is already in the scene. */
   hasEdge(fromId: string, toId: string): boolean {
-    for (const edge of this.edgeById.values()) {
-      if (edge.fromId === fromId && edge.toId === toId) return true;
+    return this.edgePairIndex().has(pairKey(fromId, toId));
+  }
+
+  /** The edge map's pairs, built once and invalidated by topology changes. */
+  private edgePairIndex(): Set<string> {
+    if (this.edgePairs === null) {
+      this.edgePairs = topologyPairs(this.edgeById.values());
     }
-    return false;
+    return this.edgePairs;
   }
 
   /** Highlights the card a pulled connector would land on. */
@@ -541,7 +562,7 @@ export class FlowScene {
       // The read carries both ports for every connector it reports, including
       // one whose curve crosses the viewport while both of its cards are
       // outside the read. Without either port there is nothing to draw.
-      if (this.edgePorts(edge) === null) this.edgeById.delete(id);
+      if (this.edgePorts(edge) === null && this.edgeById.delete(id)) this.edgePairs = null;
     }
     const selected = this.selectedEdge();
     if (selected !== null && !this.edgeById.has(selected)) this.selectedEdge.set(null);
@@ -579,6 +600,26 @@ export class FlowScene {
     if (!this.overrideRects.delete(id)) return;
     this.setRectSignal(id, this.applied.get(id) ?? null);
   }
+}
+
+/** A directional, collision-free key for a connector's pair. */
+function pairKey(fromId: string, toId: string): string {
+  return `${fromId.length}:${fromId}${toId}`;
+}
+
+/** The pairs an edge map currently contains, for cache retention checks. */
+function topologyPairs(edges: Iterable<EdgeSummary>): Set<string> {
+  const pairs = new Set<string>();
+  for (const edge of edges) pairs.add(pairKey(edge.fromId, edge.toId));
+  return pairs;
+}
+
+function samePairs(a: Set<string>, b: Set<string>): boolean {
+  if (a.size !== b.size) return false;
+  for (const key of a) {
+    if (!b.has(key)) return false;
+  }
+  return true;
 }
 
 function rectOfNode(node: NodeSummary): BoxGeometry {

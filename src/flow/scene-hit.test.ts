@@ -123,3 +123,112 @@ test("keeps the nearest connector and the first one on an exact tie", () => {
   scene.apply(snapshot([], [vertical, horizontal]));
   expect(scene.edgeAt(100, 0)).toBe("vertical");
 });
+
+test("builds the pair index lazily and keeps it directional", () => {
+  const scene = new FlowScene();
+  scene.apply(snapshot([node("a", 0, 0), node("b", 300, 0)], [edge("a-b", "a", "b")]));
+
+  expect(scene.hasEdge("a", "b")).toBe(true);
+  expect(scene.hasEdge("b", "a")).toBe(false);
+});
+
+test("updates the pair index when a change set adds, moves or removes an edge", () => {
+  const scene = new FlowScene();
+  scene.apply(
+    snapshot(
+      [node("a", 0, 0), node("b", 300, 0), node("c", 600, 0), node("d", 900, 0)],
+      [edge("a-b", "a", "b")],
+    ),
+  );
+  expect(scene.hasEdge("a", "b")).toBe(true);
+
+  scene.applyChangeSet({
+    changed: [],
+    removed: [],
+    edgesChanged: [edge("a-c", "a", "c")],
+    edgesRemoved: [],
+  });
+  expect(scene.hasEdge("a", "c")).toBe(true);
+  expect(scene.hasEdge("a", "b")).toBe(true);
+
+  // Reconnecting changes the pair without changing the edge id.
+  scene.applyChangeSet({
+    changed: [],
+    removed: [],
+    edgesChanged: [edge("a-b", "a", "d")],
+    edgesRemoved: [],
+  });
+  expect(scene.hasEdge("a", "b")).toBe(false);
+  expect(scene.hasEdge("a", "d")).toBe(true);
+
+  scene.applyChangeSet({
+    changed: [],
+    removed: [],
+    edgesChanged: [],
+    edgesRemoved: ["a-c"],
+  });
+  expect(scene.hasEdge("a", "c")).toBe(false);
+  expect(scene.hasEdge("a", "d")).toBe(true);
+});
+
+test("forgets a pair removed by a later snapshot", () => {
+  const scene = new FlowScene();
+  scene.apply(snapshot([node("a", 0, 0), node("b", 300, 0)], [edge("a-b", "a", "b")]));
+  expect(scene.hasEdge("a", "b")).toBe(true);
+
+  scene.apply(snapshot([node("a", 0, 0)]));
+  expect(scene.edgeCount()).toBe(0);
+  expect(scene.hasEdge("a", "b")).toBe(false);
+});
+
+test("keeps a pinned connector's pair across a read that omits it", () => {
+  const scene = new FlowScene();
+  scene.apply(
+    snapshot([node("a", 0, 0), node("b", 260, 0), node("c", 520, 0)], [edge("a-b", "a", "b")]),
+  );
+  scene.select(["a", "b"]);
+  expect(scene.hasEdge("a", "b")).toBe(true);
+
+  scene.apply(snapshot([node("c", 520, 0)]), { maxCards: 1 });
+  expect(scene.edgeCount()).toBe(1);
+  expect(scene.hasEdge("a", "b")).toBe(true);
+});
+
+test("forgets a pair pruned for missing anchors without a reactive read", () => {
+  const scene = new FlowScene();
+  scene.apply(snapshot([node("a", 0, 0), node("b", 300, 0)], [edge("a-b", "a", "b")]));
+  expect(scene.hasEdge("a", "b")).toBe(true);
+
+  // The next read reports the edge with neither card nor anchor; prune drops
+  // it, and the next query must not see the stale pair.
+  scene.apply(snapshot([], [edge("a-b", "a", "b")]));
+  expect(scene.edgeCount()).toBe(0);
+  expect(scene.hasEdge("a", "b")).toBe(false);
+});
+
+test("keeps oddly named node pairs distinct in the pair index", () => {
+  const scene = new FlowScene();
+  const trickyFrom = 'a\u0000,b:c"';
+  const trickyTo = "d";
+  const collidingFrom = "a";
+  const collidingTo = '\u0000,b:c"d';
+
+  // These two pairs concatenate to the same raw string; the length-prefixed
+  // key keeps them apart.
+  expect(`${trickyFrom}${trickyTo}`).toBe(`${collidingFrom}${collidingTo}`);
+  scene.apply(
+    snapshot(
+      [],
+      [
+        anchored("one", trickyFrom, trickyTo, { x: 0, y: 0 }, { x: 100, y: 0 }),
+        anchored("two", collidingFrom, collidingTo, { x: 0, y: 50 }, { x: 100, y: 50 }),
+      ],
+    ),
+  );
+
+  expect(scene.hasEdge(trickyFrom, trickyTo)).toBe(true);
+  expect(scene.hasEdge(collidingFrom, collidingTo)).toBe(true);
+  expect(scene.hasEdge(trickyFrom, collidingTo)).toBe(false);
+  expect(scene.hasEdge(collidingFrom, trickyTo)).toBe(false);
+  expect(scene.hasEdge(trickyTo, trickyFrom)).toBe(false);
+});
