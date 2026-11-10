@@ -70,6 +70,11 @@ All notable changes to Flow are recorded here. The format follows
 
 ### Changed
 
+- Preview and composer images now use one cached `blob:` URL per asset
+  instead of building and decoding a base64 data URL on every mount; NSH
+  resolves the blob's native image bytes once, and the cache owns their
+  revocation until the page closes.
+
 - The canvas keeps at most one viewport read (and one preview read) in
   flight; a pan or zoom that arrives while a read is pending coalesces into
   one follow-up instead of queuing on the document worker.

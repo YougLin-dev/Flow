@@ -1,7 +1,7 @@
 /**
- * Asset bytes to a URL NSH's `<Image>` can show. NSH's image
- * loader does not read `blob:` URLs (it waits for them forever), so assets
- * become `data:` URLs, which it decodes on every platform.
+ * Asset bytes to a URL NSH's `<Image>` can show. NSH resolves a `blob:` URL
+ * into shared native image bytes once per URL, so this cache creates one
+ * blob per asset and owns its revocation until the page is disposed.
  */
 import type { Document } from "@flow/native";
 
@@ -32,9 +32,11 @@ export class AssetUrls {
     return loading;
   }
 
-  /** Drops the decoded URL cache. */
+  /** Revokes the URLs this cache still owns; safe to call more than once. */
   dispose(): void {
+    if (this.disposed) return;
     this.disposed = true;
+    for (const url of this.urls.values()) URL.revokeObjectURL(url);
     this.urls.clear();
   }
 
@@ -42,8 +44,11 @@ export class AssetUrls {
     try {
       const bytes = await this.document.assetBytes(assetId);
       if (this.disposed || bytes.length === 0) return null;
-      const url = `data:${mime};base64,${base64(bytes)}`;
-      if (this.disposed) return null;
+      const url = URL.createObjectURL(new Blob([bytes], { type: mime }));
+      if (this.disposed) {
+        URL.revokeObjectURL(url);
+        return null;
+      }
       this.urls.set(assetId, url);
       return url;
     } catch (error) {
@@ -53,13 +58,4 @@ export class AssetUrls {
       return null;
     }
   }
-}
-
-function base64(bytes: Uint8Array): string {
-  let binary = "";
-  const chunk = 0x1000;
-  for (let index = 0; index < bytes.length; index += chunk) {
-    binary += String.fromCharCode(...bytes.subarray(index, index + chunk));
-  }
-  return btoa(binary);
 }
