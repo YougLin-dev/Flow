@@ -205,7 +205,15 @@ connectors meet the card's own border. `FlowEdges` strokes every connector's
 cubic from `flow/connection.ts` in one native-canvas layer with round caps;
 the canvas rasterizer draws at the transformed resolution, so the lines stay
 smooth and sharp at every camera scale instead of showing sampled joints, and
-there is no arrowhead. The pulled connectors are one dashed `FlowPreviews`
+there is no arrowhead. The connectors of selected cards rest brighter and
+thicker than the others and carry a wave of light (`flow/edge-flow.ts`):
+nested lit spans whose dash is each pass's own body, all ending at the
+wave's head, so the light grows from its source with a gradient trail fading
+behind its head, its tail leaves through the target, and the next wave
+starts. Every connector is stroked from its source to its
+target, so the wave flows into a selected target and out of a selected
+source. The wave's offset is an animated canvas number, so it travels
+natively without JS per frame; the loop runs only while a card is selected. The pulled connectors are one dashed `FlowPreviews`
 canvas above the cards, holding one line per fixed end, so a group drag pulls
 a line from every selected card. Both are presentational: props are
 accessors, and the page passes scene signals to them.

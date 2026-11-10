@@ -1,6 +1,7 @@
 import { expect, test } from "nsh/test";
 import {
   connectionBounds,
+  connectionLength,
   connectionPoints,
   connectorControls,
   cubicAt,
@@ -20,6 +21,12 @@ test("plus buttons rest just outside the border", () => {
   const box = { x: 40, y: 60, width: 300, height: 220 };
   expect(portButtonPoint(box, "in")).toEqual({ x: 24, y: 170 });
   expect(portButtonPoint(box, "out")).toEqual({ x: 356, y: 170 });
+});
+
+test("measures a connector along its curve", () => {
+  // Level ports give a straight line; a vertical pair bows out and back.
+  expect(Math.abs(connectionLength({ x: 0, y: 0 }, { x: 100, y: 0 }) - 100) < 0.001).toBe(true);
+  expect(connectionLength({ x: 0, y: 0 }, { x: 0, y: 200 })).toBeGreaterThan(200);
 });
 
 test("a side zone follows the pointer just outside its border", () => {

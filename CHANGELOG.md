@@ -13,6 +13,13 @@ All notable changes to Flow are recorded here. The format follows
   window's wheel to native components rather than to views, so the canvas's
   pointer surface is a wheel sensor registered by the Rust crate (Windows),
   which draws nothing, takes no presses and forwards each scroll to TSX.
+- The connectors of the selected cards flow: they rest brighter and thicker
+  than the others, and a wave of light grows from each connector's source
+  with a gradient trail behind its head, its tail leaves through the target,
+  and the next wave starts, so a selected card's incoming lines flow into it
+  and its outgoing ones flow out of it, for one card or a whole selection.
+  The wave's offset is an animated canvas value, so it travels natively
+  without JS per frame, and the loop runs only while a card is selected.
 - A secondary-button drag pans the canvas with any tool, without selecting,
   box-selecting or moving a card, and a right click opens the canvas context
   menu with Add text node and Add image node, placing the card at the pressed

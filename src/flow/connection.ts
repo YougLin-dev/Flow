@@ -132,6 +132,18 @@ export function connectionPoints(from: Point, to: Point, steps = 16): Point[] {
   return points;
 }
 
+/** The length of the connector's curve, by its sampled segments. */
+export function connectionLength(from: Point, to: Point, steps = 24): number {
+  const points = connectionPoints(from, to, steps);
+  let length = 0;
+  for (let index = 1; index < points.length; index += 1) {
+    const a = points[index - 1];
+    const b = points[index];
+    length += Math.hypot(b.x - a.x, b.y - a.y);
+  }
+  return length;
+}
+
 /** How far `point` is from the cubic connector, by sampled segments. */
 export function distanceToConnection(from: Point, to: Point, point: Point): number {
   const { c1, c2 } = connectorControls(from, to);
