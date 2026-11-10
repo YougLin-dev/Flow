@@ -1,5 +1,5 @@
 /** The composer sheet: the always-available native panel attached to a card. */
-import { Image as NshImage, Text, View } from "nsh";
+import { computed, Image as NshImage, Text, View } from "nsh";
 import { Button, Input } from "nsh/base";
 import type { InputItemSummary, NodeDetail, ResultItemSummary } from "@flow/native";
 import type { ComposerState } from "../flow/composer-state";
@@ -27,6 +27,15 @@ const labelClass = "text-[11px] font-medium text-muted-foreground";
 
 /** The node's native composer: inputs, prompt, model and run. */
 export function NodeComposer(props: NodeComposerProps) {
+  // A detail reload replaces the record, not necessarily the content. These
+  // derived accessors keep same-kind reloads from remounting sections and
+  // lists: the kind computed compares equal, and rows reconcile by key.
+  const kind = computed(() => props.detail.node.kind);
+  const imageItems = computed(
+    () => props.detail.batch?.items.filter((item) => item.kind === "image") ?? [],
+  );
+  const groupRows = computed(() => inputGroups(props.detail.inputs));
+
   return (
     <View
       testID="node-composer"
@@ -62,27 +71,34 @@ export function NodeComposer(props: NodeComposerProps) {
 
       <View class={sectionClass}>
         <Text class={labelClass}>Inputs · {props.detail.inputs.length}</Text>
-        {props.detail.inputs.length === 0 ? (
+        <If when={props.detail.inputs.length === 0}>
           <Text class="text-xs text-muted-foreground">
             Connect an upstream node or upload an image.
           </Text>
-        ) : (
-          inputGroups(props.detail.inputs).map((group) => (
-            <View class="gap-1">
-              <Text class="text-[10px] font-medium text-muted-foreground">{group.title}</Text>
-              {group.entries.map((entry) => (
-                <InputChip
-                  input={entry.input}
-                  index={entry.index}
-                  count={props.detail.inputs.length}
-                  assetUrls={props.assetUrls}
-                  onRemove={props.onRemoveInput}
-                  onMove={(index, delta) => moveInput(props, index, delta)}
-                />
-              ))}
-            </View>
-          ))
-        )}
+        </If>
+        <View class="gap-1">
+          <Each of={groupRows()} key={(group) => group.id}>
+            {(group) => (
+              <View class="gap-1">
+                <Text class="text-[10px] font-medium text-muted-foreground">{group().title}</Text>
+                <View>
+                  <Each of={group().entries} key={(entry) => entry.input.id}>
+                    {(entry) => (
+                      <InputChip
+                        input={() => entry().input}
+                        index={() => entry().index}
+                        count={() => props.detail.inputs.length}
+                        assetUrls={props.assetUrls}
+                        onRemove={props.onRemoveInput}
+                        onMove={(index, delta) => moveInput(props, index, delta)}
+                      />
+                    )}
+                  </Each>
+                </View>
+              </View>
+            )}
+          </Each>
+        </View>
       </View>
 
       <View class={sectionClass}>
@@ -115,7 +131,7 @@ export function NodeComposer(props: NodeComposerProps) {
         </Button>
       </View>
 
-      {props.detail.node.kind === "image" ? (
+      <If when={kind() === "image"}>
         <View class="flex-row items-center justify-between gap-2">
           <View class="flex-row items-center gap-1">
             {IMAGE_ASPECTS.map((aspect: ImageAspect) => (
@@ -149,9 +165,9 @@ export function NodeComposer(props: NodeComposerProps) {
             </Button>
           </View>
         </View>
-      ) : null}
+      </If>
 
-      {props.detail.node.kind === "text" ? (
+      <If when={kind() === "text"}>
         <View class={sectionClass}>
           <View class="flex-row items-center justify-between">
             <Text class={labelClass}>Text body</Text>
@@ -173,7 +189,7 @@ export function NodeComposer(props: NodeComposerProps) {
             class="min-h-24 rounded-md border border-input bg-card px-2 py-1.5 text-sm text-card-foreground"
           />
         </View>
-      ) : null}
+      </If>
 
       {resultTextOf(props.detail) === "" ? null : (
         <View class={sectionClass}>
@@ -182,18 +198,16 @@ export function NodeComposer(props: NodeComposerProps) {
         </View>
       )}
 
-      {imageItemsOf(props.detail).length === 0 ? null : (
+      <If when={imageItems().length > 0}>
         <View class={sectionClass}>
           <Text class={labelClass}>Latest images</Text>
           <View class="flex-row flex-wrap gap-1">
-            {imageItemsOf(props.detail)
-              .slice(0, 4)
-              .map((item) => (
-                <ResultThumb item={item} assetUrls={props.assetUrls} />
-              ))}
+            <Each of={imageItems().slice(0, 4)} key={(item) => item.id}>
+              {(item) => <ResultThumb item={item} assetUrls={props.assetUrls} />}
+            </Each>
           </View>
         </View>
-      )}
+      </If>
 
       <View class="flex-row items-center justify-end gap-2">
         {props.running() ? (
@@ -233,9 +247,10 @@ function moveInput(props: NodeComposerProps, index: number, delta: number): void
 }
 
 interface InputChipProps {
-  readonly input: InputItemSummary;
-  readonly index: number;
-  readonly count: number;
+  /** The row's item accessor: a retained row follows reorders and edits. */
+  readonly input: () => InputItemSummary;
+  readonly index: () => number;
+  readonly count: () => number;
   readonly assetUrls: () => Readonly<Record<string, string>>;
   readonly onRemove: (id: string) => void;
   readonly onMove: (index: number, delta: number) => void;
@@ -244,34 +259,34 @@ interface InputChipProps {
 function InputChip(props: InputChipProps) {
   return (
     <View class="flex-row items-center gap-2 rounded-md border border-border px-2 py-1">
-      <If when={inputUrl(props.input, props.assetUrls())}>
+      <If when={inputUrl(props.input(), props.assetUrls())}>
         {(url) => <NshImage src={url()} style={{ width: 28, height: 28, borderRadius: 4 }} />}
       </If>
       <View class="flex-1 gap-0.5">
         <Text class="text-[10px] text-muted-foreground">
-          {props.input.kind === "image" ? "Image" : "Text"}
+          {props.input().kind === "image" ? "Image" : "Text"}
         </Text>
-        <Text class="text-xs text-card-foreground">{chipLabel(props.input)}</Text>
+        <Text class="text-xs text-card-foreground">{chipLabel(props.input())}</Text>
       </View>
       <Button
         accessibilityLabel="Move input up"
-        onPress={() => props.onMove(props.index, -1)}
-        disabled={props.index === 0}
+        onPress={() => props.onMove(props.index(), -1)}
+        disabled={props.index() === 0}
         class="rounded-md px-1.5 py-0.5 active:bg-muted disabled:opacity-30"
       >
         <Text class="text-xs text-muted-foreground">↑</Text>
       </Button>
       <Button
         accessibilityLabel="Move input down"
-        onPress={() => props.onMove(props.index, 1)}
-        disabled={props.index === props.count - 1}
+        onPress={() => props.onMove(props.index(), 1)}
+        disabled={props.index() === props.count() - 1}
         class="rounded-md px-1.5 py-0.5 active:bg-muted disabled:opacity-30"
       >
         <Text class="text-xs text-muted-foreground">↓</Text>
       </Button>
       <Button
         accessibilityLabel="Remove input"
-        onPress={() => props.onRemove(props.input.id)}
+        onPress={() => props.onRemove(props.input().id)}
         class="rounded-md px-1.5 py-0.5 active:bg-muted"
       >
         <Text class="text-xs text-destructive">×</Text>
@@ -281,11 +296,12 @@ function InputChip(props: InputChipProps) {
 }
 
 function ResultThumb(props: {
-  readonly item: ResultItemSummary;
+  /** The row's item accessor: thumbnails reconcile by item id. */
+  readonly item: () => ResultItemSummary;
   readonly assetUrls: () => Readonly<Record<string, string>>;
 }) {
   return (
-    <If when={itemUrl(props.item, props.assetUrls())}>
+    <If when={itemUrl(props.item(), props.assetUrls())}>
       {(url) => <NshImage src={url()} style={{ width: 64, height: 64, borderRadius: 6 }} />}
     </If>
   );
@@ -297,6 +313,8 @@ interface InputEntry {
 }
 
 interface InputGroup {
+  /** Unique per list position: a source key may repeat non-adjacently. */
+  readonly id: string;
   readonly key: string;
   readonly title: string;
   readonly entries: InputEntry[];
@@ -313,7 +331,7 @@ function inputGroups(inputs: readonly InputItemSummary[]): InputGroup[] {
       last.entries.push({ input, index });
       return;
     }
-    groups.push({ key, title, entries: [{ input, index }] });
+    groups.push({ id: `${key}:${groups.length}`, key, title, entries: [{ input, index }] });
   });
   return groups;
 }
@@ -334,10 +352,6 @@ function errorOf(detail: NodeDetail): string {
 
 function resultTextOf(detail: NodeDetail): string {
   return detail.batch?.items.find((item) => item.kind === "text")?.text ?? "";
-}
-
-function imageItemsOf(detail: NodeDetail): ResultItemSummary[] {
-  return detail.batch?.items.filter((item) => item.kind === "image") ?? [];
 }
 
 function itemUrl(
