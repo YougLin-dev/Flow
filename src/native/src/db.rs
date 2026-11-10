@@ -1051,6 +1051,60 @@ mod tests {
     }
 
     #[test]
+    fn a_capped_scene_read_does_not_return_uncrossable_offscreen_connectors() {
+        let db = Database::open(":memory:").expect("open");
+        let interiors = ["interior-0", "interior-1", "interior-2"];
+        let mut inputs = Vec::new();
+        for (index, id) in interiors.iter().enumerate() {
+            inputs.push(node(id, id, "", &[], 50.0 + index as f64 * 240.0, 50.0));
+        }
+        // The long connector's cards sit below every in-view card's z, so the
+        // in-view-first ordering can never promote one into a one-card sample.
+        let mut left = node("left", "Left", "", &[], -5_000.0, 0.0);
+        left.z = -1.0;
+        let mut right = node("right", "Right", "", &[], 5_000.0, 0.0);
+        right.z = -1.0;
+        inputs.push(left);
+        inputs.push(right);
+        db.insert_nodes(inputs).expect("insert");
+        // Only left -> right; none of the interior cards touches the long
+        // connector.
+        connect(&db, "left-right", "left", "right");
+
+        let rect = Viewport {
+            x: 0.0,
+            y: 0.0,
+            width: 800.0,
+            height: 600.0,
+        };
+
+        // The uncapped read still runs the RTree half and finds the crossing.
+        let full = db
+            .scene(rect.clone(), 0.0, viewport::NODE_LIMIT)
+            .expect("uncapped scene");
+        assert_eq!(full.nodes.len(), 3);
+        assert!(full.edges.iter().all(|edge| edge.id == "left-right"));
+        assert!(full.edges.iter().any(|edge| edge.id == "left-right"));
+
+        // One kept card is a capped sample; the RTree half must not add a
+        // connector that touches none of the kept cards.
+        let one = db.scene(rect.clone(), 0.0, 1).expect("one-card scene");
+        assert_eq!(one.nodes.len(), 1);
+        assert!(
+            interiors.contains(&one.nodes[0].id.as_str()),
+            "the kept card was {}",
+            one.nodes[0].id
+        );
+        assert!(!one.edges.iter().any(|edge| edge.id == "left-right"));
+
+        // Reaching the cap exactly (three interior cards, budget three) is
+        // still capped; the predicate is `>=`, not `>`.
+        let three = db.scene(rect, 0.0, 3).expect("three-card scene");
+        assert_eq!(three.nodes.len(), 3);
+        assert!(!three.edges.iter().any(|edge| edge.id == "left-right"));
+    }
+
+    #[test]
     fn moving_a_card_moves_its_connector_in_the_edge_index() {
         let db = Database::open(":memory:").expect("open");
         db.insert_nodes(vec![

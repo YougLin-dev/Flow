@@ -25,8 +25,14 @@ pub fn snapshot(
     margin: f64,
     max_cards: u64,
 ) -> Result<SceneSnapshot, String> {
+    let kept_limit = std::cmp::min(max_cards, viewport::NODE_LIMIT);
     let nodes = viewport::viewport(conn, rect.clone(), margin, max_cards)?;
-    let edges = edges_for_scene(conn, &nodes, &rect, margin)?;
+    // A read that exhausted its card budget is a sample: its connectors can
+    // only be the ones touching the cards that survived. Only an uncapped
+    // (or not-yet-full) read can afford the RTree half that finds connectors
+    // whose cards are both outside the node read.
+    let capped = kept_limit == 0 || nodes.len() as u64 >= kept_limit;
+    let edges = edges_for_scene(conn, &nodes, &rect, margin, capped)?;
     let rev = document::current_rev(conn).map_err(|error| error.to_string())?;
 
     Ok(SceneSnapshot {
@@ -106,6 +112,7 @@ fn edges_for_scene(
     nodes: &[NodeSummary],
     rect: &Viewport,
     margin: f64,
+    capped: bool,
 ) -> Result<Vec<EdgeSummary>, String> {
     let mut found: BTreeMap<String, edges::Model> = BTreeMap::new();
 
@@ -133,8 +140,12 @@ fn edges_for_scene(
 
     // Edges whose curve crosses the viewport while both of their cards are
     // outside the node read. The curve's box, not its endpoints, decides.
-    for row in edge_index::viewport(conn, rect, margin).map_err(|error| error.to_string())? {
-        found.insert(row.id.clone(), row);
+    // A capped read skips this half: the sample's card budget is the whole
+    // point, so its connectors must come from the cards that survived.
+    if !capped {
+        for row in edge_index::viewport(conn, rect, margin).map_err(|error| error.to_string())? {
+            found.insert(row.id.clone(), row);
+        }
     }
 
     // Every connector touching the viewport carries both ports, so a scene
