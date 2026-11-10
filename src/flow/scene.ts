@@ -4,7 +4,7 @@
  * the image previews the page loaded. It owns no views; the canvas components
  * read its signals and the page drives its commands.
  */
-import { batch, signal, type Signal } from "nsh";
+import { batch, signal, type Signal, untracked } from "nsh";
 import type { EdgeSummary, NodeBounds, NodeSummary, SceneSnapshot } from "@flow/native";
 import {
   type BoxGeometry,
@@ -17,6 +17,7 @@ import {
 } from "./connection";
 import { CARD_TITLE_BAND } from "./card-layout";
 import { KeyedFlags } from "./keyed-flags";
+import { sameEdge, sameNode } from "./record-equality";
 
 /** The URLs a card's image body should show, loaded by the page. */
 export interface PreviewView {
@@ -70,7 +71,11 @@ export class FlowScene {
       for (const id of this.selection()) seen.add(id);
 
       for (const node of nodes) {
-        this.byId.set(node.id, node);
+        const previous = this.byId.get(node.id);
+        this.byId.set(
+          node.id,
+          previous !== undefined && sameNode(previous, node) ? previous : node,
+        );
         this.setApplied(node);
       }
       for (const [id] of this.byId) {
@@ -88,8 +93,15 @@ export class FlowScene {
       const keptEdges = [...this.edgeById.values()].filter(
         (edge) => pinned.has(edge.fromId) || pinned.has(edge.toId),
       );
+      // Keep each record object when its fields did not change, so a binding
+      // reading the lists wakes only for a real change.
+      const retained = new Map<string, EdgeSummary>();
+      for (const edge of snapshot.edges) {
+        const previous = this.edgeById.get(edge.id);
+        retained.set(edge.id, previous !== undefined && sameEdge(previous, edge) ? previous : edge);
+      }
       this.edgeById.clear();
-      for (const edge of snapshot.edges) this.edgeById.set(edge.id, edge);
+      for (const [id, edge] of retained) this.edgeById.set(id, edge);
       for (const edge of keptEdges) this.edgeById.set(edge.id, edge);
       this.prune();
     });
@@ -105,7 +117,11 @@ export class FlowScene {
     // The cards, connectors and resolved overrides are one command result.
     batch(() => {
       for (const node of changes.changed) {
-        this.byId.set(node.id, node);
+        const previous = this.byId.get(node.id);
+        this.byId.set(
+          node.id,
+          previous !== undefined && sameNode(previous, node) ? previous : node,
+        );
         this.setApplied(node);
         const override = this.overrideRects.get(node.id);
         if (override && sameRect(override, rectOfNode(node))) this.dropOverride(node.id);
@@ -119,15 +135,17 @@ export class FlowScene {
         // A command's edge carries no far anchors; keep the ones the viewport
         // read resolved for it, so a reconnect does not blank the connector.
         const previous = this.edgeById.get(edge.id);
-        this.edgeById.set(
-          edge.id,
+        const merged =
           previous === undefined
             ? edge
             : {
                 ...edge,
                 fromPoint: edge.fromPoint ?? previous.fromPoint ?? null,
                 toPoint: edge.toPoint ?? previous.toPoint ?? null,
-              },
+              };
+        this.edgeById.set(
+          edge.id,
+          previous !== undefined && sameEdge(previous, merged) ? previous : merged,
         );
       }
       for (const id of changes.edgesRemoved) this.edgeById.delete(id);
@@ -502,8 +520,20 @@ export class FlowScene {
     for (const id of this.overrideRects.keys()) {
       if (!this.byId.has(id)) this.dropOverride(id);
     }
-    this.nodes.set([...this.byId.values()]);
-    this.edges.set([...this.edgeById.values()]);
+    // Publish only a list that differs from the current one. Record identity
+    // is preserved above, so an unchanged read leaves both signals untouched.
+    const nextNodes = [...this.byId.values()];
+    const currentNodes = untracked(() => this.nodes());
+    const nodesChanged =
+      nextNodes.length !== currentNodes.length ||
+      nextNodes.some((node, index) => node !== currentNodes[index]);
+    if (nodesChanged) this.nodes.set(nextNodes);
+    const nextEdges = [...this.edgeById.values()];
+    const currentEdges = untracked(() => this.edges());
+    const edgesChanged =
+      nextEdges.length !== currentEdges.length ||
+      nextEdges.some((edge, index) => edge !== currentEdges[index]);
+    if (edgesChanged) this.edges.set(nextEdges);
     const live = new Set(this.byId.keys());
     this.selectedFlags.retain(live);
     this.targetFlags.retain(live);
