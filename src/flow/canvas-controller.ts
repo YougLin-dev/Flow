@@ -10,11 +10,11 @@ import type { CanvasCamera } from "./camera";
 import { type BoxGeometry, framePortZone, type Point, type PortSide } from "./connection";
 import type { ConnectionPair } from "./connection-gesture";
 import { EdgeGestures } from "./edge-gestures";
+import { cursorForHandle, handleAtPoint, screenRect } from "./resize-handles";
 import { RightGesture } from "./right-gesture";
 import type { FlowScene } from "./scene";
 import {
   containsPoint,
-  handleAt,
   intersects,
   normalizeRect,
   type ResizeHandle,
@@ -115,16 +115,7 @@ export class CanvasController {
 
   /** The screen rectangle of a card, or null when it is not in the scene. */
   screenRect(id: string): ScreenRect | null {
-    const rect = this.host.scene().cardRect(id);
-    if (!rect) return null;
-    const camera = this.host.camera();
-    const topLeft = camera.toScreen(rect.x, rect.y);
-    return {
-      x: topLeft.x,
-      y: topLeft.y,
-      width: rect.width * camera.scale,
-      height: rect.height * camera.scale,
-    };
+    return screenRect(this.host.scene(), this.host.camera(), id);
   }
 
   /**
@@ -171,37 +162,6 @@ export class CanvasController {
       if (point !== null) return { side, point };
     }
     return null;
-  }
-
-  /**
-   * The card whose resize handle is under a screen point, topmost first.
-   * Handles work on every visible card, not only the selected one, so a card
-   * can be resized with one press. A card under the point owns the decision:
-   * another card's handle never reaches through it.
-   */
-  private handleAtPoint(x: number, y: number): { id: string; side: ResizeHandle } | null {
-    const scene = this.host.scene();
-    const camera = this.host.camera();
-    const world = camera.toWorld(x, y);
-    const under = scene.nodeAt(world.x, world.y);
-    if (under !== null) {
-      const rect = this.screenRect(under);
-      const side = rect ? handleAt(rect, x, y) : null;
-      return side === null ? null : { id: under, side };
-    }
-    // Outside every card: a handle reaches past its card's border, so look
-    // for the topmost one within reach.
-    let hit: { id: string; side: ResizeHandle; z: number } | null = null;
-    for (const node of scene.nodes()) {
-      const rect = this.screenRect(node.id);
-      if (!rect) continue;
-      const side = handleAt(rect, x, y);
-      const depth = scene.cardDepth(node.id);
-      if (side !== null && (hit === null || depth >= hit.z)) {
-        hit = { id: node.id, side, z: depth };
-      }
-    }
-    return hit === null ? null : { id: hit.id, side: hit.side };
   }
 
   /** A press is one state transition: readers see the gesture's final state. */
@@ -272,7 +232,7 @@ export class CanvasController {
         return;
       }
 
-      const target = this.handleAtPoint(x, y);
+      const target = handleAtPoint(scene, camera, scene.nodes(), x, y);
       const base = target === null ? null : scene.cardRect(target.id);
       if (target && base) {
         // A handle resizes its card without a prior selection; the press
@@ -288,7 +248,7 @@ export class CanvasController {
           resizeId: target.id,
           resizeSide: target.side,
         };
-        this.cursor.set(cursorFor(target.side));
+        this.cursor.set(cursorForHandle(target.side));
         return;
       }
 
@@ -504,11 +464,11 @@ export class CanvasController {
         this.cursor.set("grab");
         return;
       }
-      const target = this.handleAtPoint(x, y);
+      const target = handleAtPoint(scene, camera, scene.nodes(), x, y);
       if (target) {
         this.hovered.set(target.id);
         this.portPlus.set(null);
-        this.cursor.set(cursorFor(target.side));
+        this.cursor.set(cursorForHandle(target.side));
         return;
       }
       const id = scene.nodeAt(world.x, world.y);
@@ -594,23 +554,4 @@ function idle(): Gesture {
 
 function screenDistance(gesture: Gesture, x: number, y: number): number {
   return Math.hypot(x - gesture.startX, y - gesture.startY);
-}
-
-function cursorFor(handle: ResizeHandle): CanvasCursor {
-  switch (handle) {
-    case "nw":
-    case "se":
-      return "nwse-resize";
-    case "ne":
-    case "sw":
-      return "nesw-resize";
-    case "n":
-    case "s":
-      return "ns-resize";
-    case "e":
-    case "w":
-      return "ew-resize";
-    default:
-      throw new Error(`Unexpected resize handle "${String(handle)}".`);
-  }
 }
