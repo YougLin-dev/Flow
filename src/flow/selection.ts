@@ -98,8 +98,8 @@ export function resizedRect(
       (safeWidth * safeWidth + safeHeight * safeHeight);
     const minScale = Math.max(minWidth / safeWidth, minHeight / safeHeight);
     const effective = Math.max(minScale, scale);
-    const width = Math.max(1, start.width * effective);
-    const height = Math.max(1, start.height * effective);
+    const width = Math.round(Math.max(1, start.width * effective));
+    const height = Math.round(Math.max(1, start.height * effective));
     return {
       x: west ? start.x + start.width - width : start.x,
       y: north ? start.y + start.height - height : start.y,
@@ -108,9 +108,10 @@ export function resizedRect(
     };
   }
 
+  const right = start.x + start.width;
+  const bottom = start.y + start.height;
   let { x, y, width, height } = start;
   if (side === "w") {
-    const right = x + width;
     const nextX = Math.min(x + dx, right - minWidth);
     width = right - nextX;
     x = nextX;
@@ -118,12 +119,15 @@ export function resizedRect(
     width = Math.max(minWidth, width + dx);
   }
   if (side === "n") {
-    const bottom = y + height;
     const nextY = Math.min(y + dy, bottom - minHeight);
     height = bottom - nextY;
     y = nextY;
   } else if (side === "s") {
     height = Math.max(minHeight, height + dy);
   }
+  width = Math.max(1, minWidth, Math.round(width));
+  height = Math.max(1, minHeight, Math.round(height));
+  if (side === "w") x = right - width;
+  if (side === "n") y = bottom - height;
   return { x, y, width, height };
 }

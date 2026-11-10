@@ -74,6 +74,33 @@ test("does not snap to the minimum when a corner passes one edge", () => {
   });
 });
 
+test("rounds a resized card to whole points", () => {
+  const start = { x: 100, y: 100, width: 200, height: 100 };
+  const resized = resizedRect(start, "se", 33.4, 21.7);
+  expect(Number.isInteger(resized.width)).toBe(true);
+  expect(Number.isInteger(resized.height)).toBe(true);
+  expect(resized.width).toBeGreaterThanOrEqual(120);
+  expect(resized.height).toBeGreaterThanOrEqual(80);
+  expect(resized.x).toBe(100);
+  expect(resized.y).toBe(100);
+});
+
+test("rounds a west resize against the fixed right edge", () => {
+  const start = { x: 100, y: 100, width: 200, height: 100 };
+  // west/north negative delta expands
+  const resized = resizedRect(start, "w", -20.3, 0);
+  expect(resized).toEqual({ x: 80, y: 100, width: 220, height: 100 });
+  expect(resized.x + resized.width).toBe(300);
+});
+
+test("rounds a north resize against the fixed bottom edge", () => {
+  const start = { x: 100, y: 100, width: 200, height: 100.4 };
+  // west/north negative delta expands
+  const resized = resizedRect(start, "n", 0, -20.3);
+  expect(resized).toEqual({ x: 100, y: 79.4, width: 200, height: 121 });
+  expect(resized.y + resized.height).toBe(200.4);
+});
+
 test("never resizes a card below its minimum", () => {
   const start = { x: 100, y: 100, width: 200, height: 100 };
   // The minimum scale keeps both edges above their minimums and the card's
