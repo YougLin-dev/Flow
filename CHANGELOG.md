@@ -40,8 +40,12 @@ All notable changes to Flow are recorded here. The format follows
   FTS5 index: debounced search over titles, bodies and tags, snippets and type
   filters, and opening a result fits the camera to and selects its card.
 - Development data persists in `.nsh/dev/flow.db` through `bun run dev`; the
-  document path is overridable with `FLOW_DB_PATH`, the only environment
-  variable declared in `src/nsh.json`.
+  document path is overridable with `FLOW_DB_PATH`.
+- A frame-rate meter for performance checks: `FLOW_FPS=1 bun run dev` shows
+  the rate the app renders at above the tool switch, counted from
+  `requestAnimationFrame` callbacks twice a second. While the meter runs the
+  app renders continuously, so the reading is the display's real rate;
+  without it no measuring loop runs.
 - `bun run test:100k` seeds 100,000 nodes and drives the real desktop host
   through pan, zoom, search, reveal and Fit.
 - Interface icons come from [Lucide](https://lucide.dev/) (`lucide` 1.70.0,

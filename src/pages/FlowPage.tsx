@@ -4,6 +4,7 @@ import type { ChangeSet, Document, NodeBounds, SearchHit } from "@flow/native";
 import { BrandCard } from "../components/BrandCard";
 import { CanvasContextMenu } from "../components/CanvasContextMenu";
 import { FlowCanvas } from "../components/FlowCanvas";
+import { FrameRate } from "../components/FrameRate";
 import { HintBar } from "../components/HintBar";
 import { InlineTextEditor } from "../components/InlineTextEditor";
 import { NodeComposer } from "../components/NodeComposer";
@@ -465,6 +466,8 @@ export function FlowPage() {
       {composerOpen() ? null : <HintBar tool={currentTool()} />}
 
       {composerOpen() ? null : <ToolSwitch tool={currentTool()} onChange={setTool} />}
+
+      {process.env.FLOW_FPS ? <FrameRate /> : null}
 
       <If when={currentSession()?.detail()}>
         {(detail) => (
