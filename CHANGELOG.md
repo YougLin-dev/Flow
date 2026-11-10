@@ -70,6 +70,14 @@ All notable changes to Flow are recorded here. The format follows
 
 ### Changed
 
+- Cards paint less on large boards: the body's rounded background, border and
+  shadow live in a childless plate the Windows renderer can skip when it is
+  outside the damage area; a camera-scale detail tier (`flow/card-detail.ts`)
+  drops the shadow and the body and status text below 35% zoom and the title
+  and image previews below 20%, where they are sub-pixel; a resized card's
+  width and height are now whole points so consecutive frames share the
+  shadow cache. The card's decoration is unchanged at 100% zoom.
+
 - Preview and composer images now use one cached `blob:` URL per asset
   instead of building and decoding a base64 data URL on every mount; NSH
   resolves the blob's native image bytes once, and the cache owns their

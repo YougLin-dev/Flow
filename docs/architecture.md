@@ -201,7 +201,11 @@ as two memoized halves — position and size — so a drag wakes only the root's
 geometry-derived style on every pointer move. Its title, status and body come
 from equality-gated values (`flow/card-content.ts`), so a viewport read that
 carries the same card wakes nothing; that keeps a zoom or pan from resubmitting
-every visible card's text. The card renders the title and
+every visible card's text. The body's rounded background, border and shadow
+are a childless plate under the content, so the Windows renderer can skip
+that paint when it is outside the damage rectangle, and a camera-scale detail
+tier (`flow/card-detail.ts`) drops the shadow, body and status text below 35%
+zoom and the title and image previews below 20%. The card renders the title and
 status above the card, the body text or image thumbnails inside it (laid out
 inside the body box), and one round plus button outside each side while the
 card is hovered or selected. On a multi-card frame those per-card
