@@ -480,6 +480,25 @@ read, write, preview or startup work should compare its before/after numbers on
 this exact fixture version (or name a new version) and report the row shapes,
 rather than mixing them with the older in-memory node-only table.
 
+### Scene read card budget (plan 011)
+
+Measured 2026-11-11 on branch `advisor/011-scene-read-budget` from `300227c`,
+release build, same machine and `100k-grid-edges-images-v1` fixture as the
+table above. The lines below are copied verbatim from `bun run test:bench`
+(`cargo test --release`, ignored benchmark). The canvas keeps 300 cards below
+0.15 zoom, 800 below 0.40 and 2,000 otherwise; these reads predate passing
+that budget to Rust, so the 300- and 800-card cases still returned 2,000 rows.
+
+**Before 011** (the existing single-statement read; no per-read card budget):
+
+```text
+legacy viewport scale=1.0000 (reference; edges and images present): n=5 avg=0.57ms p95=0.81ms max=0.81ms rect=(0.0,0.0,1920.0,1080.0) margin=120.0 nodes=90
+legacy scene scale=1.0000 (reference; edges and images present): n=5 avg=24.53ms p95=25.65ms max=25.65ms scale=1.0000 rect=(0.0,0.0,1920.0,1080.0) margin=120.0 nodes=90 edges=90
+scene fit=0.0500: n=5 avg=2472.65ms p95=2516.38ms max=2516.38ms scale=0.0500 rect=(-9170.0,58212.0,40320.0,23520.0) margin=10080.0 nodes=2000 edges=30888
+scene scale=0.15: n=5 avg=702.79ms p95=728.40ms max=728.40ms scale=0.1500 rect=(4270.0,66052.0,13440.0,7840.0) margin=3360.0 nodes=2000 edges=9672
+scene scale=0.40: n=5 avg=49.41ms p95=51.26ms max=51.26ms scale=0.4000 rect=(8470.0,68502.0,5040.0,2940.0) margin=1260.0 nodes=1440 edges=1480
+```
+
 ## Phases
 
 ### P0 — mixed scaffold and storage spike (done)
