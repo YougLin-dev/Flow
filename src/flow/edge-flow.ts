@@ -1,72 +1,67 @@
 /**
- * The connector flow: a wave of light that fills the connectors of the
- * selected cards from their source and leaves through their target. Every
- * connector is stroked from its source to its target, so the wave reads as
- * flowing into a selected target and out of a selected source. The wave's
- * body is nested spans that all end at its head and fade toward its tail,
- * so it travels as one light with a gradient trail rather than a glowing
- * segment of one color.
+ * The connector flow: a comet of light that travels along the connectors of
+ * the selected cards from their source and leaves through their target.
+ * Every connector is stroked from its source to its target, so the light
+ * reads as flowing into a selected target and out of a selected source.
+ * The comet is drawn as short pieces of the connector's curve, each with an
+ * animated alpha, so a step of the light repaints only the pieces under its
+ * trail instead of the whole curve's bounds.
  */
 import type { EdgeSummary } from "@flow/native";
 
-/** One wave: the light fills the connector, its tail leaves through the
- * target, and the next wave starts. */
+/** One wave: the comet crosses the connector, its tail leaves through the
+ * target, and the next one starts. */
 export const FLOW_CYCLE_MS = 1200;
 
-/** The head's lit span is the connector's length and this much more, so the
- * whole curve lights up even when the sampled length is a little short. */
-export const FLOW_OVERSHOOT = 8;
+/** How far apart the wave steps, in ms: a step updates the canvas's animated
+ * values, so the canvas repaints about 30 times a second instead of on every
+ * display frame. */
+export const FLOW_STEP_MS = 33;
 
-/** How many spans the wave's gradient is built of: more spans are a smoother
- * trail but more strokes. */
-export const FLOW_LAYERS = 16;
-
-/** The light's alpha at the wave's head; the tail fades from there. */
+/** The light's alpha at the comet's head; the trail fades from there. */
 export const FLOW_HEAD_ALPHA = 0.9;
 
 /** A selected card's connectors rest at this share of the flow color, so the
- * selection reads between waves; the wave lights them from there. */
+ * selection reads between waves; the comet lights them from there. */
 export const FLOW_REST_ALPHA = 0.5;
 
-/** One pass of the wave: a lit body `lit` long that ends at the wave's head,
- * drawn at `alpha` over the passes before it. */
-export interface FlowLayer {
-  readonly lit: number;
-  /** The gap after this pass's dash: past any connector's length, so one
-   * wave never meets a dash of another period. */
-  readonly gap: number;
-  /** The pass's constant dash offset, added to the wave's own: it ends
-   * every pass at the same head. */
-  readonly shift: number;
-  readonly alpha: number;
-  /** The head pass (the last and shortest), the only one that glows. */
-  readonly head: boolean;
+/** How many pieces the connector's curve is split into: more pieces are a
+ * smoother trail (the trail fades in this many steps), fewer pieces are
+ * fewer strokes to record and replay. */
+export const FLOW_SEGMENTS = 48;
+
+/** The comet's trail, as a share of the connector: the light is at its
+ * head's alpha there and fades to nothing this far behind it, so a step
+ * repaints the trail's pieces, not the whole curve. */
+export const FLOW_TRAIL = 0.24;
+
+/** The wave's position `elapsed` ms into a cycle: 1 (nothing lit) falls
+ * through 0 (the comet under way) to -1 (its tail left through the
+ * target), then the next comet starts. */
+export function flowWave(elapsed: number): number {
+  const cycle = FLOW_CYCLE_MS;
+  const phase = ((elapsed % cycle) + cycle) % cycle;
+  return 1 - (2 * phase) / cycle;
 }
 
-/** The passes of a wave whose body is `fill` long, longest first. Every pass
- * shares the head, so alphas accumulate toward it: with a linear ramp of the
- * composed alpha, the tail is the first pass's faint light and the head
- * reaches `FLOW_HEAD_ALPHA`, the trail fading evenly in between. */
-export function flowLayers(fill: number): readonly FlowLayer[] {
-  if (!(fill > 0)) return [];
-  const gap = fill * 4 + 1_000;
-  const step = fill / FLOW_LAYERS;
-  const layers: FlowLayer[] = [];
-  let shown = 0;
-  for (let i = 0; i < FLOW_LAYERS; i++) {
-    const lit = fill - i * step;
-    const wanted = (FLOW_HEAD_ALPHA * (i + 1)) / FLOW_LAYERS;
-    layers.push({
-      lit,
-      gap,
-      shift: lit - fill,
-      // The pass that takes the composed alpha from `shown` to `wanted`.
-      alpha: (wanted - shown) / (1 - shown),
-      head: i === FLOW_LAYERS - 1,
-    });
-    shown = wanted;
-  }
-  return layers;
+/** One piece's alpha over the wave, as an `interpolate` range. */
+export interface FlowPass {
+  readonly inputRange: number[];
+  readonly outputRange: number[];
+}
+
+/** The alpha timeline of piece `index` of `segments`: none until the
+ * comet's head reaches the piece, the head's alpha there, then down to none
+ * as the trail leaves it. The last knot drops the alpha a hair after the
+ * head, so a piece ahead of the comet stays dark. */
+export function flowPass(index: number, segments = FLOW_SEGMENTS, trail = FLOW_TRAIL): FlowPass {
+  const centre = (index + 0.5) / segments;
+  const span = 1 + trail;
+  // The wave value where the head reaches the piece, and where it has moved
+  // `trail` past it.
+  const head = 1 - (2 * centre) / span;
+  const tail = 1 - (2 * (centre + trail)) / span;
+  return { inputRange: [tail, head, head + 1e-3], outputRange: [0, FLOW_HEAD_ALPHA, 0] };
 }
 
 /** Whether `edge` has a selected card at either end. */

@@ -69,6 +69,33 @@ test("zooms with the platform modifier", async () => {
   expect(percentOf(app.texts())).toBeGreaterThan(fitted);
 });
 
+test("drags a card through the canvas pointer surface", async () => {
+  const app = await open("./App.tsx");
+  await app.waitUntil(() => percentOf(app.texts()) > 0);
+
+  // Reveal and centre the seed text card, then close its composer so the
+  // press lands on the card itself.
+  await selectSeed(app, "Text", "id:search-result-seed-text");
+  await app.waitUntil(() => app.shows("id:node-composer"));
+  await app.keyboard.press("escape");
+  await app.waitUntil(() => !app.shows("id:node-composer"));
+
+  // The revealed card sits at the canvas centre. Drag it far enough that the
+  // old centre is empty: pressing there afterwards must select nothing, so
+  // the move went through the native pointer surface and committed.
+  await app.drag("id:flow-canvas", { x: 400, y: 260 });
+  await app.waitUntil(() => app.texts().some((text) => text.includes("1 card selected")));
+  // The press that started the drag landed on the selected card, which opens
+  // its composer again; close the sheet so the canvas takes the next press.
+  await app.waitUntil(() => app.texts().some((text) => text.includes("Esc to close")));
+  await app.keyboard.press("escape");
+  await app.waitUntil(() => app.texts().some((text) => text.includes("Esc to clear")));
+  // A click on the now-empty centre clears the selection; the canvas's
+  // pointer surface listens to touch and mouse events, not to `onPress`.
+  await app.drag("id:flow-canvas", { x: 0, y: 0 });
+  await app.waitUntil(() => !app.texts().some((text) => text.includes("card selected")));
+});
+
 test("searches cards and reveals the chosen one", async () => {
   const app = await open("./App.tsx");
   await app.waitUntil(() => percentOf(app.texts()) > 0);

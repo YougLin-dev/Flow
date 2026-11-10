@@ -14,12 +14,13 @@ All notable changes to Flow are recorded here. The format follows
   pointer surface is a wheel sensor registered by the Rust crate (Windows),
   which draws nothing, takes no presses and forwards each scroll to TSX.
 - The connectors of the selected cards flow: they rest brighter and thicker
-  than the others, and a wave of light grows from each connector's source
-  with a gradient trail behind its head, its tail leaves through the target,
-  and the next wave starts, so a selected card's incoming lines flow into it
-  and its outgoing ones flow out of it, for one card or a whole selection.
-  The wave's offset is an animated canvas value, so it travels natively
-  without JS per frame, and the loop runs only while a card is selected.
+  than the others, and a comet of light travels from each connector's
+  source with a gradient trail behind its head and leaves through the
+  target, so a selected card's incoming lines flow into it and its outgoing
+  ones flow out of it, for one card or a whole selection. The connector's
+  curve is drawn as short pieces, each with an animated alpha stepped from a
+  timer at about 30 Hz, so a step only repaints the trail's pieces; the
+  loop runs only while a card is selected.
 - A secondary-button drag pans the canvas with any tool, without selecting,
   box-selecting or moving a card, and a right click opens the canvas context
   menu with Add text node and Add image node, placing the card at the pressed
@@ -57,6 +58,28 @@ All notable changes to Flow are recorded here. The format follows
 
 ### Changed
 
+- A viewport read that carries a card unchanged no longer resubmits its
+  title, status, body or stacking: the card reads them through
+  equality-gated values (`flow/card-content.ts`), so a zoom or pan over many
+  cards wakes only the cards whose content actually changed instead of every
+  visible card's text.
+- A card's root now carries its world position while its title, body and
+  plus buttons are laid out in card-local points (`flow/card-geometry.ts`).
+  The card's rectangle is split into equality-gated position and size memos,
+  so moving a selection submits one style update per moved card instead of
+  every geometry-derived style (eight per text card, eight plus one per
+  thumbnail for an image card), and a viewport read that leaves a card where
+  it was wakes none of its styles.
+- The connectors' flow is a comet drawn as short pieces of the curve with an
+  animated alpha each, stepped from a timer at about 30 Hz: a step repaints
+  only the trail's pieces instead of every selected connector's whole curve,
+  so a selected hub no longer makes the canvas — and with it the app —
+  repaint the stage thirty times a second.
+- Dragging or resizing a selection with more than a few flowing connectors
+  draws the resting highlight only while the gesture runs: the connectors'
+  canvas re-records on every pointer move, and the comet's many short
+  strokes would dominate that record. The comet comes back when the gesture
+  ends.
 - Migrated to NSH's main window API: `App` captures `currentWindow()` while it
   renders and the title bar's hidden style and the pin's window `level` go
   through that `WindowRef` (`Window.setTitleBar`/`Window.setLevel` are gone);
@@ -127,6 +150,12 @@ All notable changes to Flow are recorded here. The format follows
 
 ### Fixed
 
+- Dragging a card no longer re-renders every visible card: the drag's
+  transient geometry is read per card, so only the cards it moves and their
+  connectors update, and the un-moved cards keep the same geometry objects
+  across viewport reads. The connectors' canvas rounds its box outward in
+  whole steps, so a drag redraws the connectors without resizing the canvas
+  surface on every pointer move.
 - A click on the canvas no longer swallows the secondary click that follows
   it within half a second: NSH reports a mouse press to `onTouch` listeners
   too, so the click's touch end armed the post-touch suppression the canvas

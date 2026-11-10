@@ -123,6 +123,13 @@ For behaviour below the pointer, test the pieces directly:
 
 - `FlowScene` in `flow/scene.test.ts`: viewport reconciliation, pinning,
   change sets, overrides, selection and world-space hit tests.
+- `CardGeometry` in `flow/card-geometry.test.ts`: a move wakes only the
+  position memo and a resize only the size memo, an unchanged rectangle wakes
+  neither, a missing rectangle clears both, and the card-local chrome and
+  plus points compose back onto the world point they came from.
+- `CardContent` in `flow/card-content.test.ts`: a viewport read with the same
+  fields wakes nothing, a new title or body wakes only itself, a status wakes
+  the status and its label, and a kind wakes the accent and the image check.
 - `CanvasController` in `flow/canvas-controller.test.ts`: press/drag/resize/
   marquee/pan/connect against a real scene and camera with a recorded host.
 - `CanvasCamera` in `flow/camera.test.ts`: pan, zoom-around and fit invariants.
@@ -162,6 +169,13 @@ easiest observable: it is `—` before the first fit and `<n>%` afterwards.
   far card left the scene or both cards did, a selected card pinned through
   a read that reports neither end keeps its connectors, an edge with no
   ports and no cards is dropped, and previews only include visible cards.
+- `flow/card-geometry.ts`: a drag override or command move wakes only the
+  moved card's position memo, a resize wakes only its size memo, a viewport
+  read that leaves a card where it was wakes neither, and the chrome and plus
+  helpers work in card-local points.
+- `flow/card-content.ts`: the same through every card text: a viewport read
+  that carries a card's fields unchanged wakes no value, and each value
+  wakes only what reads it.
 - `flow/camera.ts`: pan/zoom/fit invariants (the point under the cursor stays
   put, content stays centered), wheel notch factors, clamping and the view
   signal. The wheel itself is a native-component event with no test driver;

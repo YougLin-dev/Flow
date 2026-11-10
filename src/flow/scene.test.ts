@@ -302,6 +302,28 @@ test("drops the overrides on a cancelled gesture", () => {
   expect(rect(scene, "a")).toEqual({ x: 40, y: 40, width: 200, height: 84 });
 });
 
+test("a drag's overrides notify only the cards it moves", () => {
+  const scene = new FlowScene();
+  scene.apply(snapshot([node("a", 40, 40), node("b", 360, 40)]));
+  let runsA = 0;
+  let runsB = 0;
+  effect(() => {
+    scene.cardRect("a");
+    runsA += 1;
+  });
+  effect(() => {
+    scene.cardRect("b");
+    runsB += 1;
+  });
+
+  scene.setOverrides(new Map([["a", { x: 90, y: 40, width: 200, height: 84 }]]));
+  expect(rect(scene, "a")).toEqual({ x: 90, y: 40, width: 200, height: 84 });
+  expect(runsA).toBe(2);
+  // A drag commits only what it moves: the other cards' geometry bindings
+  // (and the connectors reading them) do not run.
+  expect(runsB).toBe(1);
+});
+
 test("finds ports, cards and connectors in world coordinates", () => {
   const scene = new FlowScene();
   scene.apply(snapshot([node("a", 0, 0), node("b", 300, 0)], [edge("a-b", "a", "b")]));

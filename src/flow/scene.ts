@@ -4,7 +4,7 @@
  * the image previews the page loaded. It owns no views; the canvas components
  * read its signals and the page drives its commands.
  */
-import { signal } from "nsh";
+import { signal, type Signal } from "nsh";
 import type { EdgeSummary, NodeBounds, NodeSummary, SceneSnapshot } from "@flow/native";
 import {
   type BoxGeometry,
@@ -35,7 +35,10 @@ export class FlowScene {
   readonly edges = signal<readonly EdgeSummary[]>([]);
   readonly previews = signal<ReadonlyMap<string, PreviewView>>(new Map());
   /** Geometry being dragged or resized, ahead of the document. */
-  readonly overrides = signal<ReadonlyMap<string, BoxGeometry>>(new Map());
+  private readonly overrideRects = new Map<string, BoxGeometry>();
+  /** The overrides read per card: a drag invalidates the cards it moves (and
+   * their connectors), not every binding that positions a card. */
+  private readonly overrideSignals = new Map<string, Signal<BoxGeometry | undefined>>();
   /** The document ids of the selected cards. */
   readonly selection = signal<readonly string[]>([]);
   readonly selectedEdge = signal<string | null>(null);
@@ -63,7 +66,7 @@ export class FlowScene {
 
     for (const node of nodes) {
       this.byId.set(node.id, node);
-      this.applied.set(node.id, rectOfNode(node));
+      this.setApplied(node);
     }
     for (const [id] of this.byId) {
       if (seen.has(id)) continue;
@@ -95,8 +98,8 @@ export class FlowScene {
   }): void {
     for (const node of changes.changed) {
       this.byId.set(node.id, node);
-      this.applied.set(node.id, rectOfNode(node));
-      const override = this.overrides().get(node.id);
+      this.setApplied(node);
+      const override = this.overrideRects.get(node.id);
       if (override && sameRect(override, rectOfNode(node))) this.dropOverride(node.id);
     }
     for (const id of changes.removed) {
@@ -135,7 +138,7 @@ export class FlowScene {
   /** The geometry changed by a drag or resize since the last snapshot. */
   commitBounds(): NodeBounds[] {
     const changed: NodeBounds[] = [];
-    for (const [id, rect] of this.overrides()) {
+    for (const [id, rect] of this.overrideRects) {
       const applied = this.applied.get(id);
       if (!applied) continue;
       if (!sameRect(applied, rect)) changed.push({ id, ...rect });
@@ -143,15 +146,27 @@ export class FlowScene {
     return changed;
   }
 
+  /** The transient geometry being dragged or resized, ahead of the document. */
+  overrides(): ReadonlyMap<string, BoxGeometry> {
+    return this.overrideRects;
+  }
+
   /** Drops every transient geometry (a failed commit, or a cancelled drag). */
   clearOverrides(): void {
-    if (this.overrides().size === 0) return;
-    this.overrides.set(new Map());
+    if (this.overrideRects.size === 0) return;
+    this.overrideRects.clear();
+    for (const override of this.overrideSignals.values()) override.set(undefined);
   }
 
   /** Replaces the overrides in one write; the drag controller builds them. */
   setOverrides(next: ReadonlyMap<string, BoxGeometry>): void {
-    this.overrides.set(new Map(next));
+    const ids = new Set([...this.overrideRects.keys(), ...next.keys()]);
+    this.overrideRects.clear();
+    for (const [id, rect] of next) this.overrideRects.set(id, rect);
+    // Only the cards whose geometry changed hear of it; the cards reading
+    // their own rect stay untouched, which keeps a drag's re-render to what
+    // it moves.
+    for (const id of ids) this.overrideSignals.get(id)?.set(next.get(id));
   }
 
   selectedIds(): readonly string[] {
@@ -187,10 +202,28 @@ export class FlowScene {
     // Read the nodes signal so a binding that positions a card or connector
     // recomputes when a change set moves it, not only during an override.
     this.nodes();
-    const override = this.overrides().get(id);
+    const override = this.overrideSignal(id)();
     if (override) return override;
-    const node = this.byId.get(id);
-    return node ? rectOfNode(node) : null;
+    return this.applied.get(id) ?? null;
+  }
+
+  /** `id`'s override as a signal of its own, so a drag's write reaches only
+   * the cards it moves. */
+  private overrideSignal(id: string): Signal<BoxGeometry | undefined> {
+    let override = this.overrideSignals.get(id);
+    if (!override) {
+      override = signal<BoxGeometry | undefined>(this.overrideRects.get(id));
+      this.overrideSignals.set(id, override);
+    }
+    return override;
+  }
+
+  /** Keeps `id`'s applied rect the same object while it does not move, so a
+   * viewport read does not invalidate every card's geometry bindings. */
+  private setApplied(node: NodeSummary): void {
+    const rect = rectOfNode(node);
+    const previous = this.applied.get(node.id);
+    this.applied.set(node.id, previous && sameRect(previous, rect) ? previous : rect);
   }
 
   /**
@@ -427,7 +460,7 @@ export class FlowScene {
     let maxZ = 0;
     for (const node of this.byId.values()) if (node.z > maxZ) maxZ = node.z;
     this.baseZ = maxZ + 1;
-    for (const id of this.overrides().keys()) {
+    for (const id of this.overrideRects.keys()) {
       if (!this.byId.has(id)) this.dropOverride(id);
     }
     this.nodes.set([...this.byId.values()]);
@@ -435,11 +468,8 @@ export class FlowScene {
   }
 
   private dropOverride(id: string): void {
-    const current = this.overrides();
-    if (!current.has(id)) return;
-    const next = new Map(current);
-    next.delete(id);
-    this.overrides.set(next);
+    if (!this.overrideRects.delete(id)) return;
+    this.overrideSignals.get(id)?.set(undefined);
   }
 }
 

@@ -194,10 +194,17 @@ menu takes the pointer and would prevent the right-button drag from panning;
 `flow/context-menu.ts` wires the press, the pending press a release opens and
 the item actions.
 
-`FlowCard` positions itself from the node's world rectangle and renders the
-title and status above the card, the body text or image thumbnails inside it
-(laid out inside the body box), and one round plus button outside each side
-while the card is hovered or selected. On a multi-card frame those per-card
+`FlowCard`'s root carries the node's world position and lays its chrome out
+in card-local points (`flow/card-geometry.ts`). The rectangle reaches the card
+as two memoized halves — position and size — so a drag wakes only the root's
+`left`/`top` and a resize only the styles that read the size, instead of every
+geometry-derived style on every pointer move. Its title, status and body come
+from equality-gated values (`flow/card-content.ts`), so a viewport read that
+carries the same card wakes nothing; that keeps a zoom or pan from resubmitting
+every visible card's text. The card renders the title and
+status above the card, the body text or image thumbnails inside it (laid out
+inside the body box), and one round plus button outside each side while the
+card is hovered or selected. On a multi-card frame those per-card
 pluses give way to the frame's merged ones. A plus rests just outside the
 border; inside the side zone it eases toward the pointer in both axes, and it
 springs back when the pointer leaves. The plus is only a drag handle:
@@ -206,20 +213,25 @@ cubic from `flow/connection.ts` in one native-canvas layer with round caps;
 the canvas rasterizer draws at the transformed resolution, so the lines stay
 smooth and sharp at every camera scale instead of showing sampled joints, and
 there is no arrowhead. The connectors of selected cards rest brighter and
-thicker than the others and carry a wave of light (`flow/edge-flow.ts`):
-nested lit spans whose dash is each pass's own body, all ending at the
-wave's head, so the light grows from its source with a gradient trail fading
-behind its head, its tail leaves through the target, and the next wave
-starts. Every connector is stroked from its source to its
-target, so the wave flows into a selected target and out of a selected
-source. The wave's offset is an animated canvas number, so it travels
-natively without JS per frame; the loop runs only while a card is selected. The pulled connectors are one dashed `FlowPreviews`
+thicker than the others and carry a comet of light (`flow/edge-flow.ts`):
+the connector's cubic is split into short pieces (`splitConnector`), and
+each piece's alpha is an animated value of the shared wave, so the light
+travels from its source with a gradient trail behind its head and leaves
+through the target, and the next comet starts. Every connector is stroked
+from its source to its target, so the light flows into a selected target
+and out of a selected source. The wave's position is stepped from a timer
+(`FLOW_STEP_MS`), about thirty times a second: a step only updates the
+drawing's values, and only the pieces under the trail change, so the canvas
+repaints the trail instead of every selected connector's whole curve, and
+between steps no frame is needed. The timer runs only while a card is
+selected. The pulled connectors are one dashed `FlowPreviews`
 canvas above the cards, holding one line per fixed end, so a group drag pulls
 a line from every selected card. Both are presentational: props are
 accessors, and the page passes scene signals to them.
 
 The scene model (`flow/scene.ts`) is headless: it holds the visible nodes and
-edges, the selection, transient drag geometry (`overrides`), previews, the
+edges, the selection, transient drag geometry (`overrides`, read per card so
+a drag updates only the cards it moves and their connectors), previews, the
 connection previews and the card a pulled connector would snap to, and answers
 world-space hit questions (`nodeAt`, `portZoneAt`, `edgeAt`). Selected cards
 stack above every unselected one in selection order, so a pressed card comes

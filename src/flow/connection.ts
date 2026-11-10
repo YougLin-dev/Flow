@@ -144,6 +144,42 @@ export function connectionLength(from: Point, to: Point, steps = 24): number {
   return length;
 }
 
+/** One piece of a connector's cubic: an exact sub-curve of it. */
+export interface ConnectorPiece {
+  readonly from: Point;
+  readonly c1: Point;
+  readonly c2: Point;
+  readonly to: Point;
+}
+
+/**
+ * The connector's cubic split into `parts` pieces, each an exact sub-curve:
+ * a piece's handles come from the curve's position and derivative at its
+ * ends, so the pieces together draw the same cubic. The flow light tints
+ * only the pieces its trail covers.
+ */
+export function splitConnector(from: Point, to: Point, parts: number): ConnectorPiece[] {
+  const { c1, c2 } = connectorControls(from, to);
+  const count = Math.max(1, Math.floor(parts));
+  const pieces: ConnectorPiece[] = [];
+  for (let index = 0; index < count; index += 1) {
+    const start = index / count;
+    const end = (index + 1) / count;
+    const begin = cubicAt(from, c1, c2, to, start);
+    const finish = cubicAt(from, c1, c2, to, end);
+    const speed = (end - start) / 3;
+    const d0 = cubicDerivativeAt(from, c1, c2, to, start);
+    const d1 = cubicDerivativeAt(from, c1, c2, to, end);
+    pieces.push({
+      from: begin,
+      c1: { x: begin.x + d0.x * speed, y: begin.y + d0.y * speed },
+      c2: { x: finish.x - d1.x * speed, y: finish.y - d1.y * speed },
+      to: finish,
+    });
+  }
+  return pieces;
+}
+
 /** How far `point` is from the cubic connector, by sampled segments. */
 export function distanceToConnection(from: Point, to: Point, point: Point): number {
   const { c1, c2 } = connectorControls(from, to);
@@ -169,6 +205,18 @@ export function cubicAt(from: Point, c1: Point, c2: Point, to: Point, t: number)
   return {
     x: a * from.x + b * c1.x + c * c2.x + d * to.x,
     y: a * from.y + b * c1.y + c * c2.y + d * to.y,
+  };
+}
+
+/** The cubic's derivative at `t`. */
+function cubicDerivativeAt(from: Point, c1: Point, c2: Point, to: Point, t: number): Point {
+  const u = 1 - t;
+  const a = 3 * u * u;
+  const b = 6 * u * t;
+  const c = 3 * t * t;
+  return {
+    x: a * (c1.x - from.x) + b * (c2.x - c1.x) + c * (to.x - c2.x),
+    y: a * (c1.y - from.y) + b * (c2.y - c1.y) + c * (to.y - c2.y),
   };
 }
 

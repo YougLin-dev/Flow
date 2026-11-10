@@ -1,14 +1,27 @@
 /**
  * One node card on the native canvas: its title and status above the card,
- * the body inside it and a plus button on each side while it is active. Its
- * pixel values are world-space points, so they scale with the camera.
+ * the body inside it and a plus button on each side while it is active. The
+ * card's root carries its world position, and its chrome is laid out in
+ * card-local points, so a drag moves one style instead of every geometry
+ * derived style (see `flow/card-geometry.ts`); its document text is read
+ * through equality-gated values (`flow/card-content.ts`), so a viewport
+ * refresh that carries the same card wakes no binding. Its pixel values
+ * scale with the camera through the world view.
  */
-import { Image, Text, View } from "nsh";
+import { computed, Image, Text, View } from "nsh";
 import type { NodeSummary } from "@flow/native";
 import { PortPlus } from "./PortPlus";
-import { CARD_TITLE_GAP, CARD_TITLE_HEIGHT } from "../flow/card-layout";
-import { type BoxGeometry, type Point, type PortSide, portButtonPoint } from "../flow/connection";
-import { type FlowAccent, nodeKind, statusLabel } from "../flow/node-kinds";
+import { CardContent } from "../flow/card-content";
+import {
+  CardGeometry,
+  type CardSize,
+  cardLocalLayout,
+  cardPlusPoint,
+  toCardLocal,
+} from "../flow/card-geometry";
+import { CARD_TITLE_HEIGHT } from "../flow/card-layout";
+import type { BoxGeometry, Point, PortSide } from "../flow/connection";
+import type { FlowAccent } from "../flow/node-kinds";
 import { previewCell } from "../flow/preview-grid";
 import type { PreviewView } from "../flow/scene";
 
@@ -41,23 +54,32 @@ const ACCENT_BG: Record<FlowAccent, string> = {
 /** The body inset inside the card. */
 const BODY_INSET = 16;
 
+const ZERO_POINT: Point = { x: 0, y: 0 };
+const ZERO_SIZE: CardSize = { width: 0, height: 0 };
+
 export function FlowCard(props: FlowCardProps) {
-  const accent = () => nodeKind(props.node().kind).accent;
+  // The rectangle arrives whole on every drag move; the position and size
+  // memos keep each chrome style subscribed to only the fields it reads.
+  const geometry = new CardGeometry(() => props.rect());
+  // Both cards' records and their stacking are replaced by every viewport
+  // read; the gated values keep an unchanged card from waking any binding.
+  const content = new CardContent(() => props.node());
+  const zIndex = computed(() => props.zIndex());
+  const pos = () => geometry.position() ?? ZERO_POINT;
+  const size = () => geometry.size() ?? ZERO_SIZE;
+  const layout = () => cardLocalLayout(size());
+
+  const accent = content.accent;
   const active = () => props.selected() || props.previewed() || props.hovered() || props.target();
-  const left = () => props.rect()?.x ?? 0;
-  const top = () => props.rect()?.y ?? 0;
-  const width = () => props.rect()?.width ?? 0;
-  const height = () => props.rect()?.height ?? 0;
-  const body = () => props.node().body.trim();
-  const status = () => statusLabel(props.node().status);
-  const lineCount = () => Math.max(1, Math.floor((height() - BODY_INSET * 2) / 19));
-  const plusBase = (side: PortSide): Point => {
-    const rect = props.rect();
-    return rect ? portButtonPoint(rect, side) : { x: 0, y: 0 };
-  };
+  const body = content.body;
+  const status = content.status;
+  const statusText = content.statusText;
+  const lineCount = () => Math.max(1, Math.floor((size().height - BODY_INSET * 2) / 19));
+  const plusBase = (side: PortSide): Point =>
+    geometry.size() === null ? ZERO_POINT : cardPlusPoint(size(), side);
   const plusFollow = (side: PortSide): Point | null => {
     const followed = props.plus();
-    return followed !== null && followed.side === side ? followed.point : null;
+    return followed !== null && followed.side === side ? toCardLocal(followed.point, pos()) : null;
   };
   const showPlus = () => !props.plusSuppressed() && (props.selected() || props.hovered());
 
@@ -65,20 +87,20 @@ export function FlowCard(props: FlowCardProps) {
     <View
       style={{
         position: "absolute",
-        left: 0,
-        top: 0,
+        left: pos().x,
+        top: pos().y,
         width: 0,
         height: 0,
-        zIndex: props.zIndex(),
+        zIndex: zIndex(),
       }}
     >
       <View
         style={{
           position: "absolute",
-          left: left(),
-          top: top() - CARD_TITLE_HEIGHT - CARD_TITLE_GAP,
-          width: width(),
-          height: CARD_TITLE_HEIGHT,
+          left: layout().title.x,
+          top: layout().title.y,
+          width: layout().title.width,
+          height: layout().title.height,
         }}
       >
         <View
@@ -92,30 +114,30 @@ export function FlowCard(props: FlowCardProps) {
           style={{
             left: 12,
             top: 0,
-            width: Math.max(1, width() - (status() === "" ? 12 : 92)),
+            width: Math.max(1, size().width - (statusText() === "" ? 12 : 92)),
             height: CARD_TITLE_HEIGHT,
             textAlignVertical: "center",
             numberOfLines: 1,
             textOverflow: "ellipsis",
           }}
         >
-          {props.node().title}
+          {content.title()}
         </Text>
         <View
           classList={{
             "absolute h-1.5 w-1.5 rounded-full": true,
-            [statusDot(props.node().status)]: true,
+            [statusDot(status())]: true,
           }}
           style={{
-            left: width() - 74,
+            left: size().width - 74,
             top: 7,
-            visibility: status() === "" ? "hidden" : "visible",
+            visibility: statusText() === "" ? "hidden" : "visible",
           }}
         />
         <Text
-          classList={{ "absolute text-[10px]": true, [statusText(props.node().status)]: true }}
+          classList={{ "absolute text-[10px]": true, [statusTextClass(status())]: true }}
           style={{
-            left: width() - 64,
+            left: size().width - 64,
             top: 0,
             width: 56,
             height: CARD_TITLE_HEIGHT,
@@ -125,12 +147,12 @@ export function FlowCard(props: FlowCardProps) {
             textOverflow: "ellipsis",
           }}
         >
-          {status()}
+          {statusText()}
         </Text>
       </View>
 
       <View
-        accessibilityLabel={props.node().title}
+        accessibilityLabel={content.title()}
         classList={{
           "absolute rounded-2xl border bg-card shadow-lg": true,
           "border-chart-1": active(),
@@ -138,20 +160,20 @@ export function FlowCard(props: FlowCardProps) {
         }}
         style={{
           position: "absolute",
-          left: left(),
-          top: top(),
-          width: width(),
-          height: height(),
+          left: layout().body.x,
+          top: layout().body.y,
+          width: layout().body.width,
+          height: layout().body.height,
         }}
       >
-        {props.node().kind === "image" ? (
+        {content.image() ? (
           <View
             class="absolute"
             style={{
               left: BODY_INSET,
               top: BODY_INSET,
-              width: Math.max(1, width() - BODY_INSET * 2),
-              height: Math.max(1, height() - BODY_INSET * 2),
+              width: Math.max(1, size().width - BODY_INSET * 2),
+              height: Math.max(1, size().height - BODY_INSET * 2),
               overflow: "hidden",
             }}
           >
@@ -165,8 +187,8 @@ export function FlowCard(props: FlowCardProps) {
                   style={{
                     position: "absolute",
                     ...previewCell(
-                      Math.max(1, width() - BODY_INSET * 2),
-                      Math.max(1, height() - BODY_INSET * 2),
+                      Math.max(1, size().width - BODY_INSET * 2),
+                      Math.max(1, size().height - BODY_INSET * 2),
                       index(),
                       props.preview()?.urls.length ?? 0,
                     ),
@@ -190,14 +212,14 @@ export function FlowCard(props: FlowCardProps) {
             style={{
               left: BODY_INSET,
               top: BODY_INSET,
-              width: Math.max(1, width() - BODY_INSET * 2),
-              height: Math.max(1, height() - BODY_INSET * 2),
+              width: Math.max(1, size().width - BODY_INSET * 2),
+              height: Math.max(1, size().height - BODY_INSET * 2),
               lineHeight: 19,
               numberOfLines: lineCount(),
               textOverflow: "ellipsis",
             }}
           >
-            {truncate(props.node().body, 600)}
+            {truncate(body(), 600)}
           </Text>
         )}
       </View>
@@ -227,7 +249,7 @@ function statusDot(status: string): string {
   }
 }
 
-function statusText(status: string): string {
+function statusTextClass(status: string): string {
   switch (status) {
     case "running":
       return "text-chart-1";
