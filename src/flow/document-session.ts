@@ -17,7 +17,7 @@ export async function openFlowDocument(): Promise<Document> {
   const document = await Document.open(path);
   try {
     await document.recoverRuns();
-    if ((await document.count()) === 0 && (await document.edgeCount()) === 0) {
+    if (await document.isEmpty()) {
       await seedDocument(document);
     }
   } catch (error) {

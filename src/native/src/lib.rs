@@ -329,6 +329,12 @@ impl Document {
         off_thread(move || db.edge_count()).await
     }
 
+    /// Whether the open document has neither nodes nor edges.
+    pub async fn is_empty(this: Instance<Self>) -> Result<bool, String> {
+        let db = this.with(|document| document.db.clone());
+        off_thread(move || db.is_empty()).await
+    }
+
     /// Reverts the last command.
     pub async fn undo(this: Instance<Self>) -> Result<ChangeSet, String> {
         let db = this.with(|document| document.db.clone());

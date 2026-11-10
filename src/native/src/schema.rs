@@ -16,7 +16,17 @@ use crate::entity::{
 
 /// Every migration that this build knows, in order. Add a new entry here and
 /// a matching arm in `apply_migration`.
-const MIGRATIONS: &[i32] = &[1, 2, 3];
+const MIGRATIONS: &[i32] = &[1, 2, 3, 4];
+
+/// Recovery's exact filters: a document's running nodes and every running
+/// batch. Both partial indexes keep the startup scans proportional to the
+/// unfinished work rather than the document.
+const RUNNING_WORK_INDEXES: &[&str] = &[
+    "CREATE INDEX IF NOT EXISTS nodes_running \
+     ON nodes(document_id, status) WHERE status = 'running'",
+    "CREATE INDEX IF NOT EXISTS result_batches_running \
+     ON result_batches(status) WHERE status = 'running'",
+];
 
 /// Migration 2 is the node editor's breaking reset: all document data is
 /// discarded (the TSX side seeds the new example after opening).
@@ -85,6 +95,7 @@ fn apply_migration(conn: &DatabaseConnection, version: i32) -> Result<(), String
             1 => migration_1(txn)?,
             2 => migration_2(txn)?,
             3 => migration_3(txn)?,
+            4 => migration_4(txn)?,
             _ => {
                 return Err(DbErr::Custom(format!(
                     "unknown database migration {version}"
@@ -139,6 +150,18 @@ where
 {
     conn.execute_unprepared(EDGES_RTREE)?;
     crate::edge_index::backfill(conn)
+}
+
+/// Partial indexes for the two startup recovery queries. The table's rows are
+/// untouched; SQLite fills each index from existing data in this transaction.
+fn migration_4<C>(conn: &C) -> Result<(), DbErr>
+where
+    C: ConnectionTrait,
+{
+    for statement in RUNNING_WORK_INDEXES {
+        conn.execute_unprepared(statement)?;
+    }
+    Ok(())
 }
 
 fn create_document_tables<C>(conn: &C) -> Result<(), DbErr>
@@ -385,6 +408,171 @@ mod tests {
         assert_eq!(
             scene.edges[0].from_point.map(|point| point.x),
             Some(-4_800.0)
+        );
+    }
+
+    #[test]
+    fn migration_4_adds_running_work_indexes_once() {
+        use crate::entity::{edges, nodes, result_batches};
+        use crate::types::{EdgeInput, NodeInput, ResultBatchInput, ResultItemInput};
+        use sea_orm::{EntityTrait, PaginatorTrait, Statement};
+
+        fn node(id: &str, x: f64) -> NodeInput {
+            NodeInput {
+                id: id.to_owned(),
+                kind: "image".to_owned(),
+                title: id.to_owned(),
+                body: String::new(),
+                tags: Vec::new(),
+                x,
+                y: 0.0,
+                width: 200.0,
+                height: 84.0,
+                z: 0.0,
+                data_json: None,
+                settings_json: None,
+            }
+        }
+
+        fn run(
+            conn: &DatabaseConnection,
+            node_id: &str,
+            batch_id: &str,
+            item_id: &str,
+            text: &str,
+        ) {
+            crate::mutation::save_run(
+                conn,
+                ResultBatchInput {
+                    id: batch_id.to_owned(),
+                    node_id: node_id.to_owned(),
+                    trigger: "run".to_owned(),
+                    provider: "mock-image".to_owned(),
+                    model: "mock-image".to_owned(),
+                    params_json: "{}".to_owned(),
+                    status: "done".to_owned(),
+                    error: None,
+                },
+                vec![ResultItemInput {
+                    id: item_id.to_owned(),
+                    position: 0.0,
+                    kind: "image".to_owned(),
+                    text: text.to_owned(),
+                    asset_id: None,
+                    meta_json: None,
+                }],
+            )
+            .expect("save run");
+        }
+
+        fn index_exists(conn: &DatabaseConnection, name: &str) -> bool {
+            let statement = Statement::from_sql_and_values(
+                conn.get_database_backend(),
+                "SELECT name FROM sqlite_master WHERE type = 'index' AND name = ?",
+                [name.into()],
+            );
+            !conn
+                .query_all_raw(statement)
+                .expect("index list")
+                .is_empty()
+        }
+
+        fn migration_versions(conn: &DatabaseConnection) -> Vec<i32> {
+            let mut versions: Vec<i32> = schema_migrations::Entity::find()
+                .all(conn)
+                .expect("migration rows")
+                .into_iter()
+                .map(|row| row.version)
+                .collect();
+            versions.sort_unstable();
+            versions
+        }
+
+        let conn = Database::connect("sqlite::memory:").expect("open memory database");
+        create_table(&conn, schema_migrations::Entity).expect("create migrations");
+        // A version 3 database: the reset migration 2 is already behind us,
+        // so this fixture never reruns its destructive body.
+        migration_1(&conn).expect("create version 1 schema");
+        migration_3(&conn).expect("create the connector index");
+        conn.execute_unprepared(
+            "INSERT INTO schema_migrations (version, applied_at) VALUES (1, 0), (2, 0), (3, 0)",
+        )
+        .expect("record version 3");
+        conn.execute_unprepared(
+            "INSERT INTO documents (id, title, rev, created_at, updated_at) \
+             VALUES ('default', 'Flow', 0, 0, 0)",
+        )
+        .expect("insert document");
+        assert_eq!(migration_versions(&conn), vec![1, 2, 3]);
+        assert!(!index_exists(&conn, "nodes_running"));
+        assert!(!index_exists(&conn, "result_batches_running"));
+
+        crate::mutation::insert_nodes(&conn, vec![node("source", 0.0), node("target", 400.0)])
+            .expect("insert nodes");
+        crate::mutation::insert_edges(
+            &conn,
+            vec![EdgeInput {
+                id: "source-target".to_owned(),
+                from_id: "source".to_owned(),
+                to_id: "target".to_owned(),
+                from_port: None,
+                to_port: None,
+                kind: "flow".to_owned(),
+                data_json: None,
+            }],
+        )
+        .expect("insert edge");
+        run(&conn, "source", "batch-source", "item-source", "Source");
+        run(&conn, "target", "batch-target", "item-target", "Target");
+
+        let nodes_before = nodes::Entity::find().all(&conn).expect("nodes before");
+        let edges_before = edges::Entity::find().all(&conn).expect("edges before");
+        let previews_before =
+            crate::detail::previews(&conn, vec!["source".to_owned(), "target".to_owned()])
+                .expect("previews before");
+        assert_eq!(nodes_before.len(), 2, "fixture nodes");
+        assert_eq!(edges_before.len(), 1, "fixture edges");
+        assert_eq!(previews_before.len(), 2, "fixture previews");
+        assert_eq!(previews_before[0].node_id, "source");
+        assert_eq!(previews_before[0].items[0].text, "Source");
+        assert_eq!(previews_before[1].node_id, "target");
+
+        migrate(&conn).expect("migrate to version 4");
+        migrate(&conn).expect("a second migration is idempotent");
+
+        assert_eq!(migration_versions(&conn), vec![1, 2, 3, 4]);
+        assert_eq!(
+            migration_versions(&conn)
+                .iter()
+                .filter(|version| **version == 4)
+                .count(),
+            1,
+            "version 4 is recorded once"
+        );
+        assert!(index_exists(&conn, "nodes_running"));
+        assert!(index_exists(&conn, "result_batches_running"));
+
+        assert_eq!(
+            nodes::Entity::find().all(&conn).expect("nodes after"),
+            nodes_before,
+            "migration 4 leaves node rows unchanged"
+        );
+        assert_eq!(
+            edges::Entity::find().all(&conn).expect("edges after"),
+            edges_before,
+            "migration 4 leaves edge rows unchanged"
+        );
+        assert_eq!(
+            crate::detail::previews(&conn, vec!["source".to_owned(), "target".to_owned()])
+                .expect("previews after"),
+            previews_before,
+            "migration 4 leaves preview rows unchanged"
+        );
+        assert_eq!(
+            result_batches::Entity::find()
+                .count(&conn)
+                .expect("batches after migration"),
+            2
         );
     }
 

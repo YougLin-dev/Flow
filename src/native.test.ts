@@ -56,6 +56,30 @@ test("stores, searches and undoes nodes through the Rust core", async () => {
   document.dispose();
 });
 
+test("reports an empty document before the first node", async () => {
+  const document = await Document.open(":memory:");
+  await document.recoverRuns();
+  expect(await document.isEmpty()).toBe(true);
+
+  await document.insertNodes([
+    {
+      id: "first",
+      kind: "text",
+      title: "First",
+      body: "",
+      tags: [],
+      x: 0,
+      y: 0,
+      width: 200,
+      height: 84,
+      z: 0,
+    },
+  ]);
+  expect(await document.isEmpty()).toBe(false);
+
+  document.dispose();
+});
+
 test("clears seeded history so undo cannot remove the demo", async () => {
   const document = await Document.open(":memory:");
   await document.insertNodes([

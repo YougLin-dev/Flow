@@ -3,9 +3,10 @@ use std::path::{Path, PathBuf};
 use std::sync::mpsc::{self, Receiver, Sender};
 use std::sync::{Arc, Mutex};
 
+use sea_orm::sea_query::Expr;
 use sea_orm::{
     ActiveValue::Set, ColumnTrait, ConnectionTrait, DatabaseConnection, EntityTrait,
-    PaginatorTrait, QueryFilter,
+    PaginatorTrait, QueryFilter, QuerySelect,
 };
 
 use crate::asset;
@@ -289,6 +290,12 @@ impl Database {
         self.run(edge_count)
     }
 
+    /// Whether the open document has neither nodes nor edges. One worker job
+    /// answers startup's seed question with two existence reads, not counts.
+    pub fn is_empty(&self) -> Result<bool, String> {
+        self.run(|conn| Ok(!has_nodes(conn)? && !has_edges(conn)?))
+    }
+
     /// Runs a document mutation and records its inverse in the same worker
     /// job, so command order and history order can never diverge.
     fn run_mutation<F>(&self, work: F) -> Result<Mutation, String>
@@ -396,6 +403,30 @@ fn edge_count(conn: &DatabaseConnection) -> Result<u32, String> {
         .map_err(|error| error.to_string())
 }
 
+/// Whether any node exists, in one `SELECT 1 … LIMIT 1` instead of a count.
+fn has_nodes(conn: &DatabaseConnection) -> Result<bool, String> {
+    nodes::Entity::find()
+        .filter(nodes::Column::DocumentId.eq(DOCUMENT_ID))
+        .select_only()
+        .expr(Expr::val(1))
+        .into_tuple::<i32>()
+        .one(conn)
+        .map(|row| row.is_some())
+        .map_err(|error| error.to_string())
+}
+
+/// Whether any edge exists, in one `SELECT 1 … LIMIT 1` instead of a count.
+fn has_edges(conn: &DatabaseConnection) -> Result<bool, String> {
+    edges::Entity::find()
+        .filter(edges::Column::DocumentId.eq(DOCUMENT_ID))
+        .select_only()
+        .expr(Expr::val(1))
+        .into_tuple::<i32>()
+        .one(conn)
+        .map(|row| row.is_some())
+        .map_err(|error| error.to_string())
+}
+
 fn sqlite_url(path: &str) -> Result<String, String> {
     if path == ":memory:" {
         return Ok("sqlite::memory:".to_owned());
@@ -473,7 +504,7 @@ mod tests {
     use std::sync::atomic::{AtomicU64, Ordering};
 
     use super::*;
-    use crate::entity::result_items;
+    use crate::entity::{result_batches, result_items};
     use crate::types::EdgePoint;
 
     fn node(id: &str, title: &str, body: &str, tags: &[&str], x: f64, y: f64) -> NodeInput {
@@ -2568,6 +2599,112 @@ mod tests {
         assert_eq!(detail.batch, None);
     }
 
+    #[test]
+    fn empty_document_has_no_nodes_or_edges() {
+        fn is_empty(conn: &DatabaseConnection) -> Result<bool, String> {
+            Ok(!has_nodes(conn)? && !has_edges(conn)?)
+        }
+
+        let conn = open_connection(":memory:").expect("open memory database");
+        assert!(is_empty(&conn).expect("empty predicate"));
+
+        mutation::insert_nodes(
+            &conn,
+            vec![
+                node("a", "A", "", &[], 0.0, 0.0),
+                node("b", "B", "", &[], 300.0, 0.0),
+            ],
+        )
+        .expect("insert nodes");
+        assert!(!is_empty(&conn).expect("node-only predicate"));
+    }
+
+    #[test]
+    fn deleting_the_last_node_cascades_its_edges() {
+        let db = Database::open(":memory:").expect("open");
+        db.insert_nodes(vec![
+            node("a", "A", "", &[], 0.0, 0.0),
+            node("b", "B", "", &[], 300.0, 0.0),
+        ])
+        .expect("insert nodes");
+        db.insert_edges(vec![EdgeInput {
+            id: "a-b".to_owned(),
+            from_id: "a".to_owned(),
+            to_id: "b".to_owned(),
+            from_port: None,
+            to_port: None,
+            kind: "flow".to_owned(),
+            data_json: None,
+        }])
+        .expect("insert edge");
+        assert_eq!(db.edge_count().expect("edge count"), 1);
+        assert!(!db.is_empty().expect("populated document"));
+
+        db.run(|conn| {
+            nodes::Entity::delete_many()
+                .exec(conn)
+                .map(|_| ())
+                .map_err(|error| error.to_string())
+        })
+        .expect("delete nodes");
+
+        assert_eq!(db.count().expect("node count"), 0);
+        assert_eq!(
+            db.edge_count()
+                .expect("edge count after deleting both nodes"),
+            0,
+            "sea-orm enables foreign keys, so the edge relation's Cascade removes the edge"
+        );
+        // `has_edges` stays in `is_empty` as defense in depth: if foreign
+        // keys or the edge schema stop cascading, this assertion fails and
+        // the edge-only branch must be proven again rather than dropped.
+        assert!(
+            db.is_empty().expect("empty after the cascade"),
+            "the document is empty only after both nodes and their edge are gone"
+        );
+    }
+
+    #[test]
+    fn running_work_queries_use_partial_indexes() {
+        use sea_orm::{QueryTrait, Statement};
+
+        fn plan(conn: &DatabaseConnection, built: Statement) -> String {
+            let statement = Statement {
+                sql: format!("EXPLAIN QUERY PLAN {}", built.sql),
+                values: built.values,
+                db_backend: built.db_backend,
+            };
+            let rows = conn.query_all_raw(statement).expect("explain query plan");
+            rows.iter()
+                .map(|row| row.try_get::<String>("", "detail").expect("plan detail"))
+                .collect::<Vec<_>>()
+                .join("\n")
+        }
+
+        let conn = open_connection(":memory:").expect("open memory database");
+        let nodes_statement = nodes::Entity::find()
+            .filter(nodes::Column::DocumentId.eq(DOCUMENT_ID))
+            .filter(nodes::Column::Status.eq("running"))
+            .select_only()
+            .column(nodes::Column::Id)
+            .build(conn.get_database_backend());
+        let nodes_plan = plan(&conn, nodes_statement);
+        assert!(
+            nodes_plan.contains("nodes_running"),
+            "the nodes recovery query uses its partial index: {nodes_plan}"
+        );
+
+        let batches_statement = result_batches::Entity::update_many()
+            .col_expr(result_batches::Column::Status, Expr::value("interrupted"))
+            .filter(result_batches::Column::Status.eq("running"))
+            .build(conn.get_database_backend());
+        let batches_plan = plan(&conn, batches_statement);
+        assert!(
+            batches_plan.contains("result_batches_running"),
+            "the batch recovery query uses its partial index: {batches_plan}"
+        );
+    }
+
     fn preview_item(id: String, position: i32, asset_id: Option<&str>) -> ResultItemInput {
         let text = id.clone();
         ResultItemInput {
@@ -3512,6 +3649,40 @@ mod tests {
         print_stats("bounded_preview_reader", &mut new_times, &detail);
     }
 
+    /// Both startup emptiness predicates on the same unchanged database. The
+    /// historical count pair is the reference; `is_empty` is one worker call
+    /// with two existence reads.
+    fn measure_startup_empty(db: &Database, samples: usize) -> bool {
+        let nodes = db.count().expect("startup node count");
+        let edges = db.edge_count().expect("startup edge count");
+        let detail = format!(" fixture nodes={nodes} edges={edges} unchanged");
+        let mut count_times = Vec::with_capacity(samples);
+        let mut empty_times = Vec::with_capacity(samples);
+        let mut historical = false;
+        let mut current = false;
+        for _ in 0..samples {
+            let started = std::time::Instant::now();
+            historical = db.count().expect("startup count") == 0
+                && db.edge_count().expect("startup edge count") == 0;
+            count_times.push(elapsed_ms(started));
+
+            let started = std::time::Instant::now();
+            current = db.is_empty().expect("startup emptiness");
+            empty_times.push(elapsed_ms(started));
+        }
+        assert_eq!(
+            historical, current,
+            "the count pair and is_empty disagree about startup emptiness"
+        );
+        print_stats(
+            "startup emptiness count reference",
+            &mut count_times,
+            &detail,
+        );
+        print_stats("startup emptiness is_empty", &mut empty_times, &detail);
+        current
+    }
+
     fn node_bounds(db: &Database, id: &str) -> NodeBounds {
         let summary = db
             .get_node(id.to_owned())
@@ -3912,6 +4083,10 @@ mod tests {
             GRID_NODES - GRID_ROWS,
             "reopened fixture edge count"
         );
+        assert!(
+            !measure_startup_empty(&db, SCENE_SAMPLES),
+            "the seeded fixture is not empty"
+        );
 
         let bounds_started = std::time::Instant::now();
         let bounds = db.bounds().expect("measure document bounds");
@@ -4000,6 +4175,7 @@ mod tests {
             sinks.last().expect("the last sink")
         );
 
+        let mut recover_times = Vec::with_capacity(RECOVERY_ITERATIONS as usize);
         for iteration in 0..RECOVERY_ITERATIONS {
             mark_running(&db, iteration, &sinks);
             drop(db);
@@ -4011,6 +4187,7 @@ mod tests {
             let recover_started = std::time::Instant::now();
             let recovered = db.recover_runs().expect("recover running nodes");
             let recover_ms = elapsed_ms(recover_started);
+            recover_times.push(recover_ms);
             assert_eq!(
                 recovered,
                 sinks.len() as u32,
@@ -4027,6 +4204,11 @@ mod tests {
                 open_ms + recover_ms
             );
         }
+        print_stats(
+            "recover_runs populated-running",
+            &mut recover_times,
+            " 100 row-end nodes marked running before each fresh reopen; the clean second call is not compared",
+        );
 
         drop(db);
         let db = Database::open(&path).expect("final clean reopen");
