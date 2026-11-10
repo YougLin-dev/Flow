@@ -238,6 +238,72 @@ test("isSelected stays consistent through a snapshot that prunes the scene", () 
   expect(scene.isSelected("b")).toBe(true);
 });
 
+test("selecting flips only the newly selected cards' keyed flags", () => {
+  const scene = new FlowScene();
+  scene.apply(snapshot([node("a", 0, 0), node("b", 300, 0), node("c", 600, 0)]));
+  const runs = { a: 0, b: 0, c: 0 };
+  effect(() => {
+    scene.isSelectedKeyed("a");
+    runs.a += 1;
+  });
+  effect(() => {
+    scene.isSelectedKeyed("b");
+    runs.b += 1;
+  });
+  effect(() => {
+    scene.isSelectedKeyed("c");
+    runs.c += 1;
+  });
+
+  scene.select(["a", "b"]);
+  expect(runs).toEqual({ a: 2, b: 2, c: 1 });
+  scene.select(["b"]);
+  expect(runs).toEqual({ a: 3, b: 2, c: 1 });
+});
+
+test("the connection target flag follows setConnectionTarget", () => {
+  const scene = new FlowScene();
+  scene.apply(snapshot([node("a", 0, 0), node("b", 300, 0)]));
+  let runsA = 0;
+  let runsB = 0;
+  effect(() => {
+    scene.isConnectionTarget("a");
+    runsA += 1;
+  });
+  effect(() => {
+    scene.isConnectionTarget("b");
+    runsB += 1;
+  });
+
+  scene.setConnectionTarget("a");
+  expect([runsA, runsB]).toEqual([2, 1]);
+  scene.setConnectionTarget("b");
+  expect([runsA, runsB]).toEqual([3, 2]);
+  scene.setConnectionTarget(null);
+  expect([runsA, runsB]).toEqual([3, 3]);
+});
+
+test("a change set that removes a card drops its keyed flags", () => {
+  const scene = new FlowScene();
+  scene.apply(snapshot([node("a", 0, 0)]));
+  scene.select(["a"]);
+  let runsA = 0;
+  let runsOther = 0;
+  effect(() => {
+    scene.isSelectedKeyed("a");
+    runsA += 1;
+  });
+  effect(() => {
+    scene.isSelectedKeyed("b");
+    runsOther += 1;
+  });
+
+  scene.applyChangeSet({ changed: [], removed: ["a"], edgesChanged: [], edgesRemoved: [] });
+  expect(scene.isSelectedKeyed("a")).toBe(false);
+  expect(runsA).toBe(2);
+  expect(runsOther).toBe(1);
+});
+
 test("selecting a card clears the selected edge", () => {
   const scene = new FlowScene();
   scene.apply(snapshot([node("a", 0, 0), node("b", 300, 0)], [edge("a-b", "a", "b")]));

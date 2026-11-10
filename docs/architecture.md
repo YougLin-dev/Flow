@@ -205,7 +205,11 @@ every visible card's text. The card renders the title and
 status above the card, the body text or image thumbnails inside it (laid out
 inside the body box), and one round plus button outside each side while the
 card is hovered or selected. On a multi-card frame those per-card
-pluses give way to the frame's merged ones. A plus rests just outside the
+pluses give way to the frame's merged ones. Per-card selection and connection
+target flags come from `flow/keyed-flags.ts`, while `flow/hover-flags.ts`
+separately holds the controller's hover and marquee-preview mirrors; their
+source states write these flags in the same update round, so a change wakes
+only the cards whose membership flipped. A plus rests just outside the
 border; inside the side zone it eases toward the pointer in both axes, and it
 springs back when the pointer leaves. The plus is only a drag handle:
 connectors meet the card's own border. `FlowEdges` strokes every connector's

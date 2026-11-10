@@ -16,6 +16,7 @@ import {
   portZone,
 } from "./connection";
 import { CARD_TITLE_BAND } from "./card-layout";
+import { KeyedFlags } from "./keyed-flags";
 
 /** The URLs a card's image body should show, loaded by the page. */
 export interface PreviewView {
@@ -50,6 +51,8 @@ export class FlowScene {
   private readonly byId = new Map<string, NodeSummary>();
   private readonly edgeById = new Map<string, EdgeSummary>();
   private readonly applied = new Map<string, BoxGeometry>();
+  private readonly selectedFlags = new KeyedFlags();
+  private readonly targetFlags = new KeyedFlags();
   /** The selection the ranks were built from, and its 1-based ranks. */
   private ranksFor: readonly string[] | null = null;
   private readonly ranks = new Map<string, number>();
@@ -199,9 +202,11 @@ export class FlowScene {
       if (next.length > 0 && this.selectedEdge() !== null) this.selectedEdge.set(null);
       const current = this.selection();
       if (next.length === current.length && next.every((id, index) => id === current[index])) {
+        this.selectedFlags.set(next);
         return;
       }
       this.selection.set(next);
+      this.selectedFlags.set(next);
     });
   }
 
@@ -265,6 +270,16 @@ export class FlowScene {
   /** Whether `id` is in the current selection (ranks-map lookup, O(1)). */
   isSelected(id: string): boolean {
     return this.selectionRanks().has(id);
+  }
+
+  /** Whether `id` is selected, waking only when this card's flag flips. */
+  isSelectedKeyed(id: string): boolean {
+    return this.selectedFlags.has(id);
+  }
+
+  /** Whether `id` is the connection target of this card alone. */
+  isConnectionTarget(id: string): boolean {
+    return this.targetFlags.has(id);
   }
 
   /** Between unselected cards and the elevated selection: the frame. */
@@ -443,6 +458,7 @@ export class FlowScene {
   setConnectionTarget(id: string | null): void {
     if (this.connectionTarget() === id) return;
     this.connectionTarget.set(id);
+    this.targetFlags.set(id === null ? [] : [id]);
   }
 
   /** Image cards with a current batch, for the page's preview reads. */
@@ -476,9 +492,9 @@ export class FlowScene {
     const selected = this.selectedEdge();
     if (selected !== null && !this.edgeById.has(selected)) this.selectedEdge.set(null);
     const target = this.connectionTarget();
-    if (target !== null && !this.byId.has(target)) this.connectionTarget.set(null);
+    if (target !== null && !this.byId.has(target)) this.setConnectionTarget(null);
     const keep = new Set(this.selection().filter((id) => this.byId.has(id)));
-    if (keep.size !== this.selection().length) this.selection.set([...keep]);
+    if (keep.size !== this.selection().length) this.select([...keep]);
     // The elevation base follows the highest document z in the scene.
     let maxZ = 0;
     for (const node of this.byId.values()) if (node.z > maxZ) maxZ = node.z;
@@ -488,6 +504,9 @@ export class FlowScene {
     }
     this.nodes.set([...this.byId.values()]);
     this.edges.set([...this.edgeById.values()]);
+    const live = new Set(this.byId.keys());
+    this.selectedFlags.retain(live);
+    this.targetFlags.retain(live);
   }
 
   private dropOverride(id: string): void {

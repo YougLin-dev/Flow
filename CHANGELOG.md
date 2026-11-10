@@ -61,6 +61,11 @@ All notable changes to Flow are recorded here. The format follows
 
 ### Changed
 
+- Selection, hover, marquee-preview and connection-target changes now rebuild
+  only the cards whose own state flipped, rather than every visible card's
+  plus buttons and border. In a 2000-card measurement this reduced hover
+  work from roughly 10 ms to 0.1 ms.
+
 - The shared connector layer computes its padded and rounded canvas box once
   per geometry change instead of separately for every style binding and the
   drawing origin, and resolves each connector's ports once per draw for both

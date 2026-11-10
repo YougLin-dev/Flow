@@ -236,8 +236,11 @@ fine. Event handlers are installed once and MUST read the current value when
 invoked. Async work MUST read signals synchronously before the first `await`;
 reads after `await` or in timers are not tracked. Values derivable from other
 state MUST use `computed` (or a cheap closure), not a second signal written by
-an effect. An effect MUST synchronize an external system (theme repaint,
-window level) and MUST NOT write a signal it also reads.
+an effect. Canvas-wide state MAY keep a keyed per-id mirror
+(`flow/keyed-flags.ts`) for view bindings; the mirror MUST be written in the
+same method and `batch` as the source signal, NEVER from an effect. An effect
+MUST synchronize an external system (theme repaint, window level) and MUST NOT
+write a signal it also reads.
 User intent belongs in the handler or keymap action that received it. NSH does
 not accept signal writes from inside the canvas draw/layout computation;
 publish from a layout event, an action or after the frame, as `FlowPage` does

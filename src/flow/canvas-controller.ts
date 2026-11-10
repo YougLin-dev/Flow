@@ -10,6 +10,7 @@ import type { CanvasCamera } from "./camera";
 import { type BoxGeometry, framePortZone, type Point, type PortSide } from "./connection";
 import type { ConnectionPair } from "./connection-gesture";
 import { EdgeGestures } from "./edge-gestures";
+import { HoverFlags } from "./hover-flags";
 import { cursorForHandle, handleAtPoint, screenRect } from "./resize-handles";
 import { RightGesture } from "./right-gesture";
 import type { FlowScene } from "./scene";
@@ -90,6 +91,7 @@ export class CanvasController {
 
   /** The secondary-button gesture: a drag pans, a still press opens the menu. */
   readonly right: RightGesture;
+  readonly flags = new HoverFlags();
 
   private readonly edges: EdgeGestures;
   private edgeMode = false;
@@ -416,7 +418,7 @@ export class CanvasController {
   /** Clears hover, pluses and cursor together when the pointer leaves. */
   leave(): void {
     batch(() => {
-      this.hovered.set(null);
+      this.setHovered(null);
       this.portPlus.set(null);
       this.framePlus.set(null);
       this.cursor.set("default");
@@ -438,7 +440,7 @@ export class CanvasController {
         const framePlus = this.framePlusAt(x, y);
         if (framePlus !== null) {
           this.framePlus.set(framePlus);
-          this.hovered.set(null);
+          this.setHovered(null);
           this.portPlus.set(null);
           this.cursor.set("crosshair");
           return;
@@ -449,7 +451,7 @@ export class CanvasController {
         // selection hides its per-card pluses, so their zones are muted.
         const zone = scene.portZoneAt(world.x, world.y);
         if (zone && !(this.multiFrame() && scene.selection().includes(zone.nodeId))) {
-          this.hovered.set(zone.nodeId);
+          this.setHovered(zone.nodeId);
           this.portPlus.set({ nodeId: zone.nodeId, side: zone.side, point: zone.point });
           this.cursor.set("crosshair");
           return;
@@ -459,23 +461,29 @@ export class CanvasController {
       // inside it all move the whole selection, so the move cursor is shown
       // everywhere but the explicit port buttons above.
       if (tool === "select" && this.frameContains(x, y)) {
-        this.hovered.set(scene.nodeAt(world.x, world.y));
+        this.setHovered(scene.nodeAt(world.x, world.y));
         this.portPlus.set(null);
         this.cursor.set("grab");
         return;
       }
       const target = handleAtPoint(scene, camera, scene.nodes(), x, y);
       if (target) {
-        this.hovered.set(target.id);
+        this.setHovered(target.id);
         this.portPlus.set(null);
         this.cursor.set(cursorForHandle(target.side));
         return;
       }
       const id = scene.nodeAt(world.x, world.y);
-      this.hovered.set(id);
+      this.setHovered(id);
       this.portPlus.set(null);
       this.cursor.set(tool === "hand" ? "grab" : "default");
     });
+  }
+
+  /** Writes hover and its per-id mirror in the caller's pointer-event batch. */
+  private setHovered(id: string | null): void {
+    this.hovered.set(id);
+    this.flags.setHovered(id);
   }
 
   /** Starts a camera pan (the hand tool owns the press). */
@@ -528,12 +536,16 @@ export class CanvasController {
   private setPreview(ids: readonly string[]): void {
     const current = this.marqueePreview();
     if (ids.length === current.size && ids.every((id) => current.has(id))) return;
-    this.marqueePreview.set(new Set(ids));
+    const next = new Set(ids);
+    this.marqueePreview.set(next);
+    this.flags.setPreviewed(next);
   }
 
   private clearPreview(): void {
     if (this.marqueePreview().size === 0) return;
-    this.marqueePreview.set(new Set());
+    const next = new Set<string>();
+    this.marqueePreview.set(next);
+    this.flags.setPreviewed(next);
   }
 }
 

@@ -292,9 +292,9 @@ export function FlowCanvas(props: FlowCanvasProps) {
                 rect={() => props.scene.cardRect(id)}
                 zIndex={() => props.scene.cardZ(id)}
                 preview={() => props.scene.previews().get(id) ?? null}
-                selected={() => props.scene.isSelected(id)}
-                previewed={() => props.controller.marqueePreview().has(id)}
-                hovered={() => props.controller.hovered() === id}
+                selected={() => props.scene.isSelectedKeyed(id)}
+                previewed={() => props.controller.flags.isPreviewed(id)}
+                hovered={() => props.controller.flags.isHovered(id)}
                 plusSuppressed={() => props.controller.multiFrame() && props.scene.isSelected(id)}
                 plus={() => {
                   const plus = props.controller.portPlus();
@@ -302,7 +302,7 @@ export function FlowCanvas(props: FlowCanvasProps) {
                     ? { side: plus.side, point: plus.point }
                     : null;
                 }}
-                target={() => props.scene.connectionTarget() === id}
+                target={() => props.scene.isConnectionTarget(id)}
               />
             );
           }}
