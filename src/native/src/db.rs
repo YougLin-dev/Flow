@@ -1180,6 +1180,404 @@ mod tests {
     }
 
     #[test]
+    fn moving_both_ends_of_a_connector_in_one_command_writes_its_box_once() {
+        let db = Database::open(":memory:").expect("open");
+        db.insert_nodes(vec![
+            node("left", "Left", "", &[], -5_000.0, 0.0),
+            node("right", "Right", "", &[], 5_000.0, 0.0),
+        ])
+        .expect("insert");
+        connect(&db, "left-right", "left", "right");
+
+        db.set_node_bounds(vec![
+            NodeBounds {
+                id: "left".to_owned(),
+                x: -4_000.0,
+                y: 2_000.0,
+                width: 200.0,
+                height: 84.0,
+            },
+            NodeBounds {
+                id: "right".to_owned(),
+                x: 6_000.0,
+                y: 2_000.0,
+                width: 200.0,
+                height: 84.0,
+            },
+        ])
+        .expect("move both ends");
+
+        let scene = db
+            .scene(
+                Viewport {
+                    x: -4_000.0,
+                    y: 1_500.0,
+                    width: 10_200.0,
+                    height: 2_000.0,
+                },
+                2_000.0,
+                viewport::NODE_LIMIT,
+            )
+            .expect("new-region scene");
+        let left = scene
+            .nodes
+            .iter()
+            .find(|node| node.id == "left")
+            .expect("the moved left card");
+        assert_eq!(
+            (left.x, left.y, left.width, left.height),
+            (-4_000.0, 2_000.0, 200.0, 84.0)
+        );
+        let right = scene
+            .nodes
+            .iter()
+            .find(|node| node.id == "right")
+            .expect("the moved right card");
+        assert_eq!(
+            (right.x, right.y, right.width, right.height),
+            (6_000.0, 2_000.0, 200.0, 84.0)
+        );
+
+        let edges: Vec<_> = scene
+            .edges
+            .iter()
+            .filter(|edge| edge.id == "left-right")
+            .collect();
+        assert_eq!(edges.len(), 1, "the connector is indexed once");
+        assert_eq!(
+            edges[0].from_point,
+            Some(EdgePoint::output(-4_000.0, 2_000.0, 200.0, 84.0))
+        );
+        assert_eq!(
+            edges[0].to_point,
+            Some(EdgePoint::input(6_000.0, 2_000.0, 84.0))
+        );
+
+        // The old crossing is gone. Margin 0 keeps the moved cards and the
+        // connector's new box out of the read.
+        let old = scene_between(&db, 0.0, 0.0, 800.0, 600.0, viewport::NODE_LIMIT);
+        assert!(old.nodes.is_empty());
+        assert!(old.edges.iter().all(|edge| edge.id != "left-right"));
+
+        // A box between the new left port and the old right port would cross
+        // this band; neither the genuine old nor new box does, and no card
+        // touches it, so only the index can return the connector.
+        let stale_probe = Viewport {
+            x: -3_500.0,
+            y: 1_000.0,
+            width: 500.0,
+            height: 300.0,
+        };
+        let after = db
+            .scene(stale_probe, 0.0, viewport::NODE_LIMIT)
+            .expect("stale-endpoint probe");
+        assert!(after.nodes.is_empty());
+        assert!(after.edges.iter().all(|edge| edge.id != "left-right"));
+    }
+
+    #[test]
+    fn undo_of_a_two_end_move_restores_both_rtree_boxes() {
+        let db = Database::open(":memory:").expect("open");
+        db.insert_nodes(vec![
+            node("left", "Left", "", &[], -5_000.0, 0.0),
+            node("right", "Right", "", &[], 5_000.0, 0.0),
+        ])
+        .expect("insert");
+        connect(&db, "left-right", "left", "right");
+
+        db.set_node_bounds(vec![
+            NodeBounds {
+                id: "left".to_owned(),
+                x: -4_000.0,
+                y: 2_000.0,
+                width: 200.0,
+                height: 84.0,
+            },
+            NodeBounds {
+                id: "right".to_owned(),
+                x: 6_000.0,
+                y: 2_000.0,
+                width: 200.0,
+                height: 84.0,
+            },
+        ])
+        .expect("move both ends");
+        db.undo().expect("undo the two-end move");
+
+        let old = scene_between(&db, 0.0, 0.0, 800.0, 600.0, viewport::NODE_LIMIT);
+        assert!(old.nodes.is_empty(), "both original cards are outside");
+        assert_eq!(old.edges.len(), 1, "the original box is indexed again");
+        assert_eq!(old.edges[0].id, "left-right");
+        assert_eq!(
+            old.edges[0].from_point,
+            Some(EdgePoint::output(-5_000.0, 0.0, 200.0, 84.0))
+        );
+        assert_eq!(
+            old.edges[0].to_point,
+            Some(EdgePoint::input(5_000.0, 0.0, 84.0))
+        );
+
+        // The new box is gone. Use the new region without its usual margin:
+        // margin 2,000 would include the restored connector at y=42.
+        let new_region = scene_between(
+            &db,
+            -4_000.0,
+            1_500.0,
+            10_200.0,
+            2_000.0,
+            viewport::NODE_LIMIT,
+        );
+        assert!(new_region.edges.iter().all(|edge| edge.id != "left-right"));
+
+        let stale_probe = Viewport {
+            x: -3_500.0,
+            y: 1_000.0,
+            width: 500.0,
+            height: 300.0,
+        };
+        let stale = db
+            .scene(stale_probe.clone(), 0.0, viewport::NODE_LIMIT)
+            .expect("stale-endpoint probe after undo");
+        assert!(stale.nodes.is_empty());
+        assert!(stale.edges.iter().all(|edge| edge.id != "left-right"));
+
+        db.redo().expect("redo the two-end move");
+        let scene = db
+            .scene(
+                Viewport {
+                    x: -4_000.0,
+                    y: 1_500.0,
+                    width: 10_200.0,
+                    height: 2_000.0,
+                },
+                2_000.0,
+                viewport::NODE_LIMIT,
+            )
+            .expect("new-region scene after redo");
+        let left = scene
+            .nodes
+            .iter()
+            .find(|node| node.id == "left")
+            .expect("the redone left card");
+        assert_eq!(
+            (left.x, left.y, left.width, left.height),
+            (-4_000.0, 2_000.0, 200.0, 84.0)
+        );
+        let right = scene
+            .nodes
+            .iter()
+            .find(|node| node.id == "right")
+            .expect("the redone right card");
+        assert_eq!(
+            (right.x, right.y, right.width, right.height),
+            (6_000.0, 2_000.0, 200.0, 84.0)
+        );
+        let edges: Vec<_> = scene
+            .edges
+            .iter()
+            .filter(|edge| edge.id == "left-right")
+            .collect();
+        assert_eq!(edges.len(), 1, "the connector is indexed once after redo");
+        assert_eq!(
+            edges[0].from_point,
+            Some(EdgePoint::output(-4_000.0, 2_000.0, 200.0, 84.0))
+        );
+        assert_eq!(
+            edges[0].to_point,
+            Some(EdgePoint::input(6_000.0, 2_000.0, 84.0))
+        );
+
+        let old_after_redo = scene_between(&db, 0.0, 0.0, 800.0, 600.0, viewport::NODE_LIMIT);
+        assert!(old_after_redo.nodes.is_empty());
+        assert!(
+            old_after_redo
+                .edges
+                .iter()
+                .all(|edge| edge.id != "left-right")
+        );
+        let after = db
+            .scene(stale_probe, 0.0, viewport::NODE_LIMIT)
+            .expect("stale-endpoint probe after redo");
+        assert!(after.nodes.is_empty());
+        assert!(after.edges.iter().all(|edge| edge.id != "left-right"));
+    }
+
+    #[test]
+    fn set_node_bounds_change_set_shape_matches_baseline() {
+        let db = Database::open(":memory:").expect("open");
+        db.insert_nodes(vec![NodeInput {
+            id: "styled".to_owned(),
+            kind: "image".to_owned(),
+            title: "Styled".to_owned(),
+            body: "Body".to_owned(),
+            tags: vec!["alpha".to_owned(), "β".to_owned()],
+            x: 10.0,
+            y: 20.0,
+            width: 200.0,
+            height: 84.0,
+            z: 3.5,
+            data_json: Some("{\"prompt\":\"a cat\"}".to_owned()),
+            settings_json: Some("{\"model\":\"m1\"}".to_owned()),
+        }])
+        .expect("insert");
+        db.save_run(
+            ResultBatchInput {
+                id: "batch-1".to_owned(),
+                node_id: "styled".to_owned(),
+                trigger: "run".to_owned(),
+                provider: "test".to_owned(),
+                model: "m1".to_owned(),
+                params_json: "{}".to_owned(),
+                status: "done".to_owned(),
+                error: None,
+            },
+            vec![ResultItemInput {
+                id: "item-1".to_owned(),
+                position: 0.0,
+                kind: "text".to_owned(),
+                text: "Result text".to_owned(),
+                asset_id: None,
+                meta_json: None,
+            }],
+        )
+        .expect("save run");
+
+        let before = db
+            .get_node("styled".to_owned())
+            .expect("read before")
+            .expect("the node exists");
+        let document_rev = db
+            .scene(
+                Viewport {
+                    x: 0.0,
+                    y: 0.0,
+                    width: 1_000.0,
+                    height: 1_000.0,
+                },
+                0.0,
+                viewport::NODE_LIMIT,
+            )
+            .expect("before scene")
+            .rev;
+        let read_stored = || {
+            db.run(|conn| {
+                nodes::Entity::find()
+                    .filter(nodes::Column::Id.eq("styled"))
+                    .filter(nodes::Column::DocumentId.eq(DOCUMENT_ID))
+                    .one(conn)
+                    .map_err(|error| error.to_string())
+            })
+            .expect("read stored row")
+            .expect("the stored row exists")
+        };
+        let before_row = read_stored();
+
+        let target = NodeBounds {
+            id: "styled".to_owned(),
+            x: 100.0,
+            y: 200.0,
+            width: 300.0,
+            height: 120.0,
+        };
+        let result = db
+            .set_node_bounds(vec![target.clone()])
+            .expect("move bounds");
+
+        assert_eq!(result.changes.rev, document_rev + 1.0);
+        assert_eq!(result.changes.changed.len(), 1);
+        let mut expected = before.clone();
+        expected.x = target.x;
+        expected.y = target.y;
+        expected.width = target.width;
+        expected.height = target.height;
+        expected.rev = before.rev + 1.0;
+        assert_eq!(
+            result.changes.changed[0], expected,
+            "every non-geometry summary field is carried through"
+        );
+
+        let [
+            HistoryOp::Bounds {
+                id,
+                x,
+                y,
+                width,
+                height,
+            },
+        ] = result.forward.as_slice()
+        else {
+            panic!("one forward Bounds op, got {:?}", result.forward);
+        };
+        assert_eq!(id.as_str(), "styled");
+        assert_eq!(
+            (*x, *y, *width, *height),
+            (target.x, target.y, target.width, target.height)
+        );
+        let [
+            HistoryOp::Bounds {
+                id,
+                x,
+                y,
+                width,
+                height,
+            },
+        ] = result.inverse.as_slice()
+        else {
+            panic!("one inverse Bounds op, got {:?}", result.inverse);
+        };
+        assert_eq!(id.as_str(), "styled");
+        assert_eq!(
+            (*x, *y, *width, *height),
+            (before.x, before.y, before.width, before.height)
+        );
+
+        let after_row = read_stored();
+        assert_eq!(after_row.tags_json, before_row.tags_json);
+        assert_eq!(after_row.tags_json, "[\"alpha\",\"β\"]");
+        assert_eq!(after_row.kind, before_row.kind);
+        assert_eq!(after_row.document_id, before_row.document_id);
+        assert_eq!(after_row.created_at, before_row.created_at);
+        assert_eq!(after_row.data_json, before_row.data_json);
+        assert_eq!(after_row.settings_json, before_row.settings_json);
+        assert_eq!(after_row.status, "done");
+        assert_eq!(after_row.output_batch_id.as_deref(), Some("batch-1"));
+        assert_eq!(
+            (after_row.x, after_row.y, after_row.width, after_row.height),
+            (target.x, target.y, target.width, target.height)
+        );
+        assert_eq!(after_row.rev, before_row.rev + 1);
+        assert!(after_row.updated_at >= before_row.updated_at);
+
+        let undone = db.undo().expect("undo bounds");
+        assert_eq!(undone.changed.len(), 1);
+        assert_eq!(
+            (
+                undone.changed[0].x,
+                undone.changed[0].y,
+                undone.changed[0].width,
+                undone.changed[0].height
+            ),
+            (before.x, before.y, before.width, before.height)
+        );
+        assert_eq!(undone.changed[0].status, before.status);
+        assert_eq!(undone.changed[0].output_batch_id, before.output_batch_id);
+
+        let redone = db.redo().expect("redo bounds");
+        assert_eq!(redone.changed.len(), 1);
+        assert_eq!(
+            (
+                redone.changed[0].x,
+                redone.changed[0].y,
+                redone.changed[0].width,
+                redone.changed[0].height
+            ),
+            (target.x, target.y, target.width, target.height)
+        );
+        assert_eq!(redone.changed[0].status, before.status);
+        assert_eq!(redone.changed[0].output_batch_id, before.output_batch_id);
+    }
+
+    #[test]
     fn undoing_a_node_delete_restores_the_connector_index() {
         let db = Database::open(":memory:").expect("open");
         db.insert_nodes(vec![
