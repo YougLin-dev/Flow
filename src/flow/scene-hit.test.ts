@@ -85,6 +85,17 @@ test("keeps exact hits on the edge hit distance's inclusive border", () => {
   // Just past the expanded box and the hit distance, the connector misses.
   expect(scene.edgeAt(100, EDGE_HIT_DISTANCE + 0.001)).toBeNull();
   expect(scene.edgeAt(200 + EDGE_HIT_DISTANCE + 0.001, 0)).toBeNull();
+
+  // The expanded box's corners pass the prefilter but are farther than the
+  // hit distance from the curve, so the exact check still rejects them.
+  for (const point of [
+    { x: -EDGE_HIT_DISTANCE, y: EDGE_HIT_DISTANCE },
+    { x: 200 + EDGE_HIT_DISTANCE, y: EDGE_HIT_DISTANCE },
+    { x: -EDGE_HIT_DISTANCE, y: -EDGE_HIT_DISTANCE },
+    { x: 200 + EDGE_HIT_DISTANCE, y: -EDGE_HIT_DISTANCE },
+  ]) {
+    expect(scene.edgeAt(point.x, point.y)).toBeNull();
+  }
 });
 
 test("hit-tests a curve whose far endpoint is carried by its anchors", () => {
