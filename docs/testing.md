@@ -113,6 +113,13 @@ rather than assuming percentile distributions. Headless traces exclude
 Windows presentation and real-input/paint work: they provide engine work
 counts, not substitutes for release-host measurements.
 
+On system time, endless native animations do not block an app-test step's
+quiet wait. Manual-clock settling instead checks whether the engine is idle;
+reading an animated native value through an action may advance the clock by
+one display frame before its result publishes. Keep loop and scheduler policies
+deterministic with explicit clocks/fakes, and keep trace/timing budgets as
+manual evidence rather than CI assertions.
+
 The budgets in [§8.2](standards.md#82-performance) are manual SHOULD targets,
 not CI assertions without a stable benchmark. Record these scenarios and their
 response metrics:

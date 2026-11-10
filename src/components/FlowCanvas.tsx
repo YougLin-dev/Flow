@@ -267,7 +267,14 @@ export function FlowCanvas(props: FlowCanvasProps) {
           transform: `translate(${props.camera.x}px, ${props.camera.y}px) scale(${props.camera.scale})`,
         }}
       >
-        <FlowEdges scene={props.scene} />
+        <FlowEdges
+          scene={props.scene}
+          paused={() =>
+            props.camera.moving() ||
+            props.controller.portPlus() !== null ||
+            props.controller.framePlus() !== null
+          }
+        />
         {/* The frame shares the world's stacking: above unselected cards and
             below the selected ones, so the swept area moves as one group. */}
         <SelectionFrame scene={props.scene} camera={props.camera} controller={props.controller} />

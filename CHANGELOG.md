@@ -17,13 +17,13 @@ All notable changes to Flow are recorded here. The format follows
   pointer surface is a wheel sensor registered by the Rust crate (Windows),
   which draws nothing, takes no presses and forwards each scroll to TSX.
 - The connectors of the selected cards flow: they rest brighter and thicker
-  than the others, and a comet of light travels from each connector's
-  source with a gradient trail behind its head and leaves through the
-  target, so a selected card's incoming lines flow into it and its outgoing
-  ones flow out of it, for one card or a whole selection. The connector's
-  curve is drawn as short pieces, each with an animated alpha stepped from a
-  timer at about 30 Hz, so a step only repaints the trail's pieces; the
-  loop runs only while a card is selected.
+  than the others, and a 48-piece comet travels from each connector's source
+  with a gradient trail behind its head and leaves through the target. A
+  native stepped loop runs only while a selected endpoint has a flowing
+  connector and Reduce Motion is off. Its requested frame-rate cap is
+  platform-dependent, not a fixed Windows 30 Hz. Above four flowing
+  connectors, camera/card movement and following pluses yield to the resting
+  selection highlight while the native phase continues.
 - A secondary-button drag pans the canvas with any tool, without selecting,
   box-selecting or moving a card, and a right click opens the canvas context
   menu with Add text node and Add image node, placing the card at the pressed
@@ -83,11 +83,11 @@ All notable changes to Flow are recorded here. The format follows
   every geometry-derived style (eight per text card, eight plus one per
   thumbnail for an image card), and a viewport read that leaves a card where
   it was wakes none of its styles.
-- The connectors' flow is a comet drawn as short pieces of the curve with an
-  animated alpha each, stepped from a timer at about 30 Hz: a step repaints
-  only the trail's pieces instead of every selected connector's whole curve,
-  so a selected hub no longer makes the canvas — and with it the app —
-  repaint the stage thirty times a second.
+- The connectors' 48-piece comet now runs as a native stepped loop only when
+  selected endpoints actually have flowing connectors and Reduce Motion is
+  off. Above four flowing connectors, camera/card movement and following
+  pluses suppress the comet strokes while retaining the selection highlight
+  and advancing native phase.
 - Dragging or resizing a selection with more than a few flowing connectors
   draws the resting highlight only while the gesture runs: the connectors'
   canvas re-records on every pointer move, and the comet's many short

@@ -219,12 +219,15 @@ each piece's alpha is an animated value of the shared wave, so the light
 travels from its source with a gradient trail behind its head and leaves
 through the target, and the next comet starts. Every connector is stroked
 from its source to its target, so the light flows into a selected target
-and out of a selected source. The wave's position is stepped from a timer
-(`FLOW_STEP_MS`), about thirty times a second: a step only updates the
-drawing's values, and only the pieces under the trail change, so the canvas
-repaints the trail instead of every selected connector's whole curve, and
-between steps no frame is needed. The timer runs only while a card is
-selected. The pulled connectors are one dashed `FlowPreviews`
+and out of a selected source. A native stepped loop (`FLOW_STEPS` over one
+1200 ms cycle) drives the shared wave only while at least one connector touches
+the selection and Reduce Motion is off. Its requested 30 Hz frame cap is not a
+fixed Windows rate: unchanged canvas slots skip re-recording. `CanvasCamera`
+owns the moving flag for every pan, zoom and fit, settled by a 150 ms timer.
+Above four flowing connectors, card/selection movement, camera settling and
+following card/frame pluses suppress the expensive comet strokes while the
+native phase continues. The brighter resting selection highlight remains.
+The pulled connectors are one dashed `FlowPreviews`
 canvas above the cards, holding one line per fixed end, so a group drag pulls
 a line from every selected card. Both are presentational: props are
 accessors, and the page passes scene signals to them.

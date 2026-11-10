@@ -4,25 +4,33 @@
  * whole viewport costs one canvas rather than a view per sampled segment.
  */
 import {
+  Animated,
+  type Accessor,
   type AnimatedNode,
   Canvas,
   type CanvasRenderingContext2D,
   cleanup,
   colorScheme,
+  computed,
   createAnimatedValue,
+  Easing,
   effect,
+  reduceMotion,
   token,
 } from "nsh";
 import type { EdgeSummary } from "@flow/native";
 import { type Point, connectorControls, EDGE_THICKNESS, splitConnector } from "../flow/connection";
 import { connectorLayerBox } from "../flow/edge-layer";
 import {
+  cometRuns,
+  cometShown,
   edgeFlows,
+  FLOW_CYCLE_MS,
   FLOW_REST_ALPHA,
   FLOW_SEGMENTS,
-  FLOW_STEP_MS,
+  FLOW_STEPS,
+  flowingEdgeCount,
   flowPass,
-  flowWave,
 } from "../flow/edge-flow";
 import type { FlowScene } from "../flow/scene";
 
@@ -30,10 +38,10 @@ import type { FlowScene } from "../flow/scene";
  * cards' connectors stand out where its wave travels. */
 const FLOW_THICKNESS = EDGE_THICKNESS + 1;
 
-/** Above this many flowing connectors, a gesture that moves or resizes
- * cards draws the resting highlight only: every pointer move re-records
- * this canvas, and the comet's many short strokes would dominate that
- * record. The comet comes back when the gesture ends. */
+/** Above this many flowing connectors, card gestures, camera movement or a
+ * following card/frame plus draws the resting highlight only: every input or
+ * settle change re-records this canvas, and the comet's many short strokes
+ * would dominate that record. Its native phase continues meanwhile. */
 const GESTURE_FLOW_EDGES = 4;
 
 /** A connector's resolved ports, shared by its baseline and comet strokes. */
@@ -44,36 +52,43 @@ interface DrawableEdge {
 
 export interface FlowEdgesProps {
   readonly scene: FlowScene;
+  /** True while the camera moves/settles or a card/frame plus follows the pointer. */
+  readonly paused: Accessor<boolean>;
 }
 
 export function FlowEdges(props: FlowEdgesProps) {
-  // The wave's position, shared by every flowing connector: 1 (nothing lit),
-  // 0 (the whole connector lit) and -1 (the tail left through the target).
-  // A timer steps it (about 30 times a second) and the canvas reads it as an
-  // animated number (`lineDashOffset`), so a step only updates the drawing's
-  // values — no JS draw runs — and the canvas repaints on the steps instead
-  // of on every display frame; between steps no frame is needed.
+  const flowingCount = computed(() =>
+    flowingEdgeCount(props.scene.edges(), new Set(props.scene.selection())),
+  );
+  // A native stepped phase keeps JS out of the animation. frameRate is a cap
+  // on capable platforms, not a fixed timer rate; Windows may tick at display
+  // rate, while canvas slots that do not change skip re-recording.
   const wave = createAnimatedValue(1);
-  let step: number | null = null;
-  let began = 0;
+  const loop = Animated.loop(
+    Animated.timing(wave, {
+      toValue: -1,
+      duration: FLOW_CYCLE_MS,
+      easing: Easing.steps(FLOW_STEPS),
+      frameRate: 30,
+    }),
+    { resetBeforeIteration: true },
+  );
+  let running = false;
   const stopWave = (): void => {
-    if (step === null) return;
-    clearInterval(step);
-    step = null;
+    if (running) loop.stop();
+    running = false;
+    wave.set(1);
   };
   cleanup(stopWave);
   effect(() => {
-    if (props.scene.selection().length > 0) {
-      if (step !== null) return;
-      began = Date.now();
-      step = setInterval(() => {
-        wave.set(flowWave(Date.now() - began));
-      }, FLOW_STEP_MS);
+    if (cometRuns(flowingCount(), reduceMotion())) {
+      if (running) return;
+      running = true;
+      wave.set(1);
+      void loop.start();
       return;
     }
-    // Nothing flows: stop the wave and park it where nothing is lit.
     stopWave();
-    wave.set(1);
   });
 
   // One alpha timeline per piece, shared by every connector: every curve is
@@ -111,8 +126,8 @@ export function FlowEdges(props: FlowEdgesProps) {
     const selected = props.scene.selectedEdge();
     // Read the selection so a change redraws the flowing connectors.
     const flowing = new Set(props.scene.selection());
+    const paused = props.paused();
     cx.lineCap = "round";
-    let flowingEdges = 0;
     for (const { edge, ports } of drawable) {
       const { from, to } = ports;
       const { c1, c2 } = connectorControls(from, to);
@@ -120,7 +135,6 @@ export function FlowEdges(props: FlowEdgesProps) {
       // rest, under their wave; a connector that is itself selected keeps
       // its accent.
       const flows = edgeFlows(edge, flowing);
-      if (flows) flowingEdges += 1;
       const highlighted = edge.id !== selected && flows;
       cx.strokeStyle = edge.id === selected ? accent : normal;
       cx.lineWidth = EDGE_THICKNESS;
@@ -143,12 +157,16 @@ export function FlowEdges(props: FlowEdgesProps) {
         cx.stroke();
       }
     }
-    if (flowing.size === 0) return;
-    // A gesture that moves or resizes cards re-records this canvas on every
-    // pointer move; with many flowing connectors the comet's strokes would
-    // dominate that record, so it yields to the resting highlight until the
-    // gesture ends.
-    if (props.scene.overrides().size > 0 && flowingEdges > GESTURE_FLOW_EDGES) return;
+    if (
+      !cometShown({
+        flowing: flowingCount(),
+        reducedMotion: reduceMotion(),
+        dragging: props.scene.overrides().size > 0,
+        paused,
+        limit: GESTURE_FLOW_EDGES,
+      })
+    )
+      return;
     // A comet of light travels each selected card's connectors from their
     // source and leaves through their target: the curve is drawn as short
     // pieces, each lit by its own animated alpha, so the light has a
