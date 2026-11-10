@@ -548,10 +548,14 @@ export class CanvasController {
       width: bottomRight.x - topLeft.x,
       height: bottomRight.y - topLeft.y,
     };
-    const ids = gesture.additive ? [...scene.selection()] : [];
+    const selected = gesture.additive ? scene.selection() : [];
+    const ids = [...selected];
+    const included = new Set(selected);
     for (const node of scene.nodes()) {
       const rect = scene.cardRect(node.id);
-      if (rect && intersects(rect, world) && !ids.includes(node.id)) ids.push(node.id);
+      if (!rect || !intersects(rect, world) || included.has(node.id)) continue;
+      ids.push(node.id);
+      included.add(node.id);
     }
     return ids;
   }
