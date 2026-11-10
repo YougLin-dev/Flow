@@ -17,7 +17,7 @@ import {
 } from "./connection";
 import { CARD_TITLE_BAND } from "./card-layout";
 import { KeyedFlags } from "./keyed-flags";
-import { sameEdge, sameNode } from "./record-equality";
+import { sameEdge, sameNode, samePreviewMap, samePreviewView } from "./record-equality";
 
 /** The URLs a card's image body should show, loaded by the page. */
 export interface PreviewView {
@@ -160,10 +160,19 @@ export class FlowScene {
 
   /** Replaces the image thumbnails the page loaded for visible cards. */
   applyPreviews(previews: readonly PreviewView[]): void {
+    const current = untracked(() => this.previews());
     const next = new Map<string, PreviewView>();
     for (const preview of previews) {
-      if (this.byId.has(preview.nodeId)) next.set(preview.nodeId, preview);
+      if (!this.byId.has(preview.nodeId)) continue;
+      const previous = current.get(preview.nodeId);
+      next.set(
+        preview.nodeId,
+        previous !== undefined && samePreviewView(previous, preview) ? previous : preview,
+      );
     }
+    // Keep the published map when every entry kept its identity and order, so
+    // an unchanged reload wakes no image card.
+    if (samePreviewMap(current, next)) return;
     this.previews.set(next);
   }
 

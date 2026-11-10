@@ -69,6 +69,25 @@ export function samePreviewView(a: PreviewView, b: PreviewView): boolean {
   );
 }
 
+/**
+ * Ordered map identity: same keys in the same order and identical values, so
+ * a rebuild that kept every PreviewView object publishes nothing.
+ */
+export function samePreviewMap(
+  a: ReadonlyMap<string, PreviewView>,
+  b: ReadonlyMap<string, PreviewView>,
+): boolean {
+  if (a.size !== b.size) return false;
+  const first = [...a];
+  const second = [...b];
+  for (let index = 0; index < first.length; index += 1) {
+    const left = first[index];
+    const right = second[index];
+    if (!left || !right || left[0] !== right[0] || left[1] !== right[1]) return false;
+  }
+  return true;
+}
+
 interface EdgePointLike {
   readonly x: number;
   readonly y: number;

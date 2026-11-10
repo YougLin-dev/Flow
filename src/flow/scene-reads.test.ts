@@ -190,3 +190,23 @@ test("an identical snapshot wakes no card rect reader", () => {
 
   expect([runsA, runsB]).toEqual([1, 2]);
 });
+
+test("identical previews keep their identity and wake no reader", () => {
+  const scene = new FlowScene();
+  scene.apply(snapshot([node("a", 0, 0, { kind: "image", outputBatchId: "batch" })]));
+  scene.applyPreviews([{ nodeId: "a", urls: ["data:image/png;base64,x"], count: 1 }]);
+  let runs = 0;
+  effect(() => {
+    scene.previews();
+    runs += 1;
+  });
+  const first = scene.previews().get("a");
+
+  // Same contents in a fresh view object and URL array: no new publication.
+  scene.applyPreviews([{ nodeId: "a", urls: ["data:image/png;base64,x"], count: 1 }]);
+  expect(runs).toBe(1);
+  expect(scene.previews().get("a")).toBe(first);
+
+  scene.applyPreviews([{ nodeId: "a", urls: ["data:image/png;base64,x"], count: 2 }]);
+  expect(runs).toBe(2);
+});
