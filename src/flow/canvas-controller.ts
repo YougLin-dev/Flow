@@ -4,7 +4,7 @@
  * hand tool, and the port/edge gestures. It owns no views; the canvas
  * components read its signals.
  */
-import { signal, type ViewStyle } from "nsh";
+import { batch, signal, type ViewStyle } from "nsh";
 import type { NodeBounds } from "@flow/native";
 import type { CanvasCamera } from "./camera";
 import { type BoxGeometry, framePortZone, type Point, type PortSide } from "./connection";
@@ -204,302 +204,318 @@ export class CanvasController {
     return hit === null ? null : { id: hit.id, side: hit.side };
   }
 
+  /** A press is one state transition: readers see the gesture's final state. */
   down(x: number, y: number, shift: boolean, clickCount: number): void {
-    const scene = this.host.scene();
-    const camera = this.host.camera();
-    this.right.cancel();
-    this.edgeMode = false;
-    this.gesturing.set(false);
-    this.portPlus.set(null);
-    this.framePlus.set(null);
-    this.clearPreview();
-    this.gesture = { ...idle(), startX: x, startY: y, lastX: x, lastY: y };
+    batch(() => {
+      const scene = this.host.scene();
+      const camera = this.host.camera();
+      this.right.cancel();
+      this.edgeMode = false;
+      this.gesturing.set(false);
+      this.portPlus.set(null);
+      this.framePlus.set(null);
+      this.clearPreview();
+      this.gesture = { ...idle(), startX: x, startY: y, lastX: x, lastY: y };
 
-    // The merged plus is a connector handle for the whole selection. Test it
-    // before a press outside the frame would dismiss that frame.
-    if (this.host.tool() === "select") {
-      const framePlus = this.framePlusAt(x, y);
-      if (
-        framePlus !== null &&
-        this.edges.beginGroup(x, y, framePlus.side === "out" ? "from" : "to")
-      ) {
+      // The merged plus is a connector handle for the whole selection. Test it
+      // before a press outside the frame would dismiss that frame.
+      if (this.host.tool() === "select") {
+        const framePlus = this.framePlusAt(x, y);
+        if (
+          framePlus !== null &&
+          this.edges.beginGroup(x, y, framePlus.side === "out" ? "from" : "to")
+        ) {
+          this.edgeMode = true;
+          this.gesturing.set(true);
+          this.gesture = { ...this.gesture, mode: "edge" };
+          this.cursor.set("crosshair");
+          return;
+        }
+      }
+
+      // The frame belongs to the area the marquee swept: it stays while the
+      // pointer acts inside it and disappears on a press outside.
+      const insideFrame = this.frameContains(x, y);
+      if (!insideFrame) this.marqueeSelected.set(false);
+
+      if (this.host.tool() === "hand") {
+        this.beginPan(x, y);
+        return;
+      }
+
+      // Ports come before resize handles: a selected card's east and west
+      // handles sit exactly on its ports, and a connection is the more common
+      // gesture at that point. A framed selection hides its per-card pluses,
+      // so their zones must not start a connection either.
+      const portAllowed = (nodeId: string): boolean =>
+        !(this.multiFrame() && scene.selection().includes(nodeId));
+      if (this.edges.down(x, y, portAllowed)) {
         this.edgeMode = true;
         this.gesturing.set(true);
         this.gesture = { ...this.gesture, mode: "edge" };
         this.cursor.set("crosshair");
         return;
       }
-    }
 
-    // The frame belongs to the area the marquee swept: it stays while the
-    // pointer acts inside it and disappears on a press outside.
-    const insideFrame = this.frameContains(x, y);
-    if (!insideFrame) this.marqueeSelected.set(false);
-
-    if (this.host.tool() === "hand") {
-      this.beginPan(x, y);
-      return;
-    }
-
-    // Ports come before resize handles: a selected card's east and west
-    // handles sit exactly on its ports, and a connection is the more common
-    // gesture at that point. A framed selection hides its per-card pluses,
-    // so their zones must not start a connection either.
-    const portAllowed = (nodeId: string): boolean =>
-      !(this.multiFrame() && scene.selection().includes(nodeId));
-    if (this.edges.down(x, y, portAllowed)) {
-      this.edgeMode = true;
-      this.gesturing.set(true);
-      this.gesture = { ...this.gesture, mode: "edge" };
-      this.cursor.set("crosshair");
-      return;
-    }
-
-    const world = camera.toWorld(x, y);
-    const id = scene.nodeAt(world.x, world.y);
-    if (clickCount >= 2 && id !== null && scene.kindOf(id) === "text") {
-      this.host.openInline(id);
-      return;
-    }
-
-    // The frame a marquee left is one drag surface: a press anywhere inside
-    // it moves the whole selection, even on a card's border, instead of
-    // resizing one card, replacing the selection or starting a new box.
-    if (insideFrame) {
-      this.startDrag();
-      return;
-    }
-
-    const target = this.handleAtPoint(x, y);
-    const base = target === null ? null : scene.cardRect(target.id);
-    if (target && base) {
-      // A handle resizes its card without a prior selection; the press
-      // selects the card so the resize reads as acting on it.
-      if (!(scene.selection().length === 1 && scene.selection()[0] === target.id)) {
-        scene.select([target.id]);
+      const world = camera.toWorld(x, y);
+      const id = scene.nodeAt(world.x, world.y);
+      if (clickCount >= 2 && id !== null && scene.kindOf(id) === "text") {
+        this.host.openInline(id);
+        return;
       }
-      this.gesturing.set(true);
-      this.gesture = {
-        ...this.gesture,
-        mode: "resize",
-        base: new Map([[target.id, base]]),
-        resizeId: target.id,
-        resizeSide: target.side,
-      };
-      this.cursor.set(cursorFor(target.side));
-      return;
-    }
 
-    if (id !== null) {
-      if (shift) scene.toggleSelected(id);
-      else if (!scene.selection().includes(id)) scene.select([id]);
-      if (scene.selection().includes(id)) {
-        this.host.onCardPress(id);
+      // The frame a marquee left is one drag surface: a press anywhere inside
+      // it moves the whole selection, even on a card's border, instead of
+      // resizing one card, replacing the selection or starting a new box.
+      if (insideFrame) {
         this.startDrag();
         return;
       }
-      // A shift press on a selected card is consumed by deselecting it; a
-      // slightly moved release must not become an additive marquee that
-      // covers (and re-adds) the very card the user removed.
-      if (shift) {
-        this.host.selectEdge(null);
+
+      const target = this.handleAtPoint(x, y);
+      const base = target === null ? null : scene.cardRect(target.id);
+      if (target && base) {
+        // A handle resizes its card without a prior selection; the press
+        // selects the card so the resize reads as acting on it.
+        if (!(scene.selection().length === 1 && scene.selection()[0] === target.id)) {
+          scene.select([target.id]);
+        }
+        this.gesturing.set(true);
+        this.gesture = {
+          ...this.gesture,
+          mode: "resize",
+          base: new Map([[target.id, base]]),
+          resizeId: target.id,
+          resizeSide: target.side,
+        };
+        this.cursor.set(cursorFor(target.side));
         return;
       }
-    }
 
-    if (!shift) scene.select([]);
-    this.host.selectEdge(null);
-    this.gesture = { ...this.gesture, mode: "marquee", additive: shift };
-    this.marquee.set({ x, y, width: 0, height: 0 });
-    this.cursor.set("crosshair");
+      if (id !== null) {
+        if (shift) scene.toggleSelected(id);
+        else if (!scene.selection().includes(id)) scene.select([id]);
+        if (scene.selection().includes(id)) {
+          this.host.onCardPress(id);
+          this.startDrag();
+          return;
+        }
+        // A shift press on a selected card is consumed by deselecting it; a
+        // slightly moved release must not become an additive marquee that
+        // covers (and re-adds) the very card the user removed.
+        if (shift) {
+          this.host.selectEdge(null);
+          return;
+        }
+      }
+
+      if (!shift) scene.select([]);
+      this.host.selectEdge(null);
+      this.gesture = { ...this.gesture, mode: "marquee", additive: shift };
+      this.marquee.set({ x, y, width: 0, height: 0 });
+      this.cursor.set("crosshair");
+    });
   }
 
+  /** One pointer move is one gesture step; nested hover joins this round. */
   move(x: number, y: number): void {
-    const gesture = this.gesture;
-    if (gesture.mode === "idle") {
-      this.hover(x, y);
-      return;
-    }
-    const dx = x - gesture.lastX;
-    const dy = y - gesture.lastY;
-    gesture.lastX = x;
-    gesture.lastY = y;
+    batch(() => {
+      const gesture = this.gesture;
+      if (gesture.mode === "idle") {
+        this.hover(x, y);
+        return;
+      }
+      const dx = x - gesture.lastX;
+      const dy = y - gesture.lastY;
+      gesture.lastX = x;
+      gesture.lastY = y;
 
-    if (gesture.mode === "pan") {
-      this.host.panBy(dx, dy);
-      this.cursor.set("grabbing");
-      return;
-    }
-    if (gesture.mode === "edge") {
-      if (this.edgeMode) this.edges.move(x, y);
-      return;
-    }
-    if (gesture.mode === "marquee") {
-      const box = normalizeRect(gesture.startX, gesture.startY, x, y);
-      this.marquee.set(box);
-      // The covered cards light up as the box sweeps: the preview is the
-      // release's selection, written only when the covered set changes.
-      if (box.width < 1 && box.height < 1) this.clearPreview();
-      else this.setPreview(this.idsWithin(gesture, box));
-      return;
-    }
-    if (gesture.mode === "drag") {
-      if (screenDistance(gesture, x, y) > DRAG_THRESHOLD) gesture.moved = true;
-      if (!gesture.moved) return;
-      const camera = this.host.camera();
-      const world = camera.toWorld(x, y);
-      const start = camera.toWorld(gesture.startX, gesture.startY);
-      const worldDx = world.x - start.x;
-      const worldDy = world.y - start.y;
-      const next = new Map<string, BoxGeometry>();
-      for (const [id, rect] of gesture.base) {
-        next.set(id, { ...rect, x: rect.x + worldDx, y: rect.y + worldDy });
+      if (gesture.mode === "pan") {
+        this.host.panBy(dx, dy);
+        this.cursor.set("grabbing");
+        return;
       }
-      this.host.scene().setOverrides(next);
-      this.cursor.set("grabbing");
-      return;
-    }
-    if (gesture.mode === "resize") {
-      if (
-        Math.abs(x - gesture.startX) > DRAG_THRESHOLD ||
-        Math.abs(y - gesture.startY) > DRAG_THRESHOLD
-      ) {
-        gesture.moved = true;
+      if (gesture.mode === "edge") {
+        if (this.edgeMode) this.edges.move(x, y);
+        return;
       }
-      if (!gesture.moved) return;
-      const camera = this.host.camera();
-      const world = camera.toWorld(x, y);
-      const start = camera.toWorld(gesture.startX, gesture.startY);
-      const id = gesture.resizeId;
-      const side = gesture.resizeSide;
-      const base = id ? gesture.base.get(id) : null;
-      if (!id || !side || !base) return;
-      this.host
-        .scene()
-        .setOverrides(
-          new Map([[id, resizedRect(base, side, world.x - start.x, world.y - start.y)]]),
-        );
-    }
+      if (gesture.mode === "marquee") {
+        const box = normalizeRect(gesture.startX, gesture.startY, x, y);
+        this.marquee.set(box);
+        // The covered cards light up as the box sweeps: the preview is the
+        // release's selection, written only when the covered set changes.
+        if (box.width < 1 && box.height < 1) this.clearPreview();
+        else this.setPreview(this.idsWithin(gesture, box));
+        return;
+      }
+      if (gesture.mode === "drag") {
+        if (screenDistance(gesture, x, y) > DRAG_THRESHOLD) gesture.moved = true;
+        if (!gesture.moved) return;
+        const camera = this.host.camera();
+        const world = camera.toWorld(x, y);
+        const start = camera.toWorld(gesture.startX, gesture.startY);
+        const worldDx = world.x - start.x;
+        const worldDy = world.y - start.y;
+        const next = new Map<string, BoxGeometry>();
+        for (const [id, rect] of gesture.base) {
+          next.set(id, { ...rect, x: rect.x + worldDx, y: rect.y + worldDy });
+        }
+        this.host.scene().setOverrides(next);
+        this.cursor.set("grabbing");
+        return;
+      }
+      if (gesture.mode === "resize") {
+        if (
+          Math.abs(x - gesture.startX) > DRAG_THRESHOLD ||
+          Math.abs(y - gesture.startY) > DRAG_THRESHOLD
+        ) {
+          gesture.moved = true;
+        }
+        if (!gesture.moved) return;
+        const camera = this.host.camera();
+        const world = camera.toWorld(x, y);
+        const start = camera.toWorld(gesture.startX, gesture.startY);
+        const id = gesture.resizeId;
+        const side = gesture.resizeSide;
+        const base = id ? gesture.base.get(id) : null;
+        if (!id || !side || !base) return;
+        this.host
+          .scene()
+          .setOverrides(
+            new Map([[id, resizedRect(base, side, world.x - start.x, world.y - start.y)]]),
+          );
+      }
+    });
   }
 
+  /** A release publishes selection, frame and resting hover together. */
   up(x: number, y: number): void {
-    const gesture = this.gesture;
-    this.gesture = idle();
-    this.gesturing.set(false);
-    if (this.edgeMode) {
-      this.edgeMode = false;
-      this.edges.up(x, y);
+    batch(() => {
+      const gesture = this.gesture;
+      this.gesture = idle();
+      this.gesturing.set(false);
+      if (this.edgeMode) {
+        this.edgeMode = false;
+        this.edges.up(x, y);
+        this.hover(x, y);
+        return;
+      }
+      if (gesture.mode === "drag" || gesture.mode === "resize") {
+        if (gesture.moved) {
+          const bounds = this.host.scene().commitBounds();
+          // A gesture that ended where it began has nothing to write; drop its
+          // override instead of leaving transient geometry in the scene.
+          if (bounds.length === 0) this.host.scene().clearOverrides();
+          else this.host.commitBounds(bounds);
+        } else {
+          this.host.scene().clearOverrides();
+        }
+        // The pointer may have ended the gesture somewhere else, or on a
+        // border: read the hover state there instead of keeping the card the
+        // gesture started on (a stale hover keeps its plus showing).
+        this.hover(x, y);
+        return;
+      }
+      if (gesture.mode === "marquee") {
+        const box = normalizeRect(gesture.startX, gesture.startY, x, y);
+        const ids = this.selectWithin(gesture, box);
+        this.marquee.set(null);
+        this.clearPreview();
+        // One card is a normal selection: the frame, its merged pluses and
+        // its group drag are a multi-card selection's affordance.
+        this.marqueeSelected.set(ids.length > 1);
+        this.hover(x, y);
+        return;
+      }
+      this.marquee.set(null);
+      this.cursor.set("default");
       this.hover(x, y);
-      return;
-    }
-    if (gesture.mode === "drag" || gesture.mode === "resize") {
-      if (gesture.moved) {
-        const bounds = this.host.scene().commitBounds();
-        // A gesture that ended where it began has nothing to write; drop its
-        // override instead of leaving transient geometry in the scene.
-        if (bounds.length === 0) this.host.scene().clearOverrides();
-        else this.host.commitBounds(bounds);
-      } else {
+    });
+  }
+
+  /** A cancelled gesture restores one idle state. */
+  cancel(): void {
+    batch(() => {
+      this.edges.cancel();
+      this.right.cancel();
+      this.edgeMode = false;
+      this.gesturing.set(false);
+      this.portPlus.set(null);
+      this.framePlus.set(null);
+      if (this.gesture.mode === "drag" || this.gesture.mode === "resize") {
         this.host.scene().clearOverrides();
       }
-      // The pointer may have ended the gesture somewhere else, or on a
-      // border: read the hover state there instead of keeping the card the
-      // gesture started on (a stale hover keeps its plus showing).
-      this.hover(x, y);
-      return;
-    }
-    if (gesture.mode === "marquee") {
-      const box = normalizeRect(gesture.startX, gesture.startY, x, y);
-      const ids = this.selectWithin(gesture, box);
+      this.gesture = idle();
       this.marquee.set(null);
       this.clearPreview();
-      // One card is a normal selection: the frame, its merged pluses and
-      // its group drag are a multi-card selection's affordance.
-      this.marqueeSelected.set(ids.length > 1);
-      this.hover(x, y);
-      return;
-    }
-    this.marquee.set(null);
-    this.cursor.set("default");
-    this.hover(x, y);
+      this.marqueeSelected.set(false);
+      this.cursor.set("default");
+    });
   }
 
-  cancel(): void {
-    this.edges.cancel();
-    this.right.cancel();
-    this.edgeMode = false;
-    this.gesturing.set(false);
-    this.portPlus.set(null);
-    this.framePlus.set(null);
-    if (this.gesture.mode === "drag" || this.gesture.mode === "resize") {
-      this.host.scene().clearOverrides();
-    }
-    this.gesture = idle();
-    this.marquee.set(null);
-    this.clearPreview();
-    this.marqueeSelected.set(false);
-    this.cursor.set("default");
-  }
-
-  /** Clears the pointer state when it leaves the canvas. */
+  /** Clears hover, pluses and cursor together when the pointer leaves. */
   leave(): void {
-    this.hovered.set(null);
-    this.portPlus.set(null);
-    this.framePlus.set(null);
-    this.cursor.set("default");
+    batch(() => {
+      this.hovered.set(null);
+      this.portPlus.set(null);
+      this.framePlus.set(null);
+      this.cursor.set("default");
+    });
   }
 
-  /** A mouse move with no button down, updating hover and the cursor. */
+  /** Hover state is one derived UI state, not a separate round per signal. */
   hover(x: number, y: number): void {
-    const scene = this.host.scene();
-    const camera = this.host.camera();
-    const world = camera.toWorld(x, y);
-    const tool = this.host.tool();
-    if (tool !== "select") {
-      this.framePlus.set(null);
-    } else {
-      // The merged plus belongs to the frame's side zones, ahead of every
-      // per-card zone or resize handle it overlaps.
-      const framePlus = this.framePlusAt(x, y);
-      if (framePlus !== null) {
-        this.framePlus.set(framePlus);
-        this.hovered.set(null);
+    batch(() => {
+      const scene = this.host.scene();
+      const camera = this.host.camera();
+      const world = camera.toWorld(x, y);
+      const tool = this.host.tool();
+      if (tool !== "select") {
+        this.framePlus.set(null);
+      } else {
+        // The merged plus belongs to the frame's side zones, ahead of every
+        // per-card zone or resize handle it overlaps.
+        const framePlus = this.framePlusAt(x, y);
+        if (framePlus !== null) {
+          this.framePlus.set(framePlus);
+          this.hovered.set(null);
+          this.portPlus.set(null);
+          this.cursor.set("crosshair");
+          return;
+        }
+        this.framePlus.set(null);
+        // A plus zone takes precedence over the east/west resize handles it
+        // overlaps: pressing a visible plus starts a connection. A framed
+        // selection hides its per-card pluses, so their zones are muted.
+        const zone = scene.portZoneAt(world.x, world.y);
+        if (zone && !(this.multiFrame() && scene.selection().includes(zone.nodeId))) {
+          this.hovered.set(zone.nodeId);
+          this.portPlus.set({ nodeId: zone.nodeId, side: zone.side, point: zone.point });
+          this.cursor.set("crosshair");
+          return;
+        }
+      }
+      // The frame a marquee left is one drag surface: card bodies and borders
+      // inside it all move the whole selection, so the move cursor is shown
+      // everywhere but the explicit port buttons above.
+      if (tool === "select" && this.frameContains(x, y)) {
+        this.hovered.set(scene.nodeAt(world.x, world.y));
         this.portPlus.set(null);
-        this.cursor.set("crosshair");
+        this.cursor.set("grab");
         return;
       }
-      this.framePlus.set(null);
-      // A plus zone takes precedence over the east/west resize handles it
-      // overlaps: pressing a visible plus starts a connection. A framed
-      // selection hides its per-card pluses, so their zones are muted.
-      const zone = scene.portZoneAt(world.x, world.y);
-      if (zone && !(this.multiFrame() && scene.selection().includes(zone.nodeId))) {
-        this.hovered.set(zone.nodeId);
-        this.portPlus.set({ nodeId: zone.nodeId, side: zone.side, point: zone.point });
-        this.cursor.set("crosshair");
+      const target = this.handleAtPoint(x, y);
+      if (target) {
+        this.hovered.set(target.id);
+        this.portPlus.set(null);
+        this.cursor.set(cursorFor(target.side));
         return;
       }
-    }
-    // The frame a marquee left is one drag surface: card bodies and borders
-    // inside it all move the whole selection, so the move cursor is shown
-    // everywhere but the explicit port buttons above.
-    if (tool === "select" && this.frameContains(x, y)) {
-      this.hovered.set(scene.nodeAt(world.x, world.y));
+      const id = scene.nodeAt(world.x, world.y);
+      this.hovered.set(id);
       this.portPlus.set(null);
-      this.cursor.set("grab");
-      return;
-    }
-    const target = this.handleAtPoint(x, y);
-    if (target) {
-      this.hovered.set(target.id);
-      this.portPlus.set(null);
-      this.cursor.set(cursorFor(target.side));
-      return;
-    }
-    const id = scene.nodeAt(world.x, world.y);
-    this.hovered.set(id);
-    this.portPlus.set(null);
-    this.cursor.set(tool === "hand" ? "grab" : "default");
+      this.cursor.set(tool === "hand" ? "grab" : "default");
+    });
   }
 
   /** Starts a camera pan (the hand tool owns the press). */

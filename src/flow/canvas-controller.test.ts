@@ -1,4 +1,5 @@
 import { expect, test } from "nsh/test";
+import { effect } from "nsh";
 import type { EdgeSummary, NodeBounds, NodeSummary, SceneSnapshot } from "@flow/native";
 import { CanvasCamera } from "./camera";
 import { type CanvasHost, type CanvasTool, CanvasController } from "./canvas-controller";
@@ -174,6 +175,43 @@ test("box-selects only the cards the marquee covers", () => {
   controller.up(350, 220);
   expect(scene.selectedIds()).toEqual(["a"]);
   expect(controller.marquee()).toBeNull();
+});
+
+test("a box selection's release never shows a multi-card selection without its frame", () => {
+  const { scene, controller } = setup([node("a", 100, 100), node("b", 400, 100)]);
+  const broken: boolean[] = [];
+  effect(() => {
+    broken.push(scene.selection().length > 1 && !controller.multiFrame());
+  });
+
+  controller.down(50, 50, false, 1);
+  controller.move(650, 220);
+  controller.up(650, 220);
+
+  expect(broken).not.toContain(true);
+  expect(controller.multiFrame()).toBe(true);
+});
+
+test("an idle move onto a card's plus zone updates hover state in one round", () => {
+  const { controller } = setup([node("a", 0, 0)]);
+  let runs = 0;
+  effect(() => {
+    controller.hovered();
+    controller.portPlus();
+    controller.framePlus();
+    controller.cursor();
+    runs += 1;
+  });
+  const before = runs;
+
+  controller.hover(210, 30);
+
+  expect(runs).toBe(before + 1);
+  expect(controller.portPlus()).toEqual({
+    nodeId: "a",
+    side: "out",
+    point: { x: 210, y: 30 },
+  });
 });
 
 test("a marquee that ends with one card leaves a normal selection", () => {
