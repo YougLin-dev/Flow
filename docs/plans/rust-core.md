@@ -489,7 +489,7 @@ table above. The lines below are copied verbatim from `bun run test:bench`
 0.15 zoom, 800 below 0.40 and 2,000 otherwise; these reads predate passing
 that budget to Rust, so the 300- and 800-card cases still returned 2,000 rows.
 
-**Before 011** (the existing single-statement read; no per-read card budget):
+**before 011** (the existing single-statement read; no per-read card budget):
 
 ```text
 legacy viewport scale=1.0000 (reference; edges and images present): n=5 avg=0.57ms p95=0.81ms max=0.81ms rect=(0.0,0.0,1920.0,1080.0) margin=120.0 nodes=90
@@ -499,7 +499,7 @@ scene scale=0.15: n=5 avg=702.79ms p95=728.40ms max=728.40ms scale=0.1500 rect=(
 scene scale=0.40: n=5 avg=49.41ms p95=51.26ms max=51.26ms scale=0.4000 rect=(8470.0,68502.0,5040.0,2940.0) margin=1260.0 nodes=1440 edges=1480
 ```
 
-**After 011** (per-read card budget, two-phase node read, capped reads skip
+**after 011** (per-read card budget, two-phase node read, capped reads skip
 the crossing-connector index, port-only far lookup):
 
 ```text
