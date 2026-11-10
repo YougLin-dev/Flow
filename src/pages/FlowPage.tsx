@@ -1,9 +1,10 @@
-import { cleanup, effect, keymap, Picker, signal, untracked, View } from "nsh";
+import { cleanup, effect, host, keymap, Picker, signal, untracked, View } from "nsh";
 import { isAvailable } from "nsh/desktop";
 import type { ChangeSet, Document, NodeBounds, SearchHit } from "@flow/native";
 import { BrandCard } from "../components/BrandCard";
 import { CanvasContextMenu } from "../components/CanvasContextMenu";
 import { FlowCanvas } from "../components/FlowCanvas";
+import { ImageLoadProbe, imageProbeText } from "../components/FlowCard";
 import { FrameRate } from "../components/FrameRate";
 import { HintBar } from "../components/HintBar";
 import { InlineTextEditor } from "../components/InlineTextEditor";
@@ -56,6 +57,7 @@ export function FlowPage() {
   const stage = signal({ width: 1, height: 1 });
   const sessionState = signal<NodeSession | null>(null);
   const searchOpen = signal(false);
+  const imageProbe = signal("");
   const composerState = new ComposerState();
 
   const currentSession = (): NodeSession | null => sessionState();
@@ -441,7 +443,10 @@ export function FlowPage() {
         onMenuCancel={() => {
           canvasMenu.close();
         }}
+        imageEvent={(event) => imageProbe.set(imageProbeText(event))}
       />
+
+      {host.params.flowImageLoadProbe === 1 ? <ImageLoadProbe value={imageProbe()} /> : null}
 
       {composerOpen() ? null : <NodeToolbar onAdd={addNode} />}
 

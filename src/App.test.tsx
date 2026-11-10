@@ -339,6 +339,39 @@ test("removes an input from the composer", async () => {
   expect(app.texts().some((text) => text.includes("清晨"))).toBe(true);
 });
 
+test("reopens the image composer with its run results", async () => {
+  const app = await openTallApp();
+  await app.waitUntil(() => percentOf(app.texts()) > 0);
+
+  await selectSeed(app, "Image", "id:search-result-seed-image");
+  await app.waitUntil(() => app.shows("id:composer-run"));
+  await app.press("id:composer-run");
+  await app.waitUntil(() => app.texts().some((text) => text.endsWith("Done")));
+
+  await app.keyboard.press("escape");
+  await app.waitUntil(() => !app.shows("id:node-composer"));
+
+  await selectSeed(app, "Image", "id:search-result-seed-image");
+  await app.waitUntil(() => app.shows("id:composer-run"));
+  expect(app.texts().some((text) => text.endsWith("Done"))).toBe(true);
+  expect(app.value("id:composer-prompt") ?? "").toContain("mountain lake");
+});
+
+test("publishes an empty image-load probe while headless", async () => {
+  const app = await open("./App.tsx", {
+    width: 900,
+    height: 1300,
+    platform: "windows",
+    host: { params: { flowImageLoadProbe: 1 } },
+  });
+  await app.waitUntil(() => percentOf(app.texts()) > 0);
+
+  await selectSeed(app, "Image", "id:search-result-seed-image");
+  await app.waitFor("id:composer-run");
+  await app.waitFor("id:image-load-probe");
+  expect(app.value("id:image-load-probe")).toBe("");
+});
+
 test("saves an edited text body from the composer", async () => {
   const app = await open("./App.tsx");
   await app.waitUntil(() => percentOf(app.texts()) > 0);

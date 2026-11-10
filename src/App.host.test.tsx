@@ -199,3 +199,62 @@ test("runs the seeded image node and records its mock batch", async () => {
   await app.waitUntil(() => app.texts().some((text) => text.endsWith("Done")));
   expect(app.texts().some((text) => text.endsWith("Done"))).toBe(true);
 });
+
+test("loads a blob image through the asset cache", async () => {
+  const app = await open("./App.tsx", {
+    width: 900,
+    height: 1300,
+    platform: "windows",
+    host: { params: { flowImageLoadProbe: 1 } },
+  });
+  await app.waitUntil(() => percentOf(app.texts()) > 0);
+
+  await selectSeed(app, "Image", "id:search-result-seed-image");
+  await app.waitFor("id:composer-run");
+
+  // Headless never loads images (no onLoad comes), so its run only proves
+  // the probe exists and reported nothing; the Windows host proves the load.
+  // A headless app still reports a desktop title bar for `platform:
+  // "windows"`, so the missing screenshot platform is what tells the two
+  // apart before the run: only a real platform draws the window.
+  const picture = await app.screenshot().then(
+    (png) => png,
+    () => null,
+  );
+  if (picture === null) {
+    expect(app.shows("id:composer-run")).toBe(true);
+    await app.waitFor("id:image-load-probe");
+    expect(app.value("id:image-load-probe")).toBe("");
+    return;
+  }
+  expect(picture.length).toBeGreaterThan(0);
+
+  await app.press("id:composer-run");
+  await app.waitUntil(() => app.texts().some((text) => text.endsWith("Done")));
+  await app.waitUntil(
+    () => {
+      const parts = (app.value("id:image-load-probe") ?? "").split(";");
+      return (
+        parts[0] === "load" &&
+        parts[1] === "seed-image" &&
+        (parts[2] ?? "").startsWith("blob:") &&
+        Number(parts[3]) > 0 &&
+        Number(parts[4]) > 0
+      );
+    },
+    { timeout: 15000 },
+  );
+
+  const report = app.value("id:image-load-probe") ?? "";
+  expect(report).not.toMatch(/^error;/);
+  expect(report).not.toContain("error;seed-image");
+  const parts = report.split(";");
+  expect(parts).toHaveLength(6);
+  expect(parts[0]).toBe("load");
+  expect(parts[1]).toBe("seed-image");
+  expect(new URL(parts[2] ?? "").protocol).toBe("blob:");
+  expect(Number.isFinite(Number(parts[3]))).toBe(true);
+  expect(Number.isFinite(Number(parts[4]))).toBe(true);
+  expect(Number(parts[3])).toBeGreaterThan(0);
+  expect(Number(parts[4])).toBeGreaterThan(0);
+});

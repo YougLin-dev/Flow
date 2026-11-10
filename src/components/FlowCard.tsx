@@ -8,7 +8,8 @@
  * refresh that carries the same card wakes no binding. Its pixel values
  * scale with the camera through the world view.
  */
-import { computed, Image, Text, View } from "nsh";
+import { computed, host, Image, Text, View } from "nsh";
+import { Input } from "nsh/base";
 import type { NodeSummary } from "@flow/native";
 import { PortPlus } from "./PortPlus";
 import { CardContent } from "../flow/card-content";
@@ -24,6 +25,16 @@ import type { BoxGeometry, Point, PortSide } from "../flow/connection";
 import type { FlowAccent } from "../flow/node-kinds";
 import { previewCell } from "../flow/preview-grid";
 import type { PreviewView } from "../flow/scene";
+
+/** One image load or failure, reported for the host image regression. */
+export interface CardImageEvent {
+  readonly nodeId: string;
+  readonly kind: "load" | "error";
+  readonly url: string;
+  readonly width: number;
+  readonly height: number;
+  readonly message: string;
+}
 
 export interface FlowCardProps {
   readonly node: () => NodeSummary;
@@ -41,6 +52,8 @@ export interface FlowCardProps {
   readonly plusSuppressed: () => boolean;
   /** True while a pulled connector is snapped to this card. */
   readonly target: () => boolean;
+  /** The test-only image observation path; normal rendering has no hook. */
+  readonly imageEvent?: ((event: CardImageEvent) => void) | undefined;
 }
 
 const ACCENT_BG: Record<FlowAccent, string> = {
@@ -186,6 +199,26 @@ export function FlowCard(props: FlowCardProps) {
               {(url, index) => (
                 <Image
                   src={url()}
+                  onLoad={(event) =>
+                    props.imageEvent?.({
+                      nodeId: props.node().id,
+                      kind: "load",
+                      url: url(),
+                      width: event.size.width,
+                      height: event.size.height,
+                      message: "",
+                    })
+                  }
+                  onError={(event) =>
+                    props.imageEvent?.({
+                      nodeId: props.node().id,
+                      kind: "error",
+                      url: url(),
+                      width: 0,
+                      height: 0,
+                      message: event.message,
+                    })
+                  }
                   style={{
                     position: "absolute",
                     ...previewCell(
@@ -273,4 +306,22 @@ function statusTextClass(status: string): string {
 
 function truncate(text: string, limit: number): string {
   return text.length <= limit ? text : `${text.slice(0, limit)}…`;
+}
+
+/** The host regression's report, or nothing unless its launch parameter asks. */
+export function imageProbeText(event: CardImageEvent): string {
+  if (host.params.flowImageLoadProbe !== 1) return "";
+  return [event.kind, event.nodeId, event.url, event.width, event.height, event.message].join(";");
+}
+
+/** The invisible input a host test reads the last image event from. */
+export function ImageLoadProbe(props: { readonly value: string }) {
+  return (
+    <Input
+      testID="image-load-probe"
+      readonly
+      value={props.value}
+      style={{ position: "absolute", left: 8, top: 8, width: 360, height: 1, opacity: 0 }}
+    />
+  );
 }

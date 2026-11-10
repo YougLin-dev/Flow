@@ -15,7 +15,7 @@ import type { CanvasCamera } from "../flow/camera";
 import type { CanvasController } from "../flow/canvas-controller";
 import type { ContextMenuPoint } from "../flow/context-menu";
 import type { FlowScene } from "../flow/scene";
-import { FlowCard } from "./FlowCard";
+import { FlowCard, type CardImageEvent } from "./FlowCard";
 import { FlowEdges } from "./FlowEdges";
 import { FlowPreviews } from "./FlowPreviews";
 import { GridBackground } from "./GridBackground";
@@ -35,6 +35,8 @@ export interface FlowCanvasProps {
   readonly onMenuPress: (at: ContextMenuPoint) => void;
   readonly onMenuRelease: () => void;
   readonly onMenuCancel: () => void;
+  /** The test-only image observation path; normal rendering has no hook. */
+  readonly imageEvent?: ((event: CardImageEvent) => void) | undefined;
 }
 
 interface WheelEvent {
@@ -303,6 +305,7 @@ export function FlowCanvas(props: FlowCanvasProps) {
                     : null;
                 }}
                 target={() => props.scene.isConnectionTarget(id)}
+                imageEvent={props.imageEvent}
               />
             );
           }}
