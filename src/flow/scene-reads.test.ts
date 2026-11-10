@@ -88,3 +88,105 @@ test("a snapshot that changes one card's status replaces only that record", () =
   expect(nodes[0]?.status).toBe("running");
   expect(nodes[1]).toBe(secondNode);
 });
+
+test("a status change on one card does not wake another card's rect reader", () => {
+  const scene = new FlowScene();
+  scene.apply(snapshot([node("a", 40, 40), node("b", 360, 40)]));
+  let runsA = 0;
+  let runsB = 0;
+  effect(() => {
+    scene.cardRect("a");
+    runsA += 1;
+  });
+  effect(() => {
+    scene.cardRect("b");
+    runsB += 1;
+  });
+
+  scene.applyChangeSet({
+    changed: [node("a", 40, 40, { status: "running" })],
+    removed: [],
+    edgesChanged: [],
+    edgesRemoved: [],
+  });
+
+  // A's rectangle object did not change either; only its other fields did.
+  expect([runsA, runsB]).toEqual([1, 1]);
+});
+
+test("a change set moving A wakes only A's rect readers", () => {
+  const scene = new FlowScene();
+  scene.apply(snapshot([node("a", 40, 40), node("b", 360, 40)]));
+  let runsA = 0;
+  let runsB = 0;
+  effect(() => {
+    scene.cardRect("a");
+    runsA += 1;
+  });
+  effect(() => {
+    scene.cardRect("b");
+    runsB += 1;
+  });
+
+  scene.applyChangeSet({
+    changed: [node("a", 90, 40)],
+    removed: [],
+    edgesChanged: [],
+    edgesRemoved: [],
+  });
+
+  expect([runsA, runsB]).toEqual([2, 1]);
+});
+
+test("a far endpoint that enters the scene and moves wakes its early reader", () => {
+  const scene = new FlowScene();
+  scene.apply(
+    snapshot([node("a", 0, 0)], [{ ...edge("a-b", "a", "b"), toPoint: { x: 2_000, y: 300 } }]),
+  );
+  let runs = 0;
+  effect(() => {
+    scene.cardRect("b");
+    runs += 1;
+  });
+  expect(runs).toBe(1);
+  expect(scene.cardRect("b")).toBeNull();
+
+  // The change set accepts an id the viewport has not reported yet.
+  scene.applyChangeSet({
+    changed: [node("b", 300, 0)],
+    removed: [],
+    edgesChanged: [],
+    edgesRemoved: [],
+  });
+  expect(runs).toBe(2);
+  expect(scene.cardRect("b")).toEqual({ x: 300, y: 0, width: 200, height: 84 });
+
+  scene.applyChangeSet({
+    changed: [node("b", 400, 0)],
+    removed: [],
+    edgesChanged: [],
+    edgesRemoved: [],
+  });
+  expect(runs).toBe(3);
+  expect(scene.cardRect("b")?.x).toBe(400);
+});
+
+test("an identical snapshot wakes no card rect reader", () => {
+  const scene = new FlowScene();
+  scene.apply(snapshot([node("a", 40, 40), node("b", 360, 40)]));
+  let runsA = 0;
+  let runsB = 0;
+  effect(() => {
+    scene.cardRect("a");
+    runsA += 1;
+  });
+  effect(() => {
+    scene.cardRect("b");
+    runsB += 1;
+  });
+
+  // A is field-equal and B moved: only B's geometry binding may re-run.
+  scene.apply(snapshot([node("a", 40, 40), node("b", 500, 40)]));
+
+  expect([runsA, runsB]).toEqual([1, 2]);
+});
