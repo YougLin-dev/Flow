@@ -4,6 +4,7 @@
  * pointer events into canvas gestures.
  */
 import {
+  computed,
   nativeComponent,
   View,
   type ContextMenuEvent,
@@ -13,6 +14,7 @@ import {
 } from "nsh";
 import type { CanvasCamera } from "../flow/camera";
 import type { CanvasController } from "../flow/canvas-controller";
+import { cardDetailAt } from "../flow/card-detail";
 import type { ContextMenuPoint } from "../flow/context-menu";
 import type { FlowScene } from "../flow/scene";
 import { FlowCard, type CardImageEvent } from "./FlowCard";
@@ -80,6 +82,11 @@ export function FlowCanvas(props: FlowCanvasProps) {
   let pinchY = 0;
   let lastX = 0;
   let lastY = 0;
+
+  // The card's paint contract for the current zoom. The default equality on
+  // the tier string re-runs this read on every camera change but wakes the
+  // cards only when the tier flips, not on every wheel tick.
+  const detail = computed(() => cardDetailAt(props.camera.scale));
 
   const pointOf = (touch: TouchPoint): { x: number; y: number } => ({
     x: touch.locationX ?? touch.pageX,
@@ -305,6 +312,7 @@ export function FlowCanvas(props: FlowCanvasProps) {
                     : null;
                 }}
                 target={() => props.scene.isConnectionTarget(id)}
+                detail={detail}
                 imageEvent={props.imageEvent}
               />
             );

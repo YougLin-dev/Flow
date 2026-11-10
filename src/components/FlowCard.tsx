@@ -12,6 +12,7 @@ import { computed, host, Image, Text, View } from "nsh";
 import { Input } from "nsh/base";
 import type { NodeSummary } from "@flow/native";
 import { PortPlus } from "./PortPlus";
+import type { CardDetail } from "../flow/card-detail";
 import { CardContent } from "../flow/card-content";
 import {
   CardGeometry,
@@ -52,6 +53,8 @@ export interface FlowCardProps {
   readonly plusSuppressed: () => boolean;
   /** True while a pulled connector is snapped to this card. */
   readonly target: () => boolean;
+  /** The detail tier this card draws at, driven by the camera scale. */
+  readonly detail: () => CardDetail;
   /** The test-only image observation path; normal rendering has no hook. */
   readonly imageEvent?: ((event: CardImageEvent) => void) | undefined;
 }
@@ -124,46 +127,52 @@ export function FlowCard(props: FlowCardProps) {
             [ACCENT_BG[accent()]]: true,
           }}
         />
-        <Text
-          class="absolute text-sm font-semibold text-card-foreground"
-          style={{
-            left: 12,
-            top: 0,
-            width: Math.max(1, size().width - (statusText() === "" ? 12 : 92)),
-            height: CARD_TITLE_HEIGHT,
-            textAlignVertical: "center",
-            numberOfLines: 1,
-            textOverflow: "ellipsis",
-          }}
-        >
-          {content.title()}
-        </Text>
-        <View
-          classList={{
-            "absolute h-1.5 w-1.5 rounded-full": true,
-            [statusDot(status())]: true,
-          }}
-          style={{
-            left: size().width - 74,
-            top: 7,
-            visibility: statusText() === "" ? "hidden" : "visible",
-          }}
-        />
-        <Text
-          classList={{ "absolute text-[10px]": true, [statusTextClass(status())]: true }}
-          style={{
-            left: size().width - 64,
-            top: 0,
-            width: 56,
-            height: CARD_TITLE_HEIGHT,
-            textAlign: "right",
-            textAlignVertical: "center",
-            numberOfLines: 1,
-            textOverflow: "ellipsis",
-          }}
-        >
-          {statusText()}
-        </Text>
+        <If when={props.detail() !== "minimal"}>
+          <Text
+            class="absolute text-sm font-semibold text-card-foreground"
+            style={{
+              left: 12,
+              top: 0,
+              width: Math.max(1, size().width - (statusText() === "" ? 12 : 92)),
+              height: CARD_TITLE_HEIGHT,
+              textAlignVertical: "center",
+              numberOfLines: 1,
+              textOverflow: "ellipsis",
+            }}
+          >
+            {content.title()}
+          </Text>
+        </If>
+        <If when={props.detail() === "full"}>
+          <View
+            classList={{
+              "absolute h-1.5 w-1.5 rounded-full": true,
+              [statusDot(status())]: true,
+            }}
+            style={{
+              left: size().width - 74,
+              top: 7,
+              visibility: statusText() === "" ? "hidden" : "visible",
+            }}
+          />
+        </If>
+        <If when={props.detail() === "full"}>
+          <Text
+            classList={{ "absolute text-[10px]": true, [statusTextClass(status())]: true }}
+            style={{
+              left: size().width - 64,
+              top: 0,
+              width: 56,
+              height: CARD_TITLE_HEIGHT,
+              textAlign: "right",
+              textAlignVertical: "center",
+              numberOfLines: 1,
+              textOverflow: "ellipsis",
+            }}
+          >
+            {statusText()}
+          </Text>
+        </If>
       </View>
 
       {/* The body container carries only the geometry and the accessible name;
@@ -182,66 +191,69 @@ export function FlowCard(props: FlowCardProps) {
       >
         <View
           classList={{
-            "absolute left-0 top-0 h-full w-full rounded-2xl border bg-card shadow-lg": true,
+            "absolute left-0 top-0 h-full w-full rounded-2xl border bg-card": true,
+            "shadow-lg": props.detail() === "full",
             "border-chart-1": active(),
             "border-border": !active(),
           }}
         />
         {content.image() ? (
-          <View
-            class="absolute"
-            style={{
-              left: BODY_INSET,
-              top: BODY_INSET,
-              width: Math.max(1, size().width - BODY_INSET * 2),
-              height: Math.max(1, size().height - BODY_INSET * 2),
-              overflow: "hidden",
-            }}
-          >
-            <If when={props.preview() === null || props.preview()?.urls.length === 0}>
-              <Text class="text-xs text-muted-foreground">No output yet</Text>
-            </If>
-            <Each of={props.preview()?.urls ?? []} key="index">
-              {(url, index) => (
-                <Image
-                  src={url()}
-                  onLoad={(event) =>
-                    props.imageEvent?.({
-                      nodeId: props.node().id,
-                      kind: "load",
-                      url: url(),
-                      width: event.size.width,
-                      height: event.size.height,
-                      message: "",
-                    })
-                  }
-                  onError={(event) =>
-                    props.imageEvent?.({
-                      nodeId: props.node().id,
-                      kind: "error",
-                      url: url(),
-                      width: 0,
-                      height: 0,
-                      message: event.message,
-                    })
-                  }
-                  style={{
-                    position: "absolute",
-                    ...previewCell(
-                      Math.max(1, size().width - BODY_INSET * 2),
-                      Math.max(1, size().height - BODY_INSET * 2),
-                      index(),
-                      props.preview()?.urls.length ?? 0,
-                    ),
-                    borderRadius: 8,
-                    objectFit: "cover",
-                  }}
-                />
-              )}
-            </Each>
-          </View>
+          <If when={props.detail() === "full"}>
+            <View
+              class="absolute"
+              style={{
+                left: BODY_INSET,
+                top: BODY_INSET,
+                width: Math.max(1, size().width - BODY_INSET * 2),
+                height: Math.max(1, size().height - BODY_INSET * 2),
+                overflow: "hidden",
+              }}
+            >
+              <If when={props.preview() === null || props.preview()?.urls.length === 0}>
+                <Text class="text-xs text-muted-foreground">No output yet</Text>
+              </If>
+              <Each of={props.preview()?.urls ?? []} key="index">
+                {(url, index) => (
+                  <Image
+                    src={url()}
+                    onLoad={(event) =>
+                      props.imageEvent?.({
+                        nodeId: props.node().id,
+                        kind: "load",
+                        url: url(),
+                        width: event.size.width,
+                        height: event.size.height,
+                        message: "",
+                      })
+                    }
+                    onError={(event) =>
+                      props.imageEvent?.({
+                        nodeId: props.node().id,
+                        kind: "error",
+                        url: url(),
+                        width: 0,
+                        height: 0,
+                        message: event.message,
+                      })
+                    }
+                    style={{
+                      position: "absolute",
+                      ...previewCell(
+                        Math.max(1, size().width - BODY_INSET * 2),
+                        Math.max(1, size().height - BODY_INSET * 2),
+                        index(),
+                        props.preview()?.urls.length ?? 0,
+                      ),
+                      borderRadius: 8,
+                      objectFit: "cover",
+                    }}
+                  />
+                )}
+              </Each>
+            </View>
+          </If>
         ) : (
-          <>
+          <If when={props.detail() === "full"}>
             {body() !== "" ? (
               <Text
                 class="absolute text-[13px] text-card-foreground"
@@ -257,16 +269,17 @@ export function FlowCard(props: FlowCardProps) {
               >
                 {truncate(body(), 600)}
               </Text>
-            ) : null}
-            <If when={body() === ""}>
-              <Text
-                class="absolute text-xs text-muted-foreground"
-                style={{ left: BODY_INSET, top: BODY_INSET }}
-              >
-                No output yet
-              </Text>
-            </If>
-          </>
+            ) : (
+              <If when={body() === ""}>
+                <Text
+                  class="absolute text-xs text-muted-foreground"
+                  style={{ left: BODY_INSET, top: BODY_INSET }}
+                >
+                  No output yet
+                </Text>
+              </If>
+            )}
+          </If>
         )}
       </View>
 
