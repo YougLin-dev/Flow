@@ -1,4 +1,4 @@
-/** The canvas context menu's anchor, delay, stage placement and gestures. */
+/** The canvas context menu's anchor, stage placement and gestures. */
 import { signal } from "nsh";
 import type { CanvasCamera } from "./camera";
 import type { CanvasController } from "./canvas-controller";
@@ -17,13 +17,6 @@ export interface ContextMenuPress extends ContextMenuPoint {
   readonly worldY: number;
 }
 
-/**
- * How long a secondary press waits for its menu. NSH delivers the right press
- * at once but never its release, so the wait lets a right drag claim the press
- * and pan before a menu would cover the canvas.
- */
-export const CONTEXT_MENU_DELAY_MS = 100;
-
 /** The menu's fixed width and the height it reserves on the stage. */
 export const CONTEXT_MENU_WIDTH = 180;
 export const CONTEXT_MENU_HEIGHT = 84;
@@ -41,36 +34,34 @@ export function contextMenuPosition(
 }
 
 /**
- * The open menu's anchor; the menu closes after a secondary drag starts.
- * Private to `CanvasMenuController` in app code.
+ * The open menu's anchor and the press waiting for its release. A secondary
+ * press only records the press; the menu opens when the button is released
+ * without the press becoming a drag. Private to `CanvasMenuController`.
  */
 class ContextMenuState {
   readonly press = signal<ContextMenuPress | null>(null);
-  private timer: ReturnType<typeof setTimeout> | null = null;
+  private pending: ContextMenuPress | null = null;
 
-  /** Opens after the drag-disambiguating delay, or re-anchors at once. */
-  open(press: ContextMenuPress): void {
-    if (this.timer !== null) {
-      clearTimeout(this.timer);
-      this.timer = null;
-    }
+  /** Records a press, or re-anchors an already open menu. */
+  pressAt(press: ContextMenuPress): void {
     if (this.press() !== null) {
       this.press.set(press);
       return;
     }
-    this.timer = setTimeout(() => {
-      this.timer = null;
-      this.press.set(press);
-    }, CONTEXT_MENU_DELAY_MS);
+    this.pending = press;
   }
 
-  /** Closes an open menu or cancels a pending one; true when there was one. */
+  /** The button was released without a drag: open the waiting menu. */
+  release(): void {
+    const press = this.pending;
+    this.pending = null;
+    if (press !== null && this.press() === null) this.press.set(press);
+  }
+
+  /** Closes an open menu or forgets a waiting press; true when there was one. */
   close(): boolean {
-    const wasOpen = this.press() !== null || this.timer !== null;
-    if (this.timer !== null) {
-      clearTimeout(this.timer);
-      this.timer = null;
-    }
+    const wasOpen = this.press() !== null || this.pending !== null;
+    this.pending = null;
     if (this.press() !== null) this.press.set(null);
     return wasOpen;
   }
@@ -101,13 +92,29 @@ export class CanvasMenuController {
   press(at: ContextMenuPoint): void {
     if (!this.host.controller().right.down(at.x, at.y)) return;
     const world = this.host.camera().toWorld(at.x, at.y);
-    this.state.open({ ...at, worldX: world.x, worldY: world.y });
+    this.state.pressAt({ ...at, worldX: world.x, worldY: world.y });
   }
 
-  /** A move over the menu: a right drag dismisses it and pans. */
-  move(x: number, y: number, right: boolean): void {
-    if (!right) {
-      this.host.controller().right.end();
+  /**
+   * The secondary button was released: a press that never became a drag
+   * opens its menu at the pressed point; a drag only ends its pan.
+   */
+  release(): void {
+    const right = this.host.controller().right;
+    if (!right.active()) return;
+    const dragging = right.dragging();
+    right.end();
+    if (dragging) {
+      this.state.close();
+      return;
+    }
+    this.state.release();
+  }
+
+  /** A move over the menu: a secondary drag dismisses it and pans. */
+  move(x: number, y: number, held: boolean): void {
+    if (!held) {
+      this.release();
       return;
     }
     if (this.host.controller().right.move(x, y)) this.state.close();

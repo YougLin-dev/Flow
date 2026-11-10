@@ -5,8 +5,6 @@ import { installWindowChrome } from "./lib/window-chrome";
 import { FlowPage } from "./pages/FlowPage";
 import { isPinned, togglePinned } from "./store";
 
-installWindowChrome();
-
 /**
  * Flow — an infinite canvas built with NSH's native view tree.
  *
@@ -15,6 +13,8 @@ installWindowChrome();
  * `store.ts`.
  */
 function App() {
+  // `currentWindow()` only answers while the app renders.
+  installWindowChrome();
   return (
     <View class="flex-1 bg-background">
       {isAvailable && <TitleBar pinned={isPinned()} onTogglePinned={togglePinned} />}

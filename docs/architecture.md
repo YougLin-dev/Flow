@@ -188,7 +188,7 @@ popup anchored at a secondary-button press: it adds a text or image card at
 the pressed world point, or closes on a primary press or Escape. It is drawn
 from ordinary views rather than opened with `Menu.popup`, because a system
 menu takes the pointer and would prevent the right-button drag from panning;
-`flow/context-menu.ts` wires the press, the menu's short opening delay and
+`flow/context-menu.ts` wires the press, the pending press a release opens and
 the item actions.
 
 `FlowCard` positions itself from the node's world rectangle and renders the
@@ -257,10 +257,12 @@ pulled, the composer hides so the gesture and its target stay visible.
   the pointer view owns a sensor that forwards it.
 - **Secondary button** — holding the right button and dragging pans the
   camera with any tool, without selecting, starting a marquee or moving a
-  card. A right click that stays put opens the canvas context menu. NSH
-  reports the right press (through `onContextMenu`) but never its release, so
-  the menu waits briefly before it opens: a drag in that window claims the
-  press, and a drag after the menu opened dismisses it and pans.
+  card. A right click that stays put opens the canvas context menu on the
+  button's release. NSH reports the press through `onContextMenu`, the moves
+  while it is held, and the release through `onMouseUp`: a press that never
+  moved past the drag threshold opens its menu at the pressed point, and a
+  drag never opens one. The menu is the app's own view rather than
+  `Menu.popup`, so it never takes the pointer from the drag.
 
 Keyboard commands are declared in `flow/bindings.ts` (`bindFlowKeys`) and
 bound once by the page: `mod+=`/`mod+-`/`mod+0`
@@ -281,11 +283,13 @@ card opens its inline editor.
 
 ## Window chrome
 
-`lib/window-chrome.ts` hides the native title bar and reserves its height.
-`TitleBar` draws the app name and pin button and reports the space the system
-controls occupy through `titleBar()`, so the drag region and buttons never sit
-under the traffic lights or caption buttons. The pin button calls the store,
-which calls `Window.setLevel("floating" | "normal")`.
+`lib/window-chrome.ts` hides the native title bar once, while `App` renders
+(`currentWindow()` only answers there), and keeps the window ref for actions
+outside a render. `TitleBar` draws the app name and pin button and reports the
+space the system controls occupy through `titleBar()`, so the drag region and
+buttons never sit under the traffic lights or caption buttons. The pin button
+calls the store, which sets the window's `level` to `"floating"` or
+`"normal"` through that ref.
 
 Where `nsh/desktop` is unavailable (tests and non-desktop hosts), the title
 bar is not mounted and `FlowPage` shows `BrandCard` instead, so the same app
@@ -296,8 +300,9 @@ code runs in the headless test engine.
 `src/nsh.json` declares `capabilities.network.hosts: []`: the app reads its
 own bundled assets (`asset:` is always allowed) but may reach no remote host.
 Its `capabilities.process.env` allow-list contains only `FLOW_DB_PATH`, the
-development and smoke-test database override, and `capabilities.picker` is
-granted for local image uploads. NSH denies every capability not listed, so a
+development and smoke-test database override; `capabilities.windows.levels`
+grants the `floating` level the pin sets on the main window, and
+`capabilities.picker` is granted for local image uploads. NSH denies every capability not listed, so a
 new integration that fetches or loads a remote image must add that host
 deliberately. Adding the `capabilities` key is what changes the app from
 unrestricted to allow-list; keep it in place.

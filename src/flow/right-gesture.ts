@@ -1,8 +1,9 @@
 /**
  * A secondary-button press on the canvas. NSH reports the press
- * (`onContextMenu`) and moves made while the button is held, but never its
- * release, so this gesture becomes a camera pan once the pointer moves past a
- * threshold and otherwise leaves the press to the context menu.
+ * (`onContextMenu`), moves made while the button is held, and its release
+ * (`onMouseUp`); this gesture becomes a camera pan once the pointer moves past
+ * a threshold, and a press that never does leaves its menu to open on the
+ * release.
  */
 
 /** The distance, in screen points, a right press may move before it pans. */

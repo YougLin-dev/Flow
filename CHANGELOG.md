@@ -17,9 +17,10 @@ All notable changes to Flow are recorded here. The format follows
   box-selecting or moving a card, and a right click opens the canvas context
   menu with Add text node and Add image node, placing the card at the pressed
   point. The menu is a native-view popup rather than the system menu, because
-  a system menu takes the pointer and would break the right-drag pan; it waits
-  100 ms so a drag can claim the press, and a drag after it opened dismisses
-  it and pans.
+  a system menu takes the pointer and would break the right-drag pan; it opens
+  on the button's release when the press never became a drag, and a drag
+  dismisses it and pans. The canvas listens to `onMouseUp`, which the NSH pin
+  provides for every desktop host.
 - Moved the document core to Rust: a mixed NSH crate owns SQLite with WAL,
   SeaORM entities and SeaQuery, FTS5 search and RTree viewport reads. The
   canvas reads only the viewport, sends one command per gesture, and keeps
@@ -45,6 +46,10 @@ All notable changes to Flow are recorded here. The format follows
 
 ### Changed
 
+- Migrated to NSH's main window API: `App` captures `currentWindow()` while it
+  renders and the title bar's hidden style and the pin's window `level` go
+  through that `WindowRef` (`Window.setTitleBar`/`Window.setLevel` are gone);
+  `src/nsh.json` grants the `floating` level whose attributes the pin sets.
 - `bun run test:host` now runs only the `*.host.test.tsx` platform tests
   instead of repeating every headless test file on the native host. The app's
   window, native-input, rendering and desktop-API checks moved to

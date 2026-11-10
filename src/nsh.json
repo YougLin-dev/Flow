@@ -13,6 +13,9 @@
     "process": {
       "env": ["FLOW_DB_PATH"]
     },
+    "windows": {
+      "levels": ["floating"]
+    },
     "picker": true
   }
 }

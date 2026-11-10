@@ -13,10 +13,13 @@ export interface CanvasContextMenuProps {
   readonly onClose: () => void;
   readonly onAddText: () => void;
   readonly onAddImage: () => void;
-  /** A mouse move with the secondary button held (the page may start a pan). */
-  readonly onMove: (x: number, y: number, right: boolean) => void;
+  /** A mouse move with a button held (the page may start a pan). */
+  readonly onMove: (x: number, y: number, held: boolean) => void;
   /** A secondary press on the open menu re-anchors it, in overlay points. */
   readonly onPress: (x: number, y: number) => void;
+  /** A mouse button was released over the overlay (only a tracked secondary
+   * press acts). */
+  readonly onRelease: () => void;
 }
 
 export function CanvasContextMenu(props: CanvasContextMenuProps) {
@@ -25,8 +28,11 @@ export function CanvasContextMenu(props: CanvasContextMenuProps) {
       class="absolute z-50"
       style={{ left: 0, top: 0, width: "100%", height: "100%" }}
       onMouseMove={(event) =>
-        props.onMove(event.position.x, event.position.y, event.pressedButton === "right")
+        props.onMove(event.position.x, event.position.y, event.pressedButton !== null)
       }
+      // The controller only releases a secondary press it tracks, so any
+      // button's release is reported: a macOS Control-click releases left.
+      onMouseUp={() => props.onRelease()}
       onContextMenu={(event) => props.onPress(event.position.x, event.position.y)}
     >
       <View

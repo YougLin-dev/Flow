@@ -435,6 +435,7 @@ export function FlowPage() {
         onZoom={(factor, x, y) => viewport.zoomAround(factor, x, y)}
         onWheelZoom={(notches, x, y) => viewport.zoomAround(wheelZoomFactor(notches), x, y)}
         onMenuPress={(at) => canvasMenu.press(at)}
+        onMenuRelease={() => canvasMenu.release()}
         onMenuCancel={() => {
           canvasMenu.close();
         }}
@@ -537,8 +538,9 @@ export function FlowPage() {
             }}
             onAddText={() => canvasMenu.add("text", press())}
             onAddImage={() => canvasMenu.add("image", press())}
-            onMove={(x, y, right) => canvasMenu.move(x, y, right)}
+            onMove={(x, y, held) => canvasMenu.move(x, y, held)}
             onPress={(x, y) => canvasMenu.press({ x, y })}
+            onRelease={() => canvasMenu.release()}
           />
         )}
       </If>

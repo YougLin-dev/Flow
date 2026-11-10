@@ -33,6 +33,7 @@ export interface FlowCanvasProps {
   readonly onZoom: (factor: number, x: number, y: number) => void;
   readonly onWheelZoom: (notches: number, x: number, y: number) => void;
   readonly onMenuPress: (at: ContextMenuPoint) => void;
+  readonly onMenuRelease: () => void;
   readonly onMenuCancel: () => void;
 }
 
@@ -123,15 +124,17 @@ export function FlowCanvas(props: FlowCanvasProps) {
     lastX = event.position.x;
     lastY = event.position.y;
     if (props.controller.right.active()) {
-      if (event.pressedButton === "right") {
+      // Any held button continues the gesture: a macOS Control-click is a
+      // secondary press whose moves still report the physical left button.
+      if (event.pressedButton !== null) {
         if (props.controller.right.move(lastX, lastY)) props.onMenuCancel();
         return;
       }
-      // The next move after a right release is the only release report NSH
-      // makes; finish the pan where the button was last seen.
-      const dragging = props.controller.right.dragging();
-      props.controller.right.end();
-      if (dragging) return;
+      // A release reported by a move (a host that does not send the
+      // mouse-up event, or a release outside the window): finish it here,
+      // opening the menu when the press never dragged.
+      props.onMenuRelease();
+      return;
     }
     // Only a press that began on this view may move a gesture: a primary press
     // that started on an overlay keeps its press-up there.
@@ -149,9 +152,10 @@ export function FlowCanvas(props: FlowCanvasProps) {
 
   const onLeave = (): void => {
     if (touchActive) return;
-    // Moving onto an overlay (the menu) is a leave too; the right gesture must
-    // survive it so the overlay's moves can still pan. It ends on the first
-    // move without the button, or when the next press supersedes it.
+    // The right gesture survives a leave: the pointer may move over an
+    // overlay or out of the window, where releases are not hit-tested. It
+    // ends on the mouse-up event, on the first move without a button (a
+    // release the host did not report), or when the next press supersedes it.
     if (pressed) {
       // The pointer left the canvas while dragging; finish the gesture where
       // it last was instead of silently reverting the move.
@@ -316,6 +320,10 @@ export function FlowCanvas(props: FlowCanvasProps) {
         onPressDown={onDown}
         onPressUp={onUp}
         onMouseMove={onMove}
+        // The menu controller only acts while a secondary press is tracked,
+        // so the release's button need not be filtered here: a macOS
+        // Control-click releases the physical left button.
+        onMouseUp={() => props.onMenuRelease()}
         onMouseLeave={onLeave}
         onContextMenu={onContextMenu}
         onTouchStart={onTouchStart}

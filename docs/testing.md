@@ -177,9 +177,12 @@ easiest observable: it is `—` before the first fit and `<n>%` afterwards.
 - `flow/frame-connection.test.ts`: a multi-card frame's merged pluses, muted
   per-card zones, and the group connections pulled from either side.
 - `flow/right-gesture.ts`: the right-drag threshold and pan, the still press
-  left for the menu, and the refusal while another gesture owns the canvas.
+  a release opens its menu for, and the refusal while another gesture owns
+  the canvas.
 - `flow/context-menu.ts`: menu placement at the press and its clamping at the
-  stage edges. The menu's opening, items and Escape path are app tests.
+  stage edges, a press that opens its menu only on release, a drag that leaves
+  none, the move fallback for a release the host did not report, and
+  re-anchoring an open menu. The menu's items and Escape path are app tests.
 - `flow/composer-state.ts`: draft loading, same-node sync, reset, count
   clamping and saving settings/body.
 - `flow/grid.ts`: the tile count covers the stage at every wrapped camera

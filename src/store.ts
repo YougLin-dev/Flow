@@ -1,5 +1,6 @@
 import { platform, signal } from "nsh";
-import { isAvailable, Window } from "nsh/desktop";
+import { isAvailable } from "nsh/desktop";
+import { mainWindow } from "./lib/window-chrome";
 import type { Tool } from "./tool";
 
 // The app's workspace state stays private: pages read it through the
@@ -42,5 +43,5 @@ export function togglePinned(): void {
   if (!isAvailable || platform.os === "linux") return;
   const next = !pinned();
   pinned.set(next);
-  Window.setLevel(next ? "floating" : "normal");
+  mainWindow()?.set({ level: next ? "floating" : "normal" });
 }

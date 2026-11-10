@@ -7,7 +7,7 @@ publish = false
 [workspace]
 
 [dependencies]
-nsh-core = { git = "https://github.com/YougLin-dev/nsh.git", rev = "70017242acac6887dbe89f93074e1fbbc87d76b7" }
+nsh-core = { git = "https://github.com/YougLin-dev/nsh.git", rev = "8844a9c83368380690d4272837611ba2facde728" }
 # Synchronous SeaORM. `rusqlite` is the SQLite driver; the direct dependency
 # enables the bundled SQLite build (including FTS5 and RTree).
 sea-orm-sync = { version = "2.0.4", default-features = false, features = [
@@ -22,4 +22,4 @@ sha2 = "0.10"
 # The canvas's wheel sensor is a native component, registered by this crate
 # with the desktop host (see `wheel_surface.rs`).
 [target.'cfg(windows)'.dependencies]
-nsh-platform-windows = { git = "https://github.com/YougLin-dev/nsh.git", rev = "70017242acac6887dbe89f93074e1fbbc87d76b7", default-features = false }
+nsh-platform-windows = { git = "https://github.com/YougLin-dev/nsh.git", rev = "8844a9c83368380690d4272837611ba2facde728", default-features = false }
