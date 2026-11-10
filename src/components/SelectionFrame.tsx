@@ -28,11 +28,11 @@ export function SelectionFrame(props: SelectionFrameProps) {
           style={{
             // The frame rides the world's scale: its padding and border are
             // divided by the camera's scale to stay one screen point wide.
-            left: box().x - SELECTION_FRAME_PADDING / props.camera.scale,
-            top: box().y - SELECTION_FRAME_PADDING / props.camera.scale,
-            width: box().width + (SELECTION_FRAME_PADDING * 2) / props.camera.scale,
-            height: box().height + (SELECTION_FRAME_PADDING * 2) / props.camera.scale,
-            borderWidth: 1 / props.camera.scale,
+            left: box().x - SELECTION_FRAME_PADDING / props.camera.scaleView(),
+            top: box().y - SELECTION_FRAME_PADDING / props.camera.scaleView(),
+            width: box().width + (SELECTION_FRAME_PADDING * 2) / props.camera.scaleView(),
+            height: box().height + (SELECTION_FRAME_PADDING * 2) / props.camera.scaleView(),
+            borderWidth: 1 / props.camera.scaleView(),
             zIndex: props.scene.frameZ(),
           }}
         >

@@ -5,7 +5,7 @@
  * moves the content natively. The camera is a signal, so a change re-renders
  * the container and everything positioned from it.
  */
-import { signal, type Accessor } from "nsh";
+import { batch, signal, type Accessor } from "nsh";
 
 export interface CameraView {
   readonly x: number;
@@ -67,6 +67,9 @@ export function wheelZoomFactor(notches: number): number {
 export class CanvasCamera {
   /** The camera's current view; read it in JSX to follow camera changes. */
   readonly view = signal<CameraView>({ x: 0, y: 0, scale: 1 });
+  private readonly scaleValue = signal(1);
+  /** The scale alone, for overlays that must not wake on a pan. */
+  readonly scaleView: Accessor<number> = () => this.scaleValue();
   private readonly movingState = signal(false);
   /** Whether a camera write is recent enough to suppress expensive overlays. */
   readonly moving: Accessor<boolean>;
@@ -98,7 +101,7 @@ export class CanvasCamera {
   }
 
   get scale(): number {
-    const value = this.view().scale;
+    const value = this.scaleView();
     return Number.isFinite(value) && value > 0 ? value : 1;
   }
 
@@ -133,8 +136,7 @@ export class CanvasCamera {
   panBy(dx: number, dy: number): void {
     const view = this.view();
     if (dx === 0 && dy === 0) return;
-    this.view.set({ ...view, x: view.x + dx, y: view.y + dy });
-    this.changed();
+    this.publish({ x: view.x + dx, y: view.y + dy, scale: view.scale });
   }
 
   /**
@@ -149,8 +151,7 @@ export class CanvasCamera {
     // versa); the old fit floor could sit below this operation's floor.
     if (next === before || (factor < 1 ? next > before : next < before)) return false;
     const k = next / before;
-    this.view.set({ x: x - (x - this.x) * k, y: y - (y - this.y) * k, scale: next });
-    this.changed();
+    this.publish({ x: x - (x - this.x) * k, y: y - (y - this.y) * k, scale: next });
     return true;
   }
 
@@ -171,25 +172,38 @@ export class CanvasCamera {
       maxScale,
       Math.max(MIN_SCALE, Math.min(availableWidth / bounds.width, availableHeight / bounds.height)),
     );
-    this.view.set({
+    this.set({
       x: size.width / 2 - (bounds.x + bounds.width / 2) * scale,
       y: size.height / 2 - (bounds.y + bounds.height / 2) * scale,
       scale,
     });
-    this.changed();
-    return scale;
+    return this.scale;
+  }
+
+  /**
+   * Validates and publishes one complete view. Every real camera mutation
+   * routes here, so `view`, `scaleValue` and the motion state change in one
+   * batch; a rejected or identical view writes nothing.
+   */
+  private publish(next: CameraView): void {
+    if (!Number.isFinite(next.x) || !Number.isFinite(next.y)) return;
+    if (!Number.isFinite(next.scale) || next.scale <= 0) return;
+    const current = this.view();
+    if (current.x === next.x && current.y === next.y && current.scale === next.scale) return;
+    batch(() => {
+      this.view.set(next);
+      if (next.scale !== this.scaleValue()) this.scaleValue.set(next.scale);
+      this.changed();
+    });
   }
 
   private set(next: Partial<CameraView>): void {
     const view = this.view();
-    const x = next.x ?? view.x;
-    const y = next.y ?? view.y;
-    const scale = next.scale ?? view.scale;
-    if (!Number.isFinite(x) || !Number.isFinite(y)) return;
-    if (!Number.isFinite(scale) || scale <= 0) return;
-    if (x === view.x && y === view.y && scale === view.scale) return;
-    this.view.set({ x, y, scale });
-    this.changed();
+    this.publish({
+      x: next.x ?? view.x,
+      y: next.y ?? view.y,
+      scale: next.scale ?? view.scale,
+    });
   }
 
   private changed(): void {

@@ -1,3 +1,4 @@
+import { effect } from "nsh";
 import { expect, test } from "nsh/test";
 import {
   CAMERA_MOVE_SETTLE_MS,
@@ -250,4 +251,98 @@ test("a new camera write re-arms after the settle callback", () => {
   } finally {
     camera.dispose();
   }
+});
+
+test("scale-only readers do not wake on pan", () => {
+  const camera = new CanvasCamera();
+  let runs = 0;
+  effect(() => {
+    camera.scaleView();
+    runs += 1;
+  });
+  expect(runs).toBe(1);
+
+  camera.panBy(10, 20);
+
+  expect(runs).toBe(1);
+  expect(camera.scale).toBe(1);
+  camera.dispose();
+});
+
+test("one zoom publishes view and scale together", () => {
+  const camera = new CanvasCamera();
+  const seen: Array<{ x: number; y: number; viewScale: number; scale: number }> = [];
+  effect(() => {
+    const view = camera.view();
+    seen.push({ x: view.x, y: view.y, viewScale: view.scale, scale: camera.scaleView() });
+  });
+  expect(seen).toHaveLength(1);
+
+  expect(camera.zoomAround(2, 150, 90)).toBe(true);
+
+  expect(seen).toHaveLength(2);
+  const latest = seen[1];
+  if (!latest) throw new Error("the zoom effect must run once");
+  expect(latest.viewScale).toBe(2);
+  expect(latest.scale).toBe(2);
+  expect(latest.x).toBe(-150);
+  expect(latest.y).toBe(-90);
+  expect(camera.view().scale).toBe(camera.scaleView());
+  camera.dispose();
+});
+
+test("all camera writes keep scale in sync", () => {
+  const camera = new CanvasCamera();
+  const inSync = (): void => {
+    expect(camera.scale).toBe(camera.view().scale);
+    expect(camera.scaleView()).toBe(camera.view().scale);
+  };
+
+  camera.x = 30;
+  inSync();
+  camera.y = -10;
+  inSync();
+  camera.scale = 1.5;
+  inSync();
+  expect(
+    camera.fit({ x: 100, y: 50, width: 200, height: 100 }, { width: 800, height: 600 }, 0, 2),
+  ).toBe(2);
+  expect(camera.scale).toBe(2);
+  inSync();
+  expect(camera.zoomAround(0.5, 0, 0)).toBe(true);
+  expect(camera.scale).toBe(1);
+  inSync();
+  camera.panBy(12, -4);
+  expect(camera.scale).toBe(1);
+  inSync();
+  camera.dispose();
+});
+
+test("rejected camera values leave view and scale unchanged", () => {
+  const camera = new CanvasCamera();
+  camera.x = 10;
+  const view = camera.view();
+
+  camera.x = Number.NaN;
+  camera.y = Number.POSITIVE_INFINITY;
+  camera.scale = 0;
+  camera.scale = -2;
+  expect(camera.zoomAround(Number.NaN, 0, 0)).toBe(false);
+  expect(camera.zoomAround(0, 0, 0)).toBe(false);
+  camera.fit({ x: 0, y: 0, width: 0, height: 100 }, { width: 400, height: 400 });
+  camera.fit({ x: Number.NaN, y: 0, width: 100, height: 100 }, { width: 400, height: 400 });
+
+  expect(camera.view()).toEqual(view);
+  expect(camera.scaleView()).toBe(view.scale);
+  expect(camera.scale).toBe(view.scale);
+  camera.dispose();
+});
+
+test("a clamped zoom keeps the published scale", () => {
+  const camera = new CanvasCamera();
+  expect(camera.zoomAround(1000, 0, 0)).toBe(true);
+  expect(camera.scale).toBe(MAX_SCALE);
+  expect(camera.scaleView()).toBe(MAX_SCALE);
+  expect(camera.view().scale).toBe(MAX_SCALE);
+  camera.dispose();
 });

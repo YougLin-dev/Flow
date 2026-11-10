@@ -24,7 +24,7 @@ export function SelectionPluses(props: SelectionPlusesProps) {
     if (!props.controller.multiFrame()) return null;
     const bounds = props.scene.selectionBounds();
     if (!bounds) return null;
-    const padding = SELECTION_FRAME_PADDING / props.camera.scale;
+    const padding = SELECTION_FRAME_PADDING / props.camera.scaleView();
     return {
       x: bounds.x - padding,
       y: bounds.y - padding,
