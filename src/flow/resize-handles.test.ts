@@ -68,10 +68,10 @@ test("handleAtPoint prefers the card under the point over a handle that reaches 
 });
 
 test("handleAtPoint falls back to the topmost handle in reach when no card is under the point", () => {
-  const { scene, camera } = setup([node("low", 0, 0), node("high", 8, 8, { z: 1 })]);
+  const { scene, camera } = setup([node("low", 0, 0), node("high", 4, 4, { z: 1 })]);
 
-  // The point is outside both cards but within both southeast handles' reach.
-  expect(handleAtPoint(scene, camera, scene.nodes(), 203, 87)).toEqual({
+  // (205, 89) is outside both cards, so the fallback loop picks the topmost handle.
+  expect(handleAtPoint(scene, camera, scene.nodes(), 205, 89)).toEqual({
     id: "high",
     side: "se",
   });
