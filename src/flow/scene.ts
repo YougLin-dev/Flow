@@ -4,7 +4,7 @@
  * the image previews the page loaded. It owns no views; the canvas components
  * read its signals and the page drives its commands.
  */
-import { signal, type Signal } from "nsh";
+import { batch, signal, type Signal } from "nsh";
 import type { EdgeSummary, NodeBounds, NodeSummary, SceneSnapshot } from "@flow/native";
 import {
   type BoxGeometry,
@@ -58,35 +58,38 @@ export class FlowScene {
 
   /** Reconciles the scene with one viewport snapshot. */
   apply(snapshot: SceneSnapshot, options: { maxCards?: number } = {}): void {
-    const maxCards = options.maxCards ?? Number.POSITIVE_INFINITY;
-    const nodes =
-      snapshot.nodes.length > maxCards ? snapshot.nodes.slice(0, maxCards) : snapshot.nodes;
-    const seen = new Set(nodes.map((node) => node.id));
-    for (const id of this.selection()) seen.add(id);
+    // Readers must never see new nodes with old edges.
+    batch(() => {
+      const maxCards = options.maxCards ?? Number.POSITIVE_INFINITY;
+      const nodes =
+        snapshot.nodes.length > maxCards ? snapshot.nodes.slice(0, maxCards) : snapshot.nodes;
+      const seen = new Set(nodes.map((node) => node.id));
+      for (const id of this.selection()) seen.add(id);
 
-    for (const node of nodes) {
-      this.byId.set(node.id, node);
-      this.setApplied(node);
-    }
-    for (const [id] of this.byId) {
-      if (seen.has(id)) continue;
-      this.byId.delete(id);
-      this.applied.delete(id);
-      this.dropOverride(id);
-    }
+      for (const node of nodes) {
+        this.byId.set(node.id, node);
+        this.setApplied(node);
+      }
+      for (const [id] of this.byId) {
+        if (seen.has(id)) continue;
+        this.byId.delete(id);
+        this.applied.delete(id);
+        this.dropOverride(id);
+      }
 
-    // A selected card is pinned past the viewport, so keep its connectors
-    // even when the snapshot no longer reports them: the edge carries the
-    // far port, and the pinned card supplies the near one. A mid-drag read
-    // sees only committed geometry, which may lie outside its rect.
-    const pinned = new Set(this.selection());
-    const keptEdges = [...this.edgeById.values()].filter(
-      (edge) => pinned.has(edge.fromId) || pinned.has(edge.toId),
-    );
-    this.edgeById.clear();
-    for (const edge of snapshot.edges) this.edgeById.set(edge.id, edge);
-    for (const edge of keptEdges) this.edgeById.set(edge.id, edge);
-    this.prune();
+      // A selected card is pinned past the viewport, so keep its connectors
+      // even when the snapshot no longer reports them: the edge carries the
+      // far port, and the pinned card supplies the near one. A mid-drag read
+      // sees only committed geometry, which may lie outside its rect.
+      const pinned = new Set(this.selection());
+      const keptEdges = [...this.edgeById.values()].filter(
+        (edge) => pinned.has(edge.fromId) || pinned.has(edge.toId),
+      );
+      this.edgeById.clear();
+      for (const edge of snapshot.edges) this.edgeById.set(edge.id, edge);
+      for (const edge of keptEdges) this.edgeById.set(edge.id, edge);
+      this.prune();
+    });
   }
 
   /** Applies a command result without another database read. */
@@ -96,34 +99,37 @@ export class FlowScene {
     edgesChanged: EdgeSummary[];
     edgesRemoved: string[];
   }): void {
-    for (const node of changes.changed) {
-      this.byId.set(node.id, node);
-      this.setApplied(node);
-      const override = this.overrideRects.get(node.id);
-      if (override && sameRect(override, rectOfNode(node))) this.dropOverride(node.id);
-    }
-    for (const id of changes.removed) {
-      this.byId.delete(id);
-      this.applied.delete(id);
-      this.dropOverride(id);
-    }
-    for (const edge of changes.edgesChanged) {
-      // A command's edge carries no far anchors; keep the ones the viewport
-      // read resolved for it, so a reconnect does not blank the connector.
-      const previous = this.edgeById.get(edge.id);
-      this.edgeById.set(
-        edge.id,
-        previous === undefined
-          ? edge
-          : {
-              ...edge,
-              fromPoint: edge.fromPoint ?? previous.fromPoint ?? null,
-              toPoint: edge.toPoint ?? previous.toPoint ?? null,
-            },
-      );
-    }
-    for (const id of changes.edgesRemoved) this.edgeById.delete(id);
-    this.prune();
+    // The cards, connectors and resolved overrides are one command result.
+    batch(() => {
+      for (const node of changes.changed) {
+        this.byId.set(node.id, node);
+        this.setApplied(node);
+        const override = this.overrideRects.get(node.id);
+        if (override && sameRect(override, rectOfNode(node))) this.dropOverride(node.id);
+      }
+      for (const id of changes.removed) {
+        this.byId.delete(id);
+        this.applied.delete(id);
+        this.dropOverride(id);
+      }
+      for (const edge of changes.edgesChanged) {
+        // A command's edge carries no far anchors; keep the ones the viewport
+        // read resolved for it, so a reconnect does not blank the connector.
+        const previous = this.edgeById.get(edge.id);
+        this.edgeById.set(
+          edge.id,
+          previous === undefined
+            ? edge
+            : {
+                ...edge,
+                fromPoint: edge.fromPoint ?? previous.fromPoint ?? null,
+                toPoint: edge.toPoint ?? previous.toPoint ?? null,
+              },
+        );
+      }
+      for (const id of changes.edgesRemoved) this.edgeById.delete(id);
+      this.prune();
+    });
   }
 
   /** Replaces the image thumbnails the page loaded for visible cards. */
@@ -154,19 +160,26 @@ export class FlowScene {
   /** Drops every transient geometry (a failed commit, or a cancelled drag). */
   clearOverrides(): void {
     if (this.overrideRects.size === 0) return;
-    this.overrideRects.clear();
-    for (const override of this.overrideSignals.values()) override.set(undefined);
+    // Every card is restored together, so the connector layer re-records once.
+    batch(() => {
+      this.overrideRects.clear();
+      for (const override of this.overrideSignals.values()) override.set(undefined);
+    });
   }
 
   /** Replaces the overrides in one write; the drag controller builds them. */
   setOverrides(next: ReadonlyMap<string, BoxGeometry>): void {
-    const ids = new Set([...this.overrideRects.keys(), ...next.keys()]);
-    this.overrideRects.clear();
-    for (const [id, rect] of next) this.overrideRects.set(id, rect);
-    // Only the cards whose geometry changed hear of it; the cards reading
-    // their own rect stay untouched, which keeps a drag's re-render to what
-    // it moves.
-    for (const id of ids) this.overrideSignals.get(id)?.set(next.get(id));
+    // One gesture step's geometry is one state; per-card signals define
+    // notification granularity, not update rounds.
+    batch(() => {
+      const ids = new Set([...this.overrideRects.keys(), ...next.keys()]);
+      this.overrideRects.clear();
+      for (const [id, rect] of next) this.overrideRects.set(id, rect);
+      // Only the cards whose geometry changed hear of it; the cards reading
+      // their own rect stay untouched, which keeps a drag's re-render to what
+      // it moves.
+      for (const id of ids) this.overrideSignals.get(id)?.set(next.get(id));
+    });
   }
 
   selectedIds(): readonly string[] {
@@ -175,16 +188,21 @@ export class FlowScene {
 
   /** Replaces the selection, ignoring ids the scene does not have. */
   select(ids: readonly string[]): void {
-    const next: string[] = [];
-    for (const id of ids) {
-      if (this.byId.has(id) && !next.includes(id)) next.push(id);
-    }
-    // Selecting cards is a different selection than an edge; leaving a stale
-    // edge selected would make Delete act on the wrong thing.
-    if (next.length > 0 && this.selectedEdge() !== null) this.selectedEdge.set(null);
-    const current = this.selection();
-    if (next.length === current.length && next.every((id, index) => id === current[index])) return;
-    this.selection.set(next);
+    // The card selection and cleared edge selection are one selection state.
+    batch(() => {
+      const next: string[] = [];
+      for (const id of ids) {
+        if (this.byId.has(id) && !next.includes(id)) next.push(id);
+      }
+      // Selecting cards is a different selection than an edge; leaving a stale
+      // edge selected would make Delete act on the wrong thing.
+      if (next.length > 0 && this.selectedEdge() !== null) this.selectedEdge.set(null);
+      const current = this.selection();
+      if (next.length === current.length && next.every((id, index) => id === current[index])) {
+        return;
+      }
+      this.selection.set(next);
+    });
   }
 
   toggleSelected(id: string): void {

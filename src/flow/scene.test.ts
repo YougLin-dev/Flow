@@ -324,6 +324,73 @@ test("a drag's overrides notify only the cards it moves", () => {
   expect(runsB).toBe(1);
 });
 
+test("a group drag step wakes a reader of every moved card once", () => {
+  const scene = new FlowScene();
+  scene.apply(snapshot([node("a", 0, 0), node("b", 300, 0), node("c", 600, 0)]));
+  let runs = 0;
+  effect(() => {
+    scene.cardRect("a");
+    scene.cardRect("b");
+    scene.cardRect("c");
+    runs += 1;
+  });
+
+  scene.setOverrides(
+    new Map([
+      ["a", { x: 50, y: 0, width: 200, height: 84 }],
+      ["b", { x: 350, y: 0, width: 200, height: 84 }],
+      ["c", { x: 650, y: 0, width: 200, height: 84 }],
+    ]),
+  );
+  expect(runs).toBe(2);
+  expect(scene.cardRect("a")?.x).toBe(50);
+  expect(scene.cardRect("b")?.x).toBe(350);
+  expect(scene.cardRect("c")?.x).toBe(650);
+});
+
+test("dropping a group's overrides wakes its readers once", () => {
+  const scene = new FlowScene();
+  scene.apply(snapshot([node("a", 0, 0), node("b", 300, 0), node("c", 600, 0)]));
+  let runs = 0;
+  effect(() => {
+    scene.cardRect("a");
+    scene.cardRect("b");
+    scene.cardRect("c");
+    runs += 1;
+  });
+  scene.setOverrides(
+    new Map([
+      ["a", { x: 50, y: 0, width: 200, height: 84 }],
+      ["b", { x: 350, y: 0, width: 200, height: 84 }],
+      ["c", { x: 650, y: 0, width: 200, height: 84 }],
+    ]),
+  );
+  const before = runs;
+
+  scene.clearOverrides();
+  expect(runs).toBe(before + 1);
+});
+
+test("a snapshot updates the selected edge and the lists in one round", () => {
+  const scene = new FlowScene();
+  scene.apply(snapshot([node("a", 40, 40), node("b", 360, 40)], [edge("a-b", "a", "b")]));
+  scene.selectEdge("a-b");
+  let runs = 0;
+  effect(() => {
+    const selectedEdge = scene.selectedEdge();
+    const counts = [scene.nodes().length, scene.edges().length];
+    runs += 1;
+    void selectedEdge;
+    void counts;
+  });
+  const before = runs;
+
+  scene.apply(snapshot([node("a", 40, 40)], []));
+  expect(runs).toBe(before + 1);
+  expect(scene.selectedEdge()).toBeNull();
+  expect(scene.edgeCount()).toBe(0);
+});
+
 test("finds ports, cards and connectors in world coordinates", () => {
   const scene = new FlowScene();
   scene.apply(snapshot([node("a", 0, 0), node("b", 300, 0)], [edge("a-b", "a", "b")]));
