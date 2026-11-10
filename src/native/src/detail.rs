@@ -3,7 +3,13 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use sea_orm::{ColumnTrait, DatabaseConnection, EntityTrait, QueryFilter, QueryOrder};
+use sea_orm::sea_query::{
+    Alias, Expr, ExprTrait, Func, Order, Query, SelectStatement, WindowStatement,
+};
+use sea_orm::{
+    ColumnTrait, ConnectionTrait, DatabaseConnection, EntityTrait, FromQueryResult, QueryFilter,
+    QueryOrder, QuerySelect,
+};
 
 use crate::constants::DOCUMENT_ID;
 use crate::entity::{assets, edges, node_inputs, nodes, result_batches, result_items};
@@ -14,6 +20,20 @@ use crate::types::{
 
 const CHUNK: usize = 400;
 const PREVIEW_ITEMS: usize = 4;
+
+/// The narrow node projection previews need: the stable id and its batch.
+#[derive(FromQueryResult)]
+struct PreviewNodeRow {
+    id: String,
+    output_batch_id: Option<String>,
+}
+
+/// One batch's full item count, independent of its bounded preview rows.
+#[derive(FromQueryResult)]
+struct PreviewCountRow {
+    batch_id: String,
+    item_count: i64,
+}
 
 pub fn node_detail(conn: &DatabaseConnection, id: &str) -> Result<Option<NodeDetail>, String> {
     let Some(node) = find_node(conn, id)? else {
@@ -40,9 +60,14 @@ pub fn inputs(conn: &DatabaseConnection, node_id: &str) -> Result<Vec<InputItemS
 pub fn previews(conn: &DatabaseConnection, ids: Vec<String>) -> Result<Vec<NodePreview>, String> {
     let mut found = Vec::new();
     for chunk in ids.chunks(CHUNK) {
+        // The projection stops at the two fields previews use, instead of
+        // deserializing a whole node row for every card.
         let nodes = nodes::Entity::find()
             .filter(nodes::Column::DocumentId.eq(DOCUMENT_ID))
             .filter(nodes::Column::Id.is_in(chunk.to_vec()))
+            .select_only()
+            .columns([nodes::Column::Id, nodes::Column::OutputBatchId])
+            .into_model::<PreviewNodeRow>()
             .all(conn)
             .map_err(|error| error.to_string())?;
         let mut batch_ids = Vec::new();
@@ -57,26 +82,137 @@ pub fn previews(conn: &DatabaseConnection, ids: Vec<String>) -> Result<Vec<NodeP
             continue;
         }
 
+        // One capped item read and one grouped count for the whole chunk; the
+        // total count still includes items beyond the four preview rows.
         let mut items_by_batch: BTreeMap<String, Vec<result_items::Model>> = BTreeMap::new();
-        for (batch_id, items) in read_items_for_batches(conn, &batch_ids)? {
-            items_by_batch.insert(batch_id, items);
+        for item in read_preview_items(conn, &batch_ids)? {
+            items_by_batch
+                .entry(item.batch_id.clone())
+                .or_default()
+                .push(item);
         }
+        let counts = read_preview_counts(conn, &batch_ids)?;
+        let mut asset_ids = BTreeSet::new();
+        for item in items_by_batch.values().flatten() {
+            if let Some(asset_id) = &item.asset_id {
+                asset_ids.insert(asset_id.clone());
+            }
+        }
+        let assets = assets_by_id(conn, &asset_ids.into_iter().collect::<Vec<_>>())?;
+
         for (batch_id, node_id) in batch_by_node {
             let items = items_by_batch.remove(&batch_id).unwrap_or_default();
-            let asset_map = asset_map(conn, &items)?;
+            let item_count = counts.get(&batch_id).copied().unwrap_or(0) as f64;
             let preview_items = items
                 .iter()
                 .take(PREVIEW_ITEMS)
-                .map(|item| item_summary(item, &asset_map))
+                .map(|item| item_summary(item, &assets))
                 .collect();
             found.push(NodePreview {
                 node_id,
-                item_count: items.len() as f64,
+                item_count,
                 items: preview_items,
             });
         }
     }
     Ok(found)
+}
+
+/// The capped item read: one window partitions the chunk's rows by batch and
+/// ranks them in position/id order, and the outer query keeps four per batch.
+fn preview_items_query(batch_ids: &[String]) -> SelectStatement {
+    let mut inner = Query::select();
+    inner
+        .columns([
+            result_items::Column::Id,
+            result_items::Column::BatchId,
+            result_items::Column::Position,
+            result_items::Column::Kind,
+            result_items::Column::Text,
+            result_items::Column::AssetId,
+            result_items::Column::MetaJson,
+        ])
+        .from(result_items::Entity)
+        .and_where(result_items::Column::BatchId.is_in(batch_ids.to_vec()));
+
+    let mut window = WindowStatement::partition_by(result_items::Column::BatchId);
+    window.order_by(result_items::Column::Position, Order::Asc);
+    window.order_by(result_items::Column::Id, Order::Asc);
+    inner.expr_window_as(
+        Expr::cust("ROW_NUMBER()"),
+        window,
+        Alias::new("preview_row_number"),
+    );
+
+    let mut outer = Query::select();
+    outer
+        .columns([
+            Alias::new("id"),
+            Alias::new("batch_id"),
+            Alias::new("position"),
+            Alias::new("kind"),
+            Alias::new("text"),
+            Alias::new("asset_id"),
+            Alias::new("meta_json"),
+        ])
+        .from_subquery(inner, Alias::new("preview_items"))
+        .and_where(Expr::col(Alias::new("preview_row_number")).lte(PREVIEW_ITEMS as i64))
+        .order_by(Alias::new("batch_id"), Order::Asc)
+        .order_by(Alias::new("position"), Order::Asc)
+        .order_by(Alias::new("id"), Order::Asc);
+    outer
+}
+
+fn read_preview_items(
+    conn: &DatabaseConnection,
+    batch_ids: &[String],
+) -> Result<Vec<result_items::Model>, String> {
+    let mut items = Vec::new();
+    for chunk in batch_ids.chunks(CHUNK) {
+        let statement = preview_items_query(chunk);
+        let rows = conn
+            .query_all(&statement)
+            .map_err(|error| error.to_string())?;
+        for row in &rows {
+            items.push(
+                result_items::Model::from_query_result(row, "")
+                    .map_err(|error| error.to_string())?,
+            );
+        }
+    }
+    Ok(items)
+}
+
+/// The exact count of every requested batch, including the items the preview
+/// query deliberately leaves out.
+fn read_preview_counts(
+    conn: &DatabaseConnection,
+    batch_ids: &[String],
+) -> Result<BTreeMap<String, usize>, String> {
+    let mut counts = BTreeMap::new();
+    for chunk in batch_ids.chunks(CHUNK) {
+        let rows = result_items::Entity::find()
+            .filter(result_items::Column::BatchId.is_in(chunk.to_vec()))
+            .select_only()
+            .column(result_items::Column::BatchId)
+            .expr_as(
+                Func::count(Expr::col(result_items::Column::Id)),
+                "item_count",
+            )
+            .group_by(result_items::Column::BatchId)
+            .into_model::<PreviewCountRow>()
+            .all(conn)
+            .map_err(|error| error.to_string())?;
+        for row in rows {
+            counts.insert(row.batch_id, std::cmp::Ord::max(row.item_count, 0) as usize);
+        }
+    }
+    Ok(counts)
+}
+
+#[cfg(test)]
+pub(crate) fn preview_items_statement(batch_ids: &[String]) -> SelectStatement {
+    preview_items_query(batch_ids)
 }
 
 fn find_node(conn: &DatabaseConnection, id: &str) -> Result<Option<nodes::Model>, String> {
@@ -247,6 +383,8 @@ fn input_sources(
         .collect())
 }
 
+/// The unbounded chunked item read, kept only for the reference reader.
+#[cfg(test)]
 fn read_items_for_batches(
     conn: &DatabaseConnection,
     batch_ids: &[String],
@@ -264,6 +402,55 @@ fn read_items_for_batches(
         }
     }
     Ok(grouped.into_iter().collect())
+}
+
+/// The pre-bounded preview reader, kept only as the comparison oracle for the
+/// capped query's tests and its ignored benchmark. It loads every item and
+/// builds one asset map per node.
+#[cfg(test)]
+pub(crate) fn previews_reference(
+    conn: &DatabaseConnection,
+    ids: Vec<String>,
+) -> Result<Vec<NodePreview>, String> {
+    let mut found = Vec::new();
+    for chunk in ids.chunks(CHUNK) {
+        let nodes = nodes::Entity::find()
+            .filter(nodes::Column::DocumentId.eq(DOCUMENT_ID))
+            .filter(nodes::Column::Id.is_in(chunk.to_vec()))
+            .all(conn)
+            .map_err(|error| error.to_string())?;
+        let mut batch_ids = Vec::new();
+        let mut batch_by_node = BTreeMap::new();
+        for node in &nodes {
+            if let Some(batch_id) = &node.output_batch_id {
+                batch_ids.push(batch_id.clone());
+                batch_by_node.insert(batch_id.clone(), node.id.clone());
+            }
+        }
+        if batch_ids.is_empty() {
+            continue;
+        }
+
+        let mut items_by_batch: BTreeMap<String, Vec<result_items::Model>> = BTreeMap::new();
+        for (batch_id, items) in read_items_for_batches(conn, &batch_ids)? {
+            items_by_batch.insert(batch_id, items);
+        }
+        for (batch_id, node_id) in batch_by_node {
+            let items = items_by_batch.remove(&batch_id).unwrap_or_default();
+            let asset_map = asset_map(conn, &items)?;
+            let preview_items = items
+                .iter()
+                .take(PREVIEW_ITEMS)
+                .map(|item| item_summary(item, &asset_map))
+                .collect();
+            found.push(NodePreview {
+                node_id,
+                item_count: items.len() as f64,
+                items: preview_items,
+            });
+        }
+    }
+    Ok(found)
 }
 
 fn asset_map(

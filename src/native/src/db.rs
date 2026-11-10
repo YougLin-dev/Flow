@@ -473,6 +473,7 @@ mod tests {
     use std::sync::atomic::{AtomicU64, Ordering};
 
     use super::*;
+    use crate::entity::result_items;
     use crate::types::EdgePoint;
 
     fn node(id: &str, title: &str, body: &str, tags: &[&str], x: f64, y: f64) -> NodeInput {
@@ -2567,6 +2568,327 @@ mod tests {
         assert_eq!(detail.batch, None);
     }
 
+    fn preview_item(id: String, position: i32, asset_id: Option<&str>) -> ResultItemInput {
+        let text = id.clone();
+        ResultItemInput {
+            id,
+            position: position as f64,
+            kind: "image".to_owned(),
+            text,
+            asset_id: asset_id.map(str::to_owned),
+            meta_json: None,
+        }
+    }
+
+    /// Saves one done image run and returns the output batch the node kept.
+    fn preview_run(
+        db: &Database,
+        node_id: &str,
+        batch_id: &str,
+        items: Vec<ResultItemInput>,
+    ) -> String {
+        db.save_run(
+            ResultBatchInput {
+                id: batch_id.to_owned(),
+                node_id: node_id.to_owned(),
+                trigger: "run".to_owned(),
+                provider: "mock-image".to_owned(),
+                model: "mock-image".to_owned(),
+                params_json: "{}".to_owned(),
+                status: "done".to_owned(),
+                error: None,
+            },
+            items,
+        )
+        .expect("save preview run");
+        let actual = db
+            .get_node(node_id.to_owned())
+            .expect("read preview node")
+            .expect("the preview node exists")
+            .output_batch_id
+            .expect("a done run stores its output batch");
+        assert_eq!(actual, batch_id, "save_run output batch");
+        actual
+    }
+
+    #[test]
+    fn preview_items_stay_bounded_without_losing_total_count() {
+        let db = Database::open(":memory:").expect("open");
+        db.insert_nodes(vec![
+            node("empty", "Empty", "", &[], 0.0, 0.0),
+            node("single", "Single", "", &[], 300.0, 0.0),
+            node("six", "Six", "", &[], 600.0, 0.0),
+        ])
+        .expect("insert preview nodes");
+
+        let empty_batch = preview_run(
+            &db,
+            "empty",
+            "preview-empty",
+            vec![preview_item("empty-0".to_owned(), 0, None)],
+        );
+        preview_run(
+            &db,
+            "single",
+            "preview-single",
+            vec![preview_item("single-0".to_owned(), 0, None)],
+        );
+        preview_run(
+            &db,
+            "six",
+            "preview-six",
+            (0..6)
+                .map(|position| preview_item(format!("six-{position}"), position, None))
+                .collect(),
+        );
+        // A current batch can keep its node link after its items are gone; a
+        // preview still reports that node with an empty list and zero count.
+        db.run(move |conn| {
+            result_items::Entity::delete_many()
+                .filter(result_items::Column::BatchId.eq(empty_batch.as_str()))
+                .exec(conn)
+                .map(|_| ())
+                .map_err(|error| error.to_string())
+        })
+        .expect("remove empty batch items");
+
+        let ids = vec!["empty".to_owned(), "single".to_owned(), "six".to_owned()];
+        let previews = db.previews(ids.clone()).expect("previews");
+        let reference = db
+            .run(move |conn| detail::previews_reference(conn, ids))
+            .expect("reference previews");
+        assert_eq!(previews, reference);
+
+        let by_node = |id: &str| {
+            previews
+                .iter()
+                .find(|preview| preview.node_id == id)
+                .unwrap_or_else(|| panic!("missing {id} preview"))
+        };
+        let empty = by_node("empty");
+        assert_eq!(empty.item_count, 0.0);
+        assert!(empty.items.is_empty());
+        let single = by_node("single");
+        assert_eq!(single.item_count, 1.0);
+        assert_eq!(single.items.len(), 1);
+        let six = by_node("six");
+        assert_eq!(
+            six.item_count, 6.0,
+            "the count is the full batch, not the preview cap"
+        );
+        assert_eq!(six.items.len(), 4, "a preview carries at most four items");
+        let returned: Vec<&str> = six.items.iter().map(|item| item.id.as_str()).collect();
+        assert_eq!(returned, vec!["six-0", "six-1", "six-2", "six-3"]);
+    }
+
+    #[test]
+    fn preview_items_keep_position_then_id_order() {
+        let db = Database::open(":memory:").expect("open");
+        db.insert_nodes(vec![node("ordered", "Ordered", "", &[], 0.0, 0.0)])
+            .expect("insert preview node");
+        preview_run(
+            &db,
+            "ordered",
+            "preview-ordered",
+            vec![
+                preview_item("b".to_owned(), 1, None),
+                preview_item("a".to_owned(), 1, None),
+                preview_item("z".to_owned(), 0, None),
+                preview_item("c".to_owned(), 1, None),
+            ],
+        );
+
+        let ids = vec!["ordered".to_owned()];
+        let previews = db.previews(ids.clone()).expect("previews");
+        let reference = db
+            .run(move |conn| detail::previews_reference(conn, ids))
+            .expect("reference previews");
+        assert_eq!(previews, reference);
+        let ordered = &previews[0];
+        assert_eq!(ordered.item_count, 4.0);
+        let returned: Vec<&str> = ordered.items.iter().map(|item| item.id.as_str()).collect();
+        assert_eq!(
+            returned,
+            vec!["z", "a", "b", "c"],
+            "position first, then id"
+        );
+    }
+
+    #[test]
+    fn previews_batch_chunks_and_share_assets() {
+        let db = Database::open(":memory:").expect("open");
+        db.import_asset(AssetInput {
+            id: "shared-asset".to_owned(),
+            kind: "image".to_owned(),
+            name: "shared.png".to_owned(),
+            mime: "image/png".to_owned(),
+            bytes: benchmark_png(0),
+            meta_json: None,
+        })
+        .expect("import shared asset");
+
+        // 401 ids cross the 400-id chunk boundary once; every batch shares one
+        // asset, so a per-node asset query would repeat the same read 401 times.
+        let mut nodes = Vec::with_capacity(401);
+        for index in 0..401usize {
+            let mut preview = node(
+                &format!("preview-node-{index}"),
+                "Preview",
+                "",
+                &[],
+                index as f64 * 240.0,
+                0.0,
+            );
+            preview.kind = "image".to_owned();
+            nodes.push(preview);
+        }
+        db.insert_nodes(nodes).expect("insert preview nodes");
+        for index in 0..401usize {
+            preview_run(
+                &db,
+                &format!("preview-node-{index}"),
+                &format!("preview-batch-{index}"),
+                (0..4)
+                    .map(|position| {
+                        preview_item(
+                            format!("preview-item-{index}-{position}"),
+                            position,
+                            Some("shared-asset"),
+                        )
+                    })
+                    .collect(),
+            );
+        }
+
+        let ids: Vec<String> = (0..401)
+            .map(|index| format!("preview-node-{index}"))
+            .collect();
+        let previews = db.previews(ids.clone()).expect("previews");
+        let reference = db
+            .run({
+                let ids = ids.clone();
+                move |conn| detail::previews_reference(conn, ids)
+            })
+            .expect("reference previews");
+        assert_eq!(previews, reference);
+        assert_eq!(previews.len(), 401, "no requested preview crosses a chunk");
+        for preview in &previews {
+            assert_eq!(preview.item_count, 4.0, "{} count", preview.node_id);
+            assert_eq!(preview.items.len(), 4, "{} items", preview.node_id);
+            for item in &preview.items {
+                assert_eq!(item.asset_id.as_deref(), Some("shared-asset"));
+                assert!(item.asset.is_some(), "{} shared asset", item.id);
+            }
+        }
+    }
+
+    #[test]
+    fn previews_keep_the_old_node_and_item_summaries() {
+        let db = Database::open(":memory:").expect("open");
+        db.import_asset(AssetInput {
+            id: "shared-asset".to_owned(),
+            kind: "image".to_owned(),
+            name: "shared.png".to_owned(),
+            mime: "image/png".to_owned(),
+            bytes: benchmark_png(0),
+            meta_json: None,
+        })
+        .expect("import shared asset");
+        let mut first = node("image-a", "Image A", "", &[], 0.0, 0.0);
+        first.kind = "image".to_owned();
+        let mut second = node("image-b", "Image B", "", &[], 400.0, 0.0);
+        second.kind = "image".to_owned();
+        db.insert_nodes(vec![first, second])
+            .expect("insert preview nodes");
+        preview_run(
+            &db,
+            "image-a",
+            "batch-a",
+            vec![
+                preview_item("a-0".to_owned(), 0, Some("shared-asset")),
+                preview_item("a-1".to_owned(), 1, Some("missing-asset")),
+                preview_item("a-2".to_owned(), 2, None),
+                preview_item("a-3".to_owned(), 3, Some("shared-asset")),
+            ],
+        );
+        preview_run(
+            &db,
+            "image-b",
+            "batch-b",
+            vec![
+                preview_item("b-0".to_owned(), 0, Some("shared-asset")),
+                preview_item("b-1".to_owned(), 1, Some("missing-asset")),
+            ],
+        );
+
+        let ids = vec!["image-a".to_owned(), "image-b".to_owned()];
+        let previews = db.previews(ids.clone()).expect("previews");
+        let reference = db
+            .run(move |conn| detail::previews_reference(conn, ids))
+            .expect("reference previews");
+        assert_eq!(previews, reference);
+
+        let a = previews
+            .iter()
+            .find(|preview| preview.node_id == "image-a")
+            .expect("image-a preview");
+        assert_eq!(a.item_count, 4.0);
+        assert_eq!(a.items.len(), 4);
+        assert_eq!(a.items[0].asset_id.as_deref(), Some("shared-asset"));
+        assert!(a.items[0].asset.is_some());
+        assert_eq!(a.items[1].asset_id.as_deref(), Some("missing-asset"));
+        assert!(
+            a.items[1].asset.is_none(),
+            "a missing asset stays an item without metadata"
+        );
+        assert!(a.items[2].asset.is_none(), "an item without an asset id");
+        assert_eq!(a.items[3].asset_id.as_deref(), Some("shared-asset"));
+        assert!(
+            a.items[3].asset.is_some(),
+            "a repeated asset still resolves"
+        );
+
+        let b = previews
+            .iter()
+            .find(|preview| preview.node_id == "image-b")
+            .expect("image-b preview");
+        assert_eq!(b.item_count, 2.0);
+        assert_eq!(b.items.len(), 2);
+        assert_eq!(b.items[1].asset_id.as_deref(), Some("missing-asset"));
+        assert!(b.items[1].asset.is_none());
+    }
+
+    #[test]
+    fn preview_query_caps_rows_in_the_outer_window_query() {
+        use sea_orm::sea_query::SqliteQueryBuilder;
+
+        let statement = detail::preview_items_statement(&["batch-id".to_owned()]);
+        let (sql, values) = statement.build(SqliteQueryBuilder);
+        let upper = sql.to_ascii_uppercase();
+        assert!(upper.contains("ROW_NUMBER()"), "{sql}");
+        assert!(upper.contains("OVER"), "{sql}");
+        assert!(upper.contains("PARTITION BY"), "{sql}");
+        assert_eq!(
+            upper.matches("ROW_NUMBER()").count(),
+            1,
+            "one window ranks the whole chunk: {sql}"
+        );
+        assert!(
+            sql.contains("\"preview_row_number\" <= ?"),
+            "the cap is an outer bound value, not an interpolated id: {sql}"
+        );
+        assert_eq!(
+            sql.matches('?').count(),
+            2,
+            "the batch id and cap stay bound values: {sql}"
+        );
+        assert!(
+            !sql.contains("batch-id"),
+            "batch ids never enter the statement text: {sql}"
+        );
+        assert_eq!(values.0.len(), 2, "one id list and the cap are bound");
+    }
+
     fn benchmark_nodes(chunk: usize) -> Vec<NodeInput> {
         (0..1000)
             .map(|offset| {
@@ -3148,6 +3470,48 @@ mod tests {
         (rows, items, assets)
     }
 
+    /// Paired before/after read of one preview request on the same unchanged
+    /// database; the pre-bounded reader is the result oracle.
+    fn measure_preview_readers(db: &Database, ids: &[String], samples: usize) {
+        let expected = db
+            .run({
+                let ids = ids.to_vec();
+                move |conn| detail::previews_reference(conn, ids)
+            })
+            .expect("reference preview warmup");
+        let (rows, items, assets) = validate_previews(&expected, ids, "preview readers");
+        assert_eq!(
+            db.previews(ids.to_vec()).expect("bounded preview warmup"),
+            expected,
+            "the bounded preview reader changed the result"
+        );
+
+        let mut old_times = Vec::with_capacity(samples);
+        let mut new_times = Vec::with_capacity(samples);
+        for _ in 0..samples {
+            let started = std::time::Instant::now();
+            let old = db
+                .run({
+                    let ids = ids.to_vec();
+                    move |conn| detail::previews_reference(conn, ids)
+                })
+                .expect("reference preview sample");
+            old_times.push(elapsed_ms(started));
+            assert_eq!(old, expected, "the reference preview reader is stable");
+
+            let started = std::time::Instant::now();
+            let bounded = db.previews(ids.to_vec()).expect("bounded preview sample");
+            new_times.push(elapsed_ms(started));
+            assert_eq!(bounded, expected, "the bounded preview reader is stable");
+        }
+        let detail = format!(
+            " images={} rows={rows} items={items} assets={assets}",
+            ids.len()
+        );
+        print_stats("old_preview_reader", &mut old_times, &detail);
+        print_stats("bounded_preview_reader", &mut new_times, &detail);
+    }
+
     fn node_bounds(db: &Database, id: &str) -> NodeBounds {
         let summary = db
             .get_node(id.to_owned())
@@ -3600,6 +3964,7 @@ mod tests {
 
         let image_ids = image_node_ids();
         measure_previews(&db, &image_ids, SCENE_SAMPLES);
+        measure_preview_readers(&db, &image_ids, SCENE_SAMPLES);
 
         db.clear_history()
             .expect("clear history before move timing");
