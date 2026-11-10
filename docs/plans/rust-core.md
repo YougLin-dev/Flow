@@ -605,6 +605,61 @@ UPDATE plus one node RTree rewrite, and the connector index is rebuilt once
 per gesture commit instead of once per incident card. The change set and the
 history ops keep the same shape.
 
+### Preview and startup reads (plan 016)
+
+Measured 2026-11-11 on branch `advisor/016-small-cleanups` from `b8ee38a`,
+release build, same machine and `100k-grid-edges-images-v1` fixture as the
+tables above. The lines below are copied verbatim from `bun run test:bench`
+(`cargo test --release`, ignored benchmark). The fixture had 100,000 nodes,
+99,000 edges, 2,000 image nodes each with one four-item image batch (8,000
+items) and 2,000 content-addressed assets.
+
+**preview readers** (one unchanged database; both sides asserted the same
+2,000-preview / 8,000-item / 2,000-asset vectors before timing):
+
+```text
+old_preview_reader: n=5 avg=261.12ms p95=307.53ms max=307.53ms images=2000 rows=2000 items=8000 assets=2000
+bounded_preview_reader: n=5 avg=254.55ms p95=263.14ms max=263.14ms images=2000 rows=2000 items=8000 assets=2000
+previews images=2000: n=5 avg=249.70ms p95=268.86ms max=268.86ms rows=2000 items=8000 assets=2000
+```
+
+The bounded reader is only about 2.5% faster on this fixture at the average
+because every image batch already has exactly four items and one asset, so
+the old per-node asset read touched one row and the window query's sort costs
+roughly what the removed per-node reads saved. Its structural benefit is
+bounded work when a batch has many more than four items or when cards share
+assets; those shapes are pinned by the Rust fixtures rather than this
+four-item-per-batch seed. The output is identical in both readers.
+
+**startup emptiness** (`count() == 0 && edgeCount() == 0` vs one `isEmpty()`
+worker job with two `SELECT 1 … LIMIT 1` reads, same seeded database):
+
+```text
+startup emptiness count reference: n=5 avg=3.79ms p95=4.37ms max=4.37ms fixture nodes=100000 edges=99000 unchanged
+startup emptiness is_empty: n=5 avg=0.16ms p95=0.22ms max=0.22ms fixture nodes=100000 edges=99000 unchanged
+```
+
+**recovery** (100 row-end nodes marked running before each fresh reopen; the
+benchmark deliberately does not compare the clean second call):
+
+```text
+recover_runs populated-running: n=2 avg=19.83ms p95=22.50ms max=22.50ms 100 row-end nodes marked running before each fresh reopen; the clean second call is not compared
+```
+
+This is down from the 94.09 / 103.21 ms populated-running recovery lines in
+the full-fixture table above, which predates the version 4 partial indexes.
+`db::tests::running_work_queries_use_partial_indexes` asserts that
+`EXPLAIN QUERY PLAN` for the exact recovery filters contains `nodes_running`
+and `result_batches_running`; planning is not inferred from the timings.
+
+The grid's canvas trace evidence is manual: the same `App.test.tsx` Escape
+flow at the previous commit and after the grid change showed the hand-pan
+drag steps drop from 8 and 9 mount items to 3 and 4 (the first press step
+stays 1), while the marquee drag steps stay at 9/2/102/138. The selection
+frame and pluses are covered by the camera effect test
+`scale-only readers do not wake on pan`, which proves a pan wakes no reader
+of the scale-only accessor.
+
 ## Phases
 
 ### P0 — mixed scaffold and storage spike (done)

@@ -70,6 +70,21 @@ All notable changes to Flow are recorded here. The format follows
 
 ### Changed
 
+- Card previews now load a narrow node projection, read at most four result
+  items per batch in one windowed query, read the exact item total separately,
+  and resolve assets once per 400-node chunk. The displayed previews, item
+  order and counts are unchanged; the old reader did the same output after
+  loading every item and resolving assets once per card.
+- Startup asks one `Document.isEmpty()` existence read after recovery instead
+  of a node count plus an edge count. Schema version 4 adds partial indexes
+  for the recovery queries' exact running-node and running-batch filters.
+- A window resize on an automatic camera coalesces into one fit at the newest
+  stage size, applied by the existing 80 ms viewport drain before its scene
+  read. A user pan, zoom or explicit fit cancels a pending automatic fit.
+- The dot grid moves as one container instead of rewriting every tile's screen
+  position, and the selection frame and merged pluses read a scale-only camera
+  signal, so a pan updates two wrapper styles and leaves those overlays alone.
+
 - Cards paint less on large boards: the body's rounded background, border and
   shadow live in a childless plate the Windows renderer can skip when it is
   outside the damage area; a camera-scale detail tier (`flow/card-detail.ts`)
