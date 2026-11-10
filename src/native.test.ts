@@ -139,7 +139,7 @@ test("serves viewport scenes, bounds, edges and undo", async () => {
   ]);
   await document.insertEdges([{ id: "a-b", fromId: "a", toId: "b", kind: "flow" }]);
 
-  const scene = await document.scene({ x: 0, y: 0, width: 1000, height: 1000 }, 0);
+  const scene = await document.scene({ x: 0, y: 0, width: 1000, height: 1000 }, 0, 2000);
   expect(scene.nodes.length).toBe(2);
   expect(scene.edges.length).toBe(1);
   expect(scene.nodes.find((node) => node.id === "a")?.dataJson).toContain("First");
@@ -161,7 +161,7 @@ test("serves viewport scenes, bounds, edges and undo", async () => {
   expect(moved.changed[0]?.width).toBe(220);
 
   await document.undo();
-  const restored = await document.scene({ x: 0, y: 0, width: 1000, height: 1000 }, 0);
+  const restored = await document.scene({ x: 0, y: 0, width: 1000, height: 1000 }, 0, 2000);
   expect(restored.nodes.find((node) => node.id === "a")?.x).toBe(40);
 
   await document.deleteNodes(["a"]);

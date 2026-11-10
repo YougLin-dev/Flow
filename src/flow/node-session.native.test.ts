@@ -401,7 +401,7 @@ test("connects several sources in one undo step", async () => {
   ]);
   const scene = new FlowScene();
   scene.apply(
-    await document.scene({ x: -100_000, y: -100_000, width: 200_000, height: 200_000 }, 1000),
+    await document.scene({ x: -100_000, y: -100_000, width: 200_000, height: 200_000 }, 1000, 2000),
   );
   const { session, runner, assets } = makeSession(document, async () => [], scene);
 

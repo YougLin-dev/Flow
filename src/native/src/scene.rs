@@ -23,8 +23,9 @@ pub fn snapshot(
     conn: &DatabaseConnection,
     rect: Viewport,
     margin: f64,
+    max_cards: u64,
 ) -> Result<SceneSnapshot, String> {
-    let nodes = viewport::viewport(conn, rect.clone(), margin)?;
+    let nodes = viewport::viewport(conn, rect.clone(), margin, max_cards)?;
     let edges = edges_for_scene(conn, &nodes, &rect, margin)?;
     let rev = document::current_rev(conn).map_err(|error| error.to_string())?;
 

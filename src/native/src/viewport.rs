@@ -34,8 +34,9 @@ pub fn viewport(
     conn: &DatabaseConnection,
     rect: Viewport,
     margin: f64,
+    limit: u64,
 ) -> Result<Vec<NodeSummary>, String> {
-    let statement = viewport_statement(rect, margin);
+    let statement = viewport_statement(rect, margin, limit);
     let rows = conn
         .query_all(&statement)
         .map_err(|error| error.to_string())?;
@@ -64,7 +65,7 @@ pub fn viewport(
         .collect()
 }
 
-pub(crate) fn viewport_statement(rect: Viewport, margin: f64) -> SelectStatement {
+pub(crate) fn viewport_statement(rect: Viewport, margin: f64, limit: u64) -> SelectStatement {
     let margin = margin.max(0.0);
     let min_x = rect.x - margin;
     let min_y = rect.y - margin;
@@ -131,7 +132,7 @@ pub(crate) fn viewport_statement(rect: Viewport, margin: f64) -> SelectStatement
         .order_by((nodes::Entity, nodes::Column::Z), Order::Asc)
         .order_by_expr(sample_order, Order::Asc)
         .order_by((nodes::Entity, nodes::Column::Id), Order::Asc)
-        .limit(NODE_LIMIT);
+        .limit(std::cmp::min(limit, NODE_LIMIT));
 
     statement
 }
@@ -151,6 +152,7 @@ mod tests {
                 height: 1080.0,
             },
             120.0,
+            NODE_LIMIT,
         )
         .to_string(SqliteQueryBuilder);
         println!("{sql}");

@@ -252,11 +252,16 @@ impl Database {
     }
 
     pub fn viewport(&self, rect: Viewport, margin: f64) -> Result<Vec<NodeSummary>, String> {
-        self.run(move |conn| viewport::viewport(conn, rect, margin))
+        self.run(move |conn| viewport::viewport(conn, rect, margin, viewport::NODE_LIMIT))
     }
 
-    pub fn scene(&self, rect: Viewport, margin: f64) -> Result<SceneSnapshot, String> {
-        self.run(move |conn| scene::snapshot(conn, rect, margin))
+    pub fn scene(
+        &self,
+        rect: Viewport,
+        margin: f64,
+        max_cards: u64,
+    ) -> Result<SceneSnapshot, String> {
+        self.run(move |conn| scene::snapshot(conn, rect, margin, max_cards))
     }
 
     pub fn bounds(&self) -> Result<Viewport, String> {
@@ -904,6 +909,7 @@ mod tests {
                     height: 300.0,
                 },
                 0.0,
+                viewport::NODE_LIMIT,
             )
             .expect("scene");
 
@@ -936,7 +942,14 @@ mod tests {
         .expect("connect");
     }
 
-    fn scene_between(db: &Database, x: f64, y: f64, width: f64, height: f64) -> SceneSnapshot {
+    fn scene_between(
+        db: &Database,
+        x: f64,
+        y: f64,
+        width: f64,
+        height: f64,
+        max_cards: u64,
+    ) -> SceneSnapshot {
         db.scene(
             Viewport {
                 x,
@@ -945,6 +958,7 @@ mod tests {
                 height,
             },
             0.0,
+            max_cards,
         )
         .expect("scene")
     }
@@ -961,7 +975,7 @@ mod tests {
 
         // Both cards are far outside the read; the connector's curve crosses
         // it, so the edge RTree reports it with both endpoint ports.
-        let scene = scene_between(&db, 0.0, 0.0, 800.0, 600.0);
+        let scene = scene_between(&db, 0.0, 0.0, 800.0, 600.0, viewport::NODE_LIMIT);
         assert!(scene.nodes.is_empty());
         assert_eq!(scene.edges.len(), 1);
         let edge = &scene.edges[0];
@@ -997,8 +1011,12 @@ mod tests {
 
         // The old crossing no longer exists; the moved connector is indexed
         // between the cards' new positions.
-        assert!(scene_between(&db, 0.0, 0.0, 800.0, 600.0).edges.is_empty());
-        let scene = scene_between(&db, 4_250.0, 0.0, 400.0, 600.0);
+        assert!(
+            scene_between(&db, 0.0, 0.0, 800.0, 600.0, viewport::NODE_LIMIT)
+                .edges
+                .is_empty()
+        );
+        let scene = scene_between(&db, 4_250.0, 0.0, 400.0, 600.0, viewport::NODE_LIMIT);
         assert!(scene.nodes.is_empty());
         assert_eq!(scene.edges.len(), 1);
         assert_eq!(
@@ -1022,7 +1040,11 @@ mod tests {
 
         db.delete_edges(vec!["left-right".to_owned()])
             .expect("delete edge");
-        assert!(scene_between(&db, 0.0, 0.0, 800.0, 600.0).edges.is_empty());
+        assert!(
+            scene_between(&db, 0.0, 0.0, 800.0, 600.0, viewport::NODE_LIMIT)
+                .edges
+                .is_empty()
+        );
 
         let undone = db.undo().expect("undo delete");
         // The change set itself carries both ports, so the scene redraws the
@@ -1041,7 +1063,12 @@ mod tests {
                 y: 42.0
             })
         );
-        assert_eq!(scene_between(&db, 0.0, 0.0, 800.0, 600.0).edges.len(), 1);
+        assert_eq!(
+            scene_between(&db, 0.0, 0.0, 800.0, 600.0, viewport::NODE_LIMIT)
+                .edges
+                .len(),
+            1
+        );
     }
 
     #[test]
@@ -1055,12 +1082,16 @@ mod tests {
         connect(&db, "left-right", "left", "right");
 
         db.delete_nodes(vec!["left".to_owned()]).expect("delete");
-        assert!(scene_between(&db, 0.0, 0.0, 800.0, 600.0).edges.is_empty());
+        assert!(
+            scene_between(&db, 0.0, 0.0, 800.0, 600.0, viewport::NODE_LIMIT)
+                .edges
+                .is_empty()
+        );
 
         // Undo restores the node before its edges (the history inverse is
         // reversed again on apply), so the edge insert indexes the curve.
         db.undo().expect("undo delete");
-        let scene = scene_between(&db, 0.0, 0.0, 800.0, 600.0);
+        let scene = scene_between(&db, 0.0, 0.0, 800.0, 600.0, viewport::NODE_LIMIT);
         assert_eq!(scene.edges.len(), 1);
         assert_eq!(
             scene.edges[0].from_point,
@@ -2541,7 +2572,17 @@ mod tests {
         scale: f64,
         samples: usize,
     ) -> (usize, usize) {
-        let warmup = db.scene(rect.clone(), margin).expect("scene warmup");
+        // The same card budget the canvas passes at this camera scale.
+        let max_cards = if scale < 0.15 {
+            300
+        } else if scale < 0.4 {
+            800
+        } else {
+            2_000
+        };
+        let warmup = db
+            .scene(rect.clone(), margin, max_cards)
+            .expect("scene warmup");
         assert!(
             !warmup.nodes.is_empty(),
             "{label}: the scene returned no nodes"
@@ -2550,7 +2591,9 @@ mod tests {
         let mut times = Vec::with_capacity(samples);
         for _ in 0..samples {
             let started = std::time::Instant::now();
-            let snapshot = db.scene(rect.clone(), margin).expect("scene sample");
+            let snapshot = db
+                .scene(rect.clone(), margin, max_cards)
+                .expect("scene sample");
             times.push(elapsed_ms(started));
             assert_eq!(
                 snapshot.nodes.len(),
@@ -2667,6 +2710,7 @@ mod tests {
                     height: 600.0,
                 },
                 0.0,
+                viewport::NODE_LIMIT,
             )
             .expect("scene over the moved row");
         let interior = row
@@ -2719,6 +2763,7 @@ mod tests {
                     height: 600.0,
                 },
                 0.0,
+                viewport::NODE_LIMIT,
             )
             .expect("scene over the last moved row");
         let boundary = end

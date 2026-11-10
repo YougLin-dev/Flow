@@ -89,20 +89,22 @@ export class ViewportController {
       this.dirty = false;
       const { rect, margin } = this.visibleRect();
       const generation = ++this.generation;
+      // The card budget is read before the await so the read and the client
+      // slicer agree on the same camera scale for this snapshot.
+      const camera = this.host.camera();
+      const scale = camera?.scale ?? 1;
+      const maxCards = scale < 0.15 ? 300 : scale < 0.4 ? 800 : 2_000;
       try {
         // The drain is deliberately sequential: one read, then at most one
         // follow-up for the newest rect.
         // eslint-disable-next-line no-await-in-loop
-        const snapshot = await document.scene(rect, margin);
+        const snapshot = await document.scene(rect, margin, maxCards);
         if (
           !this.host.isDisposed() &&
           generation === this.generation &&
           snapshot.rev >= this.lastRev
         ) {
           this.lastRev = snapshot.rev;
-          const camera = this.host.camera();
-          const scale = camera?.scale ?? 1;
-          const maxCards = scale < 0.15 ? 300 : scale < 0.4 ? 800 : 2_000;
           scene.apply(snapshot, { maxCards });
           this.host.schedulePreviews();
         }

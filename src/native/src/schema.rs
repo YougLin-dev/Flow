@@ -377,6 +377,7 @@ mod tests {
                 height: 600.0,
             },
             0.0,
+            crate::viewport::NODE_LIMIT,
         )
         .expect("scene");
         assert!(scene.nodes.is_empty());

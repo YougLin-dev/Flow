@@ -288,9 +288,10 @@ impl Document {
         this: Instance<Self>,
         rect: Viewport,
         margin: f64,
+        max_cards: u64,
     ) -> Result<SceneSnapshot, String> {
         let db = this.with(|document| document.db.clone());
-        off_thread(move || db.scene(rect, margin)).await
+        off_thread(move || db.scene(rect, margin, max_cards)).await
     }
 
     /// The whole document's content bounds, for Fit.
