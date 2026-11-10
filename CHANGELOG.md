@@ -115,6 +115,11 @@ All notable changes to Flow are recorded here. The format follows
 
 ### Fixed
 
+- A click on the canvas no longer swallows the secondary click that follows
+  it within half a second: NSH reports a mouse press to `onTouch` listeners
+  too, so the click's touch end armed the post-touch suppression the canvas
+  keeps for the press events some platforms emulate. The menu's press no
+  longer consults it — a secondary press is an action of its own.
 - A connector no longer disappears when its cards leave the viewport read.
   Every edge touching the viewport carries both endpoint ports, so it is
   drawn and hit-tested while either card is loaded, and a second RTree stores

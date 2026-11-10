@@ -146,7 +146,11 @@ export function FlowCanvas(props: FlowCanvasProps) {
   };
 
   const onContextMenu = (event: ContextMenuEvent): void => {
-    if (touchActive || Date.now() < suppressUntil || pressed) return;
+    // A secondary press is an action of its own: a tap just before it must
+    // not swallow it. NSH reports a mouse press to `onTouch` listeners too,
+    // so the tap's touch end set `suppressUntil` — which is for the press
+    // events some platforms emulate after a touch, not for the next click.
+    if (touchActive || pressed) return;
     props.onMenuPress({ x: event.position.x, y: event.position.y });
   };
 

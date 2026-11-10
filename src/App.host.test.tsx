@@ -150,6 +150,17 @@ test("opens the canvas menu with a secondary click", async () => {
   await app.waitUntil(() => app.texts().some((text) => text.includes("1 card selected")));
 });
 
+test("opens the canvas menu after a click on the canvas", async () => {
+  const app = await open("./App.tsx", { platform: "windows" });
+  await app.waitUntil(() => percentOf(app.texts()) > 0);
+
+  // The click's touch end (NSH reports a mouse press to `onTouch` listeners
+  // too) must not swallow the secondary press that follows it.
+  await app.drag("id:flow-canvas", { x: 0, y: 0 });
+  await app.rightClick("id:flow-canvas");
+  await app.waitUntil(() => app.shows("id:canvas-menu"));
+});
+
 test("runs the seeded image node and records its mock batch", async () => {
   const app = await openTallApp();
   await app.waitUntil(() => percentOf(app.texts()) > 0);
