@@ -272,6 +272,33 @@ test("selecting a text node opens its composer", async () => {
   expect(app.shows("id:composer-body")).toBe(true);
 });
 
+test("keeps the composer mounted while its selected card is clicked", async () => {
+  const app = await openTallApp();
+  await app.waitUntil(() => percentOf(app.texts()) > 0);
+
+  await selectSeed(app, "Text", "id:search-result-seed-text");
+  await app.waitUntil(() => app.shows("id:composer-body"));
+  expect(app.texts().some((text) => text.includes("1 card selected"))).toBe(true);
+
+  await app.clear("id:composer-body");
+  await app.type("id:composer-body", "fresh click draft");
+  expect(app.value("id:composer-body")).toBe("fresh click draft");
+
+  // The search reveal centers the selected card, so a press at the canvas
+  // centre lands on it; the pointer stays down while the screen is read.
+  await app.dragAndHold("id:flow-canvas", { x: 0, y: 0 });
+  expect(app.shows("id:node-composer")).toBe(true);
+  expect(app.shows("id:composer-body")).toBe(true);
+  expect(app.value("id:composer-body")).toBe("fresh click draft");
+
+  await app.drop();
+  await app.waitFor("id:composer-body");
+  await app.type("id:composer-body", " suffix");
+  const value = app.value("id:composer-body") ?? "";
+  expect(value).toContain("fresh click draft");
+  expect(value).toContain("suffix");
+});
+
 test("edits the prompt and runs with it", async () => {
   const app = await openTallApp();
   await app.waitUntil(() => percentOf(app.texts()) > 0);

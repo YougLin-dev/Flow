@@ -87,6 +87,12 @@ export class CanvasController {
   readonly framePlus = signal<FramePlus | null>(null);
   /** True while a press moves cards, resizes one or pulls a connector. */
   readonly gesturing = signal(false);
+  /**
+   * True once the current gesture has actually moved: a drag or resize past
+   * the click threshold, or a connector pulled away from its press point. A
+   * still press stays a click even though `gesturing` is already true.
+   */
+  readonly gestureMoved = signal(false);
   readonly cursor = signal<CanvasCursor>("default");
 
   /** The secondary-button gesture: a drag pans, a still press opens the menu. */
@@ -174,6 +180,7 @@ export class CanvasController {
       this.right.cancel();
       this.edgeMode = false;
       this.gesturing.set(false);
+      this.gestureMoved.set(false);
       this.portPlus.set(null);
       this.framePlus.set(null);
       this.clearPreview();
@@ -298,7 +305,12 @@ export class CanvasController {
         return;
       }
       if (gesture.mode === "edge") {
-        if (this.edgeMode) this.edges.move(x, y);
+        if (this.edgeMode) {
+          this.edges.move(x, y);
+          // A connector is pulled once the pointer leaves the press point;
+          // the pre-move preview `down` published is still a click.
+          if (x !== gesture.startX || y !== gesture.startY) this.markGestureMoved();
+        }
         return;
       }
       if (gesture.mode === "marquee") {
@@ -311,7 +323,10 @@ export class CanvasController {
         return;
       }
       if (gesture.mode === "drag") {
-        if (screenDistance(gesture, x, y) > DRAG_THRESHOLD) gesture.moved = true;
+        if (!gesture.moved && screenDistance(gesture, x, y) > DRAG_THRESHOLD) {
+          gesture.moved = true;
+          this.markGestureMoved();
+        }
         if (!gesture.moved) return;
         const camera = this.host.camera();
         const world = camera.toWorld(x, y);
@@ -328,10 +343,12 @@ export class CanvasController {
       }
       if (gesture.mode === "resize") {
         if (
-          Math.abs(x - gesture.startX) > DRAG_THRESHOLD ||
-          Math.abs(y - gesture.startY) > DRAG_THRESHOLD
+          !gesture.moved &&
+          (Math.abs(x - gesture.startX) > DRAG_THRESHOLD ||
+            Math.abs(y - gesture.startY) > DRAG_THRESHOLD)
         ) {
           gesture.moved = true;
+          this.markGestureMoved();
         }
         if (!gesture.moved) return;
         const camera = this.host.camera();
@@ -356,6 +373,7 @@ export class CanvasController {
       const gesture = this.gesture;
       this.gesture = idle();
       this.gesturing.set(false);
+      this.gestureMoved.set(false);
       if (this.edgeMode) {
         this.edgeMode = false;
         this.edges.up(x, y);
@@ -402,6 +420,7 @@ export class CanvasController {
       this.right.cancel();
       this.edgeMode = false;
       this.gesturing.set(false);
+      this.gestureMoved.set(false);
       this.portPlus.set(null);
       this.framePlus.set(null);
       if (this.gesture.mode === "drag" || this.gesture.mode === "resize") {
@@ -478,6 +497,11 @@ export class CanvasController {
       this.portPlus.set(null);
       this.cursor.set(tool === "hand" ? "grab" : "default");
     });
+  }
+
+  /** Publishes a gesture's first real movement; later moves are no-ops. */
+  private markGestureMoved(): void {
+    if (!this.gestureMoved()) this.gestureMoved.set(true);
   }
 
   /** Writes hover and its per-id mirror in the caller's pointer-event batch. */

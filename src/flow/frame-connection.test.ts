@@ -135,6 +135,27 @@ test("connects a target to every selected card from the frame's left plus", () =
   ]);
 });
 
+test("a connector press stays a click until the pointer moves", () => {
+  const { controller } = setup([node("a", 0, 0)]);
+
+  // (216, 42) is the card's right plus: the press arms a connection but has
+  // not pulled one yet.
+  controller.down(216, 42, false, 1);
+  expect(controller.gesturing()).toBe(true);
+  expect(controller.gestureMoved()).toBe(false);
+
+  // A move that reports the press point publishes only the preview.
+  controller.move(216, 42);
+  expect(controller.gestureMoved()).toBe(false);
+
+  // The first nonzero screen displacement is a pulled connector.
+  controller.move(218, 42);
+  expect(controller.gestureMoved()).toBe(true);
+
+  controller.up(218, 42);
+  expect(controller.gestureMoved()).toBe(false);
+});
+
 test("keeps a single-card frame's per-card pluses", () => {
   const { controller } = setup([node("a", 100, 100)]);
 

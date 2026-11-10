@@ -256,8 +256,11 @@ position is computed in screen points from the selected card's current screen
 rectangle (`flow/overlay.ts`), so it keeps its size at every zoom and tracks
 the card. It sits directly below the card, centred on it, and is allowed to
 extend past the viewport rather than move somewhere else. The inline editor
-is anchored inside the card body. While a card is dragged or resized, or a connector is
-pulled, the composer hides so the gesture and its target stay visible.
+is anchored inside the card body. A click on the selected card leaves the
+composer mounted, so its native input keeps its draft and caret. Once a card
+is dragged or resized past a small movement threshold, or a connector is
+pulled away from its press point, the composer hides so the gesture and its
+target stay visible.
 
 ## Input
 

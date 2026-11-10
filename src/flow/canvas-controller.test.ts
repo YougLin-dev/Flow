@@ -109,6 +109,32 @@ test("selects a card on press and commits a dragged position", () => {
   expect(calls.commits).toEqual([[{ id: "a", x: 140, y: 140, width: 200, height: 84 }]]);
 });
 
+test("a selected card click does not become a moved gesture", () => {
+  const { scene, controller, calls } = setup([node("a", 100, 100)]);
+  scene.select(["a"]);
+  controller.down(150, 120, false, 1);
+  expect([controller.gesturing(), controller.gestureMoved()]).toEqual([true, false]);
+  controller.up(150, 120);
+  expect([controller.gesturing(), controller.gestureMoved()]).toEqual([false, false]);
+  expect(calls.commits).toEqual([]);
+});
+
+test("a drag or resize past the threshold publishes movement until it ends", () => {
+  const { controller } = setup([node("a", 100, 100)]);
+  controller.down(150, 120, false, 1);
+  controller.move(155, 120);
+  expect(controller.gestureMoved()).toBe(true);
+  controller.cancel();
+  expect(controller.gestureMoved()).toBe(false);
+
+  // A cancelled drag restored the card, so its corner handle resizes it.
+  controller.down(300, 184, false, 1);
+  controller.move(305, 184);
+  expect(controller.gestureMoved()).toBe(true);
+  controller.up(305, 184);
+  expect(controller.gestureMoved()).toBe(false);
+});
+
 test("drops the override when a drag ends where it began", () => {
   const { scene, controller, calls } = setup([node("a", 100, 100)]);
 

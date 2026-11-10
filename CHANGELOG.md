@@ -168,6 +168,9 @@ All notable changes to Flow are recorded here. The format follows
 
 ### Fixed
 
+- Clicking an already selected card no longer unmounts its composer: the
+  panel hides only once the gesture actually moves, so a typed draft and the
+  native input's caret no longer blink away on every click.
 - Dragging a card no longer re-renders every visible card: the drag's
   transient geometry is read per card, so only the cards it moves and their
   connectors update, and the un-moved cards keep the same geometry objects
