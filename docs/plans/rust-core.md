@@ -541,6 +541,21 @@ undo moved=1000: n=3 avg=498.78ms p95=515.48ms max=515.48ms nodes=1000 samples=3
 redo moved=1000: n=3 avg=531.06ms p95=554.38ms max=554.38ms nodes=1000 samples=3
 ```
 
+**after 012** (one UPDATE per moved card, no re-SELECT; one edge-index pass
+over the union of incident connectors, with far ends resolved in chunks):
+
+```text
+setNodeBounds moved=1000: n=3 avg=249.98ms p95=262.21ms max=262.21ms nodes=1000 samples=3
+undo moved=1000: n=3 avg=219.39ms p95=229.17ms max=229.17ms nodes=1000 samples=3
+redo moved=1000: n=3 avg=244.65ms p95=256.28ms max=256.28ms nodes=1000 samples=3
+```
+
+The move commit falls from 514.29 ms to 249.98 ms, undo from 498.78 ms to
+219.39 ms and redo from 531.06 ms to 244.65 ms. Each moved card is now one
+UPDATE plus one node RTree rewrite, and the connector index is rebuilt once
+per gesture commit instead of once per incident card. The change set and the
+history ops keep the same shape.
+
 ## Phases
 
 ### P0 — mixed scaffold and storage spike (done)
