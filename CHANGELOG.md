@@ -61,6 +61,11 @@ All notable changes to Flow are recorded here. The format follows
 
 ### Changed
 
+- Dragging a selection updates the connectors, the selection frame and the
+  merged pluses once per pointer move instead of once per moved card, and
+  releasing a box selection no longer mounts and immediately unmounts every
+  selected card's plus buttons.
+
 - A viewport read that carries a card unchanged no longer resubmits its
   title, status, body or stacking: the card reads them through
   equality-gated values (`flow/card-content.ts`), so a zoom or pan over many

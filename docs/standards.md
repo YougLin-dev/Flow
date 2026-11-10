@@ -218,7 +218,10 @@ intent callbacks as props and MUST NOT import the store. A controlled
 component keeps no private copy: it receives the current value plus a change
 callback, and the owner applies the change so the next value matches what the
 control reported. Use one `batch` only when several writes form one invariant;
-`batch` is not a performance ritual. (Review; boundary lint for component and
+`batch` is not a performance ritual. A viewport snapshot, a change set, one
+gesture step and one pointer event are each one invariant, which `FlowScene`'s
+commands and `CanvasController`'s entry points therefore batch; a method that
+writes a single signal stays unbatched. (Review; boundary lint for component and
 foundation imports; `store.test.ts` and `App.test.tsx` for behavior. No lint
 checks signal privacy.)
 
