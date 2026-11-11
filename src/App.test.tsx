@@ -1,4 +1,4 @@
-import { type App, expect, open, test } from "nsh/test";
+import { type App, expect, open, type OpenOptions, test } from "nsh/test";
 import { CONTENT } from "./flow/data";
 
 /** Opens the composer of a seed node through search. */
@@ -10,15 +10,22 @@ const selectSeed = async (app: App, query: string, testId: string): Promise<void
   await app.press(testId);
 };
 
+/** Opens the app with the probe a test reads the camera scale from. */
+const openApp = (options: OpenOptions = {}): Promise<App> =>
+  open("./App.tsx", {
+    ...options,
+    host: { ...options.host, params: { ...options.host?.params, flowZoomProbe: 1 } },
+  });
+
 /**
  * The composer always sits directly below its card and a revealed card is
  * centered, so its full sheet needs a stage taller than the default phone.
  */
-const openTallApp = (): Promise<App> => open("./App.tsx", { width: 900, height: 1300 });
+const openTallApp = (): Promise<App> => openApp({ width: 900, height: 1300 });
 
-const percentOf = (texts: string[]): number => {
-  const text = texts.find((value) => /^\d+%$/.test(value));
-  return text ? Number(text.slice(0, -1)) : Number.NaN;
+const percentOf = (app: App): number => {
+  const value = app.value("id:zoom-probe");
+  return value ? Number(value) : Number.NaN;
 };
 
 /** Half the flow's size in world coordinates. */
@@ -58,9 +65,9 @@ const arrowProbe = (scale: number, arrow: Arrow): ArrowProbe => {
 
 /** Presses `arrow` and proves the flow moved the arrow's way. */
 const expectArrowPan = async (arrow: Arrow): Promise<void> => {
-  const app = await open("./App.tsx");
-  await app.waitUntil(() => percentOf(app.texts()) > 0);
-  const probe = arrowProbe(percentOf(app.texts()) / 100, arrow);
+  const app = await openApp();
+  await app.waitUntil(() => percentOf(app) > 0);
+  const probe = arrowProbe(percentOf(app) / 100, arrow);
 
   // Each press is its own keydown/keyup, so they are sent one at a time.
   const pressRepeatedly = async (remaining: number): Promise<void> => {
@@ -77,8 +84,8 @@ const expectArrowPan = async (arrow: Arrow): Promise<void> => {
 };
 
 test("adds a panel with the toolbar and deletes it with Backspace", async () => {
-  const app = await open("./App.tsx");
-  await app.waitUntil(() => percentOf(app.texts()) > 0);
+  const app = await openApp();
+  await app.waitUntil(() => percentOf(app) > 0);
 
   await app.press("id:add-text-node");
   await app.waitUntil(() => app.texts().some((text) => text.includes("1 card selected")));
@@ -101,8 +108,8 @@ test("adds a panel with the toolbar and deletes it with Backspace", async () => 
 });
 
 test("adds an image node from the toolbar", async () => {
-  const app = await open("./App.tsx");
-  await app.waitUntil(() => percentOf(app.texts()) > 0);
+  const app = await openApp();
+  await app.waitUntil(() => percentOf(app) > 0);
 
   await app.press("id:add-image-node");
   await app.waitUntil(() => app.texts().some((text) => text.includes("1 card selected")));
@@ -111,9 +118,9 @@ test("adds an image node from the toolbar", async () => {
 });
 
 test("clears the selection with Escape", async () => {
-  const app = await open("./App.tsx");
-  await app.waitUntil(() => percentOf(app.texts()) > 0);
-  const scale = percentOf(app.texts()) / 100;
+  const app = await openApp();
+  await app.waitUntil(() => percentOf(app) > 0);
+  const scale = percentOf(app) / 100;
 
   // Move the flow off the canvas centre so the marquee starts on empty
   // canvas instead of the connector between the two cards.
@@ -133,48 +140,62 @@ test("clears the selection with Escape", async () => {
 });
 
 test("zooms with the controls", async () => {
-  const app = await open("./App.tsx");
-  await app.waitUntil(() => percentOf(app.texts()) > 0);
-  const fitted = percentOf(app.texts());
+  const app = await openApp();
+  await app.waitUntil(() => percentOf(app) > 0);
+  const fitted = percentOf(app);
 
   await app.press("label:Zoom in");
-  await app.waitUntil(() => percentOf(app.texts()) > fitted);
-  const zoomed = percentOf(app.texts());
+  await app.waitUntil(() => percentOf(app) > fitted);
+  const zoomed = percentOf(app);
   expect(zoomed).toBeGreaterThan(fitted);
 
-  await app.press("Fit");
-  await app.waitUntil(() => percentOf(app.texts()) === fitted);
-  expect(percentOf(app.texts())).toBe(fitted);
+  await app.press("id:zoom-fit");
+  await app.waitUntil(() => percentOf(app) === fitted);
+  expect(percentOf(app)).toBe(fitted);
+});
+
+test("hides and shows the minimap", async () => {
+  const app = await openApp({ platform: "windows" });
+  await app.waitUntil(() => percentOf(app) > 0);
+  expect(app.shows("id:flow-minimap")).toBe(true);
+
+  await app.press("id:minimap-toggle");
+  await app.waitUntil(() => !app.shows("id:flow-minimap"));
+  expect(app.shows("label:Show minimap")).toBe(true);
+
+  await app.press("id:minimap-toggle");
+  await app.waitUntil(() => app.shows("id:flow-minimap"));
+  expect(app.shows("label:Hide minimap")).toBe(true);
 });
 
 test("zooms with the keyboard", async () => {
-  const app = await open("./App.tsx");
-  await app.waitUntil(() => percentOf(app.texts()) > 0);
-  const fitted = percentOf(app.texts());
+  const app = await openApp();
+  await app.waitUntil(() => percentOf(app) > 0);
+  const fitted = percentOf(app);
 
   await app.keyboard.press("mod+=");
-  await app.waitUntil(() => percentOf(app.texts()) > fitted);
-  const zoomed = percentOf(app.texts());
+  await app.waitUntil(() => percentOf(app) > fitted);
+  const zoomed = percentOf(app);
   expect(zoomed).toBeGreaterThan(fitted);
   // One press is 1.2×; a duplicate binding would pass 1.4×.
   expect(zoomed).toBeLessThan(fitted * 1.3);
 
   await app.keyboard.press("mod+-");
-  await app.waitUntil(() => percentOf(app.texts()) === fitted);
-  expect(percentOf(app.texts())).toBe(fitted);
+  await app.waitUntil(() => percentOf(app) === fitted);
+  expect(percentOf(app)).toBe(fitted);
 });
 
 test("fits with the keyboard", async () => {
-  const app = await open("./App.tsx");
-  await app.waitUntil(() => percentOf(app.texts()) > 0);
-  const fitted = percentOf(app.texts());
+  const app = await openApp();
+  await app.waitUntil(() => percentOf(app) > 0);
+  const fitted = percentOf(app);
 
   await app.keyboard.press("mod+=");
-  await app.waitUntil(() => percentOf(app.texts()) > fitted);
+  await app.waitUntil(() => percentOf(app) > fitted);
 
   await app.keyboard.press("mod+0");
-  await app.waitUntil(() => percentOf(app.texts()) === fitted);
-  expect(percentOf(app.texts())).toBe(fitted);
+  await app.waitUntil(() => percentOf(app) === fitted);
+  expect(percentOf(app)).toBe(fitted);
 });
 
 test("pans right with the right arrow", async () => {
@@ -194,8 +215,8 @@ test("pans down with the down arrow", async () => {
 });
 
 test("opens a search result with Enter", async () => {
-  const app = await open("./App.tsx");
-  await app.waitUntil(() => percentOf(app.texts()) > 0);
+  const app = await openApp();
+  await app.waitUntil(() => percentOf(app) > 0);
 
   await app.keyboard.press("mod+k");
   await app.waitUntil(() => app.shows("id:search-input"));
@@ -208,8 +229,8 @@ test("opens a search result with Enter", async () => {
 });
 
 test("closes the search palette with Escape", async () => {
-  const app = await open("./App.tsx");
-  await app.waitUntil(() => percentOf(app.texts()) > 0);
+  const app = await openApp();
+  await app.waitUntil(() => percentOf(app) > 0);
 
   await app.press("id:search-button");
   await app.waitUntil(() => app.shows("id:search-input"));
@@ -220,8 +241,8 @@ test("closes the search palette with Escape", async () => {
 });
 
 test("selecting a text node opens its composer", async () => {
-  const app = await open("./App.tsx");
-  await app.waitUntil(() => percentOf(app.texts()) > 0);
+  const app = await openApp();
+  await app.waitUntil(() => percentOf(app) > 0);
 
   await selectSeed(app, "Text", "id:search-result-seed-text");
   await app.waitUntil(() => app.shows("id:node-composer"));
@@ -231,7 +252,7 @@ test("selecting a text node opens its composer", async () => {
 
 test("keeps the composer mounted while its selected card is clicked", async () => {
   const app = await openTallApp();
-  await app.waitUntil(() => percentOf(app.texts()) > 0);
+  await app.waitUntil(() => percentOf(app) > 0);
 
   await selectSeed(app, "Text", "id:search-result-seed-text");
   await app.waitUntil(() => app.shows("id:composer-body"));
@@ -258,7 +279,7 @@ test("keeps the composer mounted while its selected card is clicked", async () =
 
 test("edits the prompt and runs with it", async () => {
   const app = await openTallApp();
-  await app.waitUntil(() => percentOf(app.texts()) > 0);
+  await app.waitUntil(() => percentOf(app) > 0);
 
   await selectSeed(app, "Text", "id:search-result-seed-text");
   await app.waitUntil(() => app.shows("id:composer-run"));
@@ -272,7 +293,7 @@ test("edits the prompt and runs with it", async () => {
 
 test("runs the selected text node with the mock provider", async () => {
   const app = await openTallApp();
-  await app.waitUntil(() => percentOf(app.texts()) > 0);
+  await app.waitUntil(() => percentOf(app) > 0);
 
   await selectSeed(app, "Text", "id:search-result-seed-text");
   await app.waitUntil(() => app.shows("id:composer-run"));
@@ -283,8 +304,8 @@ test("runs the selected text node with the mock provider", async () => {
 });
 
 test("removes an input from the composer", async () => {
-  const app = await open("./App.tsx");
-  await app.waitUntil(() => percentOf(app.texts()) > 0);
+  const app = await openApp();
+  await app.waitUntil(() => percentOf(app) > 0);
 
   await selectSeed(app, "Image", "id:search-result-seed-image");
   await app.waitUntil(() => app.texts().includes("Inputs · 1"));
@@ -298,7 +319,7 @@ test("removes an input from the composer", async () => {
 
 test("reopens the image composer with its run results", async () => {
   const app = await openTallApp();
-  await app.waitUntil(() => percentOf(app.texts()) > 0);
+  await app.waitUntil(() => percentOf(app) > 0);
 
   await selectSeed(app, "Image", "id:search-result-seed-image");
   await app.waitUntil(() => app.shows("id:composer-run"));
@@ -315,13 +336,13 @@ test("reopens the image composer with its run results", async () => {
 });
 
 test("publishes an empty image-load probe while headless", async () => {
-  const app = await open("./App.tsx", {
+  const app = await openApp({
     width: 900,
     height: 1300,
     platform: "windows",
     host: { params: { flowImageLoadProbe: 1 } },
   });
-  await app.waitUntil(() => percentOf(app.texts()) > 0);
+  await app.waitUntil(() => percentOf(app) > 0);
 
   await selectSeed(app, "Image", "id:search-result-seed-image");
   await app.waitFor("id:composer-run");
@@ -330,8 +351,8 @@ test("publishes an empty image-load probe while headless", async () => {
 });
 
 test("saves an edited text body from the composer", async () => {
-  const app = await open("./App.tsx");
-  await app.waitUntil(() => percentOf(app.texts()) > 0);
+  const app = await openApp();
+  await app.waitUntil(() => percentOf(app) > 0);
 
   await selectSeed(app, "Text", "id:search-result-seed-text");
   await app.waitUntil(() => app.shows("id:composer-body"));
@@ -346,8 +367,8 @@ test("saves an edited text body from the composer", async () => {
 });
 
 test("switches the composer to another node", async () => {
-  const app = await open("./App.tsx");
-  await app.waitUntil(() => percentOf(app.texts()) > 0);
+  const app = await openApp();
+  await app.waitUntil(() => percentOf(app) > 0);
 
   await selectSeed(app, "Text", "id:search-result-seed-text");
   await app.waitUntil(() => app.shows("id:composer-body"));
@@ -360,8 +381,8 @@ test("switches the composer to another node", async () => {
 });
 
 test("keeps a draft when the composer switches nodes", async () => {
-  const app = await open("./App.tsx");
-  await app.waitUntil(() => percentOf(app.texts()) > 0);
+  const app = await openApp();
+  await app.waitUntil(() => percentOf(app) > 0);
 
   await selectSeed(app, "Text", "id:search-result-seed-text");
   await app.waitUntil(() => app.shows("id:composer-prompt"));
@@ -379,7 +400,7 @@ test("keeps a draft when the composer switches nodes", async () => {
 
 test("shows why an empty-prompt run failed", async () => {
   const app = await openTallApp();
-  await app.waitUntil(() => percentOf(app.texts()) > 0);
+  await app.waitUntil(() => percentOf(app) > 0);
 
   await selectSeed(app, "Image", "id:search-result-seed-image");
   await app.waitUntil(() => app.shows("id:composer-run"));
@@ -390,8 +411,8 @@ test("shows why an empty-prompt run failed", async () => {
 });
 
 test("opens the canvas menu on a right click and adds a text node", async () => {
-  const app = await open("./App.tsx", { platform: "windows" });
-  await app.waitUntil(() => percentOf(app.texts()) > 0);
+  const app = await openApp({ platform: "windows" });
+  await app.waitUntil(() => percentOf(app) > 0);
 
   await app.rightClick("id:flow-canvas");
   await app.waitUntil(() => app.shows("id:canvas-menu"));
@@ -402,8 +423,8 @@ test("opens the canvas menu on a right click and adds a text node", async () => 
 });
 
 test("adds an image node from the canvas menu", async () => {
-  const app = await open("./App.tsx", { platform: "windows" });
-  await app.waitUntil(() => percentOf(app.texts()) > 0);
+  const app = await openApp({ platform: "windows" });
+  await app.waitUntil(() => percentOf(app) > 0);
 
   await app.rightClick("id:flow-canvas");
   await app.waitUntil(() => app.shows("id:canvas-menu"));
@@ -413,8 +434,8 @@ test("adds an image node from the canvas menu", async () => {
 });
 
 test("closes the canvas menu with Escape", async () => {
-  const app = await open("./App.tsx", { platform: "windows" });
-  await app.waitUntil(() => percentOf(app.texts()) > 0);
+  const app = await openApp({ platform: "windows" });
+  await app.waitUntil(() => percentOf(app) > 0);
 
   await app.rightClick("id:flow-canvas");
   await app.waitUntil(() => app.shows("id:canvas-menu"));

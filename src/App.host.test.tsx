@@ -3,7 +3,7 @@
  * These run headless in `bun run test` and on this machine's desktop host in
  * `bun run test:host`; every other test file is headless-only.
  */
-import { type App, expect, open, test } from "nsh/test";
+import { type App, expect, open, type OpenOptions, test } from "nsh/test";
 
 /** Opens the composer of a seed node through search. */
 const selectSeed = async (app: App, query: string, testId: string): Promise<void> => {
@@ -14,31 +14,38 @@ const selectSeed = async (app: App, query: string, testId: string): Promise<void
   await app.press(testId);
 };
 
+/** Opens the app with the probe a test reads the camera scale from. */
+const openApp = (options: OpenOptions = {}): Promise<App> =>
+  open("./App.tsx", {
+    ...options,
+    host: { ...options.host, params: { ...options.host?.params, flowZoomProbe: 1 } },
+  });
+
 /**
  * The composer always sits directly below its card and a revealed card is
  * centered, so its full sheet needs a stage taller than the default phone.
  */
-const openTallApp = (): Promise<App> => open("./App.tsx", { width: 900, height: 1300 });
+const openTallApp = (): Promise<App> => openApp({ width: 900, height: 1300 });
 
-const percentOf = (texts: string[]): number => {
-  const text = texts.find((value) => /^\d+%$/.test(value));
-  return text ? Number(text.slice(0, -1)) : Number.NaN;
+const percentOf = (app: App): number => {
+  const value = app.value("id:zoom-probe");
+  return value ? Number(value) : Number.NaN;
 };
 
 test("shows the flow canvas", async () => {
-  const app = await open("./App.tsx");
-  await app.waitUntil(() => percentOf(app.texts()) > 0);
+  const app = await openApp();
+  await app.waitUntil(() => percentOf(app) > 0);
   expect(app.shows("id:flow-canvas")).toBe(true);
   const texts = app.texts();
   expect(texts).toContain("Flow");
   expect(texts).toContain("Native canvas · NSH");
-  expect(texts).toContain("Fit");
+  expect(app.shows("label:Fit")).toBe(true);
 });
 
 test("box-selects a card", async () => {
-  const app = await open("./App.tsx");
-  await app.waitUntil(() => percentOf(app.texts()) > 0);
-  const scale = percentOf(app.texts()) / 100;
+  const app = await openApp();
+  await app.waitUntil(() => percentOf(app) > 0);
+  const scale = percentOf(app) / 100;
 
   // Start off the connector that sits between the two cards: a press on it
   // selects the edge. Moving the flow with an arrow leaves the box-select on
@@ -58,18 +65,18 @@ test("box-selects a card", async () => {
 test("zooms with the platform modifier", async () => {
   // The headless default is Apple, where `mod` is Command; this is the
   // Windows/Linux Control mapping through the same binding.
-  const app = await open("./App.tsx", { platform: "windows" });
-  await app.waitUntil(() => percentOf(app.texts()) > 0);
-  const fitted = percentOf(app.texts());
+  const app = await openApp({ platform: "windows" });
+  await app.waitUntil(() => percentOf(app) > 0);
+  const fitted = percentOf(app);
 
   await app.keyboard.press("mod+=");
-  await app.waitUntil(() => percentOf(app.texts()) > fitted);
-  expect(percentOf(app.texts())).toBeGreaterThan(fitted);
+  await app.waitUntil(() => percentOf(app) > fitted);
+  expect(percentOf(app)).toBeGreaterThan(fitted);
 });
 
 test("drags a card through the canvas pointer surface", async () => {
-  const app = await open("./App.tsx");
-  await app.waitUntil(() => percentOf(app.texts()) > 0);
+  const app = await openApp();
+  await app.waitUntil(() => percentOf(app) > 0);
 
   // Reveal and centre the seed text card, then close its composer so the
   // press lands on the card itself.
@@ -95,8 +102,8 @@ test("drags a card through the canvas pointer surface", async () => {
 });
 
 test("searches cards and reveals the chosen one", async () => {
-  const app = await open("./App.tsx");
-  await app.waitUntil(() => percentOf(app.texts()) > 0);
+  const app = await openApp();
+  await app.waitUntil(() => percentOf(app) > 0);
 
   // Move the flow off screen first: revealing the hit must pan back to it.
   // Each press is its own keydown/keyup, so they are sent one at a time.
@@ -124,8 +131,8 @@ test("shows the desktop title bar instead of the brand card", async () => {
   // Headless iOS has no window; the desktop targets mount the title bar. The
   // Linux host has a title bar too, but no pin control (NSH cannot set a
   // window level there), so branch on the bar itself, not the pin label.
-  const app = await open("./App.tsx", { platform: "windows" });
-  await app.waitUntil(() => percentOf(app.texts()) > 0);
+  const app = await openApp({ platform: "windows" });
+  await app.waitUntil(() => percentOf(app) > 0);
 
   if (app.shows("id:title-bar")) {
     expect(app.shows("id:brand-card")).toBe(false);
@@ -143,8 +150,8 @@ test("shows the desktop title bar instead of the brand card", async () => {
 });
 
 test("pins and unpins the desktop window", async () => {
-  const app = await open("./App.tsx", { platform: "windows" });
-  await app.waitUntil(() => percentOf(app.texts()) > 0);
+  const app = await openApp({ platform: "windows" });
+  await app.waitUntil(() => percentOf(app) > 0);
   const pin = "label:Pin window on top";
 
   // A web host owns the window; the app has no pin control there.
@@ -159,20 +166,20 @@ test("pins and unpins the desktop window", async () => {
 });
 
 test("repaints when the system appearance changes", async () => {
-  const app = await open("./App.tsx");
-  await app.waitUntil(() => percentOf(app.texts()) > 0);
+  const app = await openApp();
+  await app.waitUntil(() => percentOf(app) > 0);
 
   // Repaints the native scene through the same effect a user's system uses.
   await app.setColorScheme("dark");
   await app.setColorScheme("light");
 
-  expect(percentOf(app.texts())).toBeGreaterThan(0);
+  expect(percentOf(app)).toBeGreaterThan(0);
   expect(app.texts()).toContain("Flow");
 });
 
 test("opens the canvas menu with a secondary click", async () => {
-  const app = await open("./App.tsx", { platform: "windows" });
-  await app.waitUntil(() => percentOf(app.texts()) > 0);
+  const app = await openApp({ platform: "windows" });
+  await app.waitUntil(() => percentOf(app) > 0);
 
   await app.rightClick("id:flow-canvas");
   await app.waitUntil(() => app.shows("id:canvas-menu"));
@@ -181,8 +188,8 @@ test("opens the canvas menu with a secondary click", async () => {
 });
 
 test("opens the canvas menu after a click on the canvas", async () => {
-  const app = await open("./App.tsx", { platform: "windows" });
-  await app.waitUntil(() => percentOf(app.texts()) > 0);
+  const app = await openApp({ platform: "windows" });
+  await app.waitUntil(() => percentOf(app) > 0);
 
   // The click's touch end (NSH reports a mouse press to `onTouch` listeners
   // too) must not swallow the secondary press that follows it.
@@ -193,7 +200,7 @@ test("opens the canvas menu after a click on the canvas", async () => {
 
 test("runs the seeded image node and records its mock batch", async () => {
   const app = await openTallApp();
-  await app.waitUntil(() => percentOf(app.texts()) > 0);
+  await app.waitUntil(() => percentOf(app) > 0);
 
   await selectSeed(app, "Image", "id:search-result-seed-image");
   await app.waitUntil(() => app.shows("id:composer-run"));
@@ -204,13 +211,13 @@ test("runs the seeded image node and records its mock batch", async () => {
 });
 
 test("loads a blob image through the asset cache", async () => {
-  const app = await open("./App.tsx", {
+  const app = await openApp({
     width: 900,
     height: 1300,
     platform: "windows",
     host: { params: { flowImageLoadProbe: 1 } },
   });
-  await app.waitUntil(() => percentOf(app.texts()) > 0);
+  await app.waitUntil(() => percentOf(app) > 0);
 
   await selectSeed(app, "Image", "id:search-result-seed-image");
   await app.waitFor("id:composer-run");

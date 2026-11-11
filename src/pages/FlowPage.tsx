@@ -14,7 +14,7 @@ import { NodeToolbar } from "../components/NodeToolbar";
 import { SearchButton } from "../components/SearchButton";
 import { SearchPalette } from "../components/SearchPalette";
 import { SelectionBadge } from "../components/SelectionBadge";
-import { ZoomControls } from "../components/ZoomControls";
+import { ZoomControls, ZoomProbe } from "../components/ZoomControls";
 import { AssetUrls } from "../flow/asset-urls";
 import { bindFlowKeys } from "../flow/bindings";
 import { CanvasCamera, wheelZoomFactor } from "../flow/camera";
@@ -53,6 +53,7 @@ export function FlowPage() {
   const stage = signal({ width: 1, height: 1 });
   const sessionState = signal<NodeSession | null>(null);
   const searchOpen = signal(false);
+  const minimapOpen = signal(true);
   const imageProbe = signal("");
   const composerState = new ComposerState();
 
@@ -413,19 +414,12 @@ export function FlowPage() {
 
       {host.params.flowImageLoadProbe === 1 ? <ImageLoadProbe value={imageProbe()} /> : null}
 
+      {host.params.flowZoomProbe === 1 ? <ZoomProbe value={zoomPercent()} /> : null}
+
       {composerOpen() ? null : <NodeToolbar onAdd={addNode} />}
 
       {composerOpen() ? null : (
         <SearchButton shortcut={keymap.label("mod+k")} onPress={() => searchOpen.set(true)} />
-      )}
-
-      {composerOpen() ? null : (
-        <ZoomControls
-          zoom={zoomPercent()}
-          onZoomIn={() => setZoom(1.2)}
-          onZoomOut={() => setZoom(1 / 1.2)}
-          onFit={fit}
-        />
       )}
 
       {!isAvailable && !composerOpen() ? <BrandCard /> : null}
@@ -487,18 +481,27 @@ export function FlowPage() {
         )}
       </If>
 
-      {/* A card's composer or inline editor can reach this corner: the map is
-          a canvas control and stays above them, while search, the context
-          menu and the map's own drag overlay stay above it. */}
-      {platform.desktop ? (
-        <MiniMap
-          overview={minimap.overview}
-          camera={camera}
-          stage={stage}
-          drag={minimapDrag}
-          onZoom={(notches) => setZoom(wheelZoomFactor(notches))}
+      {/* The controls and the map share the bottom-left corner. They stay
+          above a card's composer (z-20) and inline editor (z-30), while
+          search, the context menu and the map's drag overlay stay above. */}
+      <View class="absolute left-4 bottom-4 z-40 flex-row items-end gap-2">
+        <ZoomControls
+          onZoomIn={() => setZoom(1.2)}
+          onZoomOut={() => setZoom(1 / 1.2)}
+          onFit={fit}
+          minimapOpen={minimapOpen()}
+          onToggleMinimap={platform.desktop ? () => minimapOpen.set(!minimapOpen()) : undefined}
         />
-      ) : null}
+        {platform.desktop && minimapOpen() ? (
+          <MiniMap
+            overview={minimap.overview}
+            camera={camera}
+            stage={stage}
+            drag={minimapDrag}
+            onZoom={(notches) => setZoom(wheelZoomFactor(notches))}
+          />
+        ) : null}
+      </View>
 
       <If when={searchOpen()}>
         {() => (

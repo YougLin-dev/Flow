@@ -152,9 +152,10 @@ export function MiniMap(props: MiniMapProps) {
     <View
       testID="flow-minimap"
       accessibilityLabel="Document minimap"
-      // Above a card's composer (z-20) and inline editor (z-30), below the
-      // context menu (z-50): a composer near this corner must not bury it.
-      class="absolute left-4 bottom-4 z-40 overflow-hidden rounded-(--radius) border border-border bg-card"
+      // Above a card's composer (z-20) and inline editor (z-30): the dock it
+      // sits in carries the z layer; a composer near this corner must not
+      // bury it.
+      class="overflow-hidden rounded-(--radius) border border-border bg-card"
       style={{ width: MINIMAP_WIDTH, height: MINIMAP_HEIGHT, cursor: "grab" }}
       onPressDown={onDown}
       onTouchStart={onTouchStart}
