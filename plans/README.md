@@ -39,7 +39,7 @@ in the order below unless the Depends on column says otherwise.
 | 011  | Read only the cards and connectors the canvas will keep            | P2       | M      | 009, 010, 007                | DONE                                                                |
 | 012  | Write each moved card and connector box once per gesture commit    | P2       | M      | 009, 011                     | DONE                                                                |
 | 013  | Show asset images through blob: URLs instead of base64 data: URLs  | P3       | S      | 006                          | DONE                                                                |
-| 014  | Cut per-card paint work on large boards                            | P3       | M      | 004, 005, 009                | DONE                                                                |
+| 014  | Cut per-card paint work on large boards                            | P3       | M      | 004, 005, 009                | DONE (detail tiers reverted 2026-11-11)                             |
 | 015  | Rank search hits before computing snippets                         | P3       | S      | 009                          | REJECTED: two-phase is 5x slower; SQLite already defers `snippet()` |
 | 016  | Small performance cleanups (five independent commits)              | P3       | M      | 004, 007, 009, 010, 011, 012 | DONE                                                                |
 | 017  | NSH fork: record and replay only visible canvas strokes (Windows)  | P3       | M      | — (last)                     | DONE (NSH `feat/windows-canvas-damage`; Flow pins `bc17f693`)       |

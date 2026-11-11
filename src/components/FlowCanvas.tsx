@@ -4,8 +4,6 @@
  * pointer events into canvas gestures.
  */
 import {
-  computed,
-  nativeComponent,
   View,
   type ContextMenuEvent,
   type GestureResponderEvent,
@@ -14,7 +12,6 @@ import {
 } from "nsh";
 import type { CanvasCamera } from "../flow/camera";
 import type { CanvasController } from "../flow/canvas-controller";
-import { cardDetailAt } from "../flow/card-detail";
 import type { ContextMenuPoint } from "../flow/context-menu";
 import type { FlowScene } from "../flow/scene";
 import { FlowCard, type CardImageEvent } from "./FlowCard";
@@ -24,6 +21,7 @@ import { GridBackground } from "./GridBackground";
 import { SelectionFrame } from "./SelectionFrame";
 import { SelectionOverlay } from "./SelectionOverlay";
 import { SelectionPluses } from "./SelectionPluses";
+import { WheelSurface } from "./wheel-surface";
 
 export interface FlowCanvasProps {
   readonly scene: FlowScene;
@@ -40,30 +38,6 @@ export interface FlowCanvasProps {
   /** The test-only image observation path; normal rendering has no hook. */
   readonly imageEvent?: ((event: CardImageEvent) => void) | undefined;
 }
-
-interface WheelEvent {
-  readonly x: number;
-  readonly y: number;
-  readonly notchesY: number;
-}
-
-interface WheelProps {
-  /** The sensor takes no props of its own. */
-  readonly noProps?: never;
-}
-
-/**
- * The canvas's pointer surface. It is a native component registered by the
- * Rust crate (`wheel_surface.rs`), which draws nothing and takes no pointer:
- * presses reach this view's handlers as on any view, and NSH hands the mouse
- * wheel and touchpad scrolls over it to `onWheel`. Where the component is not
- * registered (the headless engine), it renders an empty view and the pointer
- * handlers still work.
- */
-const WheelSurface = nativeComponent<WheelProps, { wheel: WheelEvent }>("flow.wheel-surface", {
-  props: [],
-  events: ["wheel"],
-});
 
 interface TouchPoint {
   locationX?: number;
@@ -82,11 +56,6 @@ export function FlowCanvas(props: FlowCanvasProps) {
   let pinchY = 0;
   let lastX = 0;
   let lastY = 0;
-
-  // The card's paint contract for the current zoom. The default equality on
-  // the tier string re-runs this read on every camera change but wakes the
-  // cards only when the tier flips, not on every wheel tick.
-  const detail = computed(() => cardDetailAt(props.camera.scale));
 
   const pointOf = (touch: TouchPoint): { x: number; y: number } => ({
     x: touch.locationX ?? touch.pageX,
@@ -312,7 +281,6 @@ export function FlowCanvas(props: FlowCanvasProps) {
                     : null;
                 }}
                 target={() => props.scene.isConnectionTarget(id)}
-                detail={detail}
                 imageEvent={props.imageEvent}
               />
             );

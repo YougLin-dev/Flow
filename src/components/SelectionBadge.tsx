@@ -14,7 +14,8 @@ export function SelectionBadge(props: SelectionBadgeProps) {
         "absolute left-4 rounded-full border border-border bg-card px-3 py-1.5": true,
         // The hint bar sits at bottom-16 on a phone; keep the badge above it.
         "bottom-28": !platform.desktop,
-        "bottom-16": platform.desktop,
+        // The hint bar sits above the minimap on a desktop.
+        "bottom-48": platform.desktop,
       }}
     >
       <Text class="text-xs text-card-foreground">

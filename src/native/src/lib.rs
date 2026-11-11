@@ -37,7 +37,7 @@ fn native_components(components: &nsh_platform_windows::Components) {
 use db::Database;
 use types::{
     AssetInput, AssetSummary, ChangeSet, EdgeInput, InputItemInput, InputItemSummary, NodeBounds,
-    NodeDetail, NodeInput, NodePreview, NodeSummary, ResultBatchInput, ResultItemInput,
+    NodeDetail, NodeInput, NodePreview, NodeSummary, Overview, ResultBatchInput, ResultItemInput,
     SceneSnapshot, SearchFilters, SearchHit, Viewport,
 };
 
@@ -298,6 +298,12 @@ impl Document {
     pub async fn bounds(this: Instance<Self>) -> Result<Viewport, String> {
         let db = this.with(|document| document.db.clone());
         off_thread(move || db.bounds()).await
+    }
+
+    /// The whole document's card silhouettes, for the minimap.
+    pub async fn overview(this: Instance<Self>) -> Result<Overview, String> {
+        let db = this.with(|document| document.db.clone());
+        off_thread(move || db.overview()).await
     }
 
     /// One node by id, for revealing a search result.

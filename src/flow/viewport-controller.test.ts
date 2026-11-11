@@ -150,6 +150,24 @@ async function flushRead(): Promise<void> {
   await Promise.resolve();
 }
 
+test("centering from the minimap moves the camera and schedules a read", () => {
+  const fixture = setup();
+  try {
+    const { controller, camera, deferreds, scheduler } = fixture;
+    camera.scale = 0.5;
+
+    controller.centerOn(300, 200);
+    expect(camera.toScreen(300, 200)).toEqual({ x: 400, y: 300 });
+    expect(scheduler.armed).toBe(1);
+
+    scheduler.runDue();
+    expect(deferreds).toHaveLength(1);
+    expect(take(deferreds, 0).rect.x).toBe(-500);
+  } finally {
+    fixture.dispose();
+  }
+});
+
 test("three refreshes during one pending read cause exactly two scene reads and the last applied rect is the latest", async () => {
   const fixture = setup();
   const { controller, camera, scene, deferreds } = fixture;

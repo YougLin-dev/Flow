@@ -3,12 +3,12 @@
 
 use std::collections::HashMap;
 
-use sea_orm::sea_query::{Condition, Expr, ExprTrait, Order, Query, SelectStatement};
+use sea_orm::sea_query::{Condition, Expr, ExprTrait, Order, Query, SelectStatement, SimpleExpr};
 use sea_orm::{ConnectionTrait, DatabaseConnection, FromQueryResult};
 
 use crate::constants::DOCUMENT_ID;
 use crate::entity::{nodes, nodes_rtree};
-use crate::types::{NodeSummary, Viewport};
+use crate::types::{NodeSummary, OverviewCard, Viewport};
 
 /// The most nodes one viewport read returns. The UI applies lower card caps
 /// at low zoom; this is the hard upper bound on scene data crossing the FFI.
@@ -34,6 +34,16 @@ struct ViewportRow {
     settings_json: String,
     status: String,
     output_batch_id: Option<String>,
+}
+
+/// A minimap silhouette row: geometry only, no content.
+#[derive(FromQueryResult)]
+struct OverviewRow {
+    id: String,
+    x: f64,
+    y: f64,
+    width: f64,
+    height: f64,
 }
 
 pub fn viewport(
@@ -120,12 +130,7 @@ pub(crate) fn viewport_seq_statement(rect: Viewport, margin: f64, limit: u64) ->
 /// ordering that decides which cards survive the budget.
 fn ordered_viewport_query(rect: Viewport, margin: f64, limit: u64) -> SelectStatement {
     let margin = margin.max(0.0);
-    let min_x = rect.x - margin;
-    let min_y = rect.y - margin;
-    let max_x = rect.x + rect.width + margin;
-    let max_y = rect.y + rect.height + margin;
-
-    let mut statement = Query::select();
+    let mut statement = document_cards_query(&rect, margin);
     // The margin is for prefetching, not for the first frame: with the limit
     // applied after ordering, nodes outside the visible rectangle but inside
     // the margin must not consume the UI's card budget. Sort the nodes that
@@ -146,13 +151,26 @@ fn ordered_viewport_query(rect: Viewport, margin: f64, limit: u64) -> SelectStat
     )
     .finally(1)
     .into();
-    // Ids cluster by insertion row, so taking the first N after a limit would
-    // show one strip of a low-zoom viewport. A deterministic hash of the
-    // internal seq spreads the sample over the whole rectangle; z still owns
-    // the layer order.
-    let sample_order = Expr::col((nodes::Entity, nodes::Column::Seq))
-        .mul(2_654_435_761_i64)
-        .modulo(2_147_483_647_i64);
+    statement
+        .order_by_expr(in_view, Order::Asc)
+        .order_by((nodes::Entity, nodes::Column::Z), Order::Asc)
+        .order_by_expr(sample_order(), Order::Asc)
+        .order_by((nodes::Entity, nodes::Column::Id), Order::Asc)
+        .limit(std::cmp::min(limit, NODE_LIMIT));
+
+    statement
+}
+
+/// The RTree-first `CROSS JOIN` and the document/rect filter every spatial
+/// read shares.
+fn document_cards_query(rect: &Viewport, margin: f64) -> SelectStatement {
+    let margin = margin.max(0.0);
+    let min_x = rect.x - margin;
+    let min_y = rect.y - margin;
+    let max_x = rect.x + rect.width + margin;
+    let max_y = rect.y + rect.height + margin;
+
+    let mut statement = Query::select();
     statement
         .from(nodes_rtree::Entity)
         .cross_join(nodes::Entity)
@@ -164,14 +182,71 @@ fn ordered_viewport_query(rect: Viewport, margin: f64, limit: u64) -> SelectStat
         .and_where(Expr::col((nodes_rtree::Entity, nodes_rtree::Column::MinX)).lte(max_x))
         .and_where(Expr::col((nodes_rtree::Entity, nodes_rtree::Column::MaxY)).gte(min_y))
         .and_where(Expr::col((nodes_rtree::Entity, nodes_rtree::Column::MinY)).lte(max_y))
-        .and_where(Expr::col((nodes::Entity, nodes::Column::DocumentId)).eq(DOCUMENT_ID))
-        .order_by_expr(in_view, Order::Asc)
-        .order_by((nodes::Entity, nodes::Column::Z), Order::Asc)
-        .order_by_expr(sample_order, Order::Asc)
-        .order_by((nodes::Entity, nodes::Column::Id), Order::Asc)
-        .limit(std::cmp::min(limit, NODE_LIMIT));
+        .and_where(Expr::col((nodes::Entity, nodes::Column::DocumentId)).eq(DOCUMENT_ID));
 
     statement
+}
+
+/// Ids cluster by insertion row, so taking the first N after a limit would
+/// show one strip of a low-zoom viewport. A deterministic hash of the
+/// internal seq spreads the sample over the whole rectangle.
+fn sample_order() -> SimpleExpr {
+    Expr::col((nodes::Entity, nodes::Column::Seq))
+        .mul(2_654_435_761_i64)
+        .modulo(2_147_483_647_i64)
+}
+
+/// The largest value `sample_order` can return.
+const SAMPLE_HASH_MAX: i64 = 2_147_483_646;
+
+/// The card silhouettes a minimap draws for the whole document: the same
+/// deterministic insertion-hash sample as a viewport read, without the z
+/// stacking order, so raised cards cannot crowd out the rest. `total` lets a
+/// large document filter to about twice the cap before sorting, so the read
+/// never sorts every row it scans.
+pub(crate) fn overview_cards(
+    conn: &DatabaseConnection,
+    total: u64,
+    limit: u64,
+) -> Result<Vec<OverviewCard>, String> {
+    let limit = std::cmp::min(limit, NODE_LIMIT);
+    let mut statement = Query::select();
+    statement
+        .columns([
+            (nodes::Entity, nodes::Column::Id),
+            (nodes::Entity, nodes::Column::X),
+            (nodes::Entity, nodes::Column::Y),
+            (nodes::Entity, nodes::Column::Width),
+            (nodes::Entity, nodes::Column::Height),
+        ])
+        .from(nodes::Entity)
+        .and_where(Expr::col((nodes::Entity, nodes::Column::DocumentId)).eq(DOCUMENT_ID));
+    if total > limit {
+        // Keep roughly two candidates per drawn card: enough that the final
+        // limit still fills, small enough that the sort stays cheap.
+        let keep = std::cmp::min(total, limit.saturating_mul(2));
+        let threshold = (SAMPLE_HASH_MAX as u128 * keep as u128 / total as u128) as i64;
+        statement
+            .and_where(sample_order().lt(threshold))
+            .order_by_expr(sample_order(), Order::Asc)
+            .order_by((nodes::Entity, nodes::Column::Id), Order::Asc)
+            .limit(limit);
+    }
+    let rows = conn
+        .query_all(&statement)
+        .map_err(|error| error.to_string())?;
+    rows.iter()
+        .map(|row| {
+            let row = OverviewRow::from_query_result(row, "").map_err(|error| error.to_string())?;
+            Ok(OverviewCard {
+                id: row.id,
+                x: row.x,
+                y: row.y,
+                width: row.width,
+                height: row.height,
+            })
+        })
+        .collect()
 }
 
 /// Phase 2: the summary columns for one `IN` chunk of kept seqs. Ordinary

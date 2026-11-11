@@ -112,6 +112,23 @@ test("fits and centers content", () => {
   expect(camera.toScreen(200, 100)).toEqual({ x: 400, y: 300 });
 });
 
+test("centers a world point without changing the zoom", () => {
+  const scheduler = new FakeCameraScheduler();
+  const camera = new CanvasCamera({ scheduler });
+  camera.scale = 0.5;
+
+  camera.centerOn(300, 200, { width: 800, height: 600 });
+  expect(camera.scale).toBe(0.5);
+  expect(camera.toScreen(300, 200)).toEqual({ x: 400, y: 300 });
+  expect(scheduler.active).toBe(true);
+
+  const x = camera.x;
+  const y = camera.y;
+  camera.centerOn(Number.NaN, 0, { width: 800, height: 600 });
+  expect(camera.x).toBe(x);
+  expect(camera.y).toBe(y);
+});
+
 test("keeps its view signal in step with its properties", () => {
   const camera = new CanvasCamera();
   camera.x = 5;

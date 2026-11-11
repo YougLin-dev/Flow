@@ -16,6 +16,17 @@ All notable changes to Flow are recorded here. The format follows
   window's wheel to native components rather than to views, so the canvas's
   pointer surface is a wheel sensor registered by the Rust crate (Windows),
   which draws nothing, takes no presses and forwards each scroll to TSX.
+- A minimap in the canvas's bottom-left corner shows the whole document's
+  card silhouettes and the camera's current viewport; the hint bar moved above
+  it. Dragging anywhere on the map pans the camera (a press alone does
+  nothing), and the mouse wheel over the map zooms the canvas about the
+  viewport's center. The drag keeps going after the pointer leaves the panel
+  or the window, and a release outside ends it once the pointer returns. The
+  map always frames the union of the content and the viewport, so pulling the
+  view away from the content shrinks the silhouettes instead of hiding
+  either. One coarse Rust read (`Document.overview()`) samples at most 400
+  cards by the insertion hash, so cards outside the scene still appear
+  without instantiating the document in the view tree.
 - The connectors of the selected cards flow: they rest brighter and thicker
   than the others, and a 48-piece comet travels from each connector's source
   with a gradient trail behind its head and leaves through the target. A
@@ -87,11 +98,9 @@ All notable changes to Flow are recorded here. The format follows
 
 - Cards paint less on large boards: the body's rounded background, border and
   shadow live in a childless plate the Windows renderer can skip when it is
-  outside the damage area; a camera-scale detail tier (`flow/card-detail.ts`)
-  drops the shadow and the body and status text below 35% zoom and the title
-  and image previews below 20%, where they are sub-pixel; a resized card's
+  outside the damage area; a resized card's
   width and height are now whole points so consecutive frames share the
-  shadow cache. The card's decoration is unchanged at 100% zoom.
+  shadow cache. The card's decoration is unchanged at every zoom.
 
 - Preview and composer images now use one cached `blob:` URL per asset
   instead of building and decoding a base64 data URL on every mount; NSH

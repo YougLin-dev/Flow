@@ -186,6 +186,24 @@ events and renders four kinds of children:
   and touchpad scrolls over the canvas. The page turns each wheel event into
   a zoom about the pointer.
 
+The minimap (`components/MiniMap.tsx`) is a screen-space panel rendered by
+`FlowPage` beside `FlowCanvas`, not inside it, in the bottom-left corner and
+desktop-only. It maps the union of the document's bounds and the camera's
+visible rectangle into the panel, so the content and the view are always both
+shown: pulling the view away from the content zooms the silhouettes down
+instead of moving the viewport frame out of the panel. The silhouettes come
+from `Document.overview()`, a coarse Rust read that samples at most 400 cards
+by the insertion hash the viewport reads use (not by stacking), so it shows
+cards outside the scene and costs one read per burst of geometry changes; the
+panel never instantiates the whole document. Dragging anywhere in the panel
+pans the camera by the pointer's movement (a press alone changes nothing); the
+drag converts its deltas with the scale captured at press, so the map's own
+rescaling cannot feed back into the drag. While a drag runs, a transparent
+full-canvas surface above the page takes the pointer, so it may leave the
+small panel and keep dragging; a pointer that leaves the window pauses the
+drag but does not end it. The panel carries its own `WheelSurface` instance,
+so the wheel over it zooms the canvas about the viewport's center.
+
 The canvas context menu (`components/CanvasContextMenu.tsx`) is a native-view
 popup anchored at a secondary-button press: it adds a text or image card at
 the pressed world point, or closes on a primary press or Escape. It is drawn
@@ -203,9 +221,7 @@ from equality-gated values (`flow/card-content.ts`), so a viewport read that
 carries the same card wakes nothing; that keeps a zoom or pan from resubmitting
 every visible card's text. The body's rounded background, border and shadow
 are a childless plate under the content, so the Windows renderer can skip
-that paint when it is outside the damage rectangle, and a camera-scale detail
-tier (`flow/card-detail.ts`) drops the shadow, body and status text below 35%
-zoom and the title and image previews below 20%. The card renders the title and
+that paint when it is outside the damage rectangle. The card renders the title and
 status above the card, the body text or image thumbnails inside it (laid out
 inside the body box), and one round plus button outside each side while the
 card is hovered or selected. On a multi-card frame those per-card

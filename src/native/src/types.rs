@@ -256,6 +256,26 @@ pub struct SceneSnapshot {
     pub edges: Vec<EdgeSummary>,
 }
 
+/// One card silhouette the minimap draws, without content or styling.
+#[derive(Debug, Clone, PartialEq, JsObject)]
+pub struct OverviewCard {
+    pub id: String,
+    pub x: f64,
+    pub y: f64,
+    pub width: f64,
+    pub height: f64,
+}
+
+/// The whole document's bounds and a sampled set of card silhouettes, for
+/// the minimap. The sample is deterministic and capped, so the read stays
+/// coarse no matter how large the document is.
+#[derive(Debug, Clone, PartialEq, JsObject)]
+pub struct Overview {
+    pub rev: f64,
+    pub bounds: Viewport,
+    pub cards: Vec<OverviewCard>,
+}
+
 /// The nodes and edges a command changed and the ones it removed.
 #[derive(Debug, Clone, PartialEq, JsObject)]
 pub struct ChangeSet {

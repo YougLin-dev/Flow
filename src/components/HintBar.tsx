@@ -14,7 +14,7 @@ const hints: Record<Tool, string> = {
 
 const touchHint = "Drag a card · box-select empty space · pinch to pan/zoom";
 
-/** The one-line interaction hint at the canvas' bottom-left corner. */
+/** The one-line interaction hint above the minimap at the bottom-left. */
 export function HintBar(props: HintBarProps) {
   return (
     <View
@@ -23,7 +23,8 @@ export function HintBar(props: HintBarProps) {
         // On a phone the tool switch owns the bottom-right corner; sit above
         // it instead of sharing the row.
         "bottom-16": !platform.desktop,
-        "bottom-4": platform.desktop,
+        // The minimap owns the bottom-left corner on a desktop.
+        "bottom-36": platform.desktop,
       }}
     >
       <Text class="text-xs text-muted-foreground">

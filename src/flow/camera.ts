@@ -133,6 +133,13 @@ export class CanvasCamera {
     };
   }
 
+  /** Centers a world point in a canvas of `size`, keeping the zoom. */
+  centerOn(x: number, y: number, size: CameraSize): void {
+    if (!Number.isFinite(x) || !Number.isFinite(y)) return;
+    const scale = this.scale;
+    this.publish({ x: size.width / 2 - x * scale, y: size.height / 2 - y * scale, scale });
+  }
+
   panBy(dx: number, dy: number): void {
     const view = this.view();
     if (dx === 0 && dy === 0) return;

@@ -238,6 +238,15 @@ export class ViewportController {
     this.schedule();
   }
 
+  /** Centers a world point, from a press or drag on the minimap. */
+  centerOn(x: number, y: number): void {
+    const camera = this.host.camera();
+    if (!camera) return;
+    this.userMoved();
+    camera.centerOn(x, y, { width: this.width, height: this.height });
+    this.schedule();
+  }
+
   dispose(): void {
     cancelAnimationFrame(this.zoomFrame);
     if (this.timer !== null) this.scheduler.clearTimeout(this.timer);

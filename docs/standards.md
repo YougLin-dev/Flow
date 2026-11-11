@@ -329,6 +329,11 @@ interaction belongs in the controller and its pure geometry modules
 (`selection.ts`, `connection.ts`). A press that starts an edge gesture MUST be
 consumed before card selection. (Test, Review)
 
+The minimap panel is a control overlay, not the canvas surface: its drag is
+routed by `flow/minimap-controller.ts` with its pure mapping in
+`flow/minimap.ts`, and it never starts a canvas gesture or writes the
+document.
+
 Direct manipulation is the documented pointer exception: selecting, moving
 and resizing cards is a gesture. Every edit reachable that way MUST also have
 the native composer path. A drag MUST set transient overrides and write the
@@ -388,10 +393,6 @@ loop. Frame budgets (about 10 ms of app work and 16.7 ms per frame at 60 Hz,
 50 ms input-to-feedback) are SHOULD targets [measured manually on the reference host](testing.md#measuring-performance);
 they MUST NOT be asserted in CI without a stable benchmark. (Review,
 Manual profiling; the `perf` lint category is only a warning.)
-
-A card's paint detail scales with the camera through named tiers
-(`flow/card-detail.ts`); a new canvas view SHOULD read the tier and gate
-decorative or text paint on it rather than on the raw scale.
 
 ### 8.3 Security and the sandbox
 

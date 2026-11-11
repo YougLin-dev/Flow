@@ -24,7 +24,7 @@ use crate::schema;
 use crate::search;
 use crate::types::{
     AssetInput, AssetSummary, ChangeSet, EdgeInput, InputItemInput, InputItemSummary, NodeBounds,
-    NodeDetail, NodeInput, NodePreview, NodeSummary, ResultBatchInput, ResultItemInput,
+    NodeDetail, NodeInput, NodePreview, NodeSummary, Overview, ResultBatchInput, ResultItemInput,
     SceneSnapshot, SearchFilters, SearchHit, Viewport,
 };
 use crate::viewport;
@@ -46,6 +46,9 @@ pub struct Database {
     tx: Arc<Mutex<Sender<Job>>>,
     history: Arc<Mutex<History>>,
     assets_dir: Arc<PathBuf>,
+    /// The last document bounds, tagged with the revision they describe:
+    /// Fit and the minimap's overview ask at the same revision at startup.
+    bounds_cache: Arc<Mutex<Option<(i64, Viewport)>>>,
 }
 
 impl Database {
@@ -68,6 +71,7 @@ impl Database {
             tx: Arc::new(Mutex::new(job_tx)),
             history: Arc::new(Mutex::new(History::default())),
             assets_dir,
+            bounds_cache: Arc::new(Mutex::new(None)),
         })
     }
 
@@ -266,7 +270,16 @@ impl Database {
     }
 
     pub fn bounds(&self) -> Result<Viewport, String> {
-        self.run(scene::bounds)
+        let cache = self.bounds_cache.clone();
+        self.run(move |conn| cached_bounds(conn, &cache))
+    }
+
+    pub fn overview(&self) -> Result<Overview, String> {
+        let cache = self.bounds_cache.clone();
+        self.run(move |conn| {
+            let bounds = cached_bounds(conn, &cache)?;
+            scene::overview(conn, bounds)
+        })
     }
 
     pub fn get_node(&self, id: String) -> Result<Option<NodeSummary>, String> {
@@ -385,6 +398,34 @@ fn lock_history(
     history
         .lock()
         .map_err(|_| "the undo history lock is poisoned".to_owned())
+}
+
+/// The document bounds at the current revision, reusing the last read.
+///
+/// Every command bumps the document revision, so an entry from another
+/// revision is never reused: a change that moves, adds or removes a node
+/// invalidates the cache by construction. Fit and the minimap's overview ask
+/// at the same revision at startup, and repeated Fit presses reuse the entry.
+fn cached_bounds(
+    conn: &DatabaseConnection,
+    cache: &Arc<Mutex<Option<(i64, Viewport)>>>,
+) -> Result<Viewport, String> {
+    let rev = document::current_rev(conn).map_err(|error| error.to_string())?;
+    {
+        let cached = cache
+            .lock()
+            .map_err(|_| "the bounds cache lock is poisoned".to_owned())?;
+        if let Some((cached_rev, bounds)) = cached.as_ref()
+            && *cached_rev == rev
+        {
+            return Ok(bounds.clone());
+        }
+    }
+    let bounds = scene::bounds(conn)?;
+    *cache
+        .lock()
+        .map_err(|_| "the bounds cache lock is poisoned".to_owned())? = Some((rev, bounds.clone()));
+    Ok(bounds)
 }
 
 fn count(conn: &DatabaseConnection) -> Result<u32, String> {
@@ -637,6 +678,128 @@ mod tests {
             (bounds.x, bounds.y, bounds.width, bounds.height),
             (0.0, 0.0, 0.0, 0.0)
         );
+        let overview = db.overview().expect("overview");
+        assert_eq!(
+            (
+                overview.bounds.x,
+                overview.bounds.y,
+                overview.bounds.width,
+                overview.bounds.height
+            ),
+            (0.0, 0.0, 0.0, 0.0)
+        );
+        assert!(overview.cards.is_empty());
+    }
+
+    #[test]
+    fn bounds_cache_follows_a_move() {
+        let db = Database::open(":memory:").expect("open");
+        db.insert_nodes(vec![node("a", "A", "", &[], 0.0, 0.0)])
+            .expect("insert");
+        let first = db.bounds().expect("bounds");
+        assert_eq!((first.x, first.y), (0.0, 0.0));
+        // A second read at the same revision reuses the cached entry.
+        assert_eq!(db.bounds().expect("cached bounds"), first);
+
+        db.move_nodes(vec!["a".to_owned()], 50.0, 25.0)
+            .expect("move");
+        let moved = db.bounds().expect("bounds after move");
+        assert_eq!((moved.x, moved.y), (50.0, 25.0));
+    }
+
+    #[test]
+    fn overview_reads_every_card_and_the_document_bounds() {
+        let db = Database::open(":memory:").expect("open");
+        db.insert_nodes(vec![
+            node("a", "A", "", &[], 100.0, 50.0),
+            node("b", "B", "", &[], 700.0, 400.0),
+        ])
+        .expect("insert");
+
+        let overview = db.overview().expect("overview");
+        assert_eq!(
+            (
+                overview.bounds.x,
+                overview.bounds.y,
+                overview.bounds.width,
+                overview.bounds.height
+            ),
+            (100.0, 50.0, 800.0, 434.0)
+        );
+        assert!(overview.rev > 0.0);
+        let mut ids: Vec<&str> = overview.cards.iter().map(|card| card.id.as_str()).collect();
+        ids.sort_unstable();
+        assert_eq!(ids, vec!["a", "b"]);
+        let card = overview
+            .cards
+            .iter()
+            .find(|card| card.id == "b")
+            .expect("card b");
+        assert_eq!(
+            (card.x, card.y, card.width, card.height),
+            (700.0, 400.0, 200.0, 84.0)
+        );
+    }
+
+    #[test]
+    fn overview_sample_stays_capped_on_a_large_document() {
+        let db = Database::open(":memory:").expect("open");
+        let nodes: Vec<NodeInput> = (0..scene::OVERVIEW_LIMIT + 5)
+            .map(|index| {
+                let mut input = node(
+                    &format!("n{index}"),
+                    "Card",
+                    "",
+                    &[],
+                    index as f64 * 10.0,
+                    0.0,
+                );
+                // A raised card must not crowd the sample: order comes from
+                // the insertion hash, not from stacking or row order.
+                input.z = index as f64;
+                input
+            })
+            .collect();
+        db.insert_nodes(nodes).expect("insert");
+
+        let overview = db.overview().expect("overview");
+        assert_eq!(overview.cards.len() as u64, scene::OVERVIEW_LIMIT);
+        let unique: std::collections::BTreeSet<&str> =
+            overview.cards.iter().map(|card| card.id.as_str()).collect();
+        assert_eq!(unique.len(), overview.cards.len());
+    }
+
+    #[test]
+    fn overview_sample_is_neither_the_first_nor_the_top_cards() {
+        let db = Database::open(":memory:").expect("open");
+        let nodes: Vec<NodeInput> = (0..40)
+            .map(|index| {
+                let mut input = node(
+                    &format!("n{index:02}"),
+                    "Card",
+                    "",
+                    &[],
+                    index as f64 * 10.0,
+                    0.0,
+                );
+                input.z = index as f64;
+                input
+            })
+            .collect();
+        db.insert_nodes(nodes).expect("insert");
+
+        // The private read with a small cap: the full `overview()` cap is 400
+        // and this fixture is smaller.
+        let cards = db
+            .run(|conn| viewport::overview_cards(conn, 40, 10))
+            .expect("sample");
+        assert_eq!(cards.len(), 10);
+        let mut sampled: Vec<String> = cards.iter().map(|card| card.id.clone()).collect();
+        sampled.sort_unstable();
+        let first: Vec<String> = (0..10).map(|index| format!("n{index:02}")).collect();
+        let top: Vec<String> = (30..40).map(|index| format!("n{index:02}")).collect();
+        assert_ne!(sampled, first);
+        assert_ne!(sampled, top);
     }
 
     #[test]
@@ -4093,6 +4256,17 @@ mod tests {
         let bounds_ms = elapsed_ms(bounds_started);
         assert!(bounds.width > 0.0 && bounds.height > 0.0);
         println!("bounds (Fit source): {bounds:?} read={bounds_ms:.2}ms");
+
+        // The startup order: Fit reads the bounds, then the minimap's overview
+        // at the same revision reuses them and reads the capped sample.
+        let overview_started = std::time::Instant::now();
+        let overview = db.overview().expect("measure document overview");
+        let overview_ms = elapsed_ms(overview_started);
+        assert_eq!(overview.cards.len() as u64, scene::OVERVIEW_LIMIT);
+        println!(
+            "overview (minimap, bounds cached): cards={} read={overview_ms:.2}ms",
+            overview.cards.len()
+        );
 
         let legacy_rect = Viewport {
             x: 0.0,

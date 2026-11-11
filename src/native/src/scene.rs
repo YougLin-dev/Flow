@@ -6,19 +6,24 @@ use std::collections::{BTreeMap, BTreeSet};
 use sea_orm::sea_query::{Alias, Expr, ExprTrait, Query};
 use sea_orm::{
     ColumnTrait, Condition, ConnectionTrait, DatabaseConnection, EntityTrait, FromQueryResult,
-    QueryFilter,
+    PaginatorTrait, QueryFilter,
 };
 
 use crate::constants::DOCUMENT_ID;
 use crate::document;
 use crate::edge_index;
 use crate::entity::{edges, nodes};
-use crate::types::{EdgePoint, EdgeSummary, NodeSummary, SceneSnapshot, Viewport};
+use crate::types::{EdgePoint, EdgeSummary, NodeSummary, Overview, SceneSnapshot, Viewport};
 use crate::viewport;
 
 /// Edges are queried in chunks so the `IN` list stays below SQLite's
 /// parameter limit.
 const EDGE_CHUNK: usize = 400;
+
+/// The most card silhouettes one minimap read returns, however large the
+/// document is. The minimap is a few hundred points wide, so more rows would
+/// draw over each other.
+pub const OVERVIEW_LIMIT: u64 = 400;
 
 /// The far end of a connector whose card is outside the node read. Only the
 /// card's ports matter here, so this avoids fetching the whole node row.
@@ -117,6 +122,26 @@ pub fn bounds(conn: &DatabaseConnection) -> Result<Viewport, String> {
         }),
         _ => Ok(empty_bounds()),
     }
+}
+
+/// The minimap's read: a deterministic, capped sample of card rectangles and
+/// the document revision, for bounds the caller already read (and cached).
+pub fn overview(conn: &DatabaseConnection, bounds: Viewport) -> Result<Overview, String> {
+    let rev = document::current_rev(conn).map_err(|error| error.to_string())?;
+    let total = nodes::Entity::find()
+        .filter(nodes::Column::DocumentId.eq(DOCUMENT_ID))
+        .count(conn)
+        .map_err(|error| error.to_string())?;
+    let cards = if bounds.width > 0.0 && bounds.height > 0.0 {
+        viewport::overview_cards(conn, total, OVERVIEW_LIMIT)?
+    } else {
+        Vec::new()
+    };
+    Ok(Overview {
+        rev: rev as f64,
+        bounds,
+        cards,
+    })
 }
 
 fn edges_for_scene(

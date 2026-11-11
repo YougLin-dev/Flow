@@ -1,4 +1,4 @@
-import { cleanup, effect, host, keymap, Picker, signal, untracked, View } from "nsh";
+import { cleanup, effect, host, keymap, Picker, platform, signal, untracked, View } from "nsh";
 import { isAvailable } from "nsh/desktop";
 import type { ChangeSet, Document, NodeBounds, SearchHit } from "@flow/native";
 import { BrandCard } from "../components/BrandCard";
@@ -8,6 +8,8 @@ import { ImageLoadProbe, imageProbeText } from "../components/FlowCard";
 import { FrameRate } from "../components/FrameRate";
 import { HintBar } from "../components/HintBar";
 import { InlineTextEditor } from "../components/InlineTextEditor";
+import { MiniMap } from "../components/MiniMap";
+import { MinimapDragOverlay } from "../components/MinimapDragOverlay";
 import { NodeComposer } from "../components/NodeComposer";
 import { NodeToolbar } from "../components/NodeToolbar";
 import { SearchButton } from "../components/SearchButton";
@@ -24,11 +26,14 @@ import { CanvasMenuController, contextMenuPosition } from "../flow/context-menu"
 import { CONTENT } from "../flow/data";
 import { openFlowDocument } from "../flow/document-session";
 import { NodeRunner } from "../flow/execution";
+import { MinimapLoader } from "../flow/minimap-loader";
+import { MinimapController } from "../flow/minimap-controller";
 import type { NodeKindId } from "../flow/node-kinds";
 import { NodeSession } from "../flow/node-session";
-import { composerAnchor, inlineAnchor } from "../flow/overlay";
+import { composerPlacement, inlinePlacement } from "../flow/overlay";
 import { PreviewLoader } from "../flow/preview-loader";
 import { SEARCH_FILTERS } from "../flow/search-filters";
+import { revealSearchHit } from "../flow/search-navigation";
 import { FlowScene } from "../flow/scene";
 import { ViewportController } from "../flow/viewport-controller";
 import {
@@ -70,8 +75,14 @@ export function FlowPage() {
   });
   const schedulePreviews = (): void => previews.schedule();
 
+  const minimap = new MinimapLoader({
+    document: () => document,
+    isDisposed: () => disposed,
+  });
+
   const applyChanges = (changes: ChangeSet): void => {
     viewport.noteRev(changes.rev);
+    minimap.noteChanges(changes);
     scene.applyChangeSet(changes);
     currentSession()?.onChanges(changes);
     schedulePreviews();
@@ -86,6 +97,8 @@ export function FlowPage() {
     publishZoom: (percent) => setZoomPercent(percent),
     isDisposed: () => disposed,
   });
+
+  const minimapDrag = new MinimapController((x, y) => viewport.centerOn(x, y));
 
   const commitBounds = (bounds: readonly NodeBounds[]): void => {
     const doc = document;
@@ -166,33 +179,25 @@ export function FlowPage() {
     },
   });
 
-  const composerPosition = (): { left: number; top: number; width: number } | null => {
-    // A click on the selected card stays a click: only real movement (a
-    // drag, a resize or a pulled connector) hides the composer, so its
-    // native input keeps its draft and caret while the press is held.
-    if (controller.gestureMoved()) return null;
-    const id = currentSession()?.composerId() ?? null;
-    if (id === null) return null;
-    const rect = scene.cardRect(id);
-    if (!rect) return null;
-    const size = stage();
-    const width = Math.min(360, Math.max(280, size.width - 16));
-    const anchor = composerAnchor(rect, camera, width);
-    return { left: anchor.left, top: anchor.top, width };
-  };
+  const composerPosition = () =>
+    composerPlacement(
+      currentSession()?.composerId() ?? null,
+      // A click on the selected card stays a click: only real movement (a
+      // drag, a resize or a pulled connector) hides the composer, so its
+      // native input keeps its draft and caret while the press is held.
+      controller.gestureMoved(),
+      (id) => scene.cardRect(id),
+      camera,
+      stage(),
+    );
 
-  const inlinePosition = (): {
-    left: number;
-    top: number;
-    width: number;
-    height: number;
-  } | null => {
-    const id = currentSession()?.inlineId();
-    if (!id) return null;
-    const rect = scene.cardRect(id);
-    if (!rect) return null;
-    return inlineAnchor(rect, camera, stage());
-  };
+  const inlinePosition = () =>
+    inlinePlacement(
+      currentSession()?.inlineId() ?? null,
+      (id) => scene.cardRect(id),
+      camera,
+      stage(),
+    );
 
   const canvasMenu = new CanvasMenuController({
     camera: () => camera,
@@ -220,30 +225,8 @@ export function FlowPage() {
     return doc.search(query, { kind }, 20);
   };
 
-  const revealNode = async (id: string): Promise<void> => {
-    const doc = document;
-    if (!doc || disposed) return;
-    try {
-      const node = await doc.getNode(id);
-      if (!node || disposed) return;
-      viewport.focusBounds({ x: node.x, y: node.y, width: node.width, height: node.height });
-      await viewport.refresh();
-      if (disposed) return;
-      if (!scene.nodes().some((candidate) => candidate.id === id)) {
-        scene.applyChangeSet({
-          changed: [node],
-          removed: [],
-          edgesChanged: [],
-          edgesRemoved: [],
-        });
-      }
-      scene.select([id]);
-      openComposer(id);
-      viewport.schedule();
-    } catch (error) {
-      console.error("Flow could not reveal the search result", error);
-    }
-  };
+  const revealNode = (id: string): Promise<void> =>
+    revealSearchHit({ document, viewport, scene, isDisposed: () => disposed, openComposer }, id);
 
   const selectSearchHit = (hit: SearchHit): void => {
     searchOpen.set(false);
@@ -282,6 +265,7 @@ export function FlowPage() {
           isDisposed: () => disposed,
         }),
       );
+      minimap.schedule();
       await viewport.fitToDocument(false, false);
       await viewport.refresh();
       if (!disposed) viewport.announceZoom(camera.scale);
@@ -405,6 +389,8 @@ export function FlowPage() {
     canvasMenu.close();
     disposed = true;
     previews.dispose();
+    minimap.dispose();
+    minimapDrag.dispose();
     viewport.dispose();
     runner?.dispose();
     assets?.dispose();
@@ -445,6 +431,16 @@ export function FlowPage() {
         }}
         imageEvent={(event) => imageProbe.set(imageProbeText(event))}
       />
+
+      {platform.desktop ? (
+        <MiniMap
+          overview={minimap.overview}
+          camera={camera}
+          stage={stage}
+          drag={minimapDrag}
+          onZoom={(notches) => setZoom(wheelZoomFactor(notches))}
+        />
+      ) : null}
 
       {host.params.flowImageLoadProbe === 1 ? <ImageLoadProbe value={imageProbe()} /> : null}
 
@@ -553,6 +549,13 @@ export function FlowPage() {
           />
         )}
       </If>
+
+      {minimapDrag.dragging() ? (
+        <MinimapDragOverlay
+          controller={minimapDrag}
+          onZoom={(notches) => setZoom(wheelZoomFactor(notches))}
+        />
+      ) : null}
     </View>
   );
 }

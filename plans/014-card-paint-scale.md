@@ -1,5 +1,10 @@
 # Plan 014: Cut per-card paint work on large boards with a childless plate, detail tiers and whole-point sizes
 
+> **Status note (2026-11-11)**: the zoom-gated detail tiers were reverted at
+> the user's request: cards keep their title, status, body and preview at every
+> zoom. The childless plate, whole-point sizes and the renderer's paint elision
+> remain.
+
 > **Executor instructions**: Follow this plan step by step. Run every
 > verification command and confirm the expected result before moving to the
 > next step. If anything in the "STOP conditions" section occurs, stop and
