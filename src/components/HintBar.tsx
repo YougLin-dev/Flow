@@ -20,8 +20,6 @@ export function HintBar(props: HintBarProps) {
     <View
       classList={{
         "absolute left-4 rounded-full border border-border bg-card px-3 py-1.5": true,
-        // On a phone the tool switch owns the bottom-right corner; sit above
-        // it instead of sharing the row.
         "bottom-16": !platform.desktop,
         // The minimap owns the bottom-left corner on a desktop.
         "bottom-36": platform.desktop,

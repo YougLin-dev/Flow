@@ -42,7 +42,7 @@ test("box-selects a card", async () => {
 
   // Start off the connector that sits between the two cards: a press on it
   // selects the edge. A small pan leaves the box-select on empty canvas.
-  await app.press("Hand");
+  await app.keyboard.press("h");
   await app.drag("id:flow-canvas", { x: 0, y: 20 });
   await app.keyboard.press("v");
   await app.waitUntil(() => !app.texts().some((text) => text.includes("V to select")));
@@ -101,7 +101,7 @@ test("searches cards and reveals the chosen one", async () => {
   await app.waitUntil(() => percentOf(app.texts()) > 0);
 
   // Move the flow off screen first: revealing the hit must pan back to it.
-  await app.press("Hand");
+  await app.keyboard.press("h");
   await app.drag("id:flow-canvas", { x: 600, y: 0 });
 
   await app.keyboard.press("mod+k");

@@ -3,7 +3,7 @@ import { cleanup, signal, Text, View } from "nsh";
 /** How often the meter publishes what it counted. */
 const SAMPLE_MS = 500;
 
-/** The rate the app renders at, floating above the tool switch. Every
+/** The rate the app renders at, floating at the canvas' bottom-right. Every
  * `requestAnimationFrame` callback asks for the next frame, so this is the
  * display's real rate — and while the meter runs the app renders even when
  * it has nothing else: it forces a frame on every refresh and must be off

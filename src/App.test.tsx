@@ -115,7 +115,7 @@ test("clears the selection with Escape", async () => {
   await app.waitUntil(() => percentOf(app.texts()) > 0);
   const scale = percentOf(app.texts()) / 100;
 
-  await app.press("Hand");
+  await app.keyboard.press("h");
   await app.drag("id:flow-canvas", { x: 0, y: 20 });
   await app.keyboard.press("v");
   await app.waitUntil(() => !app.texts().some((text) => text.includes("V to select")));
@@ -137,7 +137,7 @@ test("pans in hand mode without selecting", async () => {
   const app = await open("./App.tsx");
   await app.waitUntil(() => percentOf(app.texts()) > 0);
 
-  await app.press("Hand");
+  await app.keyboard.press("h");
   await app.drag("id:flow-canvas", { x: -80, y: -40 });
 
   expect(app.texts().some((text) => text.includes("card selected"))).toBe(false);
@@ -212,7 +212,7 @@ test("switches back to the select tool with V", async () => {
   await app.keyboard.press("v");
   await app.waitUntil(() => !app.texts().some((text) => text.includes("V to select")));
 
-  await app.press("Hand");
+  await app.keyboard.press("h");
   await app.drag("id:flow-canvas", { x: 0, y: 20 });
   await app.keyboard.press("v");
   await app.waitUntil(() => !app.texts().some((text) => text.includes("V to select")));

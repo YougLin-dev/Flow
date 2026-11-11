@@ -15,7 +15,6 @@ import { NodeToolbar } from "../components/NodeToolbar";
 import { SearchButton } from "../components/SearchButton";
 import { SearchPalette } from "../components/SearchPalette";
 import { SelectionBadge } from "../components/SelectionBadge";
-import { ToolSwitch } from "../components/ToolSwitch";
 import { ZoomControls } from "../components/ZoomControls";
 import { AssetUrls } from "../flow/asset-urls";
 import { bindFlowKeys } from "../flow/bindings";
@@ -457,8 +456,6 @@ export function FlowPage() {
       ) : null}
 
       {composerOpen() ? null : <HintBar tool={currentTool()} />}
-
-      {composerOpen() ? null : <ToolSwitch tool={currentTool()} onChange={setTool} />}
 
       {process.env.FLOW_FPS ? <FrameRate /> : null}
 

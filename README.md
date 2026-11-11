@@ -105,7 +105,6 @@ src/                   the NSH app: its root, entry, config and assets
     ZoomControls.tsx   zoom in / out / fit
     SearchButton.tsx   floating search entry point
     SearchPalette.tsx  debounced full-text search, filters and result navigation
-    ToolSwitch.tsx     Select / Hand
     HintBar.tsx        shortcut hints
     SelectionBadge.tsx selection count
     BrandCard.tsx      branding shown where the desktop shell is absent
