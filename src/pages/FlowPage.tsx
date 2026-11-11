@@ -433,16 +433,6 @@ export function FlowPage() {
         imageEvent={(event) => imageProbe.set(imageProbeText(event))}
       />
 
-      {platform.desktop ? (
-        <MiniMap
-          overview={minimap.overview}
-          camera={camera}
-          stage={stage}
-          drag={minimapDrag}
-          onZoom={(notches) => setZoom(wheelZoomFactor(notches))}
-        />
-      ) : null}
-
       {host.params.flowImageLoadProbe === 1 ? <ImageLoadProbe value={imageProbe()} /> : null}
 
       {composerOpen() ? null : <NodeToolbar onAdd={addNode} />}
@@ -522,6 +512,19 @@ export function FlowPage() {
           </If>
         )}
       </If>
+
+      {/* A card's composer or inline editor can reach this corner: the map is
+          a canvas control and stays above them, while search, the context
+          menu and the map's own drag overlay stay above it. */}
+      {platform.desktop ? (
+        <MiniMap
+          overview={minimap.overview}
+          camera={camera}
+          stage={stage}
+          drag={minimapDrag}
+          onZoom={(notches) => setZoom(wheelZoomFactor(notches))}
+        />
+      ) : null}
 
       <If when={searchOpen()}>
         {() => (
