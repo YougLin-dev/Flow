@@ -181,7 +181,7 @@ export function MiniMap(props: MiniMapProps) {
           backgroundColor: "transparent",
           cursor: "grab",
         }}
-        onWheel={(event) => props.onZoom(event.notchesY)}
+        onFlowWheel={(event) => props.onZoom(event.notchesY)}
       />
     </View>
   );

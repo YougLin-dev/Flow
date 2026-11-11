@@ -4,16 +4,19 @@
  * pointer events into canvas gestures.
  */
 import {
+  computed,
+  signal,
   View,
   type ContextMenuEvent,
   type GestureResponderEvent,
   type MouseEvent as NshMouseEvent,
   type PressEvent,
 } from "nsh";
-import type { CanvasCamera } from "../flow/camera";
+import { type CanvasCamera, type CameraSize, sameBounds } from "../flow/camera";
 import type { CanvasController } from "../flow/canvas-controller";
 import type { ContextMenuPoint } from "../flow/context-menu";
 import type { FlowScene } from "../flow/scene";
+import { cardInView } from "../flow/view-culling";
 import { FlowCard, type CardImageEvent } from "./FlowCard";
 import { FlowEdges } from "./FlowEdges";
 import { FlowPreviews } from "./FlowPreviews";
@@ -28,6 +31,8 @@ export interface FlowCanvasProps {
   readonly camera: CanvasCamera;
   readonly controller: CanvasController;
   readonly tool: () => "select" | "hand";
+  /** The page's stage size: the one the camera and minimap share. */
+  readonly stage: () => CameraSize;
   readonly onSize: (size: { width: number; height: number }) => void;
   readonly onPan: (dx: number, dy: number) => void;
   readonly onZoom: (factor: number, x: number, y: number) => void;
@@ -47,6 +52,9 @@ interface TouchPoint {
 }
 
 export function FlowCanvas(props: FlowCanvasProps) {
+  // The page's stage starts at a placeholder size; clipping against it before
+  // the first layout would be wrong, so the view stays unmeasured until then.
+  const laidOut = signal(false);
   let pressed = false;
   let touchActive = false;
   let suppressUntil = 0;
@@ -121,6 +129,31 @@ export function FlowCanvas(props: FlowCanvasProps) {
       return;
     }
     props.controller.hover(lastX, lastY);
+  };
+
+  /** The world rectangle on screen; cards and connectors cull against it. */
+  const view = computed(
+    () => {
+      if (!laidOut()) return null;
+      const size = props.stage();
+      if (size.width <= 0 || size.height <= 0) return null;
+      return props.camera.visibleBounds(size);
+    },
+    { equals: sameBounds },
+  );
+
+  /**
+   * Selection pins every selected card in the scene, because the group frame
+   * and its connectors need the rectangle even off screen. At a high zoom
+   * most of a box-selected board is outside the viewport, so those cards are
+   * made transparent: NSH skips their whole paint subtree at zero opacity,
+   * and the clip would discard it anyway.
+   */
+  const cardVisible = (id: string): boolean => {
+    const shown = view();
+    if (shown === null) return true;
+    const rect = props.scene.cardRect(id);
+    return rect !== null && cardInView(rect, shown);
   };
 
   const onContextMenu = (event: ContextMenuEvent): void => {
@@ -227,9 +260,10 @@ export function FlowCanvas(props: FlowCanvasProps) {
     <View
       class="flex-1 bg-background"
       style={{ position: "relative", overflow: "hidden" }}
-      onLayout={(event) =>
-        props.onSize({ width: event.bounds.size.width, height: event.bounds.size.height })
-      }
+      onLayout={(event) => {
+        props.onSize({ width: event.bounds.size.width, height: event.bounds.size.height });
+        if (!laidOut()) laidOut.set(true);
+      }}
     >
       <GridBackground camera={props.camera} />
       <View
@@ -252,6 +286,7 @@ export function FlowCanvas(props: FlowCanvasProps) {
             props.controller.portPlus() !== null ||
             props.controller.framePlus() !== null
           }
+          visible={view}
         />
         {/* The frame shares the world's stacking: above unselected cards and
             below the selected ones, so the swept area moves as one group. */}
@@ -281,6 +316,7 @@ export function FlowCanvas(props: FlowCanvasProps) {
                     : null;
                 }}
                 target={() => props.scene.isConnectionTarget(id)}
+                visible={() => cardVisible(id)}
                 imageEvent={props.imageEvent}
               />
             );
@@ -304,7 +340,7 @@ export function FlowCanvas(props: FlowCanvasProps) {
           backgroundColor: "transparent",
           cursor: props.controller.cursor(),
         }}
-        onWheel={(event) => props.onWheelZoom(event.notchesY, event.x, event.y)}
+        onFlowWheel={(event) => props.onWheelZoom(event.notchesY, event.x, event.y)}
         onPressDown={onDown}
         onPressUp={onUp}
         onMouseMove={onMove}

@@ -1,5 +1,5 @@
 /** Pure geometry for selection, resizing, marquee selection and placement. */
-import type { BoxGeometry } from "./connection";
+import { overlaps, type BoxGeometry } from "./connection";
 
 export type ResizeHandle = "nw" | "n" | "ne" | "e" | "se" | "s" | "sw" | "w";
 
@@ -62,9 +62,7 @@ export function normalizeRect(x1: number, y1: number, x2: number, y2: number): S
 
 /** Whether two world rectangles overlap (touching edges count). */
 export function intersects(a: BoxGeometry, b: BoxGeometry): boolean {
-  return (
-    a.x <= b.x + b.width && a.x + a.width >= b.x && a.y <= b.y + b.height && a.y + a.height >= b.y
-  );
+  return overlaps(a, b);
 }
 
 /**

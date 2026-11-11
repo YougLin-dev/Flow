@@ -410,6 +410,7 @@ export function FlowPage() {
         camera={camera}
         controller={controller}
         tool={currentTool}
+        stage={stage}
         onSize={(size) => {
           stage.set(size);
           viewport.setSize(size.width, size.height);

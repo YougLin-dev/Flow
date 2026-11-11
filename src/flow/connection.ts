@@ -97,9 +97,8 @@ export function connectorControls(from: Point, to: Point): { c1: Point; c2: Poin
   };
 }
 
-/** The box holding the connector's whole cubic, from its control points. */
-export function connectionBounds(from: Point, to: Point): BoxGeometry {
-  const { c1, c2 } = connectorControls(from, to);
+/** The box holding a cubic, from its control points. */
+export function cubicBounds(from: Point, c1: Point, c2: Point, to: Point): BoxGeometry {
   const x = Math.min(from.x, c1.x, c2.x, to.x);
   const y = Math.min(from.y, c1.y, c2.y, to.y);
   return {
@@ -108,6 +107,22 @@ export function connectionBounds(from: Point, to: Point): BoxGeometry {
     width: Math.max(from.x, c1.x, c2.x, to.x) - x,
     height: Math.max(from.y, c1.y, c2.y, to.y) - y,
   };
+}
+
+/** The box holding the connector's whole cubic, from its control points. */
+export function connectionBounds(from: Point, to: Point): BoxGeometry {
+  const { c1, c2 } = connectorControls(from, to);
+  return cubicBounds(from, c1, c2, to);
+}
+
+/** Whether `a` and `b` meet; `margin` grows `b` on every side. */
+export function overlaps(a: BoxGeometry, b: BoxGeometry, margin = 0): boolean {
+  return (
+    a.x <= b.x + b.width + margin &&
+    a.x + a.width >= b.x - margin &&
+    a.y <= b.y + b.height + margin &&
+    a.y + a.height >= b.y - margin
+  );
 }
 
 /** The box holding both boxes. */

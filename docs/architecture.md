@@ -236,7 +236,12 @@ connectors meet the card's own border. `FlowEdges` strokes every connector's
 cubic from `flow/connection.ts` in one native-canvas layer with round caps;
 the canvas rasterizer draws at the transformed resolution, so the lines stay
 smooth and sharp at every camera scale instead of showing sampled joints, and
-there is no arrowhead. The connectors of selected cards rest brighter and
+there is no arrowhead. The canvas covers only the connector box clipped to the
+camera's view plus a margin, and a connector that crosses the view is stroked
+as the visible runs of its cubic (`flow/edge-clip.ts`), sampled against the
+view's width: at 250% the stroked geometry stays about one screen long instead
+of tessellating document-long curves that the clip would discard. Comet pieces
+outside the view are skipped the same way. The connectors of selected cards rest brighter and
 thicker than the others and carry a comet of light (`flow/edge-flow.ts`):
 the connector's cubic is split into short pieces (`splitConnector`), and
 each piece's alpha is an animated value of the shared wave, so the light
@@ -251,6 +256,9 @@ owns the moving flag for every pan, zoom and fit, settled by a 150 ms timer.
 Above four flowing connectors, card/selection movement, camera settling and
 following card/frame pluses suppress the expensive comet strokes while the
 native phase continues. The brighter resting selection highlight remains.
+A selected card outside the camera's view stays in the scene for the group
+frame and its connectors, but its view is fully transparent, so NSH skips the
+card's paint subtree while its text stays in the accessibility tree.
 The pulled connectors are one dashed `FlowPreviews`
 canvas above the cards, holding one line per fixed end, so a group drag pulls
 a line from every selected card. Both are presentational: props are

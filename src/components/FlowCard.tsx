@@ -52,6 +52,8 @@ export interface FlowCardProps {
   readonly plusSuppressed: () => boolean;
   /** True while a pulled connector is snapped to this card. */
   readonly target: () => boolean;
+  /** False while the card lies wholly outside the camera's view. */
+  readonly visible: () => boolean;
   /** The test-only image observation path; normal rendering has no hook. */
   readonly imageEvent?: ((event: CardImageEvent) => void) | undefined;
 }
@@ -78,6 +80,9 @@ export function FlowCard(props: FlowCardProps) {
   // read; the gated values keep an unchanged card from waking any binding.
   const content = new CardContent(() => props.node());
   const zIndex = computed(() => props.zIndex());
+  // A value-gated boolean: the card's style wakes when it starts or stops
+  // showing, not on every camera tick.
+  const shown = computed(() => props.visible());
   const pos = () => geometry.position() ?? ZERO_POINT;
   const size = () => geometry.size() ?? ZERO_SIZE;
   const layout = () => cardLocalLayout(size());
@@ -107,6 +112,10 @@ export function FlowCard(props: FlowCardProps) {
         width: 0,
         height: 0,
         zIndex: zIndex(),
+        // Zero opacity skips the whole subtree's paint natively while the
+        // card stays in the scene and the accessibility tree. Only exactly
+        // 0 or 1 is ever set, so no group layer is ever made.
+        opacity: shown() ? 1 : 0,
       }}
     >
       <View

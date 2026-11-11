@@ -2,7 +2,7 @@
  * A full-canvas capture surface during a minimap drag: the pointer may leave
  * the small panel, so its moves must keep reaching the drag.
  */
-import { View, type MouseButtonEvent, type MouseEvent as NshMouseEvent } from "nsh";
+import { View, type MouseEvent as NshMouseEvent } from "nsh";
 import type { MinimapController } from "../flow/minimap-controller";
 import { WheelSurface } from "./wheel-surface";
 
@@ -24,7 +24,7 @@ export function MinimapDragOverlay(props: MinimapDragOverlayProps) {
     props.controller.move(event.pagePosition);
   };
 
-  const onUp = (event: MouseButtonEvent): void => {
+  const onUp = (event: NshMouseEvent): void => {
     if (event.button !== "left" || !props.controller.dragging()) return;
     // The last move may lag the release by a frame: apply the release point.
     props.controller.move(event.pagePosition);
@@ -56,7 +56,7 @@ export function MinimapDragOverlay(props: MinimapDragOverlayProps) {
           height: "100%",
           backgroundColor: "transparent",
         }}
-        onWheel={(event) => props.onZoom(event.notchesY)}
+        onFlowWheel={(event) => props.onZoom(event.notchesY)}
       />
     </View>
   );

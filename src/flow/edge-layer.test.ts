@@ -2,7 +2,12 @@ import { type Accessor, effect } from "nsh";
 import { expect, test } from "nsh/test";
 import type { EdgeSummary, NodeSummary, SceneSnapshot } from "@flow/native";
 import { type BoxGeometry, type Point, connectionBounds, connectorControls } from "./connection";
-import { connectorLayerBounds, connectorLayerBox } from "./edge-layer";
+import {
+  CONNECTOR_VIEW_MARGIN,
+  connectorLayerBounds,
+  connectorLayerBox,
+  trimConnectorBox,
+} from "./edge-layer";
 import { FlowScene } from "./scene";
 
 function node(id: string, x: number, y: number): NodeSummary {
@@ -249,6 +254,38 @@ test("a move inside the rounded box wakes no readers, but crossing it wakes each
   expectReaderRuns(readers, 2);
   expect(scene.traversals).toBe(built + 2);
   expect(before.x).not.toBe(box()?.x);
+});
+
+test("a view inside the connector box trims it to the view plus margin, rounded out", () => {
+  const box = { x: 0, y: 0, width: 4000, height: 3000 };
+  const view = { x: 1000, y: 800, width: 390, height: 844 };
+  const trimmed = trimConnectorBox(box, view);
+  expect(trimmed).toEqual({ x: 896, y: 704, width: 576, height: 1024 });
+  // The rounded box still covers the view and its margin.
+  expect(trimmed?.x).toBeLessThanOrEqual(view.x - CONNECTOR_VIEW_MARGIN);
+  expect(trimmed?.y).toBeLessThanOrEqual(view.y - CONNECTOR_VIEW_MARGIN);
+  expect((trimmed?.x ?? 0) + (trimmed?.width ?? 0)).toBeGreaterThanOrEqual(
+    view.x + view.width + CONNECTOR_VIEW_MARGIN,
+  );
+  expect((trimmed?.y ?? 0) + (trimmed?.height ?? 0)).toBeGreaterThanOrEqual(
+    view.y + view.height + CONNECTOR_VIEW_MARGIN,
+  );
+});
+
+test("a view larger than the connector box keeps the rounded box", () => {
+  const box = { x: 128, y: 64, width: 320, height: 256 };
+  expect(trimConnectorBox(box, { x: -500, y: -500, width: 4000, height: 4000 })).toEqual(box);
+});
+
+test("a view beside the connector box leaves no canvas", () => {
+  const box = { x: 0, y: 0, width: 320, height: 200 };
+  expect(trimConnectorBox(box, { x: 1000, y: 0, width: 390, height: 844 })).toBeNull();
+});
+
+test("an unmeasured view keeps the whole connector box", () => {
+  const box = { x: 0, y: 0, width: 320, height: 200 };
+  expect(trimConnectorBox(box, null)).toBe(box);
+  expect(trimConnectorBox(null, { x: 0, y: 0, width: 390, height: 844 })).toBeNull();
 });
 
 test("the drawing origin shares the box memo without adding a traversal", () => {

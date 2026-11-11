@@ -1,7 +1,7 @@
 /** The canvas's wheel sensor, registered by the Rust crate (`wheel_surface.rs`). */
 import { nativeComponent } from "nsh";
 
-export interface WheelEvent {
+export interface FlowWheelEvent {
   readonly x: number;
   readonly y: number;
   readonly notchesY: number;
@@ -19,10 +19,10 @@ interface WheelProps {
  * headless engine), it renders an empty view and the pointer handlers still
  * work.
  */
-export const WheelSurface = nativeComponent<WheelProps, { wheel: WheelEvent }>(
+export const WheelSurface = nativeComponent<WheelProps, { flowWheel: FlowWheelEvent }>(
   "flow.wheel-surface",
   {
     props: [],
-    events: ["wheel"],
+    events: ["flowWheel"],
   },
 );

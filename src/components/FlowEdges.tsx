@@ -19,8 +19,17 @@ import {
   token,
 } from "nsh";
 import type { EdgeSummary } from "@flow/native";
-import { type Point, connectorControls, EDGE_THICKNESS, splitConnector } from "../flow/connection";
-import { connectorLayerBox } from "../flow/edge-layer";
+import {
+  type BoxGeometry,
+  type Point,
+  connectorControls,
+  cubicBounds,
+  EDGE_THICKNESS,
+  overlaps,
+  splitConnector,
+} from "../flow/connection";
+import { cubicInView, cubicInsideView, visibleCubicRuns } from "../flow/edge-clip";
+import { connectorLayerBox, sameBox, trimConnectorBox } from "../flow/edge-layer";
 import {
   cometRuns,
   cometShown,
@@ -44,16 +53,24 @@ const FLOW_THICKNESS = EDGE_THICKNESS + 1;
  * would dominate that record. Its native phase continues meanwhile. */
 const GESTURE_FLOW_EDGES = 4;
 
-/** A connector's resolved ports, shared by its baseline and comet strokes. */
+/** A stroke's width, in world points; the cull and clip margins keep it. */
+const STROKE_MARGIN = FLOW_THICKNESS;
+
+/** A connector's resolved geometry, shared by its baseline and comet strokes. */
 interface DrawableEdge {
   readonly edge: EdgeSummary;
   readonly ports: { from: Point; to: Point };
+  readonly controls: { c1: Point; c2: Point };
+  /** Visible polyline runs; null when the whole cubic can be stroked. */
+  readonly runs: readonly (readonly Point[])[] | null;
 }
 
 export interface FlowEdgesProps {
   readonly scene: FlowScene;
   /** True while the camera moves/settles or a card/frame plus follows the pointer. */
   readonly paused: Accessor<boolean>;
+  /** The world rectangle the camera shows; null until it has a size. */
+  readonly visible: Accessor<BoxGeometry | null>;
 }
 
 export function FlowEdges(props: FlowEdgesProps) {
@@ -99,23 +116,92 @@ export function FlowEdges(props: FlowEdgesProps) {
     wave.interpolate(flowPass(index)),
   );
 
-  const box = connectorLayerBox(props.scene);
+  // One memo per scene change serves the canvas box and both clipping paths;
+  // creating it per camera tick would walk every connector for nothing.
+  const layer = connectorLayerBox(props.scene);
+  const measured = computed(() => props.visible() !== null);
+  // Clipping is needed only while part of the connector layer leaves the
+  // view. Inside the content the value stays null, so panning and zooming
+  // there do not re-record the whole canvas.
+  const clipView = computed(
+    () => {
+      const view = props.visible();
+      const box = layer();
+      if (view === null || box === null) return null;
+      const inside =
+        box.x >= view.x &&
+        box.y >= view.y &&
+        box.x + box.width <= view.x + view.width &&
+        box.y + box.height <= view.y + view.height;
+      return inside ? null : view;
+    },
+    { equals: sameBox },
+  );
+  const box = computed(() => trimConnectorBox(layer(), clipView()), { equals: sameBox });
   const left = () => box()?.x ?? 0;
   const top = () => box()?.y ?? 0;
   const width = () => box()?.width ?? 0;
   const height = () => box()?.height ?? 0;
 
   const draw = (cx: CanvasRenderingContext2D): void => {
+    // Nothing can be clipped correctly before layout; the first measured
+    // frame records, rather than a document-sized canvas recording now.
+    if (!measured()) return;
+    const view = clipView();
     const edges = props.scene.edges();
     const drawable: DrawableEdge[] = [];
     for (const edge of edges) {
       const ports = props.scene.edgePorts(edge);
-      if (ports) drawable.push({ edge, ports });
+      if (ports === null) continue;
+      const controls = connectorControls(ports.from, ports.to);
+      if (
+        view === null ||
+        cubicInsideView(ports.from, controls.c1, controls.c2, ports.to, view, STROKE_MARGIN)
+      ) {
+        drawable.push({ edge, ports, controls, runs: null });
+        continue;
+      }
+      // A connector whose whole cubic is off screen is not stroked; one that
+      // crosses it is stroked only where it can be seen.
+      const bounds = cubicBounds(ports.from, controls.c1, controls.c2, ports.to);
+      if (!overlaps(bounds, view, STROKE_MARGIN)) continue;
+      const runs = visibleCubicRuns(
+        ports.from,
+        controls.c1,
+        controls.c2,
+        ports.to,
+        view,
+        STROKE_MARGIN,
+      );
+      if (runs.length === 0) continue;
+      drawable.push({ edge, ports, controls, runs });
     }
     if (drawable.length === 0) return;
     const current = box();
     if (current === null) return;
     const origin = { x: current.x, y: current.y };
+    const traceCubic = (from: Point, c1: Point, c2: Point, to: Point): void => {
+      cx.moveTo(from.x - origin.x, from.y - origin.y);
+      cx.bezierCurveTo(
+        c1.x - origin.x,
+        c1.y - origin.y,
+        c2.x - origin.x,
+        c2.y - origin.y,
+        to.x - origin.x,
+        to.y - origin.y,
+      );
+    };
+    const traceRuns = (runs: readonly (readonly Point[])[]): void => {
+      for (const run of runs) {
+        const first = run[0];
+        if (first === undefined) continue;
+        cx.moveTo(first.x - origin.x, first.y - origin.y);
+        for (let i = 1; i < run.length; i += 1) {
+          const point = run[i];
+          if (point !== undefined) cx.lineTo(point.x - origin.x, point.y - origin.y);
+        }
+      }
+    };
     // Read the scheme so a theme switch redraws every connector's color.
     colorScheme();
     const normal = token("muted-foreground");
@@ -128,9 +214,8 @@ export function FlowEdges(props: FlowEdgesProps) {
     const flowing = new Set(props.scene.selection());
     const paused = props.paused();
     cx.lineCap = "round";
-    for (const { edge, ports } of drawable) {
+    for (const { edge, ports, controls, runs } of drawable) {
       const { from, to } = ports;
-      const { c1, c2 } = connectorControls(from, to);
       // A selected card's connectors rest brighter and thicker than the
       // rest, under their wave; a connector that is itself selected keeps
       // its accent.
@@ -140,15 +225,8 @@ export function FlowEdges(props: FlowEdgesProps) {
       cx.lineWidth = EDGE_THICKNESS;
       cx.globalAlpha = 1;
       cx.beginPath();
-      cx.moveTo(from.x - origin.x, from.y - origin.y);
-      cx.bezierCurveTo(
-        c1.x - origin.x,
-        c1.y - origin.y,
-        c2.x - origin.x,
-        c2.y - origin.y,
-        to.x - origin.x,
-        to.y - origin.y,
-      );
+      if (runs === null) traceCubic(from, controls.c1, controls.c2, to);
+      else traceRuns(runs);
       cx.stroke();
       if (highlighted) {
         cx.strokeStyle = flowColor;
@@ -183,17 +261,20 @@ export function FlowEdges(props: FlowEdgesProps) {
       const pieces = splitConnector(ports.from, ports.to, FLOW_SEGMENTS);
       for (let i = 0; i < pieces.length; i += 1) {
         const piece = pieces[i];
+        let runs: readonly (readonly Point[])[] | null = null;
+        if (view !== null) {
+          // A piece wholly outside cannot show; one that crosses the view
+          // is stroked only where it can be seen, like the baseline.
+          if (!cubicInView(piece.from, piece.c1, piece.c2, piece.to, view, STROKE_MARGIN)) continue;
+          if (!cubicInsideView(piece.from, piece.c1, piece.c2, piece.to, view, STROKE_MARGIN)) {
+            runs = visibleCubicRuns(piece.from, piece.c1, piece.c2, piece.to, view, STROKE_MARGIN);
+            if (runs.length === 0) continue;
+          }
+        }
         cx.globalAlpha = alphas[i];
         cx.beginPath();
-        cx.moveTo(piece.from.x - origin.x, piece.from.y - origin.y);
-        cx.bezierCurveTo(
-          piece.c1.x - origin.x,
-          piece.c1.y - origin.y,
-          piece.c2.x - origin.x,
-          piece.c2.y - origin.y,
-          piece.to.x - origin.x,
-          piece.to.y - origin.y,
-        );
+        if (runs === null) traceCubic(piece.from, piece.c1, piece.c2, piece.to);
+        else traceRuns(runs);
         cx.stroke();
       }
     }

@@ -45,6 +45,34 @@ export function connectorLayerBounds(boxes: readonly (BoxGeometry | null)[]): Bo
   });
 }
 
+/** How far past the viewport the canvas keeps its world box, so a small
+ * camera move or card drag does not resize the native surface. */
+export const CONNECTOR_VIEW_MARGIN = 64;
+
+/**
+ * The part of the connector box the camera can show. A canvas over the whole
+ * connector graph stays document-sized, and its native surface scales with
+ * the camera: at 250% that is tens of millions of pixels to compose every
+ * frame. Clipping it to the viewport (plus a margin) keeps the surface about
+ * one window large at any zoom; connectors outside cannot be seen and the
+ * drawing also clips their curves, so nothing visible is lost.
+ */
+export function trimConnectorBox(
+  box: BoxGeometry | null,
+  view: BoxGeometry | null,
+): BoxGeometry | null {
+  if (box === null) return null;
+  if (view === null || view.width <= 0 || view.height <= 0) return box;
+  const left = Math.max(box.x, view.x - CONNECTOR_VIEW_MARGIN);
+  const top = Math.max(box.y, view.y - CONNECTOR_VIEW_MARGIN);
+  const right = Math.min(box.x + box.width, view.x + view.width + CONNECTOR_VIEW_MARGIN);
+  const bottom = Math.min(box.y + box.height, view.y + view.height + CONNECTOR_VIEW_MARGIN);
+  if (right <= left || bottom <= top) return null;
+  // The same 64-point step as the layer box: a pan inside a step does not
+  // touch the canvas style or resize its native surface.
+  return roundOut({ x: left, y: top, width: right - left, height: bottom - top });
+}
+
 /** The connector canvas's world box, or null with no usable connectors. */
 export function connectorLayerBox(scene: FlowScene): Accessor<BoxGeometry | null> {
   // One computation serves all four style bindings and the drawing origin;

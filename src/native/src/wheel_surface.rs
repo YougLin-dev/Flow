@@ -24,7 +24,7 @@ impl NativeComponent for WheelSurface {
             return false;
         }
         self.context.emit(
-            "wheel",
+            "flowWheel",
             json!({ "x": event.x, "y": event.y, "notchesY": event.notches_y }),
         );
         true

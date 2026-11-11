@@ -25,6 +25,18 @@ export interface CameraSize {
   height: number;
 }
 
+/** Compares two world rectangles by value, so a stable view allocates none. */
+export function sameBounds(first: CameraBounds | null, second: CameraBounds | null): boolean {
+  if (first === second) return true;
+  if (first === null || second === null) return false;
+  return (
+    first.x === second.x &&
+    first.y === second.y &&
+    first.width === second.width &&
+    first.height === second.height
+  );
+}
+
 /** An owned settle timeout without exposing a platform timer to the camera. */
 export interface CameraTimer {
   cancel(): void;

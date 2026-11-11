@@ -4,6 +4,9 @@
  * shared by the card silhouettes, the viewport rectangle and drag-to-pan.
  */
 import type { Overview, Viewport } from "@flow/native";
+import { sameBounds } from "./camera";
+
+export { sameBounds };
 
 export interface MinimapSize {
   readonly width: number;
@@ -79,18 +82,6 @@ export function unionBounds(first: Viewport, second: Viewport): Viewport {
   const right = Math.max(first.x + first.width, second.x + second.width);
   const bottom = Math.max(first.y + first.height, second.y + second.height);
   return { x, y, width: Math.max(1, right - x), height: Math.max(1, bottom - y) };
-}
-
-/** Compares two bounds by value, so an unchanged union wakes no card. */
-export function sameBounds(first: Viewport | null, second: Viewport | null): boolean {
-  if (first === second) return true;
-  if (first === null || second === null) return false;
-  return (
-    first.x === second.x &&
-    first.y === second.y &&
-    first.width === second.width &&
-    first.height === second.height
-  );
 }
 
 /** Compares two layouts by value, so a stable union allocates no new layout. */
