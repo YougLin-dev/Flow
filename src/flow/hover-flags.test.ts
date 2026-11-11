@@ -29,7 +29,6 @@ function setup(): CanvasController {
   return new CanvasController({
     scene: () => scene,
     camera: () => camera,
-    tool: () => "select",
     panBy: () => undefined,
     commitBounds: () => undefined,
     selectEdge: (id) => scene.selectEdge(id),

@@ -6,7 +6,6 @@ import { CanvasContextMenu } from "../components/CanvasContextMenu";
 import { FlowCanvas } from "../components/FlowCanvas";
 import { ImageLoadProbe, imageProbeText } from "../components/FlowCard";
 import { FrameRate } from "../components/FrameRate";
-import { HintBar } from "../components/HintBar";
 import { InlineTextEditor } from "../components/InlineTextEditor";
 import { MiniMap } from "../components/MiniMap";
 import { MinimapDragOverlay } from "../components/MinimapDragOverlay";
@@ -35,14 +34,7 @@ import { SEARCH_FILTERS } from "../flow/search-filters";
 import { revealSearchHit } from "../flow/search-navigation";
 import { FlowScene } from "../flow/scene";
 import { ViewportController } from "../flow/viewport-controller";
-import {
-  currentTool,
-  selectedCount,
-  setSelectedCount,
-  setTool,
-  setZoomPercent,
-  zoomPercent,
-} from "../store";
+import { selectedCount, setSelectedCount, setZoomPercent, zoomPercent } from "../store";
 
 /**
  * The flow workspace: a native canvas of cards and connectors, the page's
@@ -155,7 +147,6 @@ export function FlowPage() {
   const controller = new CanvasController({
     scene: () => scene,
     camera: () => camera,
-    tool: () => currentTool(),
     panBy: (dx, dy) => viewport.panBy(dx, dy),
     commitBounds,
     selectEdge,
@@ -305,13 +296,6 @@ export function FlowPage() {
     })();
   };
 
-  const connectSelected = (): void => {
-    const selected = scene.selection();
-    if (selected.length !== 2) return;
-    const [from, to] = selected;
-    if (from && to) void currentSession()?.connectNodes([{ fromId: from, toId: to }]);
-  };
-
   const undoRedo = async (direction: "undo" | "redo"): Promise<void> => {
     const doc = document;
     if (!doc || disposed) return;
@@ -328,10 +312,6 @@ export function FlowPage() {
   bindFlowKeys({
     setZoom,
     fit,
-    setTool,
-    addText: () => addNode("text"),
-    addImage: () => addNode("image"),
-    connectSelected,
     deleteSelected,
     undo: () => void undoRedo("undo"),
     redo: () => void undoRedo("redo"),
@@ -408,7 +388,6 @@ export function FlowPage() {
         scene={scene}
         camera={camera}
         controller={controller}
-        tool={currentTool}
         stage={stage}
         onSize={(size) => {
           stage.set(size);
@@ -454,8 +433,6 @@ export function FlowPage() {
       {selectedCount() > 0 ? (
         <SelectionBadge count={selectedCount()} composing={composerOpen()} />
       ) : null}
-
-      {composerOpen() ? null : <HintBar tool={currentTool()} />}
 
       {process.env.FLOW_FPS ? <FrameRate /> : null}
 

@@ -39,7 +39,6 @@ function setup(nodes: NodeSummary[]): {
   const host: CanvasHost = {
     scene: () => scene,
     camera: () => camera,
-    tool: () => "select",
     panBy: () => undefined,
     commitBounds: () => undefined,
     selectEdge: (id) => scene.selectEdge(id),

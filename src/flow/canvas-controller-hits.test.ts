@@ -1,7 +1,7 @@
 import { expect, test } from "nsh/test";
 import type { EdgeSummary, NodeBounds, NodeSummary, SceneSnapshot } from "@flow/native";
 import { CanvasCamera } from "./camera";
-import { type CanvasHost, type CanvasTool, CanvasController } from "./canvas-controller";
+import { type CanvasHost, CanvasController } from "./canvas-controller";
 import { FlowScene } from "./scene";
 
 function node(id: string, x: number, y: number, overrides: Partial<NodeSummary> = {}): NodeSummary {
@@ -46,7 +46,6 @@ function setup(
   camera: CanvasCamera;
   controller: CanvasController;
   calls: Calls;
-  useTool: (tool: CanvasTool) => void;
 } {
   const scene = new FlowScene();
   scene.apply(snapshot(nodes, edges));
@@ -60,11 +59,9 @@ function setup(
     inline: [],
     cards: [],
   };
-  let tool: CanvasTool = "select";
   const host: CanvasHost = {
     scene: () => scene,
     camera: () => camera,
-    tool: () => tool,
     panBy: (dx, dy) => calls.pans.push({ dx, dy }),
     commitBounds: (bounds) => calls.commits.push(bounds),
     selectEdge: (id) => {
@@ -81,9 +78,6 @@ function setup(
     camera,
     controller: new CanvasController(host),
     calls,
-    useTool: (next) => {
-      tool = next;
-    },
   };
 }
 

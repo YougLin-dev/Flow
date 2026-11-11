@@ -41,11 +41,9 @@ test("box-selects a card", async () => {
   const scale = percentOf(app.texts()) / 100;
 
   // Start off the connector that sits between the two cards: a press on it
-  // selects the edge. A small pan leaves the box-select on empty canvas.
-  await app.keyboard.press("h");
-  await app.drag("id:flow-canvas", { x: 0, y: 20 });
-  await app.keyboard.press("v");
-  await app.waitUntil(() => !app.texts().some((text) => text.includes("V to select")));
+  // selects the edge. Moving the flow with an arrow leaves the box-select on
+  // empty canvas.
+  await app.keyboard.press("down");
 
   await app.drag("id:flow-canvas", {
     x: -260 * scale,
@@ -101,8 +99,13 @@ test("searches cards and reveals the chosen one", async () => {
   await app.waitUntil(() => percentOf(app.texts()) > 0);
 
   // Move the flow off screen first: revealing the hit must pan back to it.
-  await app.keyboard.press("h");
-  await app.drag("id:flow-canvas", { x: 600, y: 0 });
+  // Each press is its own keydown/keyup, so they are sent one at a time.
+  const panRight = async (remaining: number): Promise<void> => {
+    if (remaining === 0) return;
+    await app.keyboard.press("right");
+    await panRight(remaining - 1);
+  };
+  await panRight(15);
 
   await app.keyboard.press("mod+k");
   await app.waitUntil(() => app.shows("id:search-input"));

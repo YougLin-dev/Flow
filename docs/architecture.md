@@ -20,8 +20,7 @@ App.tsx                     app shell: title bar + page, nothing else
  │   ├─ flow/*              node kinds, execution, scene, camera, gestures
  │   └─ store.ts            shared state behind readers and actions
  ├─ components/TitleBar.tsx window chrome (props only)
- ├─ store.ts                pinned state
- └─ tool.ts                 the Tool union shared by the store and controls
+ └─ store.ts                zoom, selection count and pinned state
 ```
 
 Dependencies point down only. `store.ts` and `components/` never import a
@@ -143,8 +142,8 @@ the binding. Nothing writes another page's local state.
 State that belongs to one mounted page stays there: `FlowPage` owns the
 `FlowScene`, the `CanvasCamera`, the `CanvasController`, the stage size and the
 document session, because they live and die with the workspace. Values the
-chrome and overlays share (tool, zoom label, selection count, window pin) move
-to the store. `App` binds the store's `isPinned`/`togglePinned` into
+chrome and overlays share (zoom label, selection count, window pin) move to
+the store. `App` binds the store's `isPinned`/`togglePinned` into
 `TitleBar`, so the component stays reusable.
 
 ## The canvas
@@ -275,8 +274,8 @@ testing uses the same depth, and the connection previews stay above them all.
 A card under the pointer hides a lower card's plus, just as it hides the card
 itself.
 `CanvasController` turns pointer events into commands: select/toggle, drag,
-resize from a handle, marquee, pan with the hand tool, the following plus,
-and the port/edge gestures. `CanvasCamera` stores logical `x`, `y` and
+resize from a handle, marquee, the following plus, and the port/edge
+gestures; the secondary button's drag pans. `CanvasCamera` stores logical `x`, `y` and
 `scale`; `panBy`, `zoomAround` and `fit` rebuild the view from those values.
 
 The dot grid and the cards follow the camera, but the composer does not: its
@@ -295,7 +294,7 @@ target stay visible.
 `FlowCanvas` feeds NSH's press, mouse and touch events into
 `CanvasController`:
 
-- **Select** — a press selects a card (Shift toggles), starts a drag when the
+- **Pointer** — a press selects a card (Shift toggles), starts a drag when the
   press lands on a selected card, starts a resize when it lands near any
   visible card's border (a corner or anywhere along an edge; the press selects
   that card first), and starts the connector gestures in a plus's side zone.
@@ -305,20 +304,18 @@ target stay visible.
   side zones keep clear of the corners, so a plus never steals a corner
   resize. A press on empty canvas clears the selection and starts the
   marquee. A double-click on a text card opens its inline editor.
-- **Hand** — presses pan the camera; nothing is selected.
-- **Touch** — one finger behaves like the current tool; two fingers pinch-zoom
-  around their center and pan with it.
+- **Touch** — one finger selects, drags, resizes, connects and box-selects as
+  the pointer does; two fingers pinch-zoom around their center and pan with it.
 - **Hover** — mouse movement updates the hovered card, the plus following the
-  pointer in a side zone, and a cursor that reflects the tool, any card's
-  resize border or a plus. A card under the pointer owns the hit: another
+  pointer in a side zone, and a cursor that reflects any card's resize border
+  or a plus. A card under the pointer owns the hit: another
   card's border or plus never reacts through it.
 - **Wheel** — the mouse wheel and touchpad zoom about the pointer, four
   notches per doubling, clamped to the camera's scale range. The wheel is a
   native-component event (the window's input never reaches TSX directly), so
   the pointer view owns a sensor that forwards it.
 - **Secondary button** — holding the right button and dragging pans the
-  camera with any tool, without selecting, starting a marquee or moving a
-  card. A right click that stays put opens the canvas context menu on the
+  camera, without selecting, starting a marquee or moving a card. A right click that stays put opens the canvas context menu on the
   button's release. NSH reports the press through `onContextMenu`, the moves
   while it is held, and the release through `onMouseUp`: a press that never
   moved past the drag threshold opens its menu at the pressed point, and a
@@ -327,11 +324,11 @@ target stay visible.
 
 Keyboard commands are declared in `flow/bindings.ts` (`bindFlowKeys`) and
 bound once by the page: `mod+=`/`mod+-`/`mod+0`
-zoom and fit, `v`/`h` switch tools, `n`/`i` add a text or image node, `l`
-connects two selected cards, `mod+z`/`mod+shift+z` undo and redo,
-Delete/Backspace delete the selected edge or cards, arrows pan, `mod+k` opens
-search, and Escape dismisses the top layer (search, inline editor, selected
-edge, composer, then the selection). Each command exists once.
+zoom and fit, `mod+z`/`mod+shift+z` undo and redo, Delete/Backspace delete
+the selected edge or cards, arrows pan, `mod+k` opens search, and Escape
+dismisses the top layer (search, inline editor, selected edge, composer, then
+the selection). The toolbar's Text and Image buttons add nodes. Each command
+exists once.
 
 Pointer gestures above the canvas: dragging a card's right plus previews a
 forward connection and the left plus a reverse one; the preview is dashed

@@ -1,13 +1,8 @@
 import { keymap } from "nsh";
-import type { Tool } from "../tool";
 
 export interface FlowKeyActions {
   readonly setZoom: (factor: number) => void;
   readonly fit: () => void;
-  readonly setTool: (tool: Tool) => void;
-  readonly addText: () => void;
-  readonly addImage: () => void;
-  readonly connectSelected: () => void;
   readonly deleteSelected: () => void;
   readonly undo: () => void;
   readonly redo: () => void;
@@ -22,11 +17,6 @@ export function bindFlowKeys(actions: FlowKeyActions): void {
     "mod+=": () => actions.setZoom(1.2),
     "mod+-": () => actions.setZoom(1 / 1.2),
     "mod+0": actions.fit,
-    v: () => actions.setTool("select"),
-    h: () => actions.setTool("hand"),
-    n: actions.addText,
-    i: actions.addImage,
-    l: actions.connectSelected,
     backspace: actions.deleteSelected,
     delete: actions.deleteSelected,
     "mod+z": actions.undo,

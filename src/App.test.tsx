@@ -76,11 +76,11 @@ const expectArrowPan = async (arrow: Arrow): Promise<void> => {
   expect(app.texts().some((text) => text.includes("card selected"))).toBe(false);
 };
 
-test("adds a panel with N and deletes it with Backspace", async () => {
+test("adds a panel with the toolbar and deletes it with Backspace", async () => {
   const app = await open("./App.tsx");
   await app.waitUntil(() => percentOf(app.texts()) > 0);
 
-  await app.keyboard.press("n");
+  await app.press("id:add-text-node");
   await app.waitUntil(() => app.texts().some((text) => text.includes("1 card selected")));
   expect(app.texts().some((text) => text.includes("1 card selected"))).toBe(true);
 
@@ -100,11 +100,11 @@ test("adds a panel with N and deletes it with Backspace", async () => {
   expect(app.texts()).toContain("No cards match");
 });
 
-test("adds an image node with I", async () => {
+test("adds an image node from the toolbar", async () => {
   const app = await open("./App.tsx");
   await app.waitUntil(() => percentOf(app.texts()) > 0);
 
-  await app.keyboard.press("i");
+  await app.press("id:add-image-node");
   await app.waitUntil(() => app.texts().some((text) => text.includes("1 card selected")));
   await app.waitUntil(() => app.texts().includes("Model · Mock Image"));
   expect(app.texts().some((text) => text.includes("1 card selected"))).toBe(true);
@@ -115,10 +115,9 @@ test("clears the selection with Escape", async () => {
   await app.waitUntil(() => percentOf(app.texts()) > 0);
   const scale = percentOf(app.texts()) / 100;
 
-  await app.keyboard.press("h");
-  await app.drag("id:flow-canvas", { x: 0, y: 20 });
-  await app.keyboard.press("v");
-  await app.waitUntil(() => !app.texts().some((text) => text.includes("V to select")));
+  // Move the flow off the canvas centre so the marquee starts on empty
+  // canvas instead of the connector between the two cards.
+  await app.keyboard.press("down");
 
   await app.drag("id:flow-canvas", { x: -260 * scale, y: -100 * scale });
   await app.waitUntil(() => app.texts().some((text) => text.includes("1 card selected")));
@@ -131,16 +130,6 @@ test("clears the selection with Escape", async () => {
 
   await app.keyboard.press("escape");
   await app.waitUntil(() => !app.texts().some((text) => text.includes("card selected")));
-});
-
-test("pans in hand mode without selecting", async () => {
-  const app = await open("./App.tsx");
-  await app.waitUntil(() => percentOf(app.texts()) > 0);
-
-  await app.keyboard.press("h");
-  await app.drag("id:flow-canvas", { x: -80, y: -40 });
-
-  expect(app.texts().some((text) => text.includes("card selected"))).toBe(false);
 });
 
 test("zooms with the controls", async () => {
@@ -186,38 +175,6 @@ test("fits with the keyboard", async () => {
   await app.keyboard.press("mod+0");
   await app.waitUntil(() => percentOf(app.texts()) === fitted);
   expect(percentOf(app.texts())).toBe(fitted);
-});
-
-test("switches to the hand tool with H", async () => {
-  const app = await open("./App.tsx", { platform: "windows" });
-  await app.waitUntil(() => percentOf(app.texts()) > 0);
-  const scale = percentOf(app.texts()) / 100;
-
-  await app.keyboard.press("h");
-  await app.waitUntil(() => app.texts().some((text) => text.includes("V to select")));
-
-  // The hand tool pans; the same drag in select would box-select a card.
-  await app.drag("id:flow-canvas", { x: -260 * scale, y: -136 * scale });
-  expect(app.texts().some((text) => text.includes("card selected"))).toBe(false);
-});
-
-test("switches back to the select tool with V", async () => {
-  const app = await open("./App.tsx", { platform: "windows" });
-  await app.waitUntil(() => percentOf(app.texts()) > 0);
-  const scale = percentOf(app.texts()) / 100;
-
-  await app.keyboard.press("h");
-  await app.waitUntil(() => app.texts().some((text) => text.includes("V to select")));
-
-  await app.keyboard.press("v");
-  await app.waitUntil(() => !app.texts().some((text) => text.includes("V to select")));
-
-  await app.keyboard.press("h");
-  await app.drag("id:flow-canvas", { x: 0, y: 20 });
-  await app.keyboard.press("v");
-  await app.waitUntil(() => !app.texts().some((text) => text.includes("V to select")));
-  await app.drag("id:flow-canvas", { x: -260 * scale, y: -100 * scale });
-  await app.waitUntil(() => app.texts().some((text) => text.includes("1 card selected")));
 });
 
 test("pans right with the right arrow", async () => {

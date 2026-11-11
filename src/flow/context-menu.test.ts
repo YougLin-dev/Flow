@@ -34,7 +34,6 @@ function menuWith(): { menu: CanvasMenuController; controller: CanvasController 
   const controller = new CanvasController({
     scene: () => scene,
     camera: () => camera,
-    tool: () => "select",
     panBy: () => undefined,
     commitBounds: () => undefined,
     selectEdge: () => undefined,

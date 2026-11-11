@@ -30,7 +30,6 @@ export interface FlowCanvasProps {
   readonly scene: FlowScene;
   readonly camera: CanvasCamera;
   readonly controller: CanvasController;
-  readonly tool: () => "select" | "hand";
   /** The page's stage size: the one the camera and minimap share. */
   readonly stage: () => CameraSize;
   readonly onSize: (size: { width: number; height: number }) => void;

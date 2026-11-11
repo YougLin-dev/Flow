@@ -91,7 +91,6 @@ function controllerWith(pans: { dx: number; dy: number }[]): CanvasController {
   return new CanvasController({
     scene: () => scene,
     camera: () => camera,
-    tool: () => "select",
     panBy: (dx, dy) => pans.push({ dx, dy }),
     commitBounds: () => undefined,
     selectEdge: () => undefined,

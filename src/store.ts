@@ -1,17 +1,12 @@
 import { platform, signal } from "nsh";
 import { isAvailable } from "nsh/desktop";
 import { mainWindow } from "./lib/window-chrome";
-import type { Tool } from "./tool";
 
 // The app's workspace state stays private: pages read it through the
 // functions below and change it through their actions.
-const tool = signal<Tool>("select");
 const zoom = signal<number | null>(null);
 const selected = signal(0);
 const pinned = signal(false);
-
-/** The current pointer tool (tracked where it is read). */
-export const currentTool = (): Tool => tool();
 
 /** The camera's scale in percent, or null before the first fit. */
 export const zoomPercent = (): number | null => zoom();
@@ -21,11 +16,6 @@ export const selectedCount = (): number => selected();
 
 /** Whether the window is kept above normal windows. */
 export const isPinned = (): boolean => pinned();
-
-/** Switches the pointer tool. */
-export function setTool(next: Tool): void {
-  tool.set(next);
-}
 
 /** Publishes the camera's scale to the zoom label. */
 export function setZoomPercent(value: number): void {
