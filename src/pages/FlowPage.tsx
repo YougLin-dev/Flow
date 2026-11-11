@@ -13,7 +13,7 @@ import { NodeComposer } from "../components/NodeComposer";
 import { NodeToolbar } from "../components/NodeToolbar";
 import { SearchButton } from "../components/SearchButton";
 import { SearchPalette } from "../components/SearchPalette";
-import { SelectionBadge } from "../components/SelectionBadge";
+import { CanvasProbe } from "../components/CanvasProbe";
 import { ZoomControls, ZoomProbe } from "../components/ZoomControls";
 import { AssetUrls } from "../flow/asset-urls";
 import { bindFlowKeys } from "../flow/bindings";
@@ -416,6 +416,10 @@ export function FlowPage() {
 
       {host.params.flowZoomProbe === 1 ? <ZoomProbe value={zoomPercent()} /> : null}
 
+      {host.params.flowSelectionProbe === 1 ? (
+        <CanvasProbe selected={selectedCount()} composing={composerOpen()} />
+      ) : null}
+
       {composerOpen() ? null : <NodeToolbar onAdd={addNode} />}
 
       {composerOpen() ? null : (
@@ -423,10 +427,6 @@ export function FlowPage() {
       )}
 
       {!isAvailable && !composerOpen() ? <BrandCard /> : null}
-
-      {selectedCount() > 0 ? (
-        <SelectionBadge count={selectedCount()} composing={composerOpen()} />
-      ) : null}
 
       {process.env.FLOW_FPS ? <FrameRate /> : null}
 

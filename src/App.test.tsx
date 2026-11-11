@@ -14,7 +14,10 @@ const selectSeed = async (app: App, query: string, testId: string): Promise<void
 const openApp = (options: OpenOptions = {}): Promise<App> =>
   open("./App.tsx", {
     ...options,
-    host: { ...options.host, params: { ...options.host?.params, flowZoomProbe: 1 } },
+    host: {
+      ...options.host,
+      params: { ...options.host?.params, flowZoomProbe: 1, flowSelectionProbe: 1 },
+    },
   });
 
 /**
@@ -27,6 +30,13 @@ const percentOf = (app: App): number => {
   const value = app.value("id:zoom-probe");
   return value ? Number(value) : Number.NaN;
 };
+
+const canvasState = (app: App): { selected: number; composing: boolean } => {
+  const [selected = "0", composing = "0"] = (app.value("id:canvas-probe") ?? "").split(";");
+  return { selected: Number(selected), composing: composing === "1" };
+};
+
+const selectedOf = (app: App): number => canvasState(app).selected;
 
 /** Half the flow's size in world coordinates. */
 const HALF_WIDTH = CONTENT.width / 2;
@@ -80,7 +90,7 @@ const expectArrowPan = async (arrow: Arrow): Promise<void> => {
 
   // Empty canvas here means the flow moved the arrow's way; had it moved the
   // other way (or not moved), the box would have hit a card.
-  expect(app.texts().some((text) => text.includes("card selected"))).toBe(false);
+  expect(selectedOf(app)).toBe(0);
 };
 
 test("adds a panel with the toolbar and deletes it with Backspace", async () => {
@@ -88,18 +98,18 @@ test("adds a panel with the toolbar and deletes it with Backspace", async () => 
   await app.waitUntil(() => percentOf(app) > 0);
 
   await app.press("id:add-text-node");
-  await app.waitUntil(() => app.texts().some((text) => text.includes("1 card selected")));
-  expect(app.texts().some((text) => text.includes("1 card selected"))).toBe(true);
+  await app.waitUntil(() => selectedOf(app) === 1);
+  expect(selectedOf(app)).toBe(1);
 
   // The new node's composer is open, so Delete is held back; Escape closes
   // the composer while keeping the node selected.
   await app.keyboard.press("escape");
   await app.keyboard.press("backspace");
-  await app.waitUntil(() => !app.texts().some((text) => text.includes("card selected")));
-  expect(app.texts().some((text) => text.includes("card selected"))).toBe(false);
+  await app.waitUntil(() => selectedOf(app) === 0);
+  expect(selectedOf(app)).toBe(0);
 
-  // The badge clearing only proves the selection reset; search proves the
-  // node is gone from the document and its full-text index.
+  // The selection probe clearing only proves the selection reset; search
+  // proves the node is gone from the document and its full-text index.
   await app.keyboard.press("mod+k");
   await app.waitUntil(() => app.shows("id:search-input"));
   await app.type("id:search-input", "New panel");
@@ -112,9 +122,9 @@ test("adds an image node from the toolbar", async () => {
   await app.waitUntil(() => percentOf(app) > 0);
 
   await app.press("id:add-image-node");
-  await app.waitUntil(() => app.texts().some((text) => text.includes("1 card selected")));
+  await app.waitUntil(() => selectedOf(app) === 1);
   await app.waitUntil(() => app.texts().includes("Model · Mock Image"));
-  expect(app.texts().some((text) => text.includes("1 card selected"))).toBe(true);
+  expect(selectedOf(app)).toBe(1);
 });
 
 test("clears the selection with Escape", async () => {
@@ -127,16 +137,16 @@ test("clears the selection with Escape", async () => {
   await app.keyboard.press("down");
 
   await app.drag("id:flow-canvas", { x: -260 * scale, y: -100 * scale });
-  await app.waitUntil(() => app.texts().some((text) => text.includes("1 card selected")));
+  await app.waitUntil(() => selectedOf(app) === 1);
 
   // Selecting a card opens its composer; Escape closes the sheet first and
   // leaves the card selected, the second Escape clears the selection.
   await app.keyboard.press("escape");
-  await app.waitUntil(() => app.texts().some((text) => text.includes("Esc to clear")));
-  expect(app.texts().some((text) => text.includes("1 card selected"))).toBe(true);
+  await app.waitUntil(() => !app.shows("id:node-composer"));
+  expect(selectedOf(app)).toBe(1);
 
   await app.keyboard.press("escape");
-  await app.waitUntil(() => !app.texts().some((text) => text.includes("card selected")));
+  await app.waitUntil(() => selectedOf(app) === 0);
 });
 
 test("zooms with the controls", async () => {
@@ -224,7 +234,7 @@ test("opens a search result with Enter", async () => {
   await app.waitUntil(() => app.shows("id:search-result-seed-image"));
 
   await app.submit("id:search-input");
-  await app.waitUntil(() => app.texts().some((text) => text.includes("1 card selected")));
+  await app.waitUntil(() => selectedOf(app) === 1);
   expect(app.shows("id:search-input")).toBe(false);
 });
 
@@ -256,7 +266,7 @@ test("keeps the composer mounted while its selected card is clicked", async () =
 
   await selectSeed(app, "Text", "id:search-result-seed-text");
   await app.waitUntil(() => app.shows("id:composer-body"));
-  expect(app.texts().some((text) => text.includes("1 card selected"))).toBe(true);
+  expect(selectedOf(app)).toBe(1);
 
   await app.clear("id:composer-body");
   await app.type("id:composer-body", "fresh click draft");
@@ -418,7 +428,7 @@ test("opens the canvas menu on a right click and adds a text node", async () => 
   await app.waitUntil(() => app.shows("id:canvas-menu"));
   await app.press("id:context-add-text");
 
-  await app.waitUntil(() => app.texts().some((text) => text.includes("1 card selected")));
+  await app.waitUntil(() => selectedOf(app) === 1);
   await app.waitUntil(() => app.texts().includes("Model · Mock Text"));
 });
 

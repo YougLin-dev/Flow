@@ -18,7 +18,10 @@ const selectSeed = async (app: App, query: string, testId: string): Promise<void
 const openApp = (options: OpenOptions = {}): Promise<App> =>
   open("./App.tsx", {
     ...options,
-    host: { ...options.host, params: { ...options.host?.params, flowZoomProbe: 1 } },
+    host: {
+      ...options.host,
+      params: { ...options.host?.params, flowZoomProbe: 1, flowSelectionProbe: 1 },
+    },
   });
 
 /**
@@ -31,6 +34,15 @@ const percentOf = (app: App): number => {
   const value = app.value("id:zoom-probe");
   return value ? Number(value) : Number.NaN;
 };
+
+const canvasState = (app: App): { selected: number; composing: boolean } => {
+  const [selected = "0", composing = "0"] = (app.value("id:canvas-probe") ?? "").split(";");
+  return { selected: Number(selected), composing: composing === "1" };
+};
+
+const selectedOf = (app: App): number => canvasState(app).selected;
+
+const composingOf = (app: App): boolean => canvasState(app).composing;
 
 test("shows the flow canvas", async () => {
   const app = await openApp();
@@ -56,8 +68,8 @@ test("box-selects a card", async () => {
     x: -260 * scale,
     y: -100 * scale,
   });
-  await app.waitUntil(() => app.texts().some((text) => text.includes("1 card selected")));
-  expect(app.texts().some((text) => text.includes("1 card selected"))).toBe(true);
+  await app.waitUntil(() => selectedOf(app) === 1);
+  expect(selectedOf(app)).toBe(1);
   // One card is a normal selection: no group frame around it.
   expect(app.shows("id:selection-frame")).toBe(false);
 });
@@ -89,16 +101,16 @@ test("drags a card through the canvas pointer surface", async () => {
   // old centre is empty: pressing there afterwards must select nothing, so
   // the move went through the native pointer surface and committed.
   await app.drag("id:flow-canvas", { x: 400, y: 260 });
-  await app.waitUntil(() => app.texts().some((text) => text.includes("1 card selected")));
+  await app.waitUntil(() => selectedOf(app) === 1);
   // The press that started the drag landed on the selected card, which opens
   // its composer again; close the sheet so the canvas takes the next press.
-  await app.waitUntil(() => app.texts().some((text) => text.includes("Esc to close")));
+  await app.waitUntil(() => composingOf(app));
   await app.keyboard.press("escape");
-  await app.waitUntil(() => app.texts().some((text) => text.includes("Esc to clear")));
+  await app.waitUntil(() => !composingOf(app));
   // A click on the now-empty centre clears the selection; the canvas's
   // pointer surface listens to touch and mouse events, not to `onPress`.
   await app.drag("id:flow-canvas", { x: 0, y: 0 });
-  await app.waitUntil(() => !app.texts().some((text) => text.includes("card selected")));
+  await app.waitUntil(() => selectedOf(app) === 0);
 });
 
 test("searches cards and reveals the chosen one", async () => {
@@ -123,7 +135,7 @@ test("searches cards and reveals the chosen one", async () => {
   await app.waitUntil(() => app.shows("id:search-result-seed-image"));
 
   await app.press("id:search-result-seed-image");
-  await app.waitUntil(() => app.texts().some((text) => text.includes("1 card selected")));
+  await app.waitUntil(() => selectedOf(app) === 1);
   expect(app.shows("id:search-input")).toBe(false);
 });
 
@@ -184,7 +196,7 @@ test("opens the canvas menu with a secondary click", async () => {
   await app.rightClick("id:flow-canvas");
   await app.waitUntil(() => app.shows("id:canvas-menu"));
   await app.press("id:context-add-text");
-  await app.waitUntil(() => app.texts().some((text) => text.includes("1 card selected")));
+  await app.waitUntil(() => selectedOf(app) === 1);
 });
 
 test("opens the canvas menu after a click on the canvas", async () => {
