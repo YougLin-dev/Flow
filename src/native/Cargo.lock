@@ -1453,7 +1453,7 @@ dependencies = [
 [[package]]
 name = "nsh-base"
 version = "0.5.0"
-source = "git+https://github.com/YougLin-dev/nsh.git?rev=34e39f7a84488769103bb4de3f5e575a626c5423#34e39f7a84488769103bb4de3f5e575a626c5423"
+source = "git+https://github.com/YougLin-dev/nsh.git?rev=0c8db00845a52eb8ac81a08c535384a823d34ee8#0c8db00845a52eb8ac81a08c535384a823d34ee8"
 dependencies = [
  "chrono",
  "html5ever",
@@ -1472,7 +1472,7 @@ dependencies = [
 [[package]]
 name = "nsh-core"
 version = "0.5.0"
-source = "git+https://github.com/YougLin-dev/nsh.git?rev=34e39f7a84488769103bb4de3f5e575a626c5423#34e39f7a84488769103bb4de3f5e575a626c5423"
+source = "git+https://github.com/YougLin-dev/nsh.git?rev=0c8db00845a52eb8ac81a08c535384a823d34ee8#0c8db00845a52eb8ac81a08c535384a823d34ee8"
 dependencies = [
  "cap-std",
  "crc32fast",
@@ -1512,7 +1512,7 @@ dependencies = [
 [[package]]
 name = "nsh-engine"
 version = "0.5.0"
-source = "git+https://github.com/YougLin-dev/nsh.git?rev=34e39f7a84488769103bb4de3f5e575a626c5423#34e39f7a84488769103bb4de3f5e575a626c5423"
+source = "git+https://github.com/YougLin-dev/nsh.git?rev=0c8db00845a52eb8ac81a08c535384a823d34ee8#0c8db00845a52eb8ac81a08c535384a823d34ee8"
 dependencies = [
  "crossbeam-channel",
  "libc",
@@ -1530,7 +1530,7 @@ dependencies = [
 [[package]]
 name = "nsh-macros"
 version = "0.5.0"
-source = "git+https://github.com/YougLin-dev/nsh.git?rev=34e39f7a84488769103bb4de3f5e575a626c5423#34e39f7a84488769103bb4de3f5e575a626c5423"
+source = "git+https://github.com/YougLin-dev/nsh.git?rev=0c8db00845a52eb8ac81a08c535384a823d34ee8#0c8db00845a52eb8ac81a08c535384a823d34ee8"
 dependencies = [
  "imagesize 0.15.0",
  "proc-macro2",
@@ -1543,7 +1543,7 @@ dependencies = [
 [[package]]
 name = "nsh-platform-windows"
 version = "0.5.0"
-source = "git+https://github.com/YougLin-dev/nsh.git?rev=34e39f7a84488769103bb4de3f5e575a626c5423#34e39f7a84488769103bb4de3f5e575a626c5423"
+source = "git+https://github.com/YougLin-dev/nsh.git?rev=0c8db00845a52eb8ac81a08c535384a823d34ee8#0c8db00845a52eb8ac81a08c535384a823d34ee8"
 dependencies = [
  "crossbeam-channel",
  "image",
@@ -1564,7 +1564,7 @@ dependencies = [
 [[package]]
 name = "nsh-updater"
 version = "0.5.0"
-source = "git+https://github.com/YougLin-dev/nsh.git?rev=34e39f7a84488769103bb4de3f5e575a626c5423#34e39f7a84488769103bb4de3f5e575a626c5423"
+source = "git+https://github.com/YougLin-dev/nsh.git?rev=0c8db00845a52eb8ac81a08c535384a823d34ee8#0c8db00845a52eb8ac81a08c535384a823d34ee8"
 dependencies = [
  "base64 0.22.1",
  "ed25519-dalek",
