@@ -6,6 +6,9 @@
   "icon": "assets/icon.png",
   "theme": "theme.json",
   "rust": "native",
+  "window": {
+    "defaultPosition": "center"
+  },
   "capabilities": {
     "network": {
       "hosts": []
