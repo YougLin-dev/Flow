@@ -27,14 +27,10 @@ All notable changes to Flow are recorded here. The format follows
   either. One coarse Rust read (`Document.overview()`) samples at most 400
   cards by the insertion hash, so cards outside the scene still appear
   without instantiating the document in the view tree.
-- The connectors of the selected cards flow: they rest brighter and thicker
-  than the others, and a 48-piece comet travels from each connector's source
-  with a gradient trail behind its head and leaves through the target. A
-  native stepped loop runs only while a selected endpoint has a flowing
-  connector and Reduce Motion is off. Its requested frame-rate cap is
-  platform-dependent, not a fixed Windows 30 Hz. Above four flowing
-  connectors, camera/card movement and following pluses yield to the resting
-  selection highlight while the native phase continues.
+- Connectors rest faint, at a third of their port type's color. Selecting a
+  card relights its connectors, and clicking a line selects it and lights it
+  the same way: one point thicker at full brightness, without any animation;
+  the earlier comet of light is gone.
 - A secondary-button drag pans the canvas with any tool, without selecting,
   box-selecting or moving a card, and a right click opens the canvas context
   menu with Add text node and Add image node, placing the card at the pressed
@@ -76,11 +72,38 @@ All notable changes to Flow are recorded here. The format follows
   ISC), drawn by a small native-canvas `Icon` view; the zoom, search, tool and
   add-node controls use them instead of text glyphs. The dependency decision
   is [ADR 0006](docs/adr/0006-lucide-icons.md).
+- Hovering a port shows a compact pill above the icon with its name
+  ("Prompt", "Image references"; a group port shows its type and side), since
+  cards connect left to right and the sides stay with the connectors. The
+  placement is configurable and a bubble that would leave the stage flips to
+  the opposite side. A card mounts its ports only when selected, hovered, a
+  snapped target, or connected and at least 56 on-screen points tall, so an
+  idle fit-to-board overview of a large document mounts no port views.
 - The engineering standard in `docs/standards.md`, an ADR template and this
   changelog.
 
 ### Changed
 
+- Nodes now expose named, typed ports instead of one aggregated input and
+  output per card. The text and image kinds declare a `prompt` text input, an
+  `image` references input with its own capacity (4 for text, 16 for image)
+  and a typed output; every port has the type's icon and color, and no plus
+  button remains. A connection records the exact output and input port plus
+  each port's offset, so two edges between the same cards stay visually
+  apart and the far endpoint needs no node lookup. The connector ends at the
+  port icon's centre just outside the card, not on the card's border, and a
+  far endpoint carried by the read is moved out by the same gap. Type
+  mismatches, full
+  inputs and duplicate port pairs never highlight as targets; a gesture that
+  would overflow any port is rejected whole. Dragging a selected edge's
+  endpoint moves that end to another port. The composer groups inputs by
+  input port and shows the edge slots in use. A multi-card frame exposes one
+  group port per input type and output type, icon only; dragging one fans the
+  connection out to every matching selected port, and a full member disables
+  the group port. Connectors, previews and the selected edge take their
+  port type's color. Schema version 5 resets the document like version 2
+  because typed ports are a breaking storage change; the app reseeds its
+  example with the semantic port ids.
 - Card previews now load a narrow node projection, read at most four result
   items per batch in one windowed query, read the exact item total separately,
   and resolve assets once per 400-node chunk. The displayed previews, item
@@ -93,8 +116,9 @@ All notable changes to Flow are recorded here. The format follows
   stage size, applied by the existing 80 ms viewport drain before its scene
   read. A user pan, zoom or explicit fit cancels a pending automatic fit.
 - The dot grid moves as one container instead of rewriting every tile's screen
-  position, and the selection frame and merged pluses read a scale-only camera
-  signal, so a pan updates two wrapper styles and leaves those overlays alone.
+  position, and the selection frame and its group ports read a scale-only
+  camera signal, so a pan updates two wrapper styles and leaves those overlays
+  alone.
 
 - Cards paint less on large boards: the body's rounded background, border and
   shadow live in a childless plate the Windows renderer can skip when it is
@@ -125,18 +149,18 @@ All notable changes to Flow are recorded here. The format follows
 
 - Selection, hover, marquee-preview and connection-target changes now rebuild
   only the cards whose own state flipped, rather than every visible card's
-  plus buttons and border. In a 2000-card measurement this reduced hover
-  work from roughly 10 ms to 0.1 ms.
+  ports and border. In a 2000-card measurement this reduced hover work from
+  roughly 10 ms to 0.1 ms.
 
 - The shared connector layer computes its padded and rounded canvas box once
   per geometry change instead of separately for every style binding and the
-  drawing origin, and resolves each connector's ports once per draw for both
-  its resting line and flowing comet.
+  drawing origin, and resolves each connector's ports once per draw for every
+  stroke.
 
-- Dragging a selection updates the connectors, the selection frame and the
-  merged pluses once per pointer move instead of once per moved card, and
+- Dragging a selection updates the connectors, the selection frame and its
+  group ports once per pointer move instead of once per moved card, and
   releasing a box selection no longer mounts and immediately unmounts every
-  selected card's plus buttons.
+  selected card's ports.
 
 - A viewport read that carries a card unchanged no longer resubmits its
   title, status, body or stacking: the card reads them through
@@ -144,22 +168,18 @@ All notable changes to Flow are recorded here. The format follows
   cards wakes only the cards whose content actually changed instead of every
   visible card's text.
 - A card's root now carries its world position while its title, body and
-  plus buttons are laid out in card-local points (`flow/card-geometry.ts`).
+  ports are laid out in card-local points (`flow/card-geometry.ts`).
   The card's rectangle is split into equality-gated position and size memos,
   so moving a selection submits one style update per moved card instead of
   every geometry-derived style (eight per text card, eight plus one per
   thumbnail for an image card), and a viewport read that leaves a card where
   it was wakes none of its styles.
-- The connectors' 48-piece comet now runs as a native stepped loop only when
-  selected endpoints actually have flowing connectors and Reduce Motion is
-  off. Above four flowing connectors, camera/card movement and following
-  pluses suppress the comet strokes while retaining the selection highlight
-  and advancing native phase.
-- Dragging or resizing a selection with more than a few flowing connectors
-  draws the resting highlight only while the gesture runs: the connectors'
-  canvas re-records on every pointer move, and the comet's many short
-  strokes would dominate that record. The comet comes back when the gesture
-  ends.
+- Connectors rest at a third of their port type's color and relight while a
+  card at either end is selected or the connector is clicked: the selected
+  line is one point thicker and fully opaque. The earlier comet of light is
+  gone. Above a few flowing connectors the selection relight still draws, but
+  only the resting stroke, because the canvas re-records on every pointer
+  move.
 - Migrated to NSH's main window API: `App` captures `currentWindow()` while it
   renders and the title bar's hidden style and the pin's window `level` go
   through that `WindowRef` (`Window.setTitleBar`/`Window.setLevel` are gone);
@@ -181,15 +201,12 @@ All notable changes to Flow are recorded here. The format follows
   unclassified, not only when its target is.
 - Connectors are stroked as cubics in one native-canvas layer, so every line
   stays smooth and sharp at any zoom instead of showing sampled joints;
-  connector arrowheads are gone. Ports are round plus buttons just
-  outside a card's left and right borders instead of permanent accent dots:
-  they appear while a card is hovered or selected, follow the pointer in a
-  side zone through native animated values and spring back when it leaves,
-  and dragging one starts a connection either way (right side forward, left
-  side reverse). The pulled preview is dashed until the connection is written;
-  it snaps to a valid card's port, highlights that card's border like hover,
-  and unsnaps when the pointer leaves. Connectors still meet the card border
-  itself; the plus is only a drag handle.
+  connector arrowheads are gone. Typed ports sit just outside a card's left
+  and right borders: they follow the pointer in a side zone through native
+  animated values and spring back when it leaves. The pulled preview is
+  dashed until the connection is written; it snaps to a valid card's port,
+  highlights that card's border like hover, and unsnaps when the pointer
+  leaves. Connectors end at the port icon's centre, not on the card border.
 - A card's title and status now sit above the card instead of inside it, and
   the body uses the full card area.
 - Selection no longer draws the eight resize handle dots or a square outline
@@ -212,12 +229,13 @@ All notable changes to Flow are recorded here. The format follows
   drags the whole selection, including the empty space between its cards and
   their borders, instead of starting a new box or resizing one card; the
   frame shows the move cursor throughout. A box that ends with a single card
-  is just that card's selection: no frame, no group drag, its own pluses.
-- A multi-card frame replaces the cards' own plus buttons with one merged
-  plus on each side. Dragging the right plus pulls a dashed line from every
-  selected card and connects them all to the release target; the left plus
-  connects the target to every selected card. The whole group is written in
-  one Rust command, so one undo removes it in one step.
+  is just that card's selection: no frame, no group drag, its own ports.
+- A multi-card frame exposes one typed group port per input and output type
+  on its sides. Dragging one pulls a dashed line from every selected card's
+  matching port and connects them all to the release target, or connects the
+  target to every selected input; a full member disables the input group.
+  The whole group is written in one Rust command, so one undo removes it in
+  one step.
 - Any visible card can be resized without selecting it first: pressing its
   border selects the card and starts the resize, hovering shows the resize
   cursor along any edge, and a card under the pointer keeps another card's

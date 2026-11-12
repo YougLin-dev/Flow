@@ -3,6 +3,7 @@ import { effect } from "nsh";
 import type { EdgeSummary, NodeSummary, SceneSnapshot } from "@flow/native";
 import type { BoxGeometry } from "./connection";
 import { FlowScene } from "./scene";
+import { portAt } from "./scene-ports";
 
 function node(id: string, x: number, y: number, overrides: Partial<NodeSummary> = {}): NodeSummary {
   return {
@@ -25,7 +26,18 @@ function node(id: string, x: number, y: number, overrides: Partial<NodeSummary> 
 }
 
 function edge(id: string, fromId: string, toId: string): EdgeSummary {
-  return { id, fromId, toId, fromPort: null, toPort: null, kind: "flow", dataJson: "{}" };
+  return {
+    id,
+    fromId,
+    toId,
+    fromPort: "text",
+    toPort: "prompt",
+    portKind: "text",
+    fromOffset: 42,
+    toOffset: 42,
+    kind: "flow",
+    dataJson: "{}",
+  };
 }
 
 function snapshot(nodes: NodeSummary[], edges: EdgeSummary[] = []): SceneSnapshot {
@@ -78,10 +90,10 @@ test("keeps a connector whose far card left the scene", () => {
   const first = scene.edges()[0];
   if (!first) throw new Error("the edge was pruned");
   expect(scene.edgePorts(first)).toEqual({
-    from: { x: 200, y: 42 },
-    to: { x: 2_000, y: 300 },
+    from: { x: 214, y: 42 },
+    to: { x: 1_986, y: 300 },
   });
-  expect(scene.edgeAt(2_000, 300)).toBe("a-b");
+  expect(scene.edgeAt(1_986, 300)).toBe("a-b");
 
   // A moved near card moves its port; the far anchor stays put.
   scene.applyChangeSet({
@@ -90,8 +102,8 @@ test("keeps a connector whose far card left the scene", () => {
     edgesChanged: [],
     edgesRemoved: [],
   });
-  expect(scene.edgePorts(first)?.from).toEqual({ x: 200, y: 142 });
-  expect(scene.edgePorts(first)?.to).toEqual({ x: 2_000, y: 300 });
+  expect(scene.edgePorts(first)?.from).toEqual({ x: 214, y: 142 });
+  expect(scene.edgePorts(first)?.to).toEqual({ x: 1_986, y: 300 });
 });
 
 test("keeps a connector whose cards both left the scene", () => {
@@ -139,8 +151,8 @@ test("keeps a selected card's connector when a read finds neither card", () => {
   const first = scene.edges()[0];
   if (!first) throw new Error("the edge was pruned");
   expect(scene.edgePorts(first)).toEqual({
-    from: { x: 200, y: 142 },
-    to: { x: 2_000, y: 300 },
+    from: { x: 214, y: 142 },
+    to: { x: 1_986, y: 300 },
   });
 
   // Releasing the drag keeps it too; the next read catches up.
@@ -168,7 +180,7 @@ test("keeps a far anchor when a change set reports its edge", () => {
   expect(scene.edgeCount()).toBe(1);
   const first = scene.edges()[0];
   if (!first) throw new Error("the edge was pruned");
-  expect(scene.edgePorts(first)?.to).toEqual({ x: 2_000, y: 300 });
+  expect(scene.edgePorts(first)?.to).toEqual({ x: 1_986, y: 300 });
 });
 
 test("applies a change set and keeps edges to existing cards", () => {
@@ -350,9 +362,9 @@ test("raises selected cards above unselected ones for drawing and hits", () => {
   scene.select(["b", "a"]);
   expect(scene.cardZ("a")).toBeGreaterThan(scene.cardZ("b"));
   expect(scene.selectionBounds()).toEqual({ x: 0, y: -26, width: 250, height: 150 });
-  // Merged frame pluses sit above the selection; the preview stays above them.
-  expect(scene.framePlusZ()).toBeGreaterThan(scene.cardZ("a"));
-  expect(scene.previewZ()).toBeGreaterThan(scene.framePlusZ());
+  // Group ports sit above the selection; the preview stays above them.
+  expect(scene.selectionPortsZ()).toBeGreaterThan(scene.cardZ("a"));
+  expect(scene.previewZ()).toBeGreaterThan(scene.selectionPortsZ());
 });
 
 test("raises a card in the same update as its selection", () => {
@@ -492,16 +504,19 @@ test("finds ports, cards and connectors in world coordinates", () => {
   const scene = new FlowScene();
   scene.apply(snapshot([node("a", 0, 0), node("b", 300, 0)], [edge("a-b", "a", "b")]));
 
-  expect(scene.portWorld("a", "out")).toEqual({ x: 200, y: 42 });
-  expect(scene.portZoneAt(210, 42)).toEqual({
+  expect(portAt(scene, 214, 42)).toMatchObject({
     nodeId: "a",
     side: "out",
-    point: { x: 210, y: 42 },
+    portId: "text",
+    portKind: "text",
+    offset: 42,
+    point: { x: 214, y: 42 },
   });
-  expect(scene.portZoneAt(290, 42)).toEqual({
+  expect(portAt(scene, 286, 28)).toMatchObject({
     nodeId: "b",
     side: "in",
-    point: { x: 290, y: 42 },
+    portId: "prompt",
+    point: { x: 286, y: 28 },
   });
   expect(scene.nodeAt(100, 30)).toBe("a");
   expect(scene.nodeAt(250, 30)).toBeNull();
@@ -509,23 +524,30 @@ test("finds ports, cards and connectors in world coordinates", () => {
   expect(scene.kindOf("a")).toBe("text");
 });
 
-test("the topmost card owns an overlapping side zone", () => {
+test("the topmost card owns an overlapping port", () => {
   const scene = new FlowScene();
   scene.apply(snapshot([node("low", 0, 0, { z: 0 }), node("high", 0, 0, { z: 5 })]));
 
-  expect(scene.portZoneAt(210, 42)).toEqual({
-    nodeId: "high",
-    side: "out",
-    point: { x: 210, y: 42 },
-  });
+  expect(portAt(scene, 214, 46)?.nodeId).toBe("high");
 });
 
-test("a card under the pointer hides a lower card's side zone", () => {
+test("the nearest port wins when one card's reaches overlap", () => {
+  const scene = new FlowScene();
+  scene.apply(snapshot([node("a", 0, 0)], []));
+
+  // The prompt (28) and image references (56) centres are 28 apart; a point
+  // 6 from the prompt is inside both reaches, and must take the prompt even
+  // though the references port comes later in the schema.
+  expect(portAt(scene, -14, 34)?.portId).toBe("prompt");
+  expect(portAt(scene, -14, 50)?.portId).toBe("references");
+});
+
+test("a card under the pointer hides a lower card's port", () => {
   const scene = new FlowScene();
   scene.apply(snapshot([node("a", 0, 0), node("cover", 190, 0, { z: 5 })]));
 
-  // (204, 42) is in a's output zone but the cover card is in front of it.
-  expect(scene.portZoneAt(204, 42)).toBeNull();
+  // (204, 42) is on a's output port but the cover card is in front of it.
+  expect(portAt(scene, 204, 42)).toBeNull();
 });
 
 test("picks the topmost card under a point", () => {
@@ -551,31 +573,30 @@ test("previews only the cards in the scene", () => {
 test("publishes and clears the connection preview", () => {
   const scene = new FlowScene();
   scene.setConnectionPreview({ x: 1, y: 2 }, { x: 3, y: 4 });
-  expect(scene.connectionPreview()).toEqual({ from: { x: 1, y: 2 }, to: { x: 3, y: 4 } });
-  expect(scene.connectionPreviews()).toEqual([{ from: { x: 1, y: 2 }, to: { x: 3, y: 4 } }]);
+  expect(scene.connectionPreview()).toEqual({
+    from: { x: 1, y: 2 },
+    to: { x: 3, y: 4 },
+    portKind: "text",
+  });
+  expect(scene.connectionPreviews()).toEqual([
+    { from: { x: 1, y: 2 }, to: { x: 3, y: 4 }, portKind: "text" },
+  ]);
 
   // A group drag publishes one line per fixed end.
   scene.setConnectionPreviews([
-    { from: { x: 1, y: 2 }, to: { x: 3, y: 4 } },
-    { from: { x: 5, y: 6 }, to: { x: 7, y: 8 } },
+    { from: { x: 1, y: 2 }, to: { x: 3, y: 4 }, portKind: "text" },
+    { from: { x: 5, y: 6 }, to: { x: 7, y: 8 }, portKind: "image" },
   ]);
   expect(scene.connectionPreviews()).toHaveLength(2);
   // An equal write keeps the signal's value, so the canvas does not redraw.
   const current = scene.connectionPreviews();
   scene.setConnectionPreviews([
-    { from: { x: 1, y: 2 }, to: { x: 3, y: 4 } },
-    { from: { x: 5, y: 6 }, to: { x: 7, y: 8 } },
+    { from: { x: 1, y: 2 }, to: { x: 3, y: 4 }, portKind: "text" },
+    { from: { x: 5, y: 6 }, to: { x: 7, y: 8 }, portKind: "image" },
   ]);
   expect(scene.connectionPreviews()).toBe(current);
 
   scene.setConnectionPreviews([]);
   expect(scene.connectionPreview()).toBeNull();
   expect(scene.connectionPreviews()).toBeNull();
-});
-
-test("knows whether a pair is already connected", () => {
-  const scene = new FlowScene();
-  scene.apply(snapshot([node("a", 0, 0), node("b", 300, 0)], [edge("a-b", "a", "b")]));
-  expect(scene.hasEdge("a", "b")).toBe(true);
-  expect(scene.hasEdge("b", "a")).toBe(false);
 });

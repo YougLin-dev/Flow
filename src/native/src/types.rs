@@ -48,14 +48,17 @@ pub struct NodeSummary {
     pub output_batch_id: Option<String>,
 }
 
-/// One connection between two nodes.
+/// One connection between two nodes' ports.
 #[derive(Debug, Clone, PartialEq, JsObject)]
 pub struct EdgeInput {
     pub id: String,
     pub from_id: String,
     pub to_id: String,
-    pub from_port: Option<String>,
-    pub to_port: Option<String>,
+    pub from_port: String,
+    pub to_port: String,
+    pub port_kind: String,
+    pub from_offset: f64,
+    pub to_offset: f64,
     pub kind: String,
     pub data_json: Option<String>,
 }
@@ -68,20 +71,17 @@ pub struct EdgePoint {
 }
 
 impl EdgePoint {
-    /// The output port: the middle of a node's right edge.
-    pub fn output(x: f64, y: f64, width: f64, height: f64) -> Self {
+    /// An output port: the card's right edge at `offset` from its top.
+    pub fn output(x: f64, y: f64, width: f64, offset: f64) -> Self {
         Self {
             x: x + width,
-            y: y + height / 2.0,
+            y: y + offset,
         }
     }
 
-    /// The input port: the middle of a node's left edge.
-    pub fn input(x: f64, y: f64, height: f64) -> Self {
-        Self {
-            x,
-            y: y + height / 2.0,
-        }
+    /// An input port: the card's left edge at `offset` from its top.
+    pub fn input(x: f64, y: f64, offset: f64) -> Self {
+        Self { x, y: y + offset }
     }
 }
 
@@ -91,8 +91,11 @@ pub struct EdgeSummary {
     pub id: String,
     pub from_id: String,
     pub to_id: String,
-    pub from_port: Option<String>,
-    pub to_port: Option<String>,
+    pub from_port: String,
+    pub to_port: String,
+    pub port_kind: String,
+    pub from_offset: f64,
+    pub to_offset: f64,
     pub kind: String,
     pub data_json: String,
     /// The from card's output port, when the read knows that card.
@@ -141,6 +144,7 @@ pub struct AssetSummary {
 pub struct ResultItemInput {
     pub id: String,
     pub position: f64,
+    pub port_id: String,
     pub kind: String,
     pub text: String,
     pub asset_id: Option<String>,
@@ -168,6 +172,7 @@ pub struct ResultItemSummary {
     pub id: String,
     pub batch_id: String,
     pub position: f64,
+    pub port_id: String,
     pub kind: String,
     pub text: String,
     pub asset_id: Option<String>,
@@ -196,6 +201,7 @@ pub struct InputItemInput {
     pub id: String,
     pub node_id: String,
     pub position: f64,
+    pub port_id: String,
     pub kind: String,
     /// `edge` or `local`.
     pub origin: String,
@@ -213,6 +219,7 @@ pub struct InputItemSummary {
     pub id: String,
     pub node_id: String,
     pub position: f64,
+    pub port_id: String,
     pub kind: String,
     pub origin: String,
     pub edge_id: Option<String>,
@@ -227,6 +234,15 @@ pub struct InputItemSummary {
     pub asset: Option<AssetSummary>,
 }
 
+/// How many connectors enter one input port. The capacity is a port's edge
+/// slots, so this is the composer's occupancy even when a source produced no
+/// items (and therefore no rows).
+#[derive(Debug, Clone, PartialEq, JsObject)]
+pub struct PortIncoming {
+    pub port_id: String,
+    pub edges: f64,
+}
+
 /// Everything a node's composer needs, in one read.
 #[derive(Debug, Clone, PartialEq, JsObject)]
 pub struct NodeDetail {
@@ -237,6 +253,8 @@ pub struct NodeDetail {
     /// The newest batch of any status, for the composer's error/status line.
     pub latest_batch: Option<ResultBatchSummary>,
     pub inputs: Vec<InputItemSummary>,
+    /// One entry per input port that has at least one connector.
+    pub incoming: Vec<PortIncoming>,
 }
 
 /// The readable preview of a node's current batch: the first few items and

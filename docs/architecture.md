@@ -50,8 +50,11 @@ its views.
 - Schema version 2 is the node editor's breaking reset: the migration drops
   the version 1 document and recreates the tables (there is no data
   migration). Version 3 adds the connector index and fills it from the
-  existing edges. The core also stores immutable result batches/items,
-  ordered node inputs and content-addressed asset bytes under
+  existing edges. Version 5 is the typed-port reset: `edges` gains required
+  `from_port`, `to_port`, `port_kind` and per-edge port offsets, `node_inputs`
+  and `result_items` gain required `port_id`, and the document tables are
+  recreated empty like version 2. The core also stores immutable result
+  batches/items, ordered node inputs and content-addressed asset bytes under
   `<database dir>/assets/`. Its commands cover settings, manual text,
   connect/reconnect, input changes, runs and crash recovery.
   [The node editor contract](node-editor.md) records the data model and
@@ -76,10 +79,12 @@ its views.
   rectangle, never transformed bounds.
 - Viewport reads are throttled to 80 ms and capped at low zoom (300/800/2000
   cards); selected cards stay in the scene when they leave the viewport.
-  A connector is read when either of its cards is loaded or when the box
-  around its cubic intersects the viewport, so it stays drawn while one card
-  is beyond the read and also when both cards are beyond it but the curve
-  crosses the visible area. Every read edge carries both endpoint ports; the
+  A connector is read when either of its cards is loaded; an uncapped read
+  also reads the ones whose cubic box intersects the viewport, so a curve
+  crossing the visible area stays drawn when both its cards are beyond the
+  read. A capped low-zoom read (300/800/2000 cards) skips that second half,
+  because its RTree matches can exceed the card budget. Every read edge
+  carries both endpoint ports; the
   far cards are not instantiated as views. A selected card pinned in the
   scene keeps its connectors even when a read omits them, so a mid-drag
   read, which sees only committed geometry, cannot blank the line. The
@@ -105,16 +110,23 @@ its views.
 
 ## Node editor
 
-M1 adds one generic executable node shape: one input port, one output port,
-and many-to-many directed connections carrying typed text and image items. A
-TSX kind registry (`flow/node-kinds.ts`) declares each kind's ports, defaults
-and settings schema; `flow/execution.ts` owns its provider. Rust stores only
-`kind` and opaque `settings_json`.
+M1 adds one generic executable node shape: several named, typed input and
+output ports, and many-to-many directed connections carrying typed text and
+image items. A TSX kind registry (`flow/node-kinds.ts`) declares each kind's
+ports, per-input capacity, defaults and settings schema; `flow/execution.ts`
+owns its provider. Rust stores only `kind` and opaque `settings_json`.
 
-- Connecting an edge snapshots all current items of the source's batch into
-  the target's inputs. Reconnecting rebuilds that snapshot, and deleting an
-  edge removes exactly the inputs it contributed; a local upload can be
-  deleted without deleting its edge.
+- A connection binds one output port to one input port; only ports of the
+  same item type can join. Connecting snapshots the source items whose
+  `portId` matches the edge's output port into the target's matching input
+  port. Reconnecting rebuilds that snapshot, and deleting an edge removes
+  exactly the inputs it contributed; a local upload can be deleted without
+  deleting its edge.
+- An input port declares how many incoming edges it accepts (a prompt one,
+  the image references up to 4 or 16 by kind). A gesture is rejected whole
+  when any proposed edge would overflow a port; no partial fan-out is
+  written. Parallel edges between two cards are legal when their ports
+  differ, and one port pair appears at most once.
 - Result batches and their items are immutable. A rerun or manual text edit
   appends a batch and moves the node's output; old batches remain for
   downstream snapshots. Provider runs are not undo history, while connect,
@@ -122,12 +134,18 @@ and settings schema; `flow/execution.ts` owns its provider. Rust stores only
 - Statuses are `idle`, `stale`, `running`, `done`, `failed`, `cancelled` and
   `interrupted`. A changed upstream marks an existing downstream result stale;
   startup turns abandoned runs into `interrupted`.
-- The native canvas draws cards, ports, connectors and the connection preview.
-  Selecting a card opens `NodeComposer`, a native panel anchored directly
-  under the card and centred on it; the placement follows the card and never
-  flips or clamps to stay inside the viewport. It is built from the same
-  controls as the rest of the app. The inline text editor is a screen-space
-  native overlay. The image node's body shows a thumbnail grid.
+- The native canvas draws cards, typed ports, connectors and the connection
+  preview. Ports are circles in the item type's color and icon, spread evenly
+  over each card side like `justify-evenly`; a hovered port springs a few
+  points toward the pointer while its connector anchor (the icon's centre)
+  stays fixed, so a line meets the port circle rather than the card's border.
+  A press on a port starts a connection from that specific port. Selecting a
+  card opens `NodeComposer`, a native panel anchored directly under the card
+  and centred on it; the placement follows the card and never flips or
+  clamps to stay inside the viewport. Its input groups follow the node
+  kind's input ports and show the edge slots in use. It is built from the
+  same controls as the rest of the app. The inline text editor is a
+  screen-space native overlay. The image node's body shows a thumbnail grid.
 - Mock text and mock image providers exercise the run lifecycle and the
   provider seam. See [the node editor contract](node-editor.md) for the full
   M1 rules and non-goals.
@@ -166,8 +184,11 @@ events and renders four kinds of children:
   with no frame of its own. A press anywhere inside the frame—on empty space
   or a card border—drags the whole selection and shows the move cursor; a
   press outside it starts a new marquee. A multi-card frame replaces the
-  cards' own pluses with one merged plus on each side: the left one is the
-  group's input handle, the right one its output handle.
+  cards' own ports with one group port per distinct input type on its left
+  and one per distinct output type on its right. A group port represents
+  every selected card's port of that type: dragging it pulls one preview per
+  member and fans the connection out to the one external target port; a full
+  member input disables the group port before the gesture starts.
 - **Selection overlay** — the marquee box in screen space, derived from the
   controller each time the drag changes. It does not take pointer events. The
   cards the box covers take the selected accent border while it sweeps, and
@@ -222,39 +243,32 @@ every visible card's text. The body's rounded background, border and shadow
 are a childless plate under the content, so the Windows renderer can skip
 that paint when it is outside the damage rectangle. The card renders the title and
 status above the card, the body text or image thumbnails inside it (laid out
-inside the body box), and one round plus button outside each side while the
-card is hovered or selected. On a multi-card frame those per-card
-pluses give way to the frame's merged ones. Per-card selection and connection
+inside the body box), and one typed port circle outside each side, shown when
+the card is selected, hovered, a connection target, or connected and readable
+on screen. On a multi-card frame those per-card ports give way to the frame's
+group ports. Per-card selection and connection
 target flags come from `flow/keyed-flags.ts`, while `flow/hover-flags.ts`
 separately holds the controller's hover and marquee-preview mirrors; their
 source states write these flags in the same update round, so a change wakes
-only the cards whose membership flipped. A plus rests just outside the
-border; inside the side zone it eases toward the pointer in both axes, and it
-springs back when the pointer leaves. The plus is only a drag handle:
-connectors meet the card's own border. `FlowEdges` strokes every connector's
-cubic from `flow/connection.ts` in one native-canvas layer with round caps;
+only the cards whose membership flipped. A port rests just outside the
+border; when hovered it springs toward the pointer within a small reach in
+both axes, and it springs back when the pointer leaves, while its connector
+anchor — the icon's centre — stays fixed. `FlowEdges` strokes every
+connector's cubic from `flow/connection.ts` in one native-canvas layer with
+round caps;
 the canvas rasterizer draws at the transformed resolution, so the lines stay
 smooth and sharp at every camera scale instead of showing sampled joints, and
 there is no arrowhead. The canvas covers only the connector box clipped to the
 camera's view plus a margin, and a connector that crosses the view is stroked
 as the visible runs of its cubic (`flow/edge-clip.ts`), sampled against the
 view's width: at 250% the stroked geometry stays about one screen long instead
-of tessellating document-long curves that the clip would discard. Comet pieces
-outside the view are skipped the same way. The connectors of selected cards rest brighter and
-thicker than the others and carry a comet of light (`flow/edge-flow.ts`):
-the connector's cubic is split into short pieces (`splitConnector`), and
-each piece's alpha is an animated value of the shared wave, so the light
-travels from its source with a gradient trail behind its head and leaves
-through the target, and the next comet starts. Every connector is stroked
-from its source to its target, so the light flows into a selected target
-and out of a selected source. A native stepped loop (`FLOW_STEPS` over one
-1200 ms cycle) drives the shared wave only while at least one connector touches
-the selection and Reduce Motion is off. Its requested 30 Hz frame cap is not a
-fixed Windows rate: unchanged canvas slots skip re-recording. `CanvasCamera`
-owns the moving flag for every pan, zoom and fit, settled by a 150 ms timer.
-Above four flowing connectors, card/selection movement, camera settling and
-following card/frame pluses suppress the expensive comet strokes while the
-native phase continues. The brighter resting selection highlight remains.
+of tessellating document-long curves that the clip would discard. A connector
+rests faint, at a third of its port type's color; the clicked edge and every
+connector touching a selected card are stroked one point thicker and fully
+lit, so selecting a card or a line relights its connectors and nothing
+animates while the board is idle. `CanvasCamera` owns the moving flag for every
+pan, zoom and fit, settled by a 150 ms timer, for overlays that suppress
+expensive work while the camera moves.
 A selected card outside the camera's view stays in the scene for the group
 frame and its connectors, but its view is fully transparent, so NSH skips the
 card's paint subtree while its text stays in the accessibility tree.
@@ -267,14 +281,15 @@ The scene model (`flow/scene.ts`) is headless: it holds the visible nodes and
 edges, the selection, transient drag geometry (`overrides`, read per card so
 a drag updates only the cards it moves and their connectors), previews, the
 connection previews and the card a pulled connector would snap to, and answers
-world-space hit questions (`nodeAt`, `portZoneAt`, `edgeAt`). Selected cards
-stack above every unselected one in selection order, so a pressed card comes
-to the front at once and a marquee brings its whole group forward; hit
-testing uses the same depth, and the connection previews stay above them all.
-A card under the pointer hides a lower card's plus, just as it hides the card
-itself.
+world-space hit questions (`nodeAt`, `edgeAt`); the typed-port queries
+(`portAt`, `nearestPort`, `portOffsetAt` in `flow/scene-ports.ts`) read it
+through that surface. Selected cards stack above every unselected one in
+selection order, so a pressed card comes to the front at once and a marquee
+brings its whole group forward; hit testing uses the same depth, and the
+connection previews stay above them all. A card under the pointer hides a
+lower card's port, just as it hides the card itself.
 `CanvasController` turns pointer events into commands: select/toggle, drag,
-resize from a handle, marquee, the following plus, and the port/edge
+resize from a handle, marquee, the following port, and the port/edge
 gestures; the secondary button's drag pans. `CanvasCamera` stores logical `x`, `y` and
 `scale`; `panBy`, `zoomAround` and `fit` rebuild the view from those values.
 
@@ -297,19 +312,19 @@ target stay visible.
 - **Pointer** — a press selects a card (Shift toggles), starts a drag when the
   press lands on a selected card, starts a resize when it lands near any
   visible card's border (a corner or anywhere along an edge; the press selects
-  that card first), and starts the connector gestures in a plus's side zone.
-  A corner keeps the card's aspect ratio with the opposite corner fixed,
+  that card first), and starts the connector gestures on a typed port. A
+  corner keeps the card's aspect ratio with the opposite corner fixed,
   scaling by the pointer's projection onto the card's diagonal, so passing one
-  edge does not snap the card to its minimum. An edge resizes one axis. The
-  side zones keep clear of the corners, so a plus never steals a corner
-  resize. A press on empty canvas clears the selection and starts the
-  marquee. A double-click on a text card opens its inline editor.
+  edge does not snap the card to its minimum. An edge resizes one axis. Ports
+  take precedence over the resize handles they overlap. A press on empty
+  canvas clears the selection and starts the marquee. A double-click on a
+  text card opens its inline editor.
 - **Touch** — one finger selects, drags, resizes, connects and box-selects as
   the pointer does; two fingers pinch-zoom around their center and pan with it.
-- **Hover** — mouse movement updates the hovered card, the plus following the
-  pointer in a side zone, and a cursor that reflects any card's resize border
-  or a plus. A card under the pointer owns the hit: another
-  card's border or plus never reacts through it.
+- **Hover** — mouse movement updates the hovered card, the typed port whose
+  icon follows the pointer, and a cursor that reflects any card's resize
+  border or a port. A card under the pointer owns the hit: another
+  card's border or port never reacts through it.
 - **Wheel** — the mouse wheel and touchpad zoom about the pointer, four
   notches per doubling, clamped to the camera's scale range. The wheel is a
   native-component event (the window's input never reaches TSX directly), so
@@ -330,14 +345,18 @@ dismisses the top layer (search, inline editor, selected edge, composer, then
 the selection). The toolbar's Text and Image buttons add nodes. Each command
 exists once.
 
-Pointer gestures above the canvas: dragging a card's right plus previews a
-forward connection and the left plus a reverse one; the preview is dashed
-until the connection is written. While the pointer is on a card that accepts
-the connection, the preview snaps to that card's port and the card's border
+Pointer gestures above the canvas: dragging an output port previews a
+forward connection and an input port a reverse one; the preview is dashed
+until the connection is written. While the pointer is within the release
+snap of a compatible port, the preview snaps to that port and the target card
 highlights like hover, and the preview follows the pointer again when it
-leaves. Dragging either plus of a selected edge's endpoints moves that end
-(source or target). A press on a connector selects it; double-clicking a text
-card opens its inline editor.
+leaves. A full input, a type mismatch and an already-connected pair never
+highlight, and a still press on a port writes nothing. Dragging either typed
+port of a selected edge's endpoints moves that end (source or target). A
+multi-card frame shows one group port per type on each side; dragging one
+fans the connection out to every matching selected port (or connects the
+target to every selected input). A press on a connector selects it;
+double-clicking a text card opens its inline editor.
 
 ## Window chrome
 

@@ -30,7 +30,18 @@ function node(id: string, x: number, y: number): NodeSummary {
 }
 
 function edge(id: string, fromId: string, toId: string): EdgeSummary {
-  return { id, fromId, toId, fromPort: null, toPort: null, kind: "flow", dataJson: "{}" };
+  return {
+    id,
+    fromId,
+    toId,
+    fromPort: "text",
+    toPort: "prompt",
+    portKind: "text",
+    fromOffset: 42,
+    toOffset: 42,
+    kind: "flow",
+    dataJson: "{}",
+  };
 }
 
 function snapshot(nodes: NodeSummary[], edges: EdgeSummary[]): SceneSnapshot {
@@ -143,7 +154,7 @@ test("padding and 64-point rounding contain the complete connector box", () => {
   const bounds = connectionBounds(ports.from, ports.to);
 
   expect(sceneBounds(scene)).toEqual({ x: 192, y: 64, width: 192, height: 64 });
-  expect(bounds).toEqual({ x: 240, y: 82, width: 120, height: 0 });
+  expect(bounds).toEqual({ x: 254, y: 68, width: 92, height: 14 });
 });
 
 test("negative coordinates and handles beyond both ports round outward", () => {
@@ -165,7 +176,7 @@ test("negative coordinates and handles beyond both ports round outward", () => {
     expect(point.x).toBeLessThanOrEqual(rounded.x + rounded.width);
     expect(point.y).toBeLessThanOrEqual(rounded.y + rounded.height);
   }
-  expect(bounds.x).toBe(-160);
+  expect(bounds.x).toBe(-174);
 });
 
 test("a move within one rounded box produces exactly the same fields", () => {

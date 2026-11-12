@@ -63,6 +63,9 @@ pub(crate) fn viewport_statement(rect: &Viewport, margin: f64) -> SelectStatemen
             (edges::Entity, edges::Column::ToId),
             (edges::Entity, edges::Column::FromPort),
             (edges::Entity, edges::Column::ToPort),
+            (edges::Entity, edges::Column::PortKind),
+            (edges::Entity, edges::Column::FromOffset),
+            (edges::Entity, edges::Column::ToOffset),
             (edges::Entity, edges::Column::Kind),
             (edges::Entity, edges::Column::DataJson),
         ])
@@ -227,8 +230,8 @@ fn write_bounds(
         return Ok(());
     };
     let (min_x, max_x, min_y, max_y) = connection_bounds(
-        EdgePoint::output(from.x, from.y, from.width, from.height),
-        EdgePoint::input(to.x, to.y, to.height),
+        EdgePoint::output(from.x, from.y, from.width, edge.from_offset),
+        EdgePoint::input(to.x, to.y, edge.to_offset),
     );
     edges_rtree::Entity::delete_by_id(rowid).exec(conn)?;
     edges_rtree::Entity::insert(edges_rtree::ActiveModel {
@@ -267,14 +270,20 @@ fn edge_rowid(conn: &impl ConnectionTrait, id: &str) -> Result<Option<i64>, DbEr
 }
 
 /// Fills the index from the edge and node tables. Runs once when migration 3
-/// lands and is idempotent: a rebuild replaces every row.
+/// lands and is idempotent: a rebuild replaces every row. A database older
+/// than the typed-port schema has no port-offset columns yet; migration 5
+/// resets it right after, so there is nothing to index there.
 pub fn backfill(conn: &impl ConnectionTrait) -> Result<(), DbErr> {
     conn.execute_unprepared("DELETE FROM edges_rtree")?;
+    if !has_column(conn, "edges", "from_offset")? {
+        return Ok(());
+    }
     let statement = Statement::from_string(
         DbBackend::Sqlite,
         "SELECT edges.rowid AS seq, \
-                f.x AS from_x, f.y AS from_y, f.width AS from_width, f.height AS from_height, \
-                t.x AS to_x, t.y AS to_y, t.height AS to_height \
+                f.x AS from_x, f.y AS from_y, f.width AS from_width, \
+                edges.from_offset AS from_offset, \
+                t.x AS to_x, t.y AS to_y, edges.to_offset AS to_offset \
          FROM edges \
          JOIN nodes AS f ON f.id = edges.from_id \
          JOIN nodes AS t ON t.id = edges.to_id"
@@ -287,12 +296,12 @@ pub fn backfill(conn: &impl ConnectionTrait) -> Result<(), DbErr> {
                 row.try_get("", "from_x")?,
                 row.try_get("", "from_y")?,
                 row.try_get("", "from_width")?,
-                row.try_get("", "from_height")?,
+                row.try_get("", "from_offset")?,
             ),
             EdgePoint::input(
                 row.try_get("", "to_x")?,
                 row.try_get("", "to_y")?,
-                row.try_get("", "to_height")?,
+                row.try_get("", "to_offset")?,
             ),
         );
         edges_rtree::Entity::insert(edges_rtree::ActiveModel {
@@ -305,6 +314,18 @@ pub fn backfill(conn: &impl ConnectionTrait) -> Result<(), DbErr> {
         .exec(conn)?;
     }
     Ok(())
+}
+
+/// Whether `table` has a column named `column` (SQLite's `PRAGMA table_info`).
+fn has_column(conn: &impl ConnectionTrait, table: &str, column: &str) -> Result<bool, DbErr> {
+    let statement =
+        Statement::from_string(DbBackend::Sqlite, format!("PRAGMA table_info({table})"));
+    for row in conn.query_all_raw(statement)? {
+        if row.try_get::<String>("", "name")? == column {
+            return Ok(true);
+        }
+    }
+    Ok(false)
 }
 
 #[cfg(test)]

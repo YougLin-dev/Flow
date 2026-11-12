@@ -6,7 +6,7 @@
  */
 import { type Accessor, computed } from "nsh";
 import { CARD_TITLE_BAND, CARD_TITLE_HEIGHT } from "./card-layout";
-import { type BoxGeometry, type Point, type PortSide, portButtonPoint } from "./connection";
+import type { BoxGeometry, Point } from "./connection";
 
 export interface CardSize {
   readonly width: number;
@@ -26,16 +26,6 @@ export function cardLocalLayout(size: CardSize): CardLayout {
     title: { x: 0, y: -CARD_TITLE_BAND, width: size.width, height: CARD_TITLE_HEIGHT },
     body: { x: 0, y: 0, width: size.width, height: size.height },
   };
-}
-
-/** The card-local rest position of a side's plus button. */
-export function cardPlusPoint(size: CardSize, side: PortSide): Point {
-  return portButtonPoint({ x: 0, y: 0, width: size.width, height: size.height }, side);
-}
-
-/** `point` in the card's local points, the card's top-left at `origin`. */
-export function toCardLocal(point: Point, origin: Point): Point {
-  return { x: point.x - origin.x, y: point.y - origin.y };
 }
 
 function samePosition(a: Point | null, b: Point | null): boolean {

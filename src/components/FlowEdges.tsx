@@ -2,20 +2,15 @@
  * All connectors in one native-canvas layer: each cubic is stroked natively,
  * so every line is smooth and stays sharp at every camera scale, and the
  * whole viewport costs one canvas rather than a view per sampled segment.
+ * A connector rests faint in its port type's color; the clicked one is
+ * thicker and fully lit.
  */
 import {
-  Animated,
   type Accessor,
-  type AnimatedNode,
   Canvas,
   type CanvasRenderingContext2D,
-  cleanup,
   colorScheme,
   computed,
-  createAnimatedValue,
-  Easing,
-  effect,
-  reduceMotion,
   token,
 } from "nsh";
 import type { EdgeSummary } from "@flow/native";
@@ -26,37 +21,22 @@ import {
   cubicBounds,
   EDGE_THICKNESS,
   overlaps,
-  splitConnector,
 } from "../flow/connection";
-import { cubicInView, cubicInsideView, visibleCubicRuns } from "../flow/edge-clip";
+import { cubicInsideView, visibleCubicRuns } from "../flow/edge-clip";
 import { connectorLayerBox, sameBox, trimConnectorBox } from "../flow/edge-layer";
-import {
-  cometRuns,
-  cometShown,
-  edgeFlows,
-  FLOW_CYCLE_MS,
-  FLOW_REST_ALPHA,
-  FLOW_SEGMENTS,
-  FLOW_STEPS,
-  flowingEdgeCount,
-  flowPass,
-} from "../flow/edge-flow";
+import { isPortKind } from "../flow/node-kinds";
+import { portVisual } from "../flow/port-visuals";
 import type { FlowScene } from "../flow/scene";
 
-/** A flowing connector's line: thicker than the rest, so the selected
- * cards' connectors stand out where its wave travels. */
-const FLOW_THICKNESS = EDGE_THICKNESS + 1;
-
-/** Above this many flowing connectors, card gestures, camera movement or a
- * following card/frame plus draws the resting highlight only: every input or
- * settle change re-records this canvas, and the comet's many short strokes
- * would dominate that record. Its native phase continues meanwhile. */
-const GESTURE_FLOW_EDGES = 4;
-
+/** The selected connector's stroke: one point thicker than the rest. */
+const SELECTED_THICKNESS = EDGE_THICKNESS + 1;
+/** Resting connectors are dimmed to this share of their type's color, so a
+ * clicked one stands out. */
+const REST_ALPHA = 0.35;
 /** A stroke's width, in world points; the cull and clip margins keep it. */
-const STROKE_MARGIN = FLOW_THICKNESS;
+const STROKE_MARGIN = SELECTED_THICKNESS;
 
-/** A connector's resolved geometry, shared by its baseline and comet strokes. */
+/** A connector's resolved geometry. */
 interface DrawableEdge {
   readonly edge: EdgeSummary;
   readonly ports: { from: Point; to: Point };
@@ -67,55 +47,11 @@ interface DrawableEdge {
 
 export interface FlowEdgesProps {
   readonly scene: FlowScene;
-  /** True while the camera moves/settles or a card/frame plus follows the pointer. */
-  readonly paused: Accessor<boolean>;
   /** The world rectangle the camera shows; null until it has a size. */
   readonly visible: Accessor<BoxGeometry | null>;
 }
 
 export function FlowEdges(props: FlowEdgesProps) {
-  const flowingCount = computed(() =>
-    flowingEdgeCount(props.scene.edges(), new Set(props.scene.selection())),
-  );
-  // A native stepped phase keeps JS out of the animation. frameRate is a cap
-  // on capable platforms, not a fixed timer rate; Windows may tick at display
-  // rate, while canvas slots that do not change skip re-recording.
-  const wave = createAnimatedValue(1);
-  const loop = Animated.loop(
-    Animated.timing(wave, {
-      toValue: -1,
-      duration: FLOW_CYCLE_MS,
-      easing: Easing.steps(FLOW_STEPS),
-      frameRate: 30,
-    }),
-    { resetBeforeIteration: true },
-  );
-  let running = false;
-  const stopWave = (): void => {
-    if (running) loop.stop();
-    running = false;
-    wave.set(1);
-  };
-  cleanup(stopWave);
-  effect(() => {
-    if (cometRuns(flowingCount(), reduceMotion())) {
-      if (running) return;
-      running = true;
-      wave.set(1);
-      void loop.start();
-      return;
-    }
-    stopWave();
-  });
-
-  // One alpha timeline per piece, shared by every connector: every curve is
-  // split into the same number of pieces, so the comet is one value driving
-  // a handful of small pieces instead of a stroke of the whole curve. The
-  // nodes are made once, so a redraw only draws with them.
-  const alphas: readonly AnimatedNode[] = Array.from({ length: FLOW_SEGMENTS }, (_, index) =>
-    wave.interpolate(flowPass(index)),
-  );
-
   // One memo per scene change serves the canvas box and both clipping paths;
   // creating it per camera tick would walk every connector for nothing.
   const layer = connectorLayerBox(props.scene);
@@ -138,6 +74,9 @@ export function FlowEdges(props: FlowEdgesProps) {
     { equals: sameBox },
   );
   const box = computed(() => trimConnectorBox(layer(), clipView()), { equals: sameBox });
+  // The selection as one set, reused by every draw until it changes; a drag
+  // re-records the canvas on each move and must not rebuild this per frame.
+  const selectedCards = computed(() => new Set(props.scene.selection()));
   const left = () => box()?.x ?? 0;
   const top = () => box()?.y ?? 0;
   const width = () => box()?.width ?? 0;
@@ -202,84 +141,26 @@ export function FlowEdges(props: FlowEdgesProps) {
         }
       }
     };
-    // Read the scheme so a theme switch redraws every connector's color.
+    // Read the scheme so a theme switch redraws every connector's color, and
+    // the selection so selecting cards or clicking a connector relights it.
     colorScheme();
-    const normal = token("muted-foreground");
-    const accent = token("chart-1");
-    // The wave stays in the connector's own family: a brighter shade of the
-    // line rather than the selection's accent.
-    const flowColor = token("flow");
     const selected = props.scene.selectedEdge();
-    // Read the selection so a change redraws the flowing connectors.
-    const flowing = new Set(props.scene.selection());
-    const paused = props.paused();
+    const touching = selectedCards();
     cx.lineCap = "round";
     for (const { edge, ports, controls, runs } of drawable) {
       const { from, to } = ports;
-      // A selected card's connectors rest brighter and thicker than the
-      // rest, under their wave; a connector that is itself selected keeps
-      // its accent.
-      const flows = edgeFlows(edge, flowing);
-      const highlighted = edge.id !== selected && flows;
-      cx.strokeStyle = edge.id === selected ? accent : normal;
-      cx.lineWidth = EDGE_THICKNESS;
-      cx.globalAlpha = 1;
+      // A connector takes its port type's color: the clicked edge and every
+      // connector touching a selected card are thicker and fully lit, the
+      // rest rest faint.
+      const lit = edge.id === selected || touching.has(edge.fromId) || touching.has(edge.toId);
+      cx.strokeStyle = portColor(edge.portKind);
+      cx.lineWidth = lit ? SELECTED_THICKNESS : EDGE_THICKNESS;
+      cx.globalAlpha = lit ? 1 : REST_ALPHA;
       cx.beginPath();
       if (runs === null) traceCubic(from, controls.c1, controls.c2, to);
       else traceRuns(runs);
       cx.stroke();
-      if (highlighted) {
-        cx.strokeStyle = flowColor;
-        cx.lineWidth = FLOW_THICKNESS;
-        cx.globalAlpha = FLOW_REST_ALPHA;
-        cx.stroke();
-      }
     }
-    if (
-      !cometShown({
-        flowing: flowingCount(),
-        reducedMotion: reduceMotion(),
-        dragging: props.scene.overrides().size > 0,
-        paused,
-        limit: GESTURE_FLOW_EDGES,
-      })
-    )
-      return;
-    // A comet of light travels each selected card's connectors from their
-    // source and leaves through their target: the curve is drawn as short
-    // pieces, each lit by its own animated alpha, so the light has a
-    // gradient trail behind its head. A step only changes the trail's
-    // pieces, so the canvas repaints the trail, not the whole curve. Every
-    // connector is stroked source to target, so the light flows into a
-    // selected target and out of a selected source.
-    cx.save();
-    cx.strokeStyle = flowColor;
-    cx.lineCap = "butt";
-    cx.lineWidth = FLOW_THICKNESS;
-    for (const { edge, ports } of drawable) {
-      if (!edgeFlows(edge, flowing)) continue;
-      const pieces = splitConnector(ports.from, ports.to, FLOW_SEGMENTS);
-      for (let i = 0; i < pieces.length; i += 1) {
-        const piece = pieces[i];
-        let runs: readonly (readonly Point[])[] | null = null;
-        if (view !== null) {
-          // A piece wholly outside cannot show; one that crosses the view
-          // is stroked only where it can be seen, like the baseline.
-          if (!cubicInView(piece.from, piece.c1, piece.c2, piece.to, view, STROKE_MARGIN)) continue;
-          if (!cubicInsideView(piece.from, piece.c1, piece.c2, piece.to, view, STROKE_MARGIN)) {
-            runs = visibleCubicRuns(piece.from, piece.c1, piece.c2, piece.to, view, STROKE_MARGIN);
-            if (runs.length === 0) continue;
-          }
-        }
-        cx.globalAlpha = alphas[i];
-        cx.beginPath();
-        if (runs === null) traceCubic(piece.from, piece.c1, piece.c2, piece.to);
-        else traceRuns(runs);
-        cx.stroke();
-      }
-    }
-    // The cap and the alpha go back to the base lines'.
-    cx.restore();
   };
 
   return (
@@ -295,4 +176,9 @@ export function FlowEdges(props: FlowEdgesProps) {
       draw={draw}
     />
   );
+}
+
+/** The stroke color of a connector from its port type. */
+function portColor(kind: string): string {
+  return token(portVisual(isPortKind(kind) ? kind : "text").token);
 }

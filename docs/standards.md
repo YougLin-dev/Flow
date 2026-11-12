@@ -360,8 +360,10 @@ and `zoomAround` MUST clamp the result to `MIN_SCALE`/`MAX_SCALE`. A fit MUST
 center finite content without dividing by zero for an empty document.
 Rectangles MAY compare approximately (a drag is committed only when it moved
 more than a sub-point), and a resize MUST never produce a size below the
-minimum. Composer and inline-editor placement MUST clamp into the stage even
-when the panel is larger than it. Geometry MUST NOT be coerced with
+minimum. The composer MUST stay anchored below its card and the inline editor
+inside the card body; both may extend past the stage rather than move away
+from the card they belong to, and the card's own placement keeps them near
+the stage in normal use. Geometry MUST NOT be coerced with
 truthiness such as `Number(x) || 0`; use `Number.isFinite`. (Test, Review)
 
 Distances used by hit tests are world distances (ports, edge proximity) while

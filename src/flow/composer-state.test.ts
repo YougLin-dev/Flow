@@ -21,7 +21,7 @@ function detail(id: string, kind: string, settingsJson: string, body = "body"): 
     status: "idle",
     outputBatchId: null,
   };
-  return { node, batch: null, latestBatch: null, inputs: [] };
+  return { node, batch: null, latestBatch: null, inputs: [], incoming: [] };
 }
 
 const IMAGE_JSON =

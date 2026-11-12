@@ -199,6 +199,7 @@ async function connectWithOutput(
   const item: ResultItemInput = {
     id: `item-${crypto.randomUUID()}`,
     position: 0,
+    portId: "text",
     kind: "text",
     text: "extra context",
   };
@@ -207,8 +208,11 @@ async function connectWithOutput(
     id: edgeId,
     fromId: sourceId,
     toId: targetId,
-    fromPort: "out",
-    toPort: "in",
+    fromPort: "text",
+    toPort: "prompt",
+    portKind: "text",
+    fromOffset: 110,
+    toOffset: 110,
     kind: "flow",
   });
 }
@@ -383,8 +387,11 @@ test("an unrelated connector change keeps the open composer's detail", async () 
     id: "unrelated-edge",
     fromId: "extra-source",
     toId: "unrelated-target",
-    fromPort: "out",
-    toPort: "in",
+    fromPort: "text",
+    toPort: "prompt",
+    portKind: "text",
+    fromOffset: 110,
+    toOffset: 110,
     kind: "flow",
   });
 

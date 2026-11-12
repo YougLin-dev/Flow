@@ -165,10 +165,10 @@ response metrics:
   to select them, and drag the group by its selection frame. Record
   card/connector/selection counts, `commits`, `js`, `items`, `frame`, `paint`,
   `canvas`, and `engine` before and after a change.
-- **Pan/zoom with selected cards**: keep the same group selected, pan with the
-  hand tool, and zoom around the pointer. Record the same fields plus
-  `fps shown/refresh` and `over`; do not infer smoothness from `fps` alone.
-  Repeat while idle to measure baseline engine wakeups.
+- **Pan/zoom with selected cards**: keep the same group selected, pan with a
+  secondary-button drag, and zoom around the pointer. Record the same fields
+  plus `fps shown/refresh` and `over`; do not infer smoothness from `fps`
+  alone. Repeat while idle to measure baseline engine wakeups.
 - **Large document/low zoom**: run `bun run test:100k`, review its ignored
   screenshots, and inspect the timestamped phases plus the pan, zoom,
   search-reveal, Fit and trace/fps costs. Its database is the text-only
@@ -267,7 +267,7 @@ For behaviour below the pointer, test the pieces directly:
 - `CardGeometry` in `flow/card-geometry.test.ts`: a move wakes only the
   position memo and a resize only the size memo, an unchanged rectangle wakes
   neither, a missing rectangle clears both, and the card-local chrome and
-  plus points compose back onto the world point they came from.
+  port points compose back onto the world point they came from.
 - `CardContent` in `flow/card-content.test.ts`: a viewport read with the same
   fields wakes nothing, a new title or body wakes only itself, a status wakes
   the status and its label, and a kind wakes the accent and the image check.
@@ -327,7 +327,7 @@ easiest observable: it is `—` before the first fit and `<n>%` afterwards.
   ports and no cards is dropped, and previews only include visible cards.
 - `flow/card-geometry.ts`: a drag override or command move wakes only the
   moved card's position memo, a resize wakes only its size memo, a viewport
-  read that leaves a card where it was wakes neither, and the chrome and plus
+  read that leaves a card where it was wakes neither, and the chrome and port
   helpers work in card-local points.
 - `flow/card-content.ts`: the same through every card text: a viewport read
   that carries a card's fields unchanged wakes no value, and each value
@@ -351,8 +351,10 @@ easiest observable: it is `—` before the first fit and `<n>%` afterwards.
 - `flow/canvas-controller.ts`: card press and drag commit, cancel, Shift
   toggle, marquee (a single-card box leaving a normal selection), hand pan,
   resize, new connections and reconnects.
-- `flow/frame-connection.test.ts`: a multi-card frame's merged pluses, muted
-  per-card zones, and the group connections pulled from either side.
+- `flow/frame-connection.test.ts`: a multi-card frame's typed group ports
+  (their ordering, capacity state and mixed-kind union), muted per-card
+  ports, a still press that writes nothing, and the group connections pulled
+  from either side.
 - `flow/right-gesture.ts`: the right-drag threshold and pan, the still press
   a release opens its menu for, and the refusal while another gesture owns
   the canvas.
@@ -379,9 +381,6 @@ easiest observable: it is `—` before the first fit and `<n>%` afterwards.
 - `flow/node-kinds.ts` and `flow/connection.ts`: direct unit tests for settings
   parsing/clamping, connection rules, port points, sampled curves and hit
   distances.
-- `flow/edge-flow.ts`: an edge flows with a selected card at either end
-  (including both), and not with neither; the wave's passes all end at its
-  head, and their alphas compose from the faint tail to the head's.
 - `flow/icon-shape.ts`: direct unit tests for Lucide node conversion — paths,
   circles, ellipses, rects with corner radii, lines, polylines/polygons and
   malformed values.

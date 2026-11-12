@@ -11,7 +11,7 @@ import { overlaps, type BoxGeometry } from "./connection";
 
 /**
  * How far outside the viewport a card may still show pixels: the title row
- * sits above the body's rectangle, the plus buttons reach out to the sides
+ * sits above the body's rectangle, the port icons reach out to the sides
  * and the card shadow spreads below and to the right.
  */
 export const CARD_CULL_MARGIN = 64;

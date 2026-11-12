@@ -9,6 +9,7 @@ pub struct Model {
     pub id: String,
     pub batch_id: String,
     pub position: i32,
+    pub port_id: String,
     pub kind: String,
     pub text: String,
     pub asset_id: Option<String>,

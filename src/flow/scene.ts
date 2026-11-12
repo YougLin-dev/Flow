@@ -12,13 +12,14 @@ import {
   distanceToConnection,
   EDGE_HIT_DISTANCE,
   type Point,
-  type PortSide,
-  portPoint,
-  portZone,
+  PORT_CENTER_GAP,
+  portCenter,
 } from "./connection";
 import { CARD_TITLE_BAND } from "./card-layout";
 import { KeyedFlags } from "./keyed-flags";
+import type { PortKind } from "./node-kinds";
 import { sameEdge, sameNode, samePreviewMap, samePreviewView } from "./record-equality";
+import { edgePortOffsets } from "./scene-ports";
 import { containsPoint } from "./selection";
 
 /** The URLs a card's image body should show, loaded by the page. */
@@ -31,6 +32,7 @@ export interface PreviewView {
 export interface ConnectionPreview {
   readonly from: Point;
   readonly to: Point;
+  readonly portKind: PortKind;
 }
 
 export class FlowScene {
@@ -56,6 +58,11 @@ export class FlowScene {
   private readonly edgeById = new Map<string, EdgeSummary>();
   /** The directional pairs the edge map holds, built on the first query. */
   private edgePairs: Set<string> | null = null;
+  /** Incoming edges per input port, rebuilt only when the edge list changes. */
+  private incomingCache: {
+    readonly edges: readonly EdgeSummary[];
+    readonly counts: ReadonlyMap<string, number>;
+  } | null = null;
   private readonly applied = new Map<string, BoxGeometry>();
   private readonly selectedFlags = new KeyedFlags();
   private readonly targetFlags = new KeyedFlags();
@@ -111,7 +118,13 @@ export class FlowScene {
       }
       this.edgeById.clear();
       for (const [id, edge] of retained) this.edgeById.set(id, edge);
-      for (const edge of keptEdges) this.edgeById.set(edge.id, edge);
+      // A pinned card's cached connectors fill in the ones the snapshot no
+      // longer reports, but never replace a fresh record: the fresh one may
+      // carry corrected far anchors, and re-inserting the stale one would
+      // undo that correction.
+      for (const edge of keptEdges) {
+        if (!this.edgeById.has(edge.id)) this.edgeById.set(edge.id, edge);
+      }
       this.prune();
       // Keep the lazy index when the read left its pairs alone; anchors and
       // record identity do not change which pairs are connected.
@@ -224,20 +237,40 @@ export class FlowScene {
   /** Replaces the overrides in one write; the drag controller builds them. */
   setOverrides(next: ReadonlyMap<string, BoxGeometry>): void {
     // One gesture step's geometry is one state; per-card signals define
-    // notification granularity, not update rounds.
+    // notification granularity, not update rounds. A drag keeps the same id
+    // set every step, so the removed-id pass usually runs empty and no
+    // union set is built per pointer move.
     batch(() => {
-      const ids = new Set([...this.overrideRects.keys(), ...next.keys()]);
+      for (const id of this.overrideRects.keys()) {
+        if (!next.has(id)) this.setRectSignal(id, this.applied.get(id) ?? null);
+      }
       this.overrideRects.clear();
-      for (const [id, rect] of next) this.overrideRects.set(id, rect);
-      // Only the cards whose geometry changed hear of it; the cards reading
-      // their own rect stay untouched, which keeps a drag's re-render to what
-      // it moves.
-      for (const id of ids) this.setRectSignal(id, this.effectiveRect(id));
+      for (const [id, rect] of next) {
+        this.overrideRects.set(id, rect);
+        this.setRectSignal(id, rect);
+      }
     });
   }
 
   selectedIds(): readonly string[] {
     return this.selection();
+  }
+
+  /** How many edges enter each input port, keyed `toId\0toPort`. A frame
+   * drag resolves group ports on every move; the count is one map per edge
+   * list, not one scan per move. */
+  incomingByPort(): ReadonlyMap<string, number> {
+    const edges = this.edges();
+    if (this.incomingCache !== null && this.incomingCache.edges === edges) {
+      return this.incomingCache.counts;
+    }
+    const counts = new Map<string, number>();
+    for (const edge of edges) {
+      const key = `${edge.toId}\u0000${edge.toPort}`;
+      counts.set(key, (counts.get(key) ?? 0) + 1);
+    }
+    this.incomingCache = { edges, counts };
+    return counts;
   }
 
   /** Replaces the selection, ignoring ids the scene does not have. */
@@ -360,8 +393,8 @@ export class FlowScene {
     return this.baseZ + this.selectionRanks().size + 3;
   }
 
-  /** Above the elevated selection and its frame: the merged plus buttons. */
-  framePlusZ(): number {
+  /** Above the elevated selection and its frame: the group ports. */
+  selectionPortsZ(): number {
     this.nodes();
     return this.baseZ + this.selectionRanks().size + 2;
   }
@@ -404,45 +437,14 @@ export class FlowScene {
     return this.ranks;
   }
 
-  /** The world point of a card's input or output port. */
-  portWorld(id: string, side: PortSide): Point | null {
-    const rect = this.cardRect(id);
-    return rect ? portPoint(rect, side) : null;
-  }
-
-  /**
-   * The side zone under a world point, with the plus button's followed
-   * position. The topmost card owns the hit: a card under the pointer hides a
-   * lower card's plus, just as it hides the card it belongs to.
-   */
-  portZoneAt(
-    x: number,
-    y: number,
-    under?: string | null,
-  ): { nodeId: string; side: PortSide; point: Point } | null {
-    let hit: { nodeId: string; side: PortSide; point: Point; z: number } | null = null;
-    for (const node of this.byId.values()) {
-      const rect = this.cardRect(node.id);
-      if (!rect) continue;
-      const depth = this.cardDepth(node.id);
-      for (const side of ["out", "in"] as const) {
-        const point = portZone(rect, side, x, y);
-        if (point !== null && (hit === null || depth >= hit.z)) {
-          hit = { nodeId: node.id, side, point, z: depth };
-        }
-      }
-    }
-    if (hit === null) return null;
-    const covered = under === undefined ? this.nodeAt(x, y) : under;
-    if (covered !== null && covered !== hit.nodeId) {
-      if (this.cardDepth(covered) >= hit.z) return null;
-    }
-    return { nodeId: hit.nodeId, side: hit.side, point: hit.point };
-  }
-
   /** The kind of a card in the scene. */
   kindOf(id: string): string | null {
     return this.byId.get(id)?.kind ?? null;
+  }
+
+  /** One connector by id, when the scene holds it. */
+  edge(id: string): EdgeSummary | null {
+    return this.edgeById.get(id) ?? null;
   }
 
   /** The topmost card under a world point. */
@@ -486,12 +488,21 @@ export class FlowScene {
   }
 
   /**
-   * A connector's endpoints: a live card's port when its card is in the
-   * scene, else the port the read carried for the card beyond it.
+   * A connector's endpoints: a live card's port icon when its card is in the
+   * scene, else the port the read carried for the card beyond it, moved from
+   * the card's edge out to where that icon sits. The line therefore touches
+   * the port, not the card border, whichever end is visible.
    */
   edgePorts(edge: EdgeSummary): { from: Point; to: Point } | null {
-    const from = this.portWorld(edge.fromId, "out") ?? edge.fromPoint;
-    const to = this.portWorld(edge.toId, "in") ?? edge.toPoint;
+    const fromRect = this.cardRect(edge.fromId);
+    const toRect = this.cardRect(edge.toId);
+    const offsets = edgePortOffsets(this, edge);
+    const from = fromRect
+      ? portCenter(fromRect, "out", offsets.from)
+      : edge.fromPoint && { x: edge.fromPoint.x + PORT_CENTER_GAP, y: edge.fromPoint.y };
+    const to = toRect
+      ? portCenter(toRect, "in", offsets.to)
+      : edge.toPoint && { x: edge.toPoint.x - PORT_CENTER_GAP, y: edge.toPoint.y };
     return from && to ? { from, to } : null;
   }
 
@@ -517,7 +528,8 @@ export class FlowScene {
       this.setConnectionPreviews(null);
       return;
     }
-    this.setConnectionPreviews([{ from, to }]);
+    // This convenience pair has no port type; text is the neutral default.
+    this.setConnectionPreviews([{ from, to, portKind: "text" }]);
   }
 
   /** Whether a connector from `fromId` to `toId` is already in the scene. */
@@ -649,7 +661,8 @@ function samePreviews(a: readonly ConnectionPreview[], b: readonly ConnectionPre
       first.from.x !== second.from.x ||
       first.from.y !== second.from.y ||
       first.to.x !== second.to.x ||
-      first.to.y !== second.to.y
+      first.to.y !== second.to.y ||
+      first.portKind !== second.portKind
     ) {
       return false;
     }

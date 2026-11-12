@@ -5,6 +5,7 @@
  */
 import {
   computed,
+  effect,
   signal,
   View,
   type ContextMenuEvent,
@@ -21,9 +22,10 @@ import { FlowCard, type CardImageEvent } from "./FlowCard";
 import { FlowEdges } from "./FlowEdges";
 import { FlowPreviews } from "./FlowPreviews";
 import { GridBackground } from "./GridBackground";
+import { PortTooltip } from "./PortTooltip";
 import { SelectionFrame } from "./SelectionFrame";
 import { SelectionOverlay } from "./SelectionOverlay";
-import { SelectionPluses } from "./SelectionPluses";
+import { SelectionPorts } from "./SelectionPorts";
 import { WheelSurface } from "./wheel-surface";
 
 export interface FlowCanvasProps {
@@ -155,6 +157,24 @@ export function FlowCanvas(props: FlowCanvasProps) {
     return rect !== null && cardInView(rect, shown);
   };
 
+  /** The cards with an edge on either side; one set per edge change. */
+  const connectedCards = computed(() => {
+    const ids = new Set<string>();
+    for (const edge of props.scene.edges()) {
+      ids.add(edge.fromId);
+      ids.add(edge.toId);
+    }
+    return ids;
+  });
+
+  // The hover and preview mirrors are per-id signals; drop the ones for
+  // cards the scene no longer holds, so their map tracks the document rather
+  // than every card a session ever saw.
+  effect(() => {
+    const live = new Set(props.scene.nodes().map((node) => node.id));
+    props.controller.flags.retain(live);
+  });
+
   const onContextMenu = (event: ContextMenuEvent): void => {
     // A secondary press is an action of its own: a tap just before it must
     // not swallow it. NSH reports a mouse press to `onTouch` listeners too,
@@ -177,7 +197,7 @@ export function FlowCanvas(props: FlowCanvasProps) {
       props.controller.up(lastX, lastY);
     }
     // The pointer is gone even if a gesture just ended at its last position:
-    // a hover (and the plus it holds) must not stay behind after it leaves.
+    // a hover (and the port it holds) must not stay behind after it leaves.
     props.controller.leave();
   };
 
@@ -278,42 +298,34 @@ export function FlowCanvas(props: FlowCanvasProps) {
           transform: `translate(${props.camera.x}px, ${props.camera.y}px) scale(${props.camera.scale})`,
         }}
       >
-        <FlowEdges
-          scene={props.scene}
-          paused={() =>
-            props.camera.moving() ||
-            props.controller.portPlus() !== null ||
-            props.controller.framePlus() !== null
-          }
-          visible={view}
-        />
+        <FlowEdges scene={props.scene} visible={view} />
         {/* The frame shares the world's stacking: above unselected cards and
             below the selected ones, so the swept area moves as one group. */}
         <SelectionFrame scene={props.scene} camera={props.camera} controller={props.controller} />
         <Each of={props.scene.nodes()} key={(node) => node.id}>
           {(node) => {
-            // The id never changes for a row. Reading it once keeps the
-            // card's signals from all depending on the node accessor: a
-            // viewport refresh replaces the node record, and a plus whose
-            // visibility read that record would be rebuilt on every refresh
-            // while it follows the pointer.
+            // The id and kind never change for a row. Reading them once keeps
+            // the card's signals from all depending on the node accessor: a
+            // viewport refresh replaces the node record, and a card whose
+            // bindings read that record would be rebuilt on every refresh.
             const id = node().id;
+            const kind = node().kind;
             return (
               <FlowCard
                 node={node}
+                nodeId={id}
+                kind={kind}
                 rect={() => props.scene.cardRect(id)}
                 zIndex={() => props.scene.cardZ(id)}
                 preview={() => props.scene.previews().get(id) ?? null}
                 selected={() => props.scene.isSelectedKeyed(id)}
                 previewed={() => props.controller.flags.isPreviewed(id)}
                 hovered={() => props.controller.flags.isHovered(id)}
-                plusSuppressed={() => props.controller.multiFrame() && props.scene.isSelected(id)}
-                plus={() => {
-                  const plus = props.controller.portPlus();
-                  return plus !== null && plus.nodeId === id
-                    ? { side: plus.side, point: plus.point }
-                    : null;
-                }}
+                hoveredPort={() => props.controller.hoveredPort()}
+                hoveredPortKey={() => props.controller.hoveredPortKey()}
+                portsSuppressed={() => props.controller.multiFrame() && props.scene.isSelected(id)}
+                connected={() => connectedCards().has(id)}
+                zoom={() => props.camera.scaleView()}
                 target={() => props.scene.isConnectionTarget(id)}
                 visible={() => cardVisible(id)}
                 imageEvent={props.imageEvent}
@@ -321,7 +333,7 @@ export function FlowCanvas(props: FlowCanvasProps) {
             );
           }}
         </Each>
-        <SelectionPluses scene={props.scene} camera={props.camera} controller={props.controller} />
+        <SelectionPorts scene={props.scene} camera={props.camera} controller={props.controller} />
         <If when={props.scene.connectionPreviews()}>
           {(previews) => <FlowPreviews previews={previews} zIndex={props.scene.previewZ()} />}
         </If>
@@ -353,6 +365,12 @@ export function FlowCanvas(props: FlowCanvasProps) {
         onTouchMove={onTouchMove}
         onTouchEnd={onTouchEnd}
         onTouchCancel={onTouchCancel}
+      />
+      <PortTooltip
+        scene={props.scene}
+        camera={props.camera}
+        controller={props.controller}
+        stage={props.stage}
       />
     </View>
   );

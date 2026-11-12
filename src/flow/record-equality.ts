@@ -36,7 +36,7 @@ export function sameNode(a: NodeSummary, b: NodeSummary): boolean {
 
 /**
  * Exhaustive per-field equality for a connector; a new EdgeSummary field is a
- * compile error at the comparison literal below. An absent optional port and
+ * compile error at the comparison literal below. An absent optional point and
  * an explicit null describe the same connector.
  */
 export function sameEdge(a: EdgeSummary, b: EdgeSummary): boolean {
@@ -46,8 +46,11 @@ export function sameEdge(a: EdgeSummary, b: EdgeSummary): boolean {
     toId: a.toId === b.toId,
     kind: a.kind === b.kind,
     dataJson: a.dataJson === b.dataJson,
-    fromPort: (a.fromPort ?? null) === (b.fromPort ?? null),
-    toPort: (a.toPort ?? null) === (b.toPort ?? null),
+    fromPort: a.fromPort === b.fromPort,
+    toPort: a.toPort === b.toPort,
+    portKind: a.portKind === b.portKind,
+    fromOffset: a.fromOffset === b.fromOffset,
+    toOffset: a.toOffset === b.toOffset,
     fromPoint: samePoint(a.fromPoint ?? null, b.fromPoint ?? null),
     toPoint: samePoint(a.toPoint ?? null, b.toPoint ?? null),
   };

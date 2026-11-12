@@ -1,6 +1,6 @@
 /**
  * One node card on the native canvas: its title and status above the card,
- * the body inside it and a plus button on each side while it is active. The
+ * the body inside it and one typed port on each declared parameter. The
  * card's root carries its world position, and its chrome is laid out in
  * card-local points, so a drag moves one style instead of every geometry
  * derived style (see `flow/card-geometry.ts`); its document text is read
@@ -11,18 +11,13 @@
 import { computed, host, Image, Text, View } from "nsh";
 import { Input } from "nsh/base";
 import type { NodeSummary } from "@flow/native";
-import { PortPlus } from "./PortPlus";
+import { Port } from "./Port";
+import { portKey, type PortHover } from "../flow/canvas-controller";
 import { CardContent } from "../flow/card-content";
-import {
-  CardGeometry,
-  type CardSize,
-  cardLocalLayout,
-  cardPlusPoint,
-  toCardLocal,
-} from "../flow/card-geometry";
+import { CardGeometry, type CardSize, cardLocalLayout } from "../flow/card-geometry";
 import { CARD_TITLE_HEIGHT } from "../flow/card-layout";
-import type { BoxGeometry, Point, PortSide } from "../flow/connection";
-import type { FlowAccent } from "../flow/node-kinds";
+import { type BoxGeometry, PORT_CENTER_GAP, portOffset } from "../flow/connection";
+import { type FlowAccent, nodeKind } from "../flow/node-kinds";
 import { previewCell } from "../flow/preview-grid";
 import type { PreviewView } from "../flow/scene";
 
@@ -38,6 +33,10 @@ export interface CardImageEvent {
 
 export interface FlowCardProps {
   readonly node: () => NodeSummary;
+  /** The card's document id; the hovered port matches against it. */
+  readonly nodeId: string;
+  /** The kind's port schema; a card's kind never changes for its row id. */
+  readonly kind: string;
   readonly rect: () => BoxGeometry | null;
   /** The card's draw order: selected cards sit above every other card. */
   readonly zIndex: () => number;
@@ -46,10 +45,16 @@ export interface FlowCardProps {
   /** True while a marquee in progress covers this card. */
   readonly previewed: () => boolean;
   readonly hovered: () => boolean;
-  /** The side this card's plus is following the pointer on, if any. */
-  readonly plus: () => { readonly side: PortSide; readonly point: Point } | null;
-  /** True while a multi-card frame replaces this card's own plus buttons. */
-  readonly plusSuppressed: () => boolean;
+  /** The port whose icon follows the pointer, if it belongs to this card. */
+  readonly hoveredPort: () => PortHover | null;
+  /** The hovered port's identity; stable while the pointer moves over it. */
+  readonly hoveredPortKey: () => string | null;
+  /** True while a multi-card frame replaces this card's own ports. */
+  readonly portsSuppressed: () => boolean;
+  /** True while this card has an edge on either side. */
+  readonly connected: () => boolean;
+  /** The camera scale: below a readable size, idle ports stay out of the tree. */
+  readonly zoom: () => number;
   /** True while a pulled connector is snapped to this card. */
   readonly target: () => boolean;
   /** False while the card lies wholly outside the camera's view. */
@@ -68,8 +73,10 @@ const ACCENT_BG: Record<FlowAccent, string> = {
 
 /** The body inset inside the card. */
 const BODY_INSET = 16;
+/** Below this on-screen card height, idle connected ports are not mounted. */
+const PORT_MIN_SCREEN_HEIGHT = 56;
 
-const ZERO_POINT: Point = { x: 0, y: 0 };
+const ZERO_POINT = { x: 0, y: 0 };
 const ZERO_SIZE: CardSize = { width: 0, height: 0 };
 
 export function FlowCard(props: FlowCardProps) {
@@ -95,13 +102,37 @@ export function FlowCard(props: FlowCardProps) {
   const status = content.status;
   const statusText = content.statusText;
   const lineCount = () => Math.max(1, Math.floor((size().height - BODY_INSET * 2) / 19));
-  const plusBase = (side: PortSide): Point =>
-    geometry.size() === null ? ZERO_POINT : cardPlusPoint(size(), side);
-  const plusFollow = (side: PortSide): Point | null => {
-    const followed = props.plus();
-    return followed !== null && followed.side === side ? toCardLocal(followed.point, pos()) : null;
+  const spec = nodeKind(props.kind);
+  // Ports stay out of the tree for cards nobody is looking at: an idle board
+  // pays no per-port views. A connected card keeps them while its ports would
+  // be readable on screen, so a low-zoom 2000-card overview stays one card
+  // per node; hover, selection and a snapped connector always show them.
+  const portsShown = computed(
+    () =>
+      props.selected() ||
+      props.hovered() ||
+      props.target() ||
+      (props.connected() && size().height * props.zoom() >= PORT_MIN_SCREEN_HEIGHT),
+  );
+  /** A port icon's card-local centre, just outside the matching border. */
+  const portCenter = (
+    side: "in" | "out",
+    index: number,
+    count: number,
+  ): { x: number; y: number } => ({
+    x: side === "in" ? -PORT_CENTER_GAP : size().width + PORT_CENTER_GAP,
+    y: portOffset(index, count, size().height),
+  });
+  /** The pointer's card-local point while this card's port is hovered. */
+  const portFollow = (side: "in" | "out", portId: string): { x: number; y: number } | null => {
+    // Read the identity before the record: every port subscribes to the
+    // identity, but only the hovered one reads the per-move pointer point.
+    if (props.hoveredPortKey() !== portKey(props.nodeId, side, portId)) return null;
+    const hover = props.hoveredPort();
+    if (hover === null) return null;
+    const origin = pos();
+    return { x: hover.point.x - origin.x, y: hover.point.y - origin.y };
   };
-  const showPlus = computed(() => !props.plusSuppressed() && (props.selected() || props.hovered()));
 
   return (
     <View
@@ -279,11 +310,25 @@ export function FlowCard(props: FlowCardProps) {
         )}
       </View>
 
-      <If when={showPlus()}>
-        <PortPlus accent={accent()} base={() => plusBase("in")} follow={() => plusFollow("in")} />
-      </If>
-      <If when={showPlus()}>
-        <PortPlus accent={accent()} base={() => plusBase("out")} follow={() => plusFollow("out")} />
+      <If when={portsShown() && !props.portsSuppressed()}>
+        <Each of={spec.inputs} key={(port) => port.id}>
+          {(port, index) => (
+            <Port
+              port={port()}
+              center={() => portCenter("in", index(), spec.inputs.length)}
+              follow={() => portFollow("in", port().id)}
+            />
+          )}
+        </Each>
+        <Each of={spec.outputs} key={(port) => port.id}>
+          {(port, index) => (
+            <Port
+              port={port()}
+              center={() => portCenter("out", index(), spec.outputs.length)}
+              follow={() => portFollow("out", port().id)}
+            />
+          )}
+        </Each>
       </If>
     </View>
   );

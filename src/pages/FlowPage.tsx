@@ -75,9 +75,15 @@ export function FlowPage() {
   const applyChanges = (changes: ChangeSet): void => {
     viewport.noteRev(changes.rev);
     minimap.noteChanges(changes);
-    scene.applyChangeSet(changes);
+    // Close a composer whose node the change set removed before the scene
+    // publishes its new selection: the selection effect saves drafts, and a
+    // deleted row cannot take one.
     currentSession()?.onChanges(changes);
+    scene.applyChangeSet(changes);
     schedulePreviews();
+    // A command can add cards the viewport has never read; without a read
+    // they would stay mounted off screen until the next pan or zoom.
+    viewport.schedule();
   };
 
   const viewport = new ViewportController({
@@ -151,8 +157,7 @@ export function FlowPage() {
     panBy: (dx, dy) => viewport.panBy(dx, dy),
     commitBounds,
     selectEdge,
-    reconnectEdge: (edgeId, fromId, toId) =>
-      void currentSession()?.reconnectEdge(edgeId, fromId, toId),
+    reconnectEdge: (edgeId, pair) => void currentSession()?.reconnectEdge(edgeId, pair),
     connectNodes: (pairs) => void currentSession()?.connectNodes(pairs),
     openInline: (nodeId) => {
       const session = currentSession();
@@ -201,9 +206,16 @@ export function FlowPage() {
     viewport.panBy(dx, dy);
   };
 
+  // Zooming mid-gesture would re-map the press point under a moved camera and
+  // jump the dragged cards; the gesture owns the pointer until release.
+  const zoomCanvas = (factor: number, x: number, y: number): void => {
+    if (controller.gesturing()) return;
+    viewport.zoomAround(factor, x, y);
+  };
+
   const setZoom = (factor: number): void => {
     const size = stage();
-    viewport.zoomAround(factor, size.width / 2, size.height / 2);
+    zoomCanvas(factor, size.width / 2, size.height / 2);
   };
 
   const fit = (): void => {
@@ -402,8 +414,8 @@ export function FlowPage() {
           viewport.onResize(size.width, size.height);
         }}
         onPan={(dx, dy) => viewport.panBy(dx, dy)}
-        onZoom={(factor, x, y) => viewport.zoomAround(factor, x, y)}
-        onWheelZoom={(notches, x, y) => viewport.zoomAround(wheelZoomFactor(notches), x, y)}
+        onZoom={(factor, x, y) => zoomCanvas(factor, x, y)}
+        onWheelZoom={(notches, x, y) => zoomCanvas(wheelZoomFactor(notches), x, y)}
         onMenuPress={(at) => canvasMenu.press(at)}
         onMenuRelease={() => canvasMenu.release()}
         onMenuCancel={() => {

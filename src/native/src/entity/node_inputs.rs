@@ -10,6 +10,7 @@ pub struct Model {
     pub id: String,
     pub node_id: String,
     pub position: i32,
+    pub port_id: String,
     pub kind: String,
     pub origin: String,
     pub edge_id: Option<String>,

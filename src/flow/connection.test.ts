@@ -6,60 +6,38 @@ import {
   connectorControls,
   cubicAt,
   distanceToConnection,
-  portButtonPoint,
-  portPoint,
-  portZone,
-  splitConnector,
+  PORT_CENTER_GAP,
+  PORT_HIT_RADIUS,
+  portCenter,
+  portHit,
+  portOffset,
 } from "./connection";
 
-test("ports meet a card's left and right edges at their middle", () => {
-  const box = { x: 40, y: 60, width: 300, height: 220 };
-  expect(portPoint(box, "in")).toEqual({ x: 40, y: 170 });
-  expect(portPoint(box, "out")).toEqual({ x: 340, y: 170 });
-});
+test("typed ports spread evenly over the card side, outside the border", () => {
+  const box = { x: 40, y: 60, width: 300, height: 210 };
+  expect(portOffset(0, 1, 210)).toBe(105);
+  expect(portOffset(0, 2, 210)).toBe(70);
+  expect(portOffset(1, 2, 210)).toBe(140);
+  expect(portCenter(box, "out", portOffset(0, 1, 210))).toEqual({
+    x: 340 + PORT_CENTER_GAP,
+    y: 165,
+  });
+  expect(portCenter(box, "in", portOffset(0, 2, 210))).toEqual({
+    x: 40 - PORT_CENTER_GAP,
+    y: 130,
+  });
 
-test("plus buttons rest just outside the border", () => {
-  const box = { x: 40, y: 60, width: 300, height: 220 };
-  expect(portButtonPoint(box, "in")).toEqual({ x: 24, y: 170 });
-  expect(portButtonPoint(box, "out")).toEqual({ x: 356, y: 170 });
+  const center = portCenter(box, "out", portOffset(1, 2, 210));
+  expect(portHit(box, "out", portOffset(1, 2, 210), center.x, center.y)).toBe(true);
+  expect(
+    portHit(box, "out", portOffset(1, 2, 210), center.x + PORT_HIT_RADIUS + 0.5, center.y),
+  ).toBe(false);
 });
 
 test("measures a connector along its curve", () => {
   // Level ports give a straight line; a vertical pair bows out and back.
   expect(Math.abs(connectionLength({ x: 0, y: 0 }, { x: 100, y: 0 }) - 100) < 0.001).toBe(true);
   expect(connectionLength({ x: 0, y: 0 }, { x: 0, y: 200 })).toBeGreaterThan(200);
-});
-
-test("splits a connector into pieces that draw the same curve", () => {
-  const from = { x: 0, y: 100 };
-  const to = { x: 420, y: 260 };
-  const { c1, c2 } = connectorControls(from, to);
-  const pieces = splitConnector(from, to, 12);
-  expect(pieces.length).toBe(12);
-  expect(pieces[0].from).toEqual(from);
-  expect(pieces[pieces.length - 1].to).toEqual(to);
-  pieces.forEach((piece, index) => {
-    // Each piece begins where the last one ended, so the pieces join.
-    if (index > 0) expect(piece.from).toEqual(pieces[index - 1].to);
-    // A piece's own midpoint lies on the original cubic at its own time.
-    const middle = cubicAt(piece.from, piece.c1, piece.c2, piece.to, 0.5);
-    const onCurve = cubicAt(from, c1, c2, to, (index + 0.5) / 12);
-    expect(Math.abs(middle.x - onCurve.x) < 1e-9 && Math.abs(middle.y - onCurve.y) < 1e-9).toBe(
-      true,
-    );
-  });
-});
-
-test("a side zone follows the pointer just outside its border", () => {
-  const box = { x: 40, y: 60, width: 300, height: 220 };
-  expect(portZone(box, "out", 352, 150)).toEqual({ x: 352, y: 150 });
-  expect(portZone(box, "in", 28, 190)).toEqual({ x: 28, y: 190 });
-  // At the border the button stays clear of it instead of sitting on it.
-  expect(portZone(box, "out", 341, 150)).toEqual({ x: 348, y: 150 });
-  // Inside the card, past the reach, or past the side's middle are no zone.
-  expect(portZone(box, "out", 330, 150)).toBeNull();
-  expect(portZone(box, "out", 380, 150)).toBeNull();
-  expect(portZone(box, "out", 352, 110)).toBeNull();
 });
 
 test("samples the connector from the output port to the input", () => {

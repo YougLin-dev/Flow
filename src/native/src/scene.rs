@@ -33,7 +33,6 @@ struct FarEndpoint {
     x: f64,
     y: f64,
     width: f64,
-    height: f64,
 }
 
 pub fn snapshot(
@@ -189,17 +188,21 @@ fn edges_for_scene(
     // that holds only one of its cards can still draw it to the far end. The
     // far cards themselves are not returned: they stay out of the view tree
     // and the card budget.
-    let mut ports: BTreeMap<String, (EdgePoint, EdgePoint)> = BTreeMap::new();
+    let mut geometry: BTreeMap<String, EdgeGeometry> = BTreeMap::new();
     for node in nodes {
-        ports.insert(
+        geometry.insert(
             node.id.clone(),
-            node_ports(node.x, node.y, node.width, node.height),
+            EdgeGeometry {
+                x: node.x,
+                y: node.y,
+                width: node.width,
+            },
         );
     }
     let missing: Vec<String> = found
         .values()
         .flat_map(|edge| [edge.from_id.clone(), edge.to_id.clone()])
-        .filter(|id| !ports.contains_key(id))
+        .filter(|id| !geometry.contains_key(id))
         .collect::<BTreeSet<_>>()
         .into_iter()
         .collect();
@@ -211,7 +214,6 @@ fn edges_for_scene(
                 (nodes::Entity, nodes::Column::X),
                 (nodes::Entity, nodes::Column::Y),
                 (nodes::Entity, nodes::Column::Width),
-                (nodes::Entity, nodes::Column::Height),
             ])
             .from(nodes::Entity)
             .and_where(Expr::col((nodes::Entity, nodes::Column::DocumentId)).eq(DOCUMENT_ID))
@@ -222,24 +224,29 @@ fn edges_for_scene(
         for row in rows {
             let endpoint =
                 FarEndpoint::from_query_result(&row, "").map_err(|error| error.to_string())?;
-            ports.insert(
+            geometry.insert(
                 endpoint.id,
-                node_ports(endpoint.x, endpoint.y, endpoint.width, endpoint.height),
+                EdgeGeometry {
+                    x: endpoint.x,
+                    y: endpoint.y,
+                    width: endpoint.width,
+                },
             );
         }
     }
 
     Ok(found
         .into_values()
-        .map(|edge| edge_summary(&edge, &ports))
+        .map(|edge| edge_summary(&edge, &geometry))
         .collect())
 }
 
-fn node_ports(x: f64, y: f64, width: f64, height: f64) -> (EdgePoint, EdgePoint) {
-    (
-        EdgePoint::output(x, y, width, height),
-        EdgePoint::input(x, y, height),
-    )
+/// The geometry a connector endpoint needs: its card's left edge and top.
+#[derive(Clone, Copy)]
+struct EdgeGeometry {
+    x: f64,
+    y: f64,
+    width: f64,
 }
 
 fn node_summary(node: &nodes::Model) -> NodeSummary {
@@ -261,20 +268,24 @@ fn node_summary(node: &nodes::Model) -> NodeSummary {
     }
 }
 
-fn edge_summary(
-    edge: &edges::Model,
-    ports: &BTreeMap<String, (EdgePoint, EdgePoint)>,
-) -> EdgeSummary {
+fn edge_summary(edge: &edges::Model, geometry: &BTreeMap<String, EdgeGeometry>) -> EdgeSummary {
     EdgeSummary {
         id: edge.id.clone(),
         from_id: edge.from_id.clone(),
         to_id: edge.to_id.clone(),
         from_port: edge.from_port.clone(),
         to_port: edge.to_port.clone(),
+        port_kind: edge.port_kind.clone(),
+        from_offset: edge.from_offset,
+        to_offset: edge.to_offset,
         kind: edge.kind.clone(),
         data_json: edge.data_json.clone(),
-        from_point: ports.get(&edge.from_id).map(|port| port.0),
-        to_point: ports.get(&edge.to_id).map(|port| port.1),
+        from_point: geometry
+            .get(&edge.from_id)
+            .map(|card| EdgePoint::output(card.x, card.y, card.width, edge.from_offset)),
+        to_point: geometry
+            .get(&edge.to_id)
+            .map(|card| EdgePoint::input(card.x, card.y, edge.to_offset)),
     }
 }
 

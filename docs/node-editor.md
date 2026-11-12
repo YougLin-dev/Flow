@@ -1,9 +1,9 @@
 # Node editor (M1)
 
-Flow's first executable node layer: a generic node with one input port and one
-output port, typed text/image items, and many-to-many directed connections.
-This document records the M1 contract; the long-term direction is still
-[the Rust document core plan](plans/rust-core.md).
+Flow's first executable node layer: kinds declare named, typed input and
+output ports, connections bind one output port to one input port, and types
+carry text or image items. This document records the M1 contract; the
+long-term direction is still [the Rust document core plan](plans/rust-core.md).
 
 ## Data model
 
@@ -12,15 +12,18 @@ table, including the version 1 nodes and edges, and recreates the current
 schema; there is no data migration. The TSX side seeds the text → image
 example into an empty database (`flow/data.ts`). Version 3 keeps the
 document and adds the connector RTree, filled from the existing edges.
+Version 5 is the typed-port reset: it drops the document tables and recreates
+them with required edge port fields and `port_id` on inputs and result items;
+there is again no data migration because the app is unreleased.
 
-| Table            | Role                                                                   |
-| ---------------- | ---------------------------------------------------------------------- |
-| `nodes`          | kind, geometry, body, opaque `settings_json`, `status`, current output |
-| `result_batches` | one immutable provider or manual run per node                          |
-| `result_items`   | the text/image items of a batch, ordered by position                   |
-| `node_inputs`    | a node's ordered input items: edge snapshots or local uploaded assets  |
-| `assets`         | metadata for content-addressed bytes under `<database dir>/assets/`    |
-| `edges`          | directed output → input connections                                    |
+| Table            | Role                                                                            |
+| ---------------- | ------------------------------------------------------------------------------- |
+| `nodes`          | kind, geometry, body, opaque `settings_json`, `status`, current output          |
+| `result_batches` | one immutable provider or manual run per node                                   |
+| `result_items`   | the text/image items of a batch, ordered by position, with output port          |
+| `node_inputs`    | a node's ordered input items, with target port: edge snapshots or local uploads |
+| `assets`         | metadata for content-addressed bytes under `<database dir>/assets/`             |
+| `edges`          | directed output-port → input-port connections                                   |
 
 `nodes.output_batch_id` points at the batch the node currently shows. A batch
 is never edited: a rerun or manual text edit inserts a new batch and moves the
@@ -30,31 +33,59 @@ their items.
 Rust stores `kind` and `settings_json` opaquely. The TSX kind registry
 (`flow/node-kinds.ts`) owns ports, default size and settings parsing, and
 `flow/execution.ts` owns the provider for each kind. M1 has `text` and
-`image`; both accept text and image items, text produces text, and image
-produces images.
+`image`. Both declare a `prompt` text input (capacity 1), a `references` image
+input (capacity 4 for text, 16 for image) and one output: `text` for the text
+kind, `image` for the image kind.
 
-## Inputs and connections
+## Ports and connections
 
-- Connecting an edge, or reconnecting one, snapshots **all items of the
-  source's current batch** into the target's input list. A source with no
+- An edge carries `fromPort`, `toPort`, the shared `portKind` and each port's
+  offset from its card's top, so the connector attaches to the exact port
+  even when the far card is outside the viewport. The line ends at the port
+  icon's centre, 14 points outside the card's border, not on the border
+  itself; an off-screen endpoint carried by the read is moved out by the
+  same gap. Ports are spread evenly over their card's side (`justify-evenly`),
+  and a visible edge resolves its endpoints from the ports' current layout,
+  so a resize keeps the line on the port. Hovering a port springs its icon a
+  few points toward the pointer, like the old plus handle; the connector
+  anchor does not move.
+- A card mounts its ports only when they can be read or acted on: selected,
+  hovered, a snapped target, or connected and at least 56 on-screen points
+  tall. A fit-to-board overview therefore pays no port views. Hovering a port
+  for 150 ms shows a compact name pill above the icon (cards connect left to
+  right, so the sides stay clear; the side is configurable and flips at the
+  stage edge); a group port shows its type and side.
+- Only ports of the same item type connect. A prompt accepts one incoming
+  edge; an image references port accepts up to its capacity. A full input, a
+  type mismatch and a self-connection never highlight as a target.
+- A connection snapshots **the source items whose `portId` matches the edge's
+  output port** into the target's matching input port. A source with no
   output contributes no items.
-- Local uploads are input rows with `origin = "local"` and an asset. Edge
-  snapshots are `origin = "edge"` with the contributing `edge_id` and
-  `item_id`, so deleting that edge can remove exactly its rows.
+- Local uploads are input rows with `origin = "local"`, target port
+  `references` and an asset. Edge snapshots are `origin = "edge"` with the
+  contributing `edge_id` and `item_id`, so deleting that edge can remove
+  exactly its rows.
 - Deleting one input row does not delete its edge. Deleting an edge removes
   the rows it contributed and leaves local uploads alone.
 - Running a node rebuilds its edge inputs from the connected sources' current
   batches (`syncInputs`) and clears previous per-item exclusions. Local inputs
-  keep their relative order; the rebuilt edge groups follow.
-- Inputs are ordered globally by `position`. The composer groups consecutive
-  items from the same source (or the local uploads) under a source heading.
-- Selecting an edge lets a drag from either endpoint's plus button move that
-  end; dragging any other plus starts a new connection (right side forward,
-  left side reverse), and a valid card under the pointer snaps into place
-  with its border highlighted.
-- Self-connections and duplicate edges are rejected in Rust. Provider runs never enter undo;
-  document edits (connect, reconnect, delete, input changes, manual text,
-  settings) do.
+  keep their relative order per port; the rebuilt edge groups follow in that
+  port.
+- Positions are per `(node, port)`; the composer groups items by input port
+  and shows the edge slots in use, such as `3 / 16`. Reorder and remove act
+  within a group.
+- Pressing a port starts a connection from that specific port, in either
+  direction; a release on a compatible port joins them. Dragging the selected
+  edge's endpoint moves that end and revalidates its type and capacity,
+  excluding the edge itself. A port pair appears at most once; parallel edges
+  between two cards on different ports are legal.
+- A multi-card selection frame exposes the union of its ports: one group port
+  per distinct input type on the left and one per distinct output type on the
+  right, icon only. Dragging a group port proposes one edge per selected
+  member port to the single external target. If any proposed edge would
+  overflow a port, the whole gesture is rejected and nothing is written.
+- Provider runs never enter undo; document edits (connect, reconnect, delete,
+  input changes, manual text, settings) do.
 - Undoing a settings edit restores only `settings_json` (and bumps the
   revision); a later run's body, output and status are not history and survive
   the undo. An existing output becomes stale when its settings change, until
@@ -89,8 +120,9 @@ or `interrupted` (`input-not-ready` is reserved for a later dependency gate).
 - Image nodes show up to four thumbnails in the card body and their latest
   images in the composer.
 - Assets are stored in Rust as `sha256`-named files next to the database and
-  read over the FFI. TSX turns the bytes into `data:` URLs because NSH's image
-  loader does not resolve `blob:` URLs.
+  read over the FFI. TSX turns the bytes into one cached `blob:` URL per
+  asset (NSH resolves the blob's native image bytes once) and owns its
+  revocation until the page closes.
 - Uploads use the NSH image picker (`"picker": true` in `nsh.json`); the
   composer appends them as local inputs.
 
@@ -117,13 +149,14 @@ new provider and, if it needs network access, a deliberate host entry in
 The canvas is a native NSH view tree. `components/FlowCanvas.tsx` holds the
 world-space cards and edges, the screen-space selection frame and marquee
 overlay and the interaction surface; `components/FlowCard.tsx` renders one
-card, `components/FlowEdges.tsx` strokes the viewport's connectors in one
-native canvas and `components/FlowPreviews.tsx` the pulled connection
-previews. `components/PortPlus.tsx` is the round plus handle, used both by a
-card and, through `components/SelectionPluses.tsx`, by a multi-card frame.
-`flow/scene.ts` is the headless model, and `flow/canvas-controller.ts` turns
-pointer events into selection, drag, resize, marquee, pan and connector
-gestures.
+card with its typed ports (`components/Port.tsx`), `components/FlowEdges.tsx`
+strokes the viewport's connectors in one native canvas and
+`components/FlowPreviews.tsx` the pulled connection previews.
+`components/SelectionPorts.tsx` renders the multi-card frame's group ports
+from `flow/group-ports.ts`. `flow/scene.ts` is the headless model,
+`flow/scene-ports.ts` answers typed-port hits and capacity queries, and
+`flow/canvas-controller.ts` turns pointer events into selection, drag,
+resize, marquee, pan and connector gestures.
 `components/GridBackground.tsx` draws the dot grid in screen space.
 `components/CanvasContextMenu.tsx` is the right-click menu: Add text node and
 Add image node place the card at the pressed point. `flow/right-gesture.ts`
@@ -148,12 +181,11 @@ operation and screen-reader semantics without an alternative path.
 editor's screen anchor; `flow/viewport-controller.ts` keeps the scene
 reconciled while the camera moves.
 
-Keyboard: `V`/`H` tools, `N`/`I` add a text or image node, `L` connect two
-selected cards, `Delete`/`Backspace` delete a selected edge or cards,
-`Mod+Z`/`Mod+Shift+Z` undo/redo, arrows pan, `Mod+K` search. A secondary-button
-drag pans the canvas, and a right click opens the canvas menu. `Escape` closes
-the canvas menu, then search, the inline editor, a selected edge, the composer,
-and finally the selection.
+Keyboard: `Delete`/`Backspace` delete a selected edge or cards, `Mod+Z` /
+`Mod+Shift+Z` undo/redo, arrows pan, `Mod+=`/`Mod+-` zoom, `Mod+0` fits,
+`Mod+K` search. A secondary-button drag pans the canvas, and a right click
+opens the canvas menu. `Escape` closes the canvas menu, then search, the
+inline editor, a selected edge, the composer, and finally the selection.
 
 ## M1 non-goals
 

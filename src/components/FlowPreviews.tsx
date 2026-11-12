@@ -4,7 +4,7 @@
  * follows the same rule as the committed connectors, so the cost stays one
  * view however large the selection is.
  */
-import { Canvas, type CanvasRenderingContext2D, colorScheme, token } from "nsh";
+import { Canvas, type CanvasRenderingContext2D, colorScheme, computed, token } from "nsh";
 import {
   type BoxGeometry,
   connectionBounds,
@@ -14,6 +14,8 @@ import {
   EDGE_THICKNESS,
   mergeBounds,
 } from "../flow/connection";
+import { isPortKind } from "../flow/node-kinds";
+import { portVisual } from "../flow/port-visuals";
 import type { ConnectionPreview } from "../flow/scene";
 
 export interface FlowPreviewsProps {
@@ -22,14 +24,17 @@ export interface FlowPreviewsProps {
 }
 
 export function FlowPreviews(props: FlowPreviewsProps) {
-  const box = (): BoxGeometry | null => {
+  // One union box per preview change serves the canvas' four style values
+  // and its draw; rebuilding it per accessor made every pointer move walk
+  // the preview list six times.
+  const box = computed((): BoxGeometry | null => {
     let union: BoxGeometry | null = null;
     for (const preview of props.previews()) {
       const bounds = connectionBounds(preview.from, preview.to);
       union = union === null ? bounds : mergeBounds(union, bounds);
     }
     return union;
-  };
+  });
   const left = () => (box()?.x ?? 0) - EDGE_PADDING;
   const top = () => (box()?.y ?? 0) - EDGE_PADDING;
   const width = () => (box()?.width ?? 0) + EDGE_PADDING * 2;
@@ -39,13 +44,13 @@ export function FlowPreviews(props: FlowPreviewsProps) {
     const previews = props.previews();
     if (previews.length === 0) return;
     const origin = { x: left(), y: top() };
-    // A theme switch repaints the preview in the new accent.
+    // A theme switch repaints the previews in the new port colors.
     colorScheme();
-    cx.strokeStyle = token("chart-1");
     cx.lineWidth = EDGE_THICKNESS;
     cx.lineCap = "round";
     cx.setLineDash(EDGE_DASH);
-    for (const { from, to } of previews) {
+    for (const { from, to, portKind } of previews) {
+      cx.strokeStyle = token(portVisual(isPortKind(portKind) ? portKind : "text").token);
       const { c1, c2 } = connectorControls(from, to);
       cx.beginPath();
       cx.moveTo(from.x - origin.x, from.y - origin.y);

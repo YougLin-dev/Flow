@@ -6,14 +6,35 @@
 
 export type FlowAccent = "chart-1" | "chart-2" | "chart-3" | "chart-4" | "chart-5";
 
-/** The type of a port's items. A node's output carries a set of these. */
+/** The type of a port's items. */
 export type PortKind = "text" | "image";
+
+/** Whether a stored kind names a known port type. */
+export function isPortKind(value: string): value is PortKind {
+  return value === "text" || value === "image";
+}
 
 export type NodeKindId = "text" | "image";
 
 export type ImageAspect = "1:1" | "16:9" | "9:16";
 
 export const IMAGE_ASPECTS: readonly ImageAspect[] = ["1:1", "16:9", "9:16"];
+
+/** One input parameter of a node kind. */
+export interface InputPort {
+  readonly id: string;
+  readonly name: string;
+  readonly kind: PortKind;
+  /** The most edges this input may receive. */
+  readonly capacity: number;
+}
+
+/** One output parameter of a node kind. */
+export interface OutputPort {
+  readonly id: string;
+  readonly name: string;
+  readonly kind: PortKind;
+}
 
 export interface TextSettings {
   version: 1;
@@ -36,8 +57,8 @@ export interface NodeKind {
   readonly name: string;
   readonly accent: FlowAccent;
   readonly size: { readonly width: number; readonly height: number };
-  readonly accepts: readonly PortKind[];
-  readonly produces: readonly PortKind[];
+  readonly inputs: readonly InputPort[];
+  readonly outputs: readonly OutputPort[];
 }
 
 const TEXT_KIND: NodeKind = {
@@ -45,8 +66,11 @@ const TEXT_KIND: NodeKind = {
   name: "Text",
   accent: "chart-2",
   size: { width: 300, height: 220 },
-  accepts: ["text", "image"],
-  produces: ["text"],
+  inputs: [
+    { id: "prompt", name: "Prompt", kind: "text", capacity: 1 },
+    { id: "references", name: "Image references", kind: "image", capacity: 4 },
+  ],
+  outputs: [{ id: "text", name: "Text", kind: "text" }],
 };
 
 const IMAGE_KIND: NodeKind = {
@@ -54,8 +78,11 @@ const IMAGE_KIND: NodeKind = {
   name: "Image",
   accent: "chart-1",
   size: { width: 300, height: 220 },
-  accepts: ["text", "image"],
-  produces: ["image"],
+  inputs: [
+    { id: "prompt", name: "Prompt", kind: "text", capacity: 1 },
+    { id: "references", name: "Image references", kind: "image", capacity: 16 },
+  ],
+  outputs: [{ id: "image", name: "Image", kind: "image" }],
 };
 
 const FALLBACK_KIND: NodeKind = {
@@ -63,8 +90,11 @@ const FALLBACK_KIND: NodeKind = {
   name: "Node",
   accent: "chart-1",
   size: { width: 300, height: 220 },
-  accepts: ["text", "image"],
-  produces: ["text", "image"],
+  inputs: [
+    { id: "prompt", name: "Prompt", kind: "text", capacity: 1 },
+    { id: "references", name: "Image references", kind: "image", capacity: 16 },
+  ],
+  outputs: [{ id: "text", name: "Text", kind: "text" }],
 };
 
 const KINDS: Record<string, NodeKind> = {
@@ -80,11 +110,16 @@ export function isKnownKind(id: string): id is NodeKindId {
   return id in KINDS;
 }
 
-/** Both kinds accept both item types in M1; the check is still by the kinds. */
-export function canConnect(fromKind: string, toKind: string): boolean {
-  const from = nodeKind(fromKind);
-  const to = nodeKind(toKind);
-  return from.produces.some((kind) => to.accepts.includes(kind));
+/** Whether two specific ports may be joined: they carry the same item type. */
+export function canConnectPorts(
+  fromKind: string,
+  fromPort: string,
+  toKind: string,
+  toPort: string,
+): boolean {
+  const from = nodeKind(fromKind).outputs.find((port) => port.id === fromPort);
+  const to = nodeKind(toKind).inputs.find((port) => port.id === toPort);
+  return from !== undefined && to !== undefined && from.kind === to.kind;
 }
 
 export function defaultSettings(kind: string): NodeSettings {

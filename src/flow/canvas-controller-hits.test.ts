@@ -32,8 +32,19 @@ interface Calls {
   readonly pans: { dx: number; dy: number }[];
   readonly commits: (readonly NodeBounds[])[];
   readonly edges: (string | null)[];
-  readonly reconnects: { edgeId: string; fromId: string; toId: string }[];
-  readonly connections: { fromId: string; toId: string }[];
+  readonly reconnects: {
+    edgeId: string;
+    fromId: string;
+    fromPort: string;
+    toId: string;
+    toPort: string;
+  }[];
+  readonly connections: {
+    fromId: string;
+    fromPort: string;
+    toId: string;
+    toPort: string;
+  }[];
   readonly inline: string[];
   readonly cards: string[];
 }
@@ -68,8 +79,23 @@ function setup(
       calls.edges.push(id);
       scene.selectEdge(id);
     },
-    reconnectEdge: (edgeId, fromId, toId) => calls.reconnects.push({ edgeId, fromId, toId }),
-    connectNodes: (pairs) => calls.connections.push(...pairs),
+    reconnectEdge: (edgeId, pair) =>
+      calls.reconnects.push({
+        edgeId,
+        fromId: pair.fromId,
+        fromPort: pair.fromPort,
+        toId: pair.toId,
+        toPort: pair.toPort,
+      }),
+    connectNodes: (pairs) =>
+      calls.connections.push(
+        ...pairs.map((pair) => ({
+          fromId: pair.fromId,
+          fromPort: pair.fromPort,
+          toId: pair.toId,
+          toPort: pair.toPort,
+        })),
+      ),
     openInline: (nodeId) => calls.inline.push(nodeId),
     onCardPress: (nodeId) => calls.cards.push(nodeId),
   };
@@ -138,12 +164,11 @@ test("keeps an outside handle's seven screen points at every zoom", () => {
   }
 });
 
-test("a top card hides a lower card's plus during hover", () => {
+test("a top card hides a lower card's port during hover", () => {
   const { controller } = setup([node("a", 0, 0), node("cover", 190, 0, { z: 5 })]);
 
-  // (204, 42) is inside a's output zone and cover's body.
-  controller.hover(204, 42);
-  expect(controller.portPlus()).toBeNull();
+  // (214, 46) is a's output port, inside cover's body.
+  controller.hover(214, 46);
   expect(controller.hovered()).toBe("cover");
   expect(controller.cursor()).toBe("default");
 });

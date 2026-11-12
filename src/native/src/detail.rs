@@ -14,8 +14,8 @@ use sea_orm::{
 use crate::constants::DOCUMENT_ID;
 use crate::entity::{assets, edges, node_inputs, nodes, result_batches, result_items};
 use crate::types::{
-    AssetSummary, InputItemSummary, NodeDetail, NodePreview, NodeSummary, ResultBatchSummary,
-    ResultItemSummary,
+    AssetSummary, InputItemSummary, NodeDetail, NodePreview, NodeSummary, PortIncoming,
+    ResultBatchSummary, ResultItemSummary,
 };
 
 const CHUNK: usize = 400;
@@ -45,12 +45,32 @@ pub fn node_detail(conn: &DatabaseConnection, id: &str) -> Result<Option<NodeDet
     };
     let latest_batch = read_latest_batch(conn, id, batch.as_ref())?;
     let inputs = read_inputs(conn, id)?;
+    let incoming = read_incoming(conn, id)?;
     Ok(Some(NodeDetail {
         node: node_summary(&node),
         batch,
         latest_batch,
         inputs,
+        incoming,
     }))
+}
+
+/// The connector count of every input port with at least one edge. Capacity
+/// is edge-based, so this stays right when a source has produced no items.
+fn read_incoming(conn: &DatabaseConnection, node_id: &str) -> Result<Vec<PortIncoming>, String> {
+    let rows = edges::Entity::find()
+        .filter(edges::Column::DocumentId.eq(DOCUMENT_ID))
+        .filter(edges::Column::ToId.eq(node_id))
+        .all(conn)
+        .map_err(|error| error.to_string())?;
+    let mut counts: BTreeMap<String, f64> = BTreeMap::new();
+    for edge in rows {
+        *counts.entry(edge.to_port).or_insert(0.0) += 1.0;
+    }
+    Ok(counts
+        .into_iter()
+        .map(|(port_id, edges)| PortIncoming { port_id, edges })
+        .collect())
 }
 
 pub fn inputs(conn: &DatabaseConnection, node_id: &str) -> Result<Vec<InputItemSummary>, String> {
@@ -127,6 +147,7 @@ fn preview_items_query(batch_ids: &[String]) -> SelectStatement {
             result_items::Column::Id,
             result_items::Column::BatchId,
             result_items::Column::Position,
+            result_items::Column::PortId,
             result_items::Column::Kind,
             result_items::Column::Text,
             result_items::Column::AssetId,
@@ -150,6 +171,7 @@ fn preview_items_query(batch_ids: &[String]) -> SelectStatement {
             Alias::new("id"),
             Alias::new("batch_id"),
             Alias::new("position"),
+            Alias::new("port_id"),
             Alias::new("kind"),
             Alias::new("text"),
             Alias::new("asset_id"),
@@ -301,6 +323,7 @@ fn read_inputs(conn: &DatabaseConnection, node_id: &str) -> Result<Vec<InputItem
                 id: row.id.clone(),
                 node_id: row.node_id.clone(),
                 position: row.position as f64,
+                port_id: row.port_id.clone(),
                 kind: row.kind.clone(),
                 origin: row.origin.clone(),
                 edge_id: row.edge_id.clone(),
@@ -491,6 +514,7 @@ fn item_summary(
         id: item.id.clone(),
         batch_id: item.batch_id.clone(),
         position: item.position as f64,
+        port_id: item.port_id.clone(),
         kind: item.kind.clone(),
         text: item.text.clone(),
         asset_id: item.asset_id.clone(),

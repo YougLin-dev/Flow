@@ -1,7 +1,7 @@
 import { effect, signal } from "nsh";
 import { expect, test } from "nsh/test";
 import type { NodeSummary, SceneSnapshot } from "@flow/native";
-import { CardGeometry, cardLocalLayout, cardPlusPoint, toCardLocal } from "./card-geometry";
+import { CardGeometry, cardLocalLayout } from "./card-geometry";
 import type { BoxGeometry } from "./connection";
 import { FlowScene } from "./scene";
 
@@ -108,24 +108,6 @@ test("the card's chrome is laid out in card-local points", () => {
   const empty = cardLocalLayout({ width: 0, height: 0 });
   expect(empty.title).toEqual({ x: 0, y: -26, width: 0, height: 20 });
   expect(empty.body).toEqual({ x: 0, y: 0, width: 0, height: 0 });
-});
-
-test("a plus rests in the card's local points", () => {
-  expect(cardPlusPoint({ width: 300, height: 220 }, "in")).toEqual({ x: -16, y: 110 });
-  expect(cardPlusPoint({ width: 300, height: 220 }, "out")).toEqual({ x: 316, y: 110 });
-  expect(cardPlusPoint({ width: 0, height: 0 }, "in")).toEqual({ x: -16, y: 0 });
-});
-
-test("a followed world point becomes card-local and lands back on it", () => {
-  const origin = { x: 40, y: 20 };
-  const base = cardPlusPoint({ width: 300, height: 220 }, "in");
-  const followed = { x: 300, y: 200 };
-  const local = toCardLocal(followed, origin);
-  expect(local).toEqual({ x: 260, y: 180 });
-  // The root carries `origin`, the plus rests at `base` and springs by the
-  // offset: the three land exactly on the pointer's world point.
-  const offset = { x: local.x - base.x, y: local.y - base.y };
-  expect({ x: origin.x + base.x + offset.x, y: origin.y + base.y + offset.y }).toEqual(followed);
 });
 
 test("a scene drag wakes only the moved card's position", () => {

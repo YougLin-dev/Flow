@@ -194,6 +194,7 @@ export class NodeRunner {
             return {
               id: `item-${crypto.randomUUID()}`,
               position,
+              portId: "text",
               kind: "text",
               text: item.text,
             };
@@ -209,6 +210,7 @@ export class NodeRunner {
           return {
             id: `item-${crypto.randomUUID()}`,
             position,
+            portId: "image",
             kind: "image",
             text: "",
             assetId: asset.id,

@@ -161,7 +161,19 @@ test("serves viewport scenes, bounds, edges and undo", async () => {
       z: 0,
     },
   ]);
-  await document.insertEdges([{ id: "a-b", fromId: "a", toId: "b", kind: "flow" }]);
+  await document.insertEdges([
+    {
+      id: "a-b",
+      fromId: "a",
+      toId: "b",
+      fromPort: "text",
+      toPort: "prompt",
+      portKind: "text",
+      fromOffset: 42,
+      toOffset: 42,
+      kind: "flow",
+    },
+  ]);
 
   const scene = await document.scene({ x: 0, y: 0, width: 1000, height: 1000 }, 0, 2000);
   expect(scene.nodes.length).toBe(2);

@@ -14,63 +14,43 @@ export interface Point {
 
 export type PortSide = "in" | "out";
 
-/** The gap between a card's border and its port button's centre. */
-export const PORT_GAP = 16;
-/** The plus button's diameter, in world units. */
-export const PORT_PLUS_SIZE = 16;
-/** How far outside a border the pointer may sit in a side zone. */
-export const PORT_ZONE_REACH = 28;
-/** The vertical span of a side zone around the middle of a side. */
-export const PORT_ZONE_HEIGHT = 48;
+/** A typed port's diameter and the gap from the card border to its centre. */
+export const PORT_SIZE = 18;
+export const PORT_CENTER_GAP = 14;
+/** How far from a port's centre a press still grabs it. The reach covers the
+ * gap to the card's border and a few points of the card, so moving from the
+ * card onto its port never drops the hover that keeps the port shown. */
+export const PORT_HIT_RADIUS = 24;
+/** How far a lifted port follows the pointer from its anchor. */
+export const PORT_FOLLOW_MAX = 22;
 
-/** The world point where a connector meets the card's left or right edge. */
-export function portPoint(node: BoxGeometry, side: PortSide): Point {
+/** A port's vertical anchor from the card's top: the stack is spread evenly
+ * over the card's side, like `justify-evenly`, whatever the card's height. */
+export function portOffset(index: number, count: number, height: number): number {
+  return (height * (index + 1)) / (count + 1);
+}
+
+/** The world point where a connector attaches: the centre of a typed port's
+ * icon, just outside the card's edge. */
+export function portCenter(node: BoxGeometry, side: PortSide, offset: number): Point {
   return {
-    x: side === "in" ? node.x : node.x + node.width,
-    y: node.y + node.height / 2,
+    x: side === "in" ? node.x - PORT_CENTER_GAP : node.x + node.width + PORT_CENTER_GAP,
+    y: node.y + offset,
   };
 }
 
-/** The rest position of a side's plus button, just outside the border. */
-export function portButtonPoint(node: BoxGeometry, side: PortSide): Point {
-  const anchor = portPoint(node, side);
-  return {
-    x: side === "in" ? anchor.x - PORT_GAP : anchor.x + PORT_GAP,
-    y: anchor.y,
-  };
-}
-
-/**
- * The plus button's world position when the pointer is in a card's side
- * zone, or null outside it. The pointer must sit just outside the border,
- * near the middle of the side; the button then follows it in both axes.
- */
-export function portZone(node: BoxGeometry, side: PortSide, x: number, y: number): Point | null {
-  const centerY = node.y + node.height / 2;
-  const half = Math.min(node.height / 2, PORT_ZONE_HEIGHT / 2);
-  if (y < centerY - half || y > centerY + half) return null;
-  const border = side === "in" ? node.x : node.x + node.width;
-  const outward = side === "in" ? border - x : x - border;
-  if (outward < 0 || outward > PORT_ZONE_REACH) return null;
-  const distance = Math.max(PORT_PLUS_SIZE / 2, outward);
-  return { x: side === "in" ? border - distance : border + distance, y };
-}
-
-/** The merged plus's followed position in a selection frame's side zone. */
-export function framePortZone(
-  bounds: BoxGeometry,
+/** Whether a world point is on a typed port. */
+export function portHit(
+  node: BoxGeometry,
   side: PortSide,
+  offset: number,
   x: number,
   y: number,
-  padding: number,
-): Point | null {
-  const frame = {
-    x: bounds.x - padding,
-    y: bounds.y - padding,
-    width: bounds.width + padding * 2,
-    height: bounds.height + padding * 2,
-  };
-  return portZone(frame, side, x, y);
+): boolean {
+  const centerX = side === "in" ? node.x - PORT_CENTER_GAP : node.x + node.width + PORT_CENTER_GAP;
+  const dx = x - centerX;
+  const dy = y - (node.y + offset);
+  return dx * dx + dy * dy <= PORT_HIT_RADIUS * PORT_HIT_RADIUS;
 }
 
 /** The connector's stroke width and hit distance, in world units. */
@@ -159,42 +139,6 @@ export function connectionLength(from: Point, to: Point, steps = 24): number {
   return length;
 }
 
-/** One piece of a connector's cubic: an exact sub-curve of it. */
-export interface ConnectorPiece {
-  readonly from: Point;
-  readonly c1: Point;
-  readonly c2: Point;
-  readonly to: Point;
-}
-
-/**
- * The connector's cubic split into `parts` pieces, each an exact sub-curve:
- * a piece's handles come from the curve's position and derivative at its
- * ends, so the pieces together draw the same cubic. The flow light tints
- * only the pieces its trail covers.
- */
-export function splitConnector(from: Point, to: Point, parts: number): ConnectorPiece[] {
-  const { c1, c2 } = connectorControls(from, to);
-  const count = Math.max(1, Math.floor(parts));
-  const pieces: ConnectorPiece[] = [];
-  for (let index = 0; index < count; index += 1) {
-    const start = index / count;
-    const end = (index + 1) / count;
-    const begin = cubicAt(from, c1, c2, to, start);
-    const finish = cubicAt(from, c1, c2, to, end);
-    const speed = (end - start) / 3;
-    const d0 = cubicDerivativeAt(from, c1, c2, to, start);
-    const d1 = cubicDerivativeAt(from, c1, c2, to, end);
-    pieces.push({
-      from: begin,
-      c1: { x: begin.x + d0.x * speed, y: begin.y + d0.y * speed },
-      c2: { x: finish.x - d1.x * speed, y: finish.y - d1.y * speed },
-      to: finish,
-    });
-  }
-  return pieces;
-}
-
 /** How far `point` is from the cubic connector, by sampled segments. */
 export function distanceToConnection(from: Point, to: Point, point: Point): number {
   const { c1, c2 } = connectorControls(from, to);
@@ -220,18 +164,6 @@ export function cubicAt(from: Point, c1: Point, c2: Point, to: Point, t: number)
   return {
     x: a * from.x + b * c1.x + c * c2.x + d * to.x,
     y: a * from.y + b * c1.y + c * c2.y + d * to.y,
-  };
-}
-
-/** The cubic's derivative at `t`. */
-function cubicDerivativeAt(from: Point, c1: Point, c2: Point, to: Point, t: number): Point {
-  const u = 1 - t;
-  const a = 3 * u * u;
-  const b = 6 * u * t;
-  const c = 3 * t * t;
-  return {
-    x: a * (c1.x - from.x) + b * (c2.x - c1.x) + c * (to.x - c2.x),
-    y: a * (c1.y - from.y) + b * (c2.y - c1.y) + c * (to.y - c2.y),
   };
 }
 

@@ -24,7 +24,18 @@ function node(id: string, x: number, y: number, overrides: Partial<NodeSummary> 
 }
 
 function edge(id: string, fromId: string, toId: string): EdgeSummary {
-  return { id, fromId, toId, fromPort: null, toPort: null, kind: "flow", dataJson: "{}" };
+  return {
+    id,
+    fromId,
+    toId,
+    fromPort: "text",
+    toPort: "prompt",
+    portKind: "text",
+    fromOffset: 0,
+    toOffset: 0,
+    kind: "flow",
+    dataJson: "{}",
+  };
 }
 
 function snapshot(nodes: NodeSummary[], edges: EdgeSummary[] = []): SceneSnapshot {

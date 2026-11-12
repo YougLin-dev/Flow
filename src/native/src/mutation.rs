@@ -3,7 +3,7 @@
 
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 
-use sea_orm::sea_query::Expr;
+use sea_orm::sea_query::{Expr, ExprTrait};
 use sea_orm::{
     ActiveValue::{NotSet, Set, Unchanged},
     ColumnTrait, Condition, DatabaseConnection, DatabaseTransaction, DbErr, EntityTrait,
@@ -404,8 +404,13 @@ struct ConnectedEdge {
 /// only one of the edge's cards.
 fn edge_summary(edge: &EdgeRow, from: &nodes::Model, to: &nodes::Model) -> EdgeSummary {
     EdgeSummary {
-        from_point: Some(EdgePoint::output(from.x, from.y, from.width, from.height)),
-        to_point: Some(EdgePoint::input(to.x, to.y, to.height)),
+        from_point: Some(EdgePoint::output(
+            from.x,
+            from.y,
+            from.width,
+            edge.from_offset,
+        )),
+        to_point: Some(EdgePoint::input(to.x, to.y, edge.to_offset)),
         ..edge.summary()
     }
 }
@@ -418,23 +423,34 @@ fn connect_edge_tx(txn: &DatabaseTransaction, input: &EdgeInput) -> Result<Conne
     }
     let source = find_node_tx(txn, &input.from_id)?;
     find_node_tx(txn, &input.to_id)?;
-    if already_connected_tx(txn, &input.from_id, &input.to_id, &input.id)? {
+    if already_connected_tx(
+        txn,
+        &input.from_id,
+        &input.from_port,
+        &input.to_id,
+        &input.to_port,
+        &input.id,
+    )? {
         return Err(DbErr::Custom(
-            "these nodes are already connected".to_owned(),
+            "these ports are already connected".to_owned(),
         ));
     }
 
     let edge = insert_edge_tx(txn, input)?;
     let mut forward = vec![HistoryOp::InsertEdge(edge.clone())];
     let mut desired_inverse = Vec::new();
-    let mut position = max_input_position_tx(txn, &input.to_id)?;
+    let mut position = max_input_position_tx(txn, &input.to_id, &input.to_port)?;
 
     if let Some(batch_id) = &source.output_batch_id {
         for item in items_for_batch_tx(txn, batch_id)? {
+            if item.port_id != input.from_port {
+                continue;
+            }
             let row = InputRow {
                 id: format!("input-{}-{}", edge.id, item.id),
                 node_id: input.to_id.clone(),
                 position,
+                port_id: input.to_port.clone(),
                 kind: item.kind.clone(),
                 origin: "edge".to_owned(),
                 edge_id: Some(edge.id.clone()),
@@ -476,9 +492,16 @@ pub fn update_edge(conn: &DatabaseConnection, input: EdgeInput) -> Result<Mutati
         let before = find_edge_tx(txn, &input.id)?;
         let source = find_node_tx(txn, &input.from_id)?;
         let target = find_node_tx(txn, &input.to_id)?;
-        if already_connected_tx(txn, &input.from_id, &input.to_id, &input.id)? {
+        if already_connected_tx(
+            txn,
+            &input.from_id,
+            &input.from_port,
+            &input.to_id,
+            &input.to_port,
+            &input.id,
+        )? {
             return Err(DbErr::Custom(
-                "these nodes are already connected".to_owned(),
+                "these ports are already connected".to_owned(),
             ));
         }
 
@@ -495,6 +518,9 @@ pub fn update_edge(conn: &DatabaseConnection, input: EdgeInput) -> Result<Mutati
                 to_id: input.to_id.clone(),
                 from_port: input.from_port.clone(),
                 to_port: input.to_port.clone(),
+                port_kind: input.port_kind.clone(),
+                from_offset: input.from_offset,
+                to_offset: input.to_offset,
                 kind: input.kind.clone(),
                 data_json: input.data_json.clone().unwrap_or_else(|| "{}".to_owned()),
             },
@@ -509,13 +535,17 @@ pub fn update_edge(conn: &DatabaseConnection, input: EdgeInput) -> Result<Mutati
             forward.push(HistoryOp::DeleteInput { id: row.id.clone() });
         }
         let mut new_inputs = Vec::new();
-        let mut position = max_input_position_tx(txn, &input.to_id)?;
+        let mut position = max_input_position_tx(txn, &input.to_id, &input.to_port)?;
         if let Some(batch_id) = &source.output_batch_id {
             for item in items_for_batch_tx(txn, batch_id)? {
+                if item.port_id != input.from_port {
+                    continue;
+                }
                 let row = InputRow {
                     id: format!("input-{}-{}", after.id, item.id),
                     node_id: input.to_id.clone(),
                     position,
+                    port_id: input.to_port.clone(),
                     kind: item.kind.clone(),
                     origin: "edge".to_owned(),
                     edge_id: Some(after.id.clone()),
@@ -572,6 +602,7 @@ pub fn add_input(conn: &DatabaseConnection, input: InputItemInput) -> Result<Mut
             id: input.id,
             node_id: input.node_id,
             position: input.position.max(0.0) as i32,
+            port_id: input.port_id,
             kind: input.kind,
             origin: input.origin,
             edge_id: input.edge_id,
@@ -700,8 +731,11 @@ pub fn sync_inputs(conn: &DatabaseConnection, node_id: String) -> Result<(), Str
         }
 
         let mut order: Vec<(String, i32)> = Vec::new();
+        let mut next: BTreeMap<String, i32> = BTreeMap::new();
         for row in &locals {
-            order.push((row.id.clone(), order.len() as i32));
+            let position = next.entry(row.port_id.clone()).or_insert(0);
+            order.push((row.id.clone(), *position));
+            *position += 1;
         }
 
         let incoming = edges::Entity::find()
@@ -715,10 +749,15 @@ pub fn sync_inputs(conn: &DatabaseConnection, node_id: String) -> Result<(), Str
                 continue;
             };
             for item in items_for_batch_tx(txn, &batch_id)? {
+                if item.port_id != edge.from_port {
+                    continue;
+                }
+                let position = next.entry(edge.to_port.clone()).or_insert(0);
                 let row = InputRow {
                     id: format!("input-{}-{}", edge.id, item.id),
                     node_id: node_id.clone(),
-                    position: order.len() as i32,
+                    position: *position,
+                    port_id: edge.to_port.clone(),
                     kind: item.kind.clone(),
                     origin: "edge".to_owned(),
                     edge_id: Some(edge.id.clone()),
@@ -730,6 +769,7 @@ pub fn sync_inputs(conn: &DatabaseConnection, node_id: String) -> Result<(), Str
                 };
                 insert_input_row_tx(txn, &row)?;
                 order.push((row.id, row.position));
+                *position += 1;
             }
         }
 
@@ -1066,12 +1106,40 @@ pub fn apply_ops(conn: &DatabaseConnection, ops: &[HistoryOp]) -> Result<ChangeS
                 }
                 HistoryOp::ReplaceEdge(row) => {
                     let row = replace_edge_row_tx(txn, row)?;
+                    // As with DeleteEdge, a run between a reconnect and its
+                    // undo/redo rebuilds this edge's snapshot under the
+                    // source's current item ids, so the ids the history
+                    // captured may be stale. Remove every row the edge
+                    // contributed; the entry's InsertInput ops restore the
+                    // state this replace returns to.
+                    let rows = node_inputs::Entity::find()
+                        .filter(node_inputs::Column::EdgeId.eq(row.id.clone()))
+                        .all(txn)?;
+                    for input in &rows {
+                        delete_input_tx(txn, &input.id)?;
+                        if touched.insert(input.node_id.clone()) {
+                            changed.push(node_row(&touch_node_tx(txn, &input.node_id)?).summary());
+                        }
+                    }
                     let from = find_node_tx(txn, &row.from_id)?;
                     let to = find_node_tx(txn, &row.to_id)?;
                     edges_changed.push(edge_summary(&row, &from, &to));
                 }
                 HistoryOp::DeleteEdge { id } => {
                     let edge = find_edge_tx(txn, id)?;
+                    // Input sync during a run recreates an edge's snapshot rows
+                    // under the source's current item ids, so undo/redo cannot
+                    // rely on the ids the history captured: remove every row
+                    // the edge contributed.
+                    let rows = node_inputs::Entity::find()
+                        .filter(node_inputs::Column::EdgeId.eq(id.clone()))
+                        .all(txn)?;
+                    for row in &rows {
+                        delete_input_tx(txn, &row.id)?;
+                        if touched.insert(row.node_id.clone()) {
+                            changed.push(node_row(&touch_node_tx(txn, &row.node_id)?).summary());
+                        }
+                    }
                     delete_edge_tx(txn, id)?;
                     edges_removed.push(edge.id);
                 }
@@ -1397,6 +1465,30 @@ fn set_node_bounds_batched(
         })
         .exec(txn)?;
 
+        // The port layout is proportional to the card's height, so a resize
+        // scales every touching edge's stored offsets by the same ratio. The
+        // edge row is the fallback anchor when its card is outside a viewport
+        // read, and the connector RTree below is built from it.
+        if before.height > 0.0 && (next.height - before.height).abs() > f64::EPSILON {
+            let ratio = next.height / before.height;
+            edges::Entity::update_many()
+                .col_expr(
+                    edges::Column::FromOffset,
+                    Expr::col(edges::Column::FromOffset).mul(Expr::value(ratio)),
+                )
+                .filter(edges::Column::DocumentId.eq(DOCUMENT_ID))
+                .filter(edges::Column::FromId.eq(next.id.clone()))
+                .exec(txn)?;
+            edges::Entity::update_many()
+                .col_expr(
+                    edges::Column::ToOffset,
+                    Expr::col(edges::Column::ToOffset).mul(Expr::value(ratio)),
+                )
+                .filter(edges::Column::DocumentId.eq(DOCUMENT_ID))
+                .filter(edges::Column::ToId.eq(next.id.clone()))
+                .exec(txn)?;
+        }
+
         // The edge index must see the post-move geometry, with the original
         // row kept for the history pair above.
         let mut updated = before;
@@ -1497,6 +1589,9 @@ fn insert_edge_tx(txn: &DatabaseTransaction, input: &EdgeInput) -> Result<EdgeRo
         to_id: Set(input.to_id.clone()),
         from_port: Set(input.from_port.clone()),
         to_port: Set(input.to_port.clone()),
+        port_kind: Set(input.port_kind.clone()),
+        from_offset: Set(input.from_offset),
+        to_offset: Set(input.to_offset),
         kind: Set(input.kind.clone()),
         data_json: Set(data_json.clone()),
     })
@@ -1509,6 +1604,9 @@ fn insert_edge_tx(txn: &DatabaseTransaction, input: &EdgeInput) -> Result<EdgeRo
         to_id: input.to_id.clone(),
         from_port: input.from_port.clone(),
         to_port: input.to_port.clone(),
+        port_kind: input.port_kind.clone(),
+        from_offset: input.from_offset,
+        to_offset: input.to_offset,
         kind: input.kind.clone(),
         data_json,
     })
@@ -1522,6 +1620,9 @@ fn insert_edge_row_tx(txn: &DatabaseTransaction, row: &EdgeRow) -> Result<(), Db
         to_id: Set(row.to_id.clone()),
         from_port: Set(row.from_port.clone()),
         to_port: Set(row.to_port.clone()),
+        port_kind: Set(row.port_kind.clone()),
+        from_offset: Set(row.from_offset),
+        to_offset: Set(row.to_offset),
         kind: Set(row.kind.clone()),
         data_json: Set(row.data_json.clone()),
     })
@@ -1536,6 +1637,9 @@ fn replace_edge_row_tx(txn: &DatabaseTransaction, row: &EdgeRow) -> Result<EdgeR
         to_id: Set(row.to_id.clone()),
         from_port: Set(row.from_port.clone()),
         to_port: Set(row.to_port.clone()),
+        port_kind: Set(row.port_kind.clone()),
+        from_offset: Set(row.from_offset),
+        to_offset: Set(row.to_offset),
         kind: Set(row.kind.clone()),
         data_json: Set(row.data_json.clone()),
         ..Default::default()
@@ -1564,13 +1668,17 @@ fn find_node_tx(txn: &DatabaseTransaction, id: &str) -> Result<nodes::Model, DbE
 fn already_connected_tx(
     txn: &DatabaseTransaction,
     from_id: &str,
+    from_port: &str,
     to_id: &str,
+    to_port: &str,
     except_edge_id: &str,
 ) -> Result<bool, DbErr> {
     Ok(edges::Entity::find()
         .filter(edges::Column::DocumentId.eq(DOCUMENT_ID))
         .filter(edges::Column::FromId.eq(from_id))
+        .filter(edges::Column::FromPort.eq(from_port))
         .filter(edges::Column::ToId.eq(to_id))
+        .filter(edges::Column::ToPort.eq(to_port))
         .filter(edges::Column::Id.ne(except_edge_id))
         .one(txn)?
         .is_some())
@@ -1631,6 +1739,7 @@ fn insert_result_item_tx(
         id: Set(item.id.clone()),
         batch_id: Set(batch_id.to_owned()),
         position: Set(item.position.max(0.0) as i32),
+        port_id: Set(item.port_id.clone()),
         kind: Set(item.kind.clone()),
         text: Set(item.text.clone()),
         asset_id: Set(item.asset_id.clone()),
@@ -1645,6 +1754,7 @@ fn insert_input_row_tx(txn: &DatabaseTransaction, row: &InputRow) -> Result<(), 
         id: Set(row.id.clone()),
         node_id: Set(row.node_id.clone()),
         position: Set(row.position),
+        port_id: Set(row.port_id.clone()),
         kind: Set(row.kind.clone()),
         origin: Set(row.origin.clone()),
         edge_id: Set(row.edge_id.clone()),
@@ -1724,9 +1834,14 @@ fn inputs_for_nodes_tx(
     Ok(found.into_values().collect())
 }
 
-fn max_input_position_tx(txn: &DatabaseTransaction, node_id: &str) -> Result<i32, DbErr> {
+fn max_input_position_tx(
+    txn: &DatabaseTransaction,
+    node_id: &str,
+    port_id: &str,
+) -> Result<i32, DbErr> {
     let row = node_inputs::Entity::find()
         .filter(node_inputs::Column::NodeId.eq(node_id))
+        .filter(node_inputs::Column::PortId.eq(port_id))
         .order_by_desc(node_inputs::Column::Position)
         .one(txn)?;
     Ok(row.map_or(0, |row| row.position + 1))
@@ -1856,6 +1971,7 @@ fn input_row(row: &node_inputs::Model) -> InputRow {
         id: row.id.clone(),
         node_id: row.node_id.clone(),
         position: row.position,
+        port_id: row.port_id.clone(),
         kind: row.kind.clone(),
         origin: row.origin.clone(),
         edge_id: row.edge_id.clone(),
@@ -1912,6 +2028,9 @@ fn edge_row(edge: &edges::Model) -> EdgeRow {
         to_id: edge.to_id.clone(),
         from_port: edge.from_port.clone(),
         to_port: edge.to_port.clone(),
+        port_kind: edge.port_kind.clone(),
+        from_offset: edge.from_offset,
+        to_offset: edge.to_offset,
         kind: edge.kind.clone(),
         data_json: edge.data_json.clone(),
     }

@@ -8,8 +8,11 @@ pub struct Model {
     pub document_id: String,
     pub from_id: String,
     pub to_id: String,
-    pub from_port: Option<String>,
-    pub to_port: Option<String>,
+    pub from_port: String,
+    pub to_port: String,
+    pub port_kind: String,
+    pub from_offset: f64,
+    pub to_offset: f64,
     pub kind: String,
     pub data_json: String,
 }

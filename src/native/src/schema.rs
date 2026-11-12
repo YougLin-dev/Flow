@@ -16,7 +16,7 @@ use crate::entity::{
 
 /// Every migration that this build knows, in order. Add a new entry here and
 /// a matching arm in `apply_migration`.
-const MIGRATIONS: &[i32] = &[1, 2, 3, 4];
+const MIGRATIONS: &[i32] = &[1, 2, 3, 4, 5];
 
 /// Recovery's exact filters: a document's running nodes and every running
 /// batch. Both partial indexes keep the startup scans proportional to the
@@ -96,6 +96,7 @@ fn apply_migration(conn: &DatabaseConnection, version: i32) -> Result<(), String
             2 => migration_2(txn)?,
             3 => migration_3(txn)?,
             4 => migration_4(txn)?,
+            5 => migration_5(txn)?,
             _ => {
                 return Err(DbErr::Custom(format!(
                     "unknown database migration {version}"
@@ -158,6 +159,26 @@ fn migration_4<C>(conn: &C) -> Result<(), DbErr>
 where
     C: ConnectionTrait,
 {
+    for statement in RUNNING_WORK_INDEXES {
+        conn.execute_unprepared(statement)?;
+    }
+    Ok(())
+}
+
+/// Typed ports: discard the document and recreate it with port-bound edges,
+/// per-port input and result rows, and port anchor offsets. The app is
+/// unreleased, so this is a breaking reset like migration 2; the TSX side
+/// seeds the example again after opening.
+fn migration_5<C>(conn: &C) -> Result<(), DbErr>
+where
+    C: ConnectionTrait,
+{
+    for table in RESET_TABLES {
+        conn.execute_unprepared(&format!("DROP TABLE IF EXISTS {table};"))?;
+    }
+    create_document_tables(conn)?;
+    create_virtual_tables(conn)?;
+    create_indexes(conn)?;
     for statement in RUNNING_WORK_INDEXES {
         conn.execute_unprepared(statement)?;
     }
@@ -237,6 +258,21 @@ where
         .table(edges::Entity)
         .col(edges::Column::ToId);
     conn.execute(&edges_to)?;
+
+    // One edge per port pair; parallel edges between two cards are legal only
+    // when they join different ports.
+    let mut edges_port_pair = Index::create();
+    edges_port_pair
+        .if_not_exists()
+        .unique()
+        .name("edges_port_pair")
+        .table(edges::Entity)
+        .col(edges::Column::DocumentId)
+        .col(edges::Column::FromId)
+        .col(edges::Column::FromPort)
+        .col(edges::Column::ToId)
+        .col(edges::Column::ToPort);
+    conn.execute(&edges_port_pair)?;
 
     let mut node_assets_asset = Index::create();
     node_assets_asset
@@ -384,12 +420,14 @@ mod tests {
         // Written without the new code's index maintenance, like a real
         // version 2 database.
         conn.execute_unprepared(
-            "INSERT INTO edges (id, document_id, from_id, to_id, from_port, to_port, kind, data_json) \
-             VALUES ('left-right', 'default', 'left', 'right', NULL, NULL, 'flow', '{}')",
+            "INSERT INTO edges (id, document_id, from_id, to_id, from_port, to_port, \
+             port_kind, from_offset, to_offset, kind, data_json) \
+             VALUES ('left-right', 'default', 'left', 'right', 'out', 'in', \
+             'text', 42.0, 42.0, 'flow', '{}')",
         )
         .expect("insert edge");
 
-        migrate(&conn).expect("upgrade to version 3");
+        migration_3(&conn).expect("backfill the connector index");
 
         let scene = crate::scene::snapshot(
             &conn,
@@ -456,6 +494,7 @@ mod tests {
                 vec![ResultItemInput {
                     id: item_id.to_owned(),
                     position: 0.0,
+                    port_id: "out".to_owned(),
                     kind: "image".to_owned(),
                     text: text.to_owned(),
                     asset_id: None,
@@ -515,8 +554,11 @@ mod tests {
                 id: "source-target".to_owned(),
                 from_id: "source".to_owned(),
                 to_id: "target".to_owned(),
-                from_port: None,
-                to_port: None,
+                from_port: "out".to_owned(),
+                to_port: "in".to_owned(),
+                port_kind: "text".to_owned(),
+                from_offset: 42.0,
+                to_offset: 42.0,
                 kind: "flow".to_owned(),
                 data_json: None,
             }],
@@ -537,18 +579,10 @@ mod tests {
         assert_eq!(previews_before[0].items[0].text, "Source");
         assert_eq!(previews_before[1].node_id, "target");
 
-        migrate(&conn).expect("migrate to version 4");
-        migrate(&conn).expect("a second migration is idempotent");
+        migration_4(&conn).expect("add the running-work indexes");
+        migration_4(&conn).expect("a second migration is idempotent");
 
-        assert_eq!(migration_versions(&conn), vec![1, 2, 3, 4]);
-        assert_eq!(
-            migration_versions(&conn)
-                .iter()
-                .filter(|version| **version == 4)
-                .count(),
-            1,
-            "version 4 is recorded once"
-        );
+        assert_eq!(migration_versions(&conn), vec![1, 2, 3]);
         assert!(index_exists(&conn, "nodes_running"));
         assert!(index_exists(&conn, "result_batches_running"));
 

@@ -854,8 +854,11 @@ mod tests {
             id: "a-b".to_owned(),
             from_id: "a".to_owned(),
             to_id: "b".to_owned(),
-            from_port: None,
-            to_port: None,
+            from_port: "out".to_owned(),
+            to_port: "in".to_owned(),
+            port_kind: "text".to_owned(),
+            from_offset: 42.0,
+            to_offset: 42.0,
             kind: "flow".to_owned(),
             data_json: None,
         }])
@@ -900,8 +903,11 @@ mod tests {
             id: id.to_owned(),
             from_id: from.to_owned(),
             to_id: to.to_owned(),
-            from_port: Some("out".to_owned()),
-            to_port: Some("in".to_owned()),
+            from_port: "out".to_owned(),
+            to_port: "in".to_owned(),
+            port_kind: "text".to_owned(),
+            from_offset: 42.0,
+            to_offset: 42.0,
             kind: "flow".to_owned(),
             data_json: None,
         };
@@ -946,6 +952,7 @@ mod tests {
                 vec![ResultItemInput {
                     id: item.to_owned(),
                     position: 0.0,
+                    port_id: "out".to_owned(),
                     kind: "text".to_owned(),
                     text: item.to_owned(),
                     asset_id: None,
@@ -959,8 +966,11 @@ mod tests {
             id: id.to_owned(),
             from_id: from.to_owned(),
             to_id: "c".to_owned(),
-            from_port: Some("out".to_owned()),
-            to_port: Some("in".to_owned()),
+            from_port: "out".to_owned(),
+            to_port: "in".to_owned(),
+            port_kind: "text".to_owned(),
+            from_offset: 42.0,
+            to_offset: 42.0,
             kind: "flow".to_owned(),
             data_json: None,
         };
@@ -1142,8 +1152,11 @@ mod tests {
             id: "a-far".to_owned(),
             from_id: "a".to_owned(),
             to_id: "far".to_owned(),
-            from_port: None,
-            to_port: None,
+            from_port: "out".to_owned(),
+            to_port: "in".to_owned(),
+            port_kind: "text".to_owned(),
+            from_offset: 42.0,
+            to_offset: 42.0,
             kind: "flow".to_owned(),
             data_json: None,
         })
@@ -1183,8 +1196,11 @@ mod tests {
             id: id.to_owned(),
             from_id: from.to_owned(),
             to_id: to.to_owned(),
-            from_port: None,
-            to_port: None,
+            from_port: "out".to_owned(),
+            to_port: "in".to_owned(),
+            port_kind: "text".to_owned(),
+            from_offset: 42.0,
+            to_offset: 42.0,
             kind: "flow".to_owned(),
             data_json: None,
         })
@@ -1441,11 +1457,11 @@ mod tests {
         assert_eq!(edges.len(), 1, "the connector is indexed once");
         assert_eq!(
             edges[0].from_point,
-            Some(EdgePoint::output(-4_000.0, 2_000.0, 200.0, 84.0))
+            Some(EdgePoint::output(-4_000.0, 2_000.0, 200.0, 42.0))
         );
         assert_eq!(
             edges[0].to_point,
-            Some(EdgePoint::input(6_000.0, 2_000.0, 84.0))
+            Some(EdgePoint::input(6_000.0, 2_000.0, 42.0))
         );
 
         // The old crossing is gone. Margin 0 keeps the moved cards and the
@@ -1505,11 +1521,11 @@ mod tests {
         assert_eq!(old.edges[0].id, "left-right");
         assert_eq!(
             old.edges[0].from_point,
-            Some(EdgePoint::output(-5_000.0, 0.0, 200.0, 84.0))
+            Some(EdgePoint::output(-5_000.0, 0.0, 200.0, 42.0))
         );
         assert_eq!(
             old.edges[0].to_point,
-            Some(EdgePoint::input(5_000.0, 0.0, 84.0))
+            Some(EdgePoint::input(5_000.0, 0.0, 42.0))
         );
 
         // The new box is gone. Use the new region without its usual margin:
@@ -1575,11 +1591,11 @@ mod tests {
         assert_eq!(edges.len(), 1, "the connector is indexed once after redo");
         assert_eq!(
             edges[0].from_point,
-            Some(EdgePoint::output(-4_000.0, 2_000.0, 200.0, 84.0))
+            Some(EdgePoint::output(-4_000.0, 2_000.0, 200.0, 42.0))
         );
         assert_eq!(
             edges[0].to_point,
-            Some(EdgePoint::input(6_000.0, 2_000.0, 84.0))
+            Some(EdgePoint::input(6_000.0, 2_000.0, 42.0))
         );
 
         let old_after_redo = scene_between(&db, 0.0, 0.0, 800.0, 600.0, viewport::NODE_LIMIT);
@@ -1629,6 +1645,7 @@ mod tests {
             vec![ResultItemInput {
                 id: "item-1".to_owned(),
                 position: 0.0,
+                port_id: "out".to_owned(),
                 kind: "text".to_owned(),
                 text: "Result text".to_owned(),
                 asset_id: None,
@@ -1979,8 +1996,11 @@ mod tests {
                 document_id: Set(DOCUMENT_ID.to_owned()),
                 from_id: Set("a".to_owned()),
                 to_id: Set("b".to_owned()),
-                from_port: Set(None),
-                to_port: Set(None),
+                from_port: Set("out".to_owned()),
+                to_port: Set("in".to_owned()),
+                port_kind: Set("text".to_owned()),
+                from_offset: Set(42.0),
+                to_offset: Set(42.0),
                 kind: Set("link".to_owned()),
                 data_json: Set("{}".to_owned()),
             })
@@ -2040,6 +2060,7 @@ mod tests {
                 ResultItemInput {
                     id: "item-a".to_owned(),
                     position: 0.0,
+                    port_id: "out".to_owned(),
                     kind: "text".to_owned(),
                     text: "A lake".to_owned(),
                     asset_id: None,
@@ -2048,6 +2069,7 @@ mod tests {
                 ResultItemInput {
                     id: "item-b".to_owned(),
                     position: 1.0,
+                    port_id: "out".to_owned(),
                     kind: "text".to_owned(),
                     text: "At dawn".to_owned(),
                     asset_id: None,
@@ -2061,8 +2083,11 @@ mod tests {
             id: "edge-text-image".to_owned(),
             from_id: "text".to_owned(),
             to_id: "image".to_owned(),
-            from_port: Some("out".to_owned()),
-            to_port: Some("in".to_owned()),
+            from_port: "out".to_owned(),
+            to_port: "in".to_owned(),
+            port_kind: "text".to_owned(),
+            from_offset: 42.0,
+            to_offset: 42.0,
             kind: "flow".to_owned(),
             data_json: None,
         })
@@ -2103,6 +2128,112 @@ mod tests {
     }
 
     #[test]
+    fn snapshots_only_the_connected_output_port_and_reports_incoming_edges() {
+        let db = Database::open(":memory:").expect("open");
+        db.insert_nodes(vec![
+            node("image", "Image", "", &[], 0.0, 0.0),
+            node("target", "Target", "", &[], 400.0, 0.0),
+        ])
+        .expect("insert nodes");
+
+        // One batch, two output ports: only the connected port's items may
+        // snapshot into the target.
+        db.save_run(
+            ResultBatchInput {
+                id: "batch-image".to_owned(),
+                node_id: "image".to_owned(),
+                trigger: "manual".to_owned(),
+                provider: "manual".to_owned(),
+                model: String::new(),
+                params_json: "{}".to_owned(),
+                status: "done".to_owned(),
+                error: None,
+            },
+            vec![
+                ResultItemInput {
+                    id: "item-image".to_owned(),
+                    position: 0.0,
+                    port_id: "image".to_owned(),
+                    kind: "image".to_owned(),
+                    text: String::new(),
+                    asset_id: None,
+                    meta_json: None,
+                },
+                ResultItemInput {
+                    id: "item-text".to_owned(),
+                    position: 1.0,
+                    port_id: "text".to_owned(),
+                    kind: "text".to_owned(),
+                    text: "sidecar".to_owned(),
+                    asset_id: None,
+                    meta_json: None,
+                },
+            ],
+        )
+        .expect("save source batch");
+
+        db.connect_edge(EdgeInput {
+            id: "edge-image".to_owned(),
+            from_id: "image".to_owned(),
+            to_id: "target".to_owned(),
+            from_port: "image".to_owned(),
+            to_port: "references".to_owned(),
+            port_kind: "image".to_owned(),
+            from_offset: 28.0,
+            to_offset: 56.0,
+            kind: "flow".to_owned(),
+            data_json: None,
+        })
+        .expect("connect");
+
+        let detail = db
+            .node_detail("target".to_owned())
+            .expect("detail")
+            .expect("target detail");
+        assert_eq!(detail.inputs.len(), 1, "only the image port snapshots");
+        assert_eq!(detail.inputs[0].item_id.as_deref(), Some("item-image"));
+        assert_eq!(detail.inputs[0].port_id, "references");
+        assert_eq!(detail.inputs[0].edge_id.as_deref(), Some("edge-image"));
+        assert_eq!(detail.incoming.len(), 1);
+        assert_eq!(detail.incoming[0].port_id, "references");
+        assert_eq!(detail.incoming[0].edges, 1.0);
+
+        // A source whose new batch has nothing on the connected port leaves
+        // no rows, but the connector still occupies the port's slot: capacity
+        // counts edges, not rows.
+        db.save_run(
+            ResultBatchInput {
+                id: "batch-empty".to_owned(),
+                node_id: "image".to_owned(),
+                trigger: "run".to_owned(),
+                provider: "mock-image".to_owned(),
+                model: "mock-image".to_owned(),
+                params_json: "{}".to_owned(),
+                status: "done".to_owned(),
+                error: None,
+            },
+            vec![ResultItemInput {
+                id: "item-other".to_owned(),
+                position: 0.0,
+                port_id: "text".to_owned(),
+                kind: "text".to_owned(),
+                text: "sidecar".to_owned(),
+                asset_id: None,
+                meta_json: None,
+            }],
+        )
+        .expect("batch without the connected port");
+        db.sync_inputs("target".to_owned()).expect("sync");
+        let after = db
+            .node_detail("target".to_owned())
+            .expect("detail")
+            .expect("target detail");
+        assert_eq!(after.inputs.len(), 0);
+        assert_eq!(after.incoming.len(), 1);
+        assert_eq!(after.incoming[0].edges, 1.0);
+    }
+
+    #[test]
     fn sync_rebuilds_edge_inputs_and_keeps_local_items() {
         let db = Database::open(":memory:").expect("open");
         db.insert_nodes(vec![
@@ -2124,6 +2255,7 @@ mod tests {
             vec![ResultItemInput {
                 id: "item-old".to_owned(),
                 position: 0.0,
+                port_id: "out".to_owned(),
                 kind: "text".to_owned(),
                 text: "Old".to_owned(),
                 asset_id: None,
@@ -2135,8 +2267,11 @@ mod tests {
             id: "edge".to_owned(),
             from_id: "text".to_owned(),
             to_id: "image".to_owned(),
-            from_port: None,
-            to_port: None,
+            from_port: "out".to_owned(),
+            to_port: "in".to_owned(),
+            port_kind: "text".to_owned(),
+            from_offset: 42.0,
+            to_offset: 42.0,
             kind: "flow".to_owned(),
             data_json: None,
         })
@@ -2145,6 +2280,7 @@ mod tests {
             id: "local".to_owned(),
             node_id: "image".to_owned(),
             position: 99.0,
+            port_id: "in".to_owned(),
             kind: "text".to_owned(),
             origin: "local".to_owned(),
             edge_id: None,
@@ -2169,6 +2305,7 @@ mod tests {
             vec![ResultItemInput {
                 id: "item-new".to_owned(),
                 position: 0.0,
+                port_id: "out".to_owned(),
                 kind: "text".to_owned(),
                 text: "New".to_owned(),
                 asset_id: None,
@@ -2205,6 +2342,7 @@ mod tests {
             vec![ResultItemInput {
                 id: "item".to_owned(),
                 position: 0.0,
+                port_id: "out".to_owned(),
                 kind: "text".to_owned(),
                 text: "A lake".to_owned(),
                 asset_id: None,
@@ -2216,8 +2354,11 @@ mod tests {
             id: "edge".to_owned(),
             from_id: "text".to_owned(),
             to_id: "image".to_owned(),
-            from_port: None,
-            to_port: None,
+            from_port: "out".to_owned(),
+            to_port: "in".to_owned(),
+            port_kind: "text".to_owned(),
+            from_offset: 42.0,
+            to_offset: 42.0,
             kind: "flow".to_owned(),
             data_json: None,
         })
@@ -2271,6 +2412,7 @@ mod tests {
                 ResultItemInput {
                     id: "item-manual".to_owned(),
                     position: 0.0,
+                    port_id: "out".to_owned(),
                     kind: "text".to_owned(),
                     text: "After".to_owned(),
                     asset_id: None,
@@ -2332,6 +2474,7 @@ mod tests {
             ResultItemInput {
                 id: "item-manual".to_owned(),
                 position: 0.0,
+                port_id: "out".to_owned(),
                 kind: "text".to_owned(),
                 text: "Orchid petals".to_owned(),
                 asset_id: None,
@@ -2365,6 +2508,7 @@ mod tests {
             vec![ResultItemInput {
                 id: "item-run".to_owned(),
                 position: 0.0,
+                port_id: "out".to_owned(),
                 kind: "text".to_owned(),
                 text: "Marigold fields".to_owned(),
                 asset_id: None,
@@ -2409,6 +2553,7 @@ mod tests {
             vec![ResultItemInput {
                 id: "item".to_owned(),
                 position: 0.0,
+                port_id: "out".to_owned(),
                 kind: "text".to_owned(),
                 text: "Run output".to_owned(),
                 asset_id: None,
@@ -2482,8 +2627,11 @@ mod tests {
             id: "a-b".to_owned(),
             from_id: "a".to_owned(),
             to_id: "b".to_owned(),
-            from_port: None,
-            to_port: None,
+            from_port: "out".to_owned(),
+            to_port: "in".to_owned(),
+            port_kind: "text".to_owned(),
+            from_offset: 42.0,
+            to_offset: 42.0,
             kind: "flow".to_owned(),
             data_json: None,
         })
@@ -2504,6 +2652,7 @@ mod tests {
                 vec![ResultItemInput {
                     id: "item-b".to_owned(),
                     position: 0.0,
+                    port_id: "out".to_owned(),
                     kind: "text".to_owned(),
                     text: "B output".to_owned(),
                     asset_id: None,
@@ -2529,6 +2678,7 @@ mod tests {
                 vec![ResultItemInput {
                     id: "item-a".to_owned(),
                     position: 0.0,
+                    port_id: "out".to_owned(),
                     kind: "text".to_owned(),
                     text: "A output".to_owned(),
                     asset_id: None,
@@ -2604,6 +2754,7 @@ mod tests {
                 id: id.to_owned(),
                 node_id: "n".to_owned(),
                 position: 0.0,
+                port_id: "out".to_owned(),
                 kind: "text".to_owned(),
                 origin: "local".to_owned(),
                 edge_id: None,
@@ -2664,6 +2815,7 @@ mod tests {
             vec![ResultItemInput {
                 id: "item".to_owned(),
                 position: 0.0,
+                port_id: "out".to_owned(),
                 kind: "text".to_owned(),
                 text: "A lake".to_owned(),
                 asset_id: None,
@@ -2675,8 +2827,11 @@ mod tests {
             id: "edge".to_owned(),
             from_id: "source".to_owned(),
             to_id: "old".to_owned(),
-            from_port: None,
-            to_port: None,
+            from_port: "out".to_owned(),
+            to_port: "in".to_owned(),
+            port_kind: "text".to_owned(),
+            from_offset: 42.0,
+            to_offset: 42.0,
             kind: "flow".to_owned(),
             data_json: None,
         })
@@ -2686,8 +2841,11 @@ mod tests {
             id: "edge".to_owned(),
             from_id: "source".to_owned(),
             to_id: "new".to_owned(),
-            from_port: None,
-            to_port: None,
+            from_port: "out".to_owned(),
+            to_port: "in".to_owned(),
+            port_kind: "text".to_owned(),
+            from_offset: 42.0,
+            to_offset: 42.0,
             kind: "flow".to_owned(),
             data_json: None,
         })
@@ -2729,6 +2887,102 @@ mod tests {
         assert_eq!(old.inputs.len(), 0);
         assert_eq!(new.inputs.len(), 1);
         assert_eq!(new.inputs[0].edge_id.as_deref(), Some("edge"));
+    }
+
+    #[test]
+    fn undoing_a_reconnect_after_a_run_drops_the_stale_snapshot() {
+        let db = Database::open(":memory:").expect("open");
+        db.insert_nodes(vec![
+            node("first", "First", "A lake", &[], 0.0, 0.0),
+            node("second", "Second", "A dawn", &[], 400.0, 0.0),
+            node("target", "Target", "", &[], 800.0, 0.0),
+        ])
+        .expect("insert nodes");
+        let batch = |id: &str, node_id: &str| ResultBatchInput {
+            id: id.to_owned(),
+            node_id: node_id.to_owned(),
+            trigger: "manual".to_owned(),
+            provider: "manual".to_owned(),
+            model: String::new(),
+            params_json: "{}".to_owned(),
+            status: "done".to_owned(),
+            error: None,
+        };
+        let item = |id: &str, text: &str| ResultItemInput {
+            id: id.to_owned(),
+            position: 0.0,
+            port_id: "out".to_owned(),
+            kind: "text".to_owned(),
+            text: text.to_owned(),
+            asset_id: None,
+            meta_json: None,
+        };
+        db.save_run(
+            batch("batch-first", "first"),
+            vec![item("i1", "first item")],
+        )
+        .expect("first batch");
+        db.save_run(
+            batch("batch-second", "second"),
+            vec![item("j1", "second item")],
+        )
+        .expect("second batch");
+        db.connect_edge(EdgeInput {
+            id: "edge".to_owned(),
+            from_id: "first".to_owned(),
+            to_id: "target".to_owned(),
+            from_port: "out".to_owned(),
+            to_port: "in".to_owned(),
+            port_kind: "text".to_owned(),
+            from_offset: 42.0,
+            to_offset: 42.0,
+            kind: "flow".to_owned(),
+            data_json: None,
+        })
+        .expect("connect");
+
+        // Move the source end, then run the new source again and sync the
+        // target: the snapshot rows are rebuilt under new item ids, so the
+        // ids the reconnect captured are gone.
+        db.update_edge(EdgeInput {
+            id: "edge".to_owned(),
+            from_id: "second".to_owned(),
+            to_id: "target".to_owned(),
+            from_port: "out".to_owned(),
+            to_port: "in".to_owned(),
+            port_kind: "text".to_owned(),
+            from_offset: 42.0,
+            to_offset: 42.0,
+            kind: "flow".to_owned(),
+            data_json: None,
+        })
+        .expect("reconnect");
+        db.save_run(
+            batch("batch-second-2", "second"),
+            vec![item("j2", "second again")],
+        )
+        .expect("second rerun");
+        db.sync_inputs("target".to_owned()).expect("sync");
+
+        db.undo().expect("undo reconnect");
+        let inputs = db
+            .node_detail("target".to_owned())
+            .expect("detail")
+            .expect("target detail")
+            .inputs;
+        assert_eq!(inputs.len(), 1);
+        assert_eq!(inputs[0].item_id.as_deref(), Some("i1"));
+        assert_eq!(inputs[0].text, "first item");
+
+        db.redo().expect("redo reconnect");
+        let inputs = db
+            .node_detail("target".to_owned())
+            .expect("detail")
+            .expect("target detail")
+            .inputs;
+        assert_eq!(inputs.len(), 1);
+        assert_eq!(inputs[0].item_id.as_deref(), Some("j1"));
+        assert_eq!(inputs[0].text, "second item");
     }
 
     #[test]
@@ -2794,8 +3048,11 @@ mod tests {
             id: "a-b".to_owned(),
             from_id: "a".to_owned(),
             to_id: "b".to_owned(),
-            from_port: None,
-            to_port: None,
+            from_port: "out".to_owned(),
+            to_port: "in".to_owned(),
+            port_kind: "text".to_owned(),
+            from_offset: 42.0,
+            to_offset: 42.0,
             kind: "flow".to_owned(),
             data_json: None,
         }])
@@ -2873,6 +3130,7 @@ mod tests {
         ResultItemInput {
             id,
             position: position as f64,
+            port_id: "out".to_owned(),
             kind: "image".to_owned(),
             text,
             asset_id: asset_id.map(str::to_owned),
@@ -3211,7 +3469,7 @@ mod tests {
 
     /// The fixture's revision. Comparisons across revisions are invalid; a
     /// later change to the grid, edges or images must pick a new label.
-    const FIXTURE_VERSION: &str = "100k-grid-edges-images-v1";
+    const FIXTURE_VERSION: &str = "100k-grid-edges-images-v2-typed-ports";
     const GRID_NODES: u32 = 100_000;
     const GRID_ROWS: u32 = 1_000;
     const ROW_NODES: u32 = 100;
@@ -3415,8 +3673,11 @@ mod tests {
                     id: format!("e{i}"),
                     from_id: format!("n{i}"),
                     to_id: format!("n{}", i + 1),
-                    from_port: None,
-                    to_port: None,
+                    from_port: "text".to_owned(),
+                    to_port: "prompt".to_owned(),
+                    port_kind: "text".to_owned(),
+                    from_offset: 42.0,
+                    to_offset: 28.0,
                     kind: "flow".to_owned(),
                     data_json: None,
                 });
@@ -3454,6 +3715,7 @@ mod tests {
                     .map(|position| ResultItemInput {
                         id: format!("bench-item-{image_index}-{position}"),
                         position: position as f64,
+                        port_id: "out".to_owned(),
                         kind: "image".to_owned(),
                         text: format!("Image {image_index} variant {position}"),
                         asset_id: Some(asset_id.clone()),
@@ -3926,12 +4188,17 @@ mod tests {
         let to = moved("n49002");
         assert_eq!(
             interior.from_point,
-            Some(EdgePoint::output(from.x, from.y, from.width, from.height)),
+            Some(EdgePoint::output(
+                from.x,
+                from.y,
+                from.width,
+                from.height / 2.0
+            )),
             "cycle {cycle}: interior from port"
         );
         assert_eq!(
             interior.to_point,
-            Some(EdgePoint::input(to.x, to.y, to.height)),
+            Some(EdgePoint::input(to.x, to.y, to.height / 3.0)),
             "cycle {cycle}: interior to port"
         );
 
@@ -3948,13 +4215,17 @@ mod tests {
                 far_from.x,
                 far_from.y,
                 far_from.width,
-                far_from.height
+                far_from.height / 2.0
             )),
             "cycle {cycle}: boundary far from port"
         );
         assert_eq!(
             crossing.to_point,
-            Some(EdgePoint::input(moved_to.x, moved_to.y, moved_to.height)),
+            Some(EdgePoint::input(
+                moved_to.x,
+                moved_to.y,
+                moved_to.height / 3.0
+            )),
             "cycle {cycle}: boundary moved to port"
         );
 
@@ -3983,13 +4254,13 @@ mod tests {
                 moved_from.x,
                 moved_from.y,
                 moved_from.width,
-                moved_from.height
+                moved_from.height / 2.0
             )),
             "cycle {cycle}: boundary moved from port"
         );
         assert_eq!(
             boundary.to_point,
-            Some(EdgePoint::input(far_to.x, far_to.y, far_to.height)),
+            Some(EdgePoint::input(far_to.x, far_to.y, far_to.height / 3.0)),
             "cycle {cycle}: boundary far to port"
         );
 

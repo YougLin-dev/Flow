@@ -29,7 +29,18 @@ function node(id: string, x: number, y: number, overrides: Partial<NodeSummary> 
 }
 
 function edge(id: string, fromId: string, toId: string): EdgeSummary {
-  return { id, fromId, toId, fromPort: null, toPort: null, kind: "flow", dataJson: "{}" };
+  return {
+    id,
+    fromId,
+    toId,
+    fromPort: "text",
+    toPort: "prompt",
+    portKind: "text",
+    fromOffset: 42,
+    toOffset: 42,
+    kind: "flow",
+    dataJson: "{}",
+  };
 }
 
 function snapshot(nodes: NodeSummary[], edges: EdgeSummary[] = []): SceneSnapshot {
@@ -71,28 +82,29 @@ test("keeps exact hits on the edge hit distance's inclusive border", () => {
   scene.apply(snapshot([], [anchored("a-b", "a", "b", { x: 0, y: 0 }, { x: 200, y: 0 })]));
 
   // Each point is exactly EDGE_HIT_DISTANCE from the straight curve and on
-  // the expanded control-point box's border.
+  // the expanded control-point box's border. The curve runs from the source
+  // port's icon (14 to the card's right) to the target's (14 to its left).
   for (const point of [
     { x: 100, y: EDGE_HIT_DISTANCE },
     { x: 100, y: -EDGE_HIT_DISTANCE },
-    { x: 0, y: EDGE_HIT_DISTANCE },
-    { x: 0, y: -EDGE_HIT_DISTANCE },
-    { x: 200 + EDGE_HIT_DISTANCE, y: 0 },
+    { x: 14, y: EDGE_HIT_DISTANCE },
+    { x: 14, y: -EDGE_HIT_DISTANCE },
+    { x: 186 + EDGE_HIT_DISTANCE, y: 0 },
   ]) {
     expect(scene.edgeAt(point.x, point.y)).toBe("a-b");
   }
 
   // Just past the expanded box and the hit distance, the connector misses.
   expect(scene.edgeAt(100, EDGE_HIT_DISTANCE + 0.001)).toBeNull();
-  expect(scene.edgeAt(200 + EDGE_HIT_DISTANCE + 0.001, 0)).toBeNull();
+  expect(scene.edgeAt(186 + EDGE_HIT_DISTANCE + 0.001, 0)).toBeNull();
 
   // The expanded box's corners pass the prefilter but are farther than the
   // hit distance from the curve, so the exact check still rejects them.
   for (const point of [
-    { x: -EDGE_HIT_DISTANCE, y: EDGE_HIT_DISTANCE },
-    { x: 200 + EDGE_HIT_DISTANCE, y: EDGE_HIT_DISTANCE },
-    { x: -EDGE_HIT_DISTANCE, y: -EDGE_HIT_DISTANCE },
-    { x: 200 + EDGE_HIT_DISTANCE, y: -EDGE_HIT_DISTANCE },
+    { x: 14 - EDGE_HIT_DISTANCE, y: EDGE_HIT_DISTANCE },
+    { x: 186 + EDGE_HIT_DISTANCE, y: EDGE_HIT_DISTANCE },
+    { x: 14 - EDGE_HIT_DISTANCE, y: -EDGE_HIT_DISTANCE },
+    { x: 186 + EDGE_HIT_DISTANCE, y: -EDGE_HIT_DISTANCE },
   ]) {
     expect(scene.edgeAt(point.x, point.y)).toBeNull();
   }
@@ -217,21 +229,6 @@ test("forgets a pair pruned for missing anchors without a reactive read", () => 
   expect(scene.hasEdge("a", "b")).toBe(false);
 });
 
-test("takes an explicit card as the side zone's occluder", () => {
-  const scene = new FlowScene();
-  scene.apply(snapshot([node("a", 0, 0), node("cover", 190, 0, { z: 5 })]));
-
-  // (204, 42) is in a's output zone but inside the cover card.
-  expect(scene.portZoneAt(204, 42, "a")).toEqual({
-    nodeId: "a",
-    side: "out",
-    point: { x: 208, y: 42 },
-  });
-  expect(scene.portZoneAt(204, 42, "cover")).toBeNull();
-  // Omitting the argument recomputes the same covering card.
-  expect(scene.portZoneAt(204, 42)).toBeNull();
-});
-
 test("keeps oddly named node pairs distinct in the pair index", () => {
   const scene = new FlowScene();
   const trickyFrom = 'a\u0000,b:c"';
@@ -257,4 +254,11 @@ test("keeps oddly named node pairs distinct in the pair index", () => {
   expect(scene.hasEdge(trickyFrom, collidingTo)).toBe(false);
   expect(scene.hasEdge(collidingFrom, trickyTo)).toBe(false);
   expect(scene.hasEdge(trickyTo, trickyFrom)).toBe(false);
+});
+
+test("knows whether a pair is already connected", () => {
+  const scene = new FlowScene();
+  scene.apply(snapshot([node("a", 0, 0), node("b", 300, 0)], [edge("a-b", "a", "b")]));
+  expect(scene.hasEdge("a", "b")).toBe(true);
+  expect(scene.hasEdge("b", "a")).toBe(false);
 });

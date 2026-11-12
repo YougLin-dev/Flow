@@ -18,7 +18,7 @@ import type {
 import type { ConnectionPair } from "./connection-gesture";
 import type { NodeRunner } from "./execution";
 import {
-  canConnect,
+  canConnectPorts,
   defaultSettings,
   type NodeKindId,
   type NodeSettings,
@@ -26,6 +26,7 @@ import {
   serializeSettings,
 } from "./node-kinds";
 import type { FlowScene } from "./scene";
+import { capacityOf, hasPortEdge, incomingEdgeCount } from "./scene-ports";
 
 /** The asset URL cache the composer reads; `AssetUrls` implements it. */
 export interface AssetUrlSource {
@@ -237,6 +238,7 @@ export class NodeSession {
             id: `input-${crypto.randomUUID()}`,
             nodeId: id,
             position: base + index,
+            portId: "references",
             kind: "image",
             origin: "local",
             assetId: asset.id,
@@ -296,6 +298,7 @@ export class NodeSession {
       const item: ResultItemInput = {
         id: `item-${crypto.randomUUID()}`,
         position: 0,
+        portId: "text",
         kind: "text",
         text,
       };
@@ -341,21 +344,38 @@ export class NodeSession {
     const document = this.host.document();
     const scene = this.host.scene();
     if (!document || !scene || this.host.isDisposed()) return;
-    const edges: EdgeInput[] = [];
-    for (const { fromId, toId } of pairs) {
-      if (fromId === toId || scene.hasEdge(fromId, toId)) continue;
-      const fromKind = scene.kindOf(fromId);
-      const toKind = scene.kindOf(toId);
-      if (!fromKind || !toKind || !canConnect(fromKind, toKind)) continue;
-      edges.push({
-        id: `edge-${crypto.randomUUID()}`,
-        fromId,
-        toId,
-        fromPort: "out",
-        toPort: "in",
-        kind: "flow",
-      });
+    const valid: ConnectionPair[] = [];
+    for (const pair of pairs) {
+      if (pair.fromId === pair.toId) continue;
+      const fromKind = scene.kindOf(pair.fromId);
+      const toKind = scene.kindOf(pair.toId);
+      if (!fromKind || !toKind) continue;
+      if (!canConnectPorts(fromKind, pair.fromPort, toKind, pair.toPort)) continue;
+      if (hasPortEdge(scene, pair.fromId, pair.fromPort, pair.toId, pair.toPort)) continue;
+      valid.push(pair);
     }
+    // Capacity is checked for the whole batch: one full input rejects the
+    // gesture rather than writing a partial fan-out.
+    const proposed = new Map<string, number>();
+    for (const pair of valid) {
+      const key = `${pair.toId}\u0000${pair.toPort}`;
+      const capacity = capacityOf(scene, pair.toId, pair.toPort);
+      const existing = incomingEdgeCount(scene, pair.toId, pair.toPort);
+      const added = proposed.get(key) ?? 0;
+      if (capacity === null || existing + added + 1 > capacity) return;
+      proposed.set(key, added + 1);
+    }
+    const edges: EdgeInput[] = valid.map((pair) => ({
+      id: `edge-${crypto.randomUUID()}`,
+      fromId: pair.fromId,
+      toId: pair.toId,
+      fromPort: pair.fromPort,
+      toPort: pair.toPort,
+      portKind: pair.portKind,
+      fromOffset: pair.fromOffset,
+      toOffset: pair.toOffset,
+      kind: "flow",
+    }));
     if (edges.length === 0) return;
     const only = edges.length === 1 ? edges[0] : null;
     try {
@@ -379,20 +399,31 @@ export class NodeSession {
     }
   }
 
-  async reconnectEdge(edgeId: string, fromId: string, toId: string): Promise<void> {
+  async reconnectEdge(edgeId: string, pair: ConnectionPair): Promise<void> {
     const document = this.host.document();
     const scene = this.host.scene();
-    if (!document || !scene || fromId === toId || this.host.isDisposed()) return;
-    const fromKind = scene.kindOf(fromId);
-    const toKind = scene.kindOf(toId);
-    if (!fromKind || !toKind || !canConnect(fromKind, toKind)) return;
+    if (!document || !scene || pair.fromId === pair.toId || this.host.isDisposed()) return;
+    const fromKind = scene.kindOf(pair.fromId);
+    const toKind = scene.kindOf(pair.toId);
+    if (!fromKind || !toKind) return;
+    if (!canConnectPorts(fromKind, pair.fromPort, toKind, pair.toPort)) return;
+    // The pair a reconnect would write must not already belong to another
+    // edge: the writer rejects it, and the gesture should never have offered it.
+    if (hasPortEdge(scene, pair.fromId, pair.fromPort, pair.toId, pair.toPort)) return;
+    // The edge being moved does not occupy a slot in its new target.
+    const capacity = capacityOf(scene, pair.toId, pair.toPort);
+    const existing = incomingEdgeCount(scene, pair.toId, pair.toPort, edgeId);
+    if (capacity === null || existing + 1 > capacity) return;
     try {
       const changes = await document.updateEdge({
         id: edgeId,
-        fromId,
-        toId,
-        fromPort: "out",
-        toPort: "in",
+        fromId: pair.fromId,
+        toId: pair.toId,
+        fromPort: pair.fromPort,
+        toPort: pair.toPort,
+        portKind: pair.portKind,
+        fromOffset: pair.fromOffset,
+        toOffset: pair.toOffset,
         kind: "flow",
       });
       if (!this.host.isDisposed()) this.host.applyChanges(changes);

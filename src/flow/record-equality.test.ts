@@ -55,8 +55,11 @@ test("sameEdge compares every field exactly", () => {
     id: "a-b",
     fromId: "a",
     toId: "b",
-    fromPort: "out",
-    toPort: "in",
+    fromPort: "text",
+    toPort: "prompt",
+    portKind: "text",
+    fromOffset: 110,
+    toOffset: 110,
     kind: "flow",
     dataJson: "{}",
     fromPoint: { x: 1, y: 2 },
@@ -74,15 +77,23 @@ test("sameEdge compares every field exactly", () => {
   expect(sameEdge(base, { ...base, toId: "c" })).toBe(false);
   expect(sameEdge(base, { ...base, kind: "data" })).toBe(false);
   expect(sameEdge(base, { ...base, dataJson: '{"a":1}' })).toBe(false);
-  expect(sameEdge(base, { ...base, fromPort: "other" })).toBe(false);
-  expect(sameEdge(base, { ...base, toPort: "other" })).toBe(false);
+  expect(sameEdge(base, { ...base, fromPort: "references" })).toBe(false);
+  expect(sameEdge(base, { ...base, toPort: "references" })).toBe(false);
+  expect(sameEdge(base, { ...base, portKind: "image" })).toBe(false);
+  expect(sameEdge(base, { ...base, fromOffset: 0 })).toBe(false);
+  expect(sameEdge(base, { ...base, toOffset: 0 })).toBe(false);
 });
 
-test("sameEdge normalizes an absent port or point to null", () => {
+test("sameEdge normalizes an absent point to null", () => {
   const base: EdgeSummary = {
     id: "a-b",
     fromId: "a",
     toId: "b",
+    fromPort: "text",
+    toPort: "prompt",
+    portKind: "text",
+    fromOffset: 110,
+    toOffset: 110,
     kind: "flow",
     dataJson: "{}",
     fromPoint: { x: 1, y: 2 },
@@ -90,11 +101,6 @@ test("sameEdge normalizes an absent port or point to null", () => {
   const withoutPoint = { ...base };
   delete withoutPoint.fromPoint;
   expect(sameEdge({ ...base, fromPoint: null }, withoutPoint)).toBe(true);
-  expect(sameEdge({ ...base, fromPort: null }, base)).toBe(true);
-
-  const withoutPort = { ...base };
-  delete withoutPort.fromPort;
-  expect(sameEdge({ ...base, fromPort: null }, withoutPort)).toBe(true);
 });
 
 test("samePreviewView compares the URL list element by element", () => {

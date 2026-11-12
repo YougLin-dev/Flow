@@ -1,42 +1,55 @@
 /**
  * Pointer interaction for the native canvas: selecting and dragging cards,
  * box selecting, resizing from a card's handles, moving the camera with the
- * hand tool, and the port/edge gestures. It owns no views; the canvas
+ * secondary button, and the port/edge gestures. It owns no views; the canvas
  * components read its signals.
  */
-import { batch, signal, type ViewStyle } from "nsh";
+import { batch, computed, signal, type ViewStyle } from "nsh";
 import type { NodeBounds } from "@flow/native";
 import type { CanvasCamera } from "./camera";
-import { type BoxGeometry, framePortZone, type Point, type PortSide } from "./connection";
+import type { BoxGeometry, Point, PortSide } from "./connection";
 import type { ConnectionPair } from "./connection-gesture";
 import { EdgeGestures } from "./edge-gestures";
+import {
+  frameContains as frameContainsScreen,
+  framePortAt as framePortAtScreen,
+  frameScreenRect,
+} from "./frame-surface";
+import type { GroupPort } from "./group-ports";
 import { HoverFlags } from "./hover-flags";
+import type { PortKind } from "./node-kinds";
 import { cursorForHandle, handleAtPoint, screenRect } from "./resize-handles";
 import { RightGesture } from "./right-gesture";
 import type { FlowScene } from "./scene";
+import { portAt } from "./scene-ports";
 import {
-  containsPoint,
   intersects,
   normalizeRect,
   type ResizeHandle,
   resizedRect,
   type ScreenRect,
-  SELECTION_FRAME_PADDING,
 } from "./selection";
 
 export type CanvasCursor = NonNullable<ViewStyle["cursor"]>;
 
-/** A card's plus button while it follows the pointer, in world coordinates. */
-export interface PortPlus {
+/** The typed port whose icon follows the pointer. */
+export interface PortHover {
   readonly nodeId: string;
   readonly side: PortSide;
+  readonly portId: string;
+  /** The pointer's world point. */
   readonly point: Point;
+  /** The port icon's world centre; the connector anchor sits on the border. */
+  readonly center: Point;
 }
 
-/** A merged plus button on a multi-card selection frame, in world coordinates. */
-export interface FramePlus {
+/** The group port whose icon follows the pointer, on a selection frame. */
+export interface GroupPortHover {
   readonly side: PortSide;
+  readonly portKind: PortKind;
+  /** The pointer's world point. */
   readonly point: Point;
+  readonly center: Point;
 }
 
 export interface CanvasHost {
@@ -46,7 +59,7 @@ export interface CanvasHost {
   /** Persist the bounds a drag or resize ended with. */
   commitBounds(bounds: readonly NodeBounds[]): void;
   selectEdge(id: string | null): void;
-  reconnectEdge(edgeId: string, fromId: string, toId: string): void;
+  reconnectEdge(edgeId: string, pair: ConnectionPair): void;
   connectNodes(pairs: readonly ConnectionPair[]): void;
   openInline(nodeId: string): void;
   /** A card was pressed (it may already be selected): show its composer. */
@@ -79,10 +92,24 @@ export class CanvasController {
   readonly marqueeSelected = signal(false);
   /** The card under the pointer while no gesture runs. */
   readonly hovered = signal<string | null>(null);
-  /** The plus button following the pointer in a card's side zone. */
-  readonly portPlus = signal<PortPlus | null>(null);
-  /** The merged frame plus following the pointer in a frame's side zone. */
-  readonly framePlus = signal<FramePlus | null>(null);
+  /** The typed port whose icon follows the pointer. */
+  readonly hoveredPort = signal<PortHover | null>(null);
+  /**
+   * The hovered port's identity, without the pointer point that changes on
+   * every move. Port views subscribe to this, so moving within one port
+   * wakes only that port instead of every mounted one.
+   */
+  readonly hoveredPortKey = computed((): string | null => {
+    const hover = this.hoveredPort();
+    return hover === null ? null : portKey(hover.nodeId, hover.side, hover.portId);
+  });
+  /** The selection frame's group port whose icon follows the pointer. */
+  readonly hoveredGroup = signal<GroupPortHover | null>(null);
+  /** The hovered group port's identity, without its per-move pointer point. */
+  readonly hoveredGroupKey = computed((): string | null => {
+    const hover = this.hoveredGroup();
+    return hover === null ? null : `${hover.side}\u0000${hover.portKind}`;
+  });
   /** True while a press moves cards, resizes one or pulls a connector. */
   readonly gesturing = signal(false);
   /**
@@ -113,9 +140,8 @@ export class CanvasController {
       camera: () => this.host.camera(),
       selectedEdge: () => this.host.scene().selectedEdge(),
       selectEdge: (id) => this.host.selectEdge(id),
-      reconnectEdge: (edgeId, fromId, toId) => this.host.reconnectEdge(edgeId, fromId, toId),
+      reconnectEdge: (edgeId, pair) => this.host.reconnectEdge(edgeId, pair),
       connectNodes: (pairs) => this.host.connectNodes(pairs),
-      changed: () => undefined,
     });
   }
 
@@ -130,19 +156,7 @@ export class CanvasController {
    */
   selectionBounds(): ScreenRect | null {
     const bounds = this.host.scene().selectionBounds();
-    return bounds ? this.frameScreenRect(bounds) : null;
-  }
-
-  /** A world frame's bounds in screen points, titles included. */
-  private frameScreenRect(bounds: BoxGeometry): ScreenRect {
-    const camera = this.host.camera();
-    const topLeft = camera.toScreen(bounds.x, bounds.y);
-    return {
-      x: topLeft.x,
-      y: topLeft.y,
-      width: bounds.width * camera.scale,
-      height: bounds.height * camera.scale,
-    };
+    return bounds ? frameScreenRect(this.host.camera(), bounds) : null;
   }
 
   /** Whether a screen point is inside the frame a marquee left around its selection. */
@@ -155,7 +169,7 @@ export class CanvasController {
     // The frame is a multi-card selection's affordance: with one card left
     // (a shift press, a delete) it is a normal selection again.
     if (!framed || bounds === null) return false;
-    return containsPoint(this.frameScreenRect(bounds), x, y, SELECTION_FRAME_PADDING);
+    return frameContainsScreen(this.host.camera(), bounds, x, y);
   }
 
   /** True while a marquee's frame spans two or more selected cards. */
@@ -163,17 +177,10 @@ export class CanvasController {
     return this.marqueeSelected() && this.host.scene().selection().length > 1;
   }
 
-  /** The merged plus zone under a screen point, on a multi-card frame. */
-  private framePlusAt(x: number, y: number, bounds: BoxGeometry | null): FramePlus | null {
+  /** The group port under a screen point, on a multi-card frame. */
+  private framePortAt(x: number, y: number, bounds: BoxGeometry | null): GroupPort | null {
     if (bounds === null) return null;
-    const camera = this.host.camera();
-    const world = camera.toWorld(x, y);
-    const padding = SELECTION_FRAME_PADDING / camera.scale;
-    for (const side of ["in", "out"] as const) {
-      const point = framePortZone(bounds, side, world.x, world.y, padding);
-      if (point !== null) return { side, point };
-    }
-    return null;
+    return framePortAtScreen(this.host.scene(), this.host.camera(), bounds, x, y);
   }
 
   /** A press is one state transition: readers see the gesture's final state. */
@@ -185,24 +192,24 @@ export class CanvasController {
       this.edgeMode = false;
       this.gesturing.set(false);
       this.gestureMoved.set(false);
-      this.portPlus.set(null);
-      this.framePlus.set(null);
+      this.hoveredPort.set(null);
+      this.hoveredGroup.set(null);
       this.clearPreview();
       this.gesture = { ...idle(), startX: x, startY: y, lastX: x, lastY: y };
       const framed = this.multiFrame();
       const frameBounds = framed ? scene.selectionBounds() : null;
 
-      // The merged plus is a connector handle for the whole selection. Test it
-      // before a press outside the frame would dismiss that frame.
-      const framePlus = this.framePlusAt(x, y, frameBounds);
-      if (
-        framePlus !== null &&
-        this.edges.beginGroup(x, y, framePlus.side === "out" ? "from" : "to")
-      ) {
-        this.edgeMode = true;
-        this.gesturing.set(true);
-        this.gesture = { ...this.gesture, mode: "edge" };
-        this.cursor.set("crosshair");
+      // A group port is a connector handle for the whole selection. Test it
+      // before a press outside the frame would dismiss that frame. A disabled
+      // port consumes the press without starting anything.
+      const framePort = this.framePortAt(x, y, frameBounds);
+      if (framePort !== null) {
+        if (framePort.enabled && this.edges.beginGroup(framePort)) {
+          this.edgeMode = true;
+          this.gesturing.set(true);
+          this.gesture = { ...this.gesture, mode: "edge" };
+          this.cursor.set("crosshair");
+        }
         return;
       }
 
@@ -213,11 +220,13 @@ export class CanvasController {
 
       // Ports come before resize handles: a selected card's east and west
       // handles sit exactly on its ports, and a connection is the more common
-      // gesture at that point. A framed selection hides its per-card pluses,
-      // so their zones must not start a connection either.
+      // gesture at that point. A framed selection hides its per-card ports,
+      // so their hits must not start a connection either. A connector inside
+      // the frame is part of the frame's drag surface too: pressing it must
+      // not select the edge and drop the multi-selection.
       const portAllowed = (nodeId: string): boolean =>
         !(this.multiFrame() && scene.selection().includes(nodeId));
-      if (this.edges.down(x, y, portAllowed)) {
+      if (!insideFrame && this.edges.down(x, y, portAllowed)) {
         this.edgeMode = true;
         this.gesturing.set(true);
         this.gesture = { ...this.gesture, mode: "edge" };
@@ -370,12 +379,17 @@ export class CanvasController {
   up(x: number, y: number): void {
     batch(() => {
       const gesture = this.gesture;
+      const moved = this.gestureMoved();
       this.gesture = idle();
       this.gesturing.set(false);
       this.gestureMoved.set(false);
       if (this.edgeMode) {
         this.edgeMode = false;
-        this.edges.up(x, y);
+        // A press that never left its point is a click: it keeps the
+        // selection instead of writing a connector to whatever port happens
+        // to snap nearby.
+        if (moved) this.edges.up(x, y);
+        else this.edges.cancel();
         this.hover(x, y);
         return;
       }
@@ -391,7 +405,7 @@ export class CanvasController {
         }
         // The pointer may have ended the gesture somewhere else, or on a
         // border: read the hover state there instead of keeping the card the
-        // gesture started on (a stale hover keeps its plus showing).
+        // gesture started on (a stale hover keeps its port showing).
         this.hover(x, y);
         return;
       }
@@ -400,7 +414,7 @@ export class CanvasController {
         const ids = this.selectWithin(gesture, box);
         this.marquee.set(null);
         this.clearPreview();
-        // One card is a normal selection: the frame, its merged pluses and
+        // One card is a normal selection: the frame, its group ports and
         // its group drag are a multi-card selection's affordance.
         this.marqueeSelected.set(ids.length > 1);
         this.hover(x, y);
@@ -420,25 +434,24 @@ export class CanvasController {
       this.edgeMode = false;
       this.gesturing.set(false);
       this.gestureMoved.set(false);
-      this.portPlus.set(null);
-      this.framePlus.set(null);
+      this.hoveredPort.set(null);
+      this.hoveredGroup.set(null);
       if (this.gesture.mode === "drag" || this.gesture.mode === "resize") {
         this.host.scene().clearOverrides();
       }
       this.gesture = idle();
       this.marquee.set(null);
       this.clearPreview();
-      this.marqueeSelected.set(false);
       this.cursor.set("default");
     });
   }
 
-  /** Clears hover, pluses and cursor together when the pointer leaves. */
+  /** Clears hover and the cursor together when the pointer leaves. */
   leave(): void {
     batch(() => {
       this.setHovered(null);
-      this.portPlus.set(null);
-      this.framePlus.set(null);
+      this.hoveredPort.set(null);
+      this.hoveredGroup.set(null);
       this.cursor.set("default");
     });
   }
@@ -449,50 +462,62 @@ export class CanvasController {
       const scene = this.host.scene();
       const camera = this.host.camera();
       const world = camera.toWorld(x, y);
-      // One card pass serves the plus occlusion, the frame hover and the
+      // One card pass serves the port occlusion, the frame hover and the
       // resting hover; the frame is also decided once for this pointer event.
       const under = scene.nodeAt(world.x, world.y);
       const framed = this.multiFrame();
       const frameBounds = framed ? scene.selectionBounds() : null;
-      // The merged plus belongs to the frame's side zones, ahead of every
-      // per-card zone or resize handle it overlaps.
-      const framePlus = this.framePlusAt(x, y, frameBounds);
-      if (framePlus !== null) {
-        this.framePlus.set(framePlus);
+      // A group port belongs to the frame, ahead of every per-card port or
+      // resize handle it overlaps. A full input group says so with its
+      // cursor instead of inviting a drag that would be rejected.
+      const framePort = this.framePortAt(x, y, frameBounds);
+      if (framePort !== null) {
         this.setHovered(null);
-        this.portPlus.set(null);
+        this.hoveredPort.set(null);
+        this.hoveredGroup.set({
+          side: framePort.side,
+          portKind: framePort.portKind,
+          point: world,
+          center: framePort.center,
+        });
+        this.cursor.set(framePort.enabled ? "crosshair" : "not-allowed");
+        return;
+      }
+      this.hoveredGroup.set(null);
+      // A typed port takes precedence over the east/west resize handles it
+      // overlaps: pressing a visible port starts a connection. Inside the
+      // frame, every card belongs to its single drag surface, so no port
+      // hover is offered there.
+      const insideFrame = this.frameContains(x, y, framed, frameBounds);
+      const port = portAt(scene, world.x, world.y);
+      if (port !== null && !insideFrame) {
+        this.setHovered(port.nodeId);
+        this.hoveredPort.set({
+          nodeId: port.nodeId,
+          side: port.side,
+          portId: port.portId,
+          point: world,
+          center: port.point,
+        });
         this.cursor.set("crosshair");
         return;
       }
-      this.framePlus.set(null);
-      // A plus zone takes precedence over the east/west resize handles it
-      // overlaps: pressing a visible plus starts a connection. A framed
-      // selection hides its per-card pluses, so their zones are muted.
-      const zone = scene.portZoneAt(world.x, world.y, under);
-      if (zone && !(framed && scene.selection().includes(zone.nodeId))) {
-        this.setHovered(zone.nodeId);
-        this.portPlus.set({ nodeId: zone.nodeId, side: zone.side, point: zone.point });
-        this.cursor.set("crosshair");
-        return;
-      }
+      this.hoveredPort.set(null);
       // The frame a marquee left is one drag surface: card bodies and borders
       // inside it all move the whole selection, so the move cursor is shown
-      // everywhere but the explicit port buttons above.
-      if (this.frameContains(x, y, framed, frameBounds)) {
+      // everywhere but the explicit ports above.
+      if (insideFrame) {
         this.setHovered(under);
-        this.portPlus.set(null);
         this.cursor.set("grab");
         return;
       }
       const target = handleAtPoint(scene, camera, scene.nodes(), x, y, under);
       if (target) {
         this.setHovered(target.id);
-        this.portPlus.set(null);
         this.cursor.set(cursorForHandle(target.side));
         return;
       }
       this.setHovered(under);
-      this.portPlus.set(null);
       this.cursor.set("default");
     });
   }
@@ -508,7 +533,7 @@ export class CanvasController {
     this.flags.setHovered(id);
   }
 
-  /** Starts a camera pan (the hand tool owns the press). */
+  /** Starts a camera pan (the secondary button owns the press). */
   beginPan(x: number, y: number): void {
     this.gesture = { ...idle(), mode: "pan", startX: x, startY: y, lastX: x, lastY: y };
     this.cursor.set("grabbing");
@@ -592,4 +617,9 @@ function idle(): Gesture {
 
 function screenDistance(gesture: Gesture, x: number, y: number): number {
   return Math.hypot(x - gesture.startX, y - gesture.startY);
+}
+
+/** The stable identity of one typed port. */
+export function portKey(nodeId: string, side: PortSide, portId: string): string {
+  return `${nodeId}\u0000${side}\u0000${portId}`;
 }

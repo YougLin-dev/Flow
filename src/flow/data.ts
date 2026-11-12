@@ -1,4 +1,5 @@
 import type { Document, NodeInput, ResultBatchInput, ResultItemInput } from "@flow/native";
+import { portOffset } from "./connection";
 import { serializeSettings } from "./node-kinds";
 
 export const NODE_WIDTH = 300;
@@ -80,6 +81,7 @@ export async function seedDocument(document: Document): Promise<void> {
   const item: ResultItemInput = {
     id: `item-${crypto.randomUUID()}`,
     position: 0,
+    portId: "text",
     kind: "text",
     text: SEED_TEXT,
   };
@@ -88,8 +90,11 @@ export async function seedDocument(document: Document): Promise<void> {
     id: SEED_EDGE_ID,
     fromId: TEXT_NODE_ID,
     toId: IMAGE_NODE_ID,
-    fromPort: "out",
-    toPort: "in",
+    fromPort: "text",
+    toPort: "prompt",
+    portKind: "text",
+    fromOffset: portOffset(0, 1, NODE_HEIGHT),
+    toOffset: portOffset(0, 2, NODE_HEIGHT),
     kind: "flow",
   });
   await document.clearHistory();

@@ -24,4 +24,11 @@ export class HoverFlags {
   setPreviewed(ids: ReadonlySet<string>): void {
     this.previewFlags.set([...ids]);
   }
+
+  /** Drops the mirrors of cards the scene no longer holds, so a long session
+   * does not keep one signal per card ever hovered. */
+  retain(live: ReadonlySet<string>): void {
+    this.hoveredFlags.retain(live);
+    this.previewFlags.retain(live);
+  }
 }

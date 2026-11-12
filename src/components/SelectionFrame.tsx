@@ -9,8 +9,9 @@
 import { View } from "nsh";
 import type { CanvasCamera } from "../flow/camera";
 import type { CanvasController } from "../flow/canvas-controller";
+import type { BoxGeometry } from "../flow/connection";
+import { selectionFrame } from "../flow/frame-surface";
 import type { FlowScene } from "../flow/scene";
-import { SELECTION_FRAME_PADDING } from "../flow/selection";
 
 export interface SelectionFrameProps {
   readonly scene: FlowScene;
@@ -25,20 +26,36 @@ export function SelectionFrame(props: SelectionFrameProps) {
         <View
           testID="selection-frame"
           class="absolute border border-chart-1"
-          style={{
-            // The frame rides the world's scale: its padding and border are
-            // divided by the camera's scale to stay one screen point wide.
-            left: box().x - SELECTION_FRAME_PADDING / props.camera.scaleView(),
-            top: box().y - SELECTION_FRAME_PADDING / props.camera.scaleView(),
-            width: box().width + (SELECTION_FRAME_PADDING * 2) / props.camera.scaleView(),
-            height: box().height + (SELECTION_FRAME_PADDING * 2) / props.camera.scaleView(),
-            borderWidth: 1 / props.camera.scaleView(),
-            zIndex: props.scene.frameZ(),
-          }}
+          style={frameStyle(box(), props.camera.scaleView(), props.scene.frameZ())}
         >
           <View class="absolute left-0 top-0 h-full w-full bg-chart-1 opacity-10" />
         </View>
       )}
     </If>
   );
+}
+
+/** The frame's world rect and its one-screen-point border, from the same
+ * padded rectangle the frame's hit testing uses. */
+function frameStyle(
+  bounds: BoxGeometry,
+  scale: number,
+  zIndex: number,
+): {
+  left: number;
+  top: number;
+  width: number;
+  height: number;
+  borderWidth: number;
+  zIndex: number;
+} {
+  const frame = selectionFrame(bounds, scale);
+  return {
+    left: frame.x,
+    top: frame.y,
+    width: frame.width,
+    height: frame.height,
+    borderWidth: 1 / scale,
+    zIndex,
+  };
 }
