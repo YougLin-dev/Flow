@@ -5,7 +5,7 @@
  * moves the content natively. The camera is a signal, so a change re-renders
  * the container and everything positioned from it.
  */
-import { batch, signal, type Accessor } from "nsh";
+import { batch, signal, type Accessor, type OS } from "nsh";
 
 export interface CameraView {
   readonly x: number;
@@ -70,6 +70,22 @@ export const MAX_SCALE = 2.5;
 
 /** Wheel notches that double the view: about 19% a notch. */
 export const WHEEL_NOTCHES_PER_DOUBLING = 4;
+
+/** Points a wheel notch moves on a precise device (a touchpad). */
+export const WHEEL_POINTS_PER_NOTCH = 48;
+
+/** Lines one wheel notch reports on Windows (the system's default setting). */
+export const WINDOWS_LINES_PER_NOTCH = 3;
+
+/**
+ * The notches a wheel event's vertical delta is worth. A mouse wheel reports
+ * lines, one notch a line everywhere but Windows, which reports the system's
+ * three lines a notch; a precise device (a touchpad) reports points.
+ */
+export function wheelNotches(deltaY: number, deltaMode: "points" | "lines", os: OS): number {
+  if (deltaMode === "points") return deltaY / WHEEL_POINTS_PER_NOTCH;
+  return os === "windows" ? deltaY / WINDOWS_LINES_PER_NOTCH : deltaY;
+}
 
 /** The zoom factor a wheel or touchpad scroll of `notches` applies. */
 export function wheelZoomFactor(notches: number): number {

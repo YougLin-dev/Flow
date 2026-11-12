@@ -11,11 +11,10 @@ All notable changes to Flow are recorded here. The format follows
 - `bun run dev:release` runs the development app against the same persistent
   `.nsh/dev` document on an optimized host for meaningful performance checks.
 
-- The mouse wheel and touchpad zoom the canvas about the pointer: four
-  notches double or halve the scale, within the camera's limits. NSH gives a
-  window's wheel to native components rather than to views, so the canvas's
-  pointer surface is a wheel sensor registered by the Rust crate (Windows),
-  which draws nothing, takes no presses and forwards each scroll to TSX.
+- The mouse wheel and touchpad zoom the canvas about the pointer on every
+  desktop: four notches double or halve the scale, within the camera's
+  limits. The canvas's pointer surface hears them with `onWheel`, converting
+  a precise device's points to notches, and the page zooms about the pointer.
 - A minimap in the canvas's bottom-left corner shows the whole document's
   card silhouettes and the camera's current viewport; the hint bar moved above
   it. Dragging anywhere on the map pans the camera (a press alone does

@@ -15,7 +15,7 @@ host to `capabilities.network` deliberately.
 ## Requirements
 
 - [Bun](https://bun.sh/) 1.4 or newer (`packageManager` pins the exact version)
-- The `nsh` CLI 0.4.0 or newer (CI pins `v0.4.0`)
+- The `nsh` CLI 0.5.0 or newer (CI pins `v0.5.0`)
 - A Rust toolchain with Cargo (for the `src/native/` mixed-app crate)
 
 ## Quick start

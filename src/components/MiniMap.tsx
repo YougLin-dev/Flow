@@ -4,9 +4,16 @@
  * the union of both, so a view pulled away from the content zooms the map out
  * rather than leaving it. Dragging anywhere in the panel pans the camera.
  */
-import { computed, View, type GestureResponderEvent, type PressEvent, type ViewStyle } from "nsh";
+import {
+  computed,
+  platform,
+  View,
+  type GestureResponderEvent,
+  type PressEvent,
+  type ViewStyle,
+} from "nsh";
 import type { Overview, OverviewCard } from "@flow/native";
-import type { CanvasCamera } from "../flow/camera";
+import { type CanvasCamera, wheelNotches } from "../flow/camera";
 import {
   minimapLayout,
   minimapRect,
@@ -16,7 +23,6 @@ import {
   unionBounds,
 } from "../flow/minimap";
 import type { MinimapController } from "../flow/minimap-controller";
-import { WheelSurface } from "./wheel-surface";
 
 const MINIMAP_WIDTH = 176;
 const MINIMAP_HEIGHT = 120;
@@ -158,6 +164,10 @@ export function MiniMap(props: MiniMapProps) {
       class="overflow-hidden rounded-(--radius) border border-border bg-card"
       style={{ width: MINIMAP_WIDTH, height: MINIMAP_HEIGHT, cursor: "grab" }}
       onPressDown={onDown}
+      onWheel={(event) => {
+        const notches = wheelNotches(event.delta.y, event.deltaMode, platform.os);
+        if (notches !== 0) props.onZoom(notches);
+      }}
       onTouchStart={onTouchStart}
       onTouchMove={onTouchMove}
       onTouchEnd={onTouchEnd}
@@ -173,19 +183,6 @@ export function MiniMap(props: MiniMapProps) {
           </>
         )}
       </If>
-      <WheelSurface
-        testID="flow-minimap-wheel"
-        style={{
-          position: "absolute",
-          left: 0,
-          top: 0,
-          width: "100%",
-          height: "100%",
-          backgroundColor: "transparent",
-          cursor: "grab",
-        }}
-        onFlowWheel={(event) => props.onZoom(event.notchesY)}
-      />
     </View>
   );
 }

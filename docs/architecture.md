@@ -199,12 +199,10 @@ events and renders four kinds of children:
   point along an edge resizes that axis, with the cursor naming the side, so
   the card shows no handle dots.
 - **Interaction view** — a transparent, full-size view that owns the cursor
-  and dispatches presses, moves and touches to the `CanvasController`. It is
-  `WheelSurface`, a native component the Rust crate registers
-  (`wheel_surface.rs`): the component draws nothing and takes no pointer, so
-  presses reach the view as on any view, while NSH hands it the mouse wheel
-  and touchpad scrolls over the canvas. The page turns each wheel event into
-  a zoom about the pointer.
+  and dispatches presses, moves and touches to the `CanvasController`. It
+  also listens with `onWheel`: NSH hands the nearest listener the mouse wheel
+  and touchpad scrolls, so the view converts each one to notches and the page
+  zooms about the pointer.
 
 The minimap (`components/MiniMap.tsx`) is a screen-space panel rendered by
 `FlowPage` beside `FlowCanvas`, not inside it, in the bottom-left corner and
@@ -221,8 +219,8 @@ drag converts its deltas with the scale captured at press, so the map's own
 rescaling cannot feed back into the drag. While a drag runs, a transparent
 full-canvas surface above the page takes the pointer, so it may leave the
 small panel and keep dragging; a pointer that leaves the window pauses the
-drag but does not end it. The panel carries its own `WheelSurface` instance,
-so the wheel over it zooms the canvas about the viewport's center.
+drag but does not end it. The panel listens with its own `onWheel`, so the
+wheel over it zooms the canvas about the viewport's center.
 
 The canvas context menu (`components/CanvasContextMenu.tsx`) is a native-view
 popup anchored at a secondary-button press: it adds a text or image card at
@@ -326,9 +324,9 @@ target stay visible.
   border or a port. A card under the pointer owns the hit: another
   card's border or port never reacts through it.
 - **Wheel** — the mouse wheel and touchpad zoom about the pointer, four
-  notches per doubling, clamped to the camera's scale range. The wheel is a
-  native-component event (the window's input never reaches TSX directly), so
-  the pointer view owns a sensor that forwards it.
+  notches per doubling, clamped to the camera's scale range. NSH delivers the
+  window's wheel to the nearest view listening with `onWheel`, so the pointer
+  view owns the listener and converts a precise device's points to notches.
 - **Secondary button** — holding the right button and dragging pans the
   camera, without selecting, starting a marquee or moving a card. A right click that stays put opens the canvas context menu on the
   button's release. NSH reports the press through `onContextMenu`, the moves

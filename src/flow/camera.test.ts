@@ -6,6 +6,7 @@ import {
   MAX_SCALE,
   MIN_SCALE,
   WHEEL_NOTCHES_PER_DOUBLING,
+  wheelNotches,
   wheelZoomFactor,
   type CameraScheduler,
   type CameraTimer,
@@ -144,6 +145,21 @@ test("turns wheel notches into a zoom factor", () => {
   // A notch down zooms out, a notch up zooms in.
   expect(wheelZoomFactor(1)).toBeLessThan(1);
   expect(wheelZoomFactor(-1)).toBeGreaterThan(1);
+});
+
+test("reads a wheel event's delta as notches", () => {
+  // A mouse wheel reports lines; one line is one notch on macOS, Linux and
+  // the web.
+  expect(wheelNotches(2, "lines", "macos")).toBe(2);
+  expect(wheelNotches(-1, "lines", "linux")).toBe(-1);
+  // Windows reports the system's three lines a notch by default.
+  expect(wheelNotches(3, "lines", "windows")).toBe(1);
+  expect(wheelNotches(-3, "lines", "windows")).toBe(-1);
+  // A precise device (a touchpad) reports points: 48 a notch.
+  expect(wheelNotches(48, "points", "macos")).toBe(1);
+  expect(wheelNotches(-48, "points", "windows")).toBe(-1);
+  expect(wheelNotches(24, "points", "macos")).toBe(0.5);
+  expect(wheelNotches(0, "points", "macos")).toBe(0);
 });
 
 test("ignores non-finite or non-positive camera values", () => {

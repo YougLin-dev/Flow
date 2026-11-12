@@ -2,9 +2,9 @@
  * A full-canvas capture surface during a minimap drag: the pointer may leave
  * the small panel, so its moves must keep reaching the drag.
  */
-import { View, type MouseEvent as NshMouseEvent } from "nsh";
+import { platform, View, type MouseEvent as NshMouseEvent } from "nsh";
+import { wheelNotches } from "../flow/camera";
 import type { MinimapController } from "../flow/minimap-controller";
-import { WheelSurface } from "./wheel-surface";
 
 export interface MinimapDragOverlayProps {
   readonly controller: MinimapController;
@@ -45,19 +45,10 @@ export function MinimapDragOverlay(props: MinimapDragOverlayProps) {
       }}
       onMouseMove={onMove}
       onMouseUp={onUp}
-    >
-      <WheelSurface
-        testID="flow-minimap-drag-wheel"
-        style={{
-          position: "absolute",
-          left: 0,
-          top: 0,
-          width: "100%",
-          height: "100%",
-          backgroundColor: "transparent",
-        }}
-        onFlowWheel={(event) => props.onZoom(event.notchesY)}
-      />
-    </View>
+      onWheel={(event) => {
+        const notches = wheelNotches(event.delta.y, event.deltaMode, platform.os);
+        if (notches !== 0) props.onZoom(notches);
+      }}
+    />
   );
 }

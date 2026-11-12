@@ -20,19 +20,6 @@ mod schema;
 mod search;
 mod types;
 mod viewport;
-#[cfg(windows)]
-mod wheel_surface;
-
-/// Registers the canvas's wheel sensor with the NSH host. The host calls this
-/// for every view it makes, before the app's own registrations.
-#[cfg(windows)]
-#[nsh_core::element::native_components(windows)]
-fn native_components(components: &nsh_platform_windows::Components) {
-    components.register(
-        "flow.wheel-surface",
-        std::rc::Rc::new(|context| Box::new(wheel_surface::WheelSurface::new(context))),
-    );
-}
 
 use db::Database;
 use types::{

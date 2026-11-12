@@ -333,10 +333,10 @@ easiest observable: it is `—` before the first fit and `<n>%` afterwards.
   that carries a card's fields unchanged wakes no value, and each value
   wakes only what reads it.
 - `flow/camera.ts`: pan/zoom/fit invariants (the point under the cursor stays
-  put, content stays centered), centering a world point, wheel notch factors,
-  clamping and the view signal. The wheel itself is a native-component event
-  with no test driver; the real host proves the sensor is registered (an
-  unknown name logs a warning), and the notch-to-factor math is unit-tested.
+  put, content stays centered), centering a world point, wheel notch factors
+  and their conversion from wheel deltas, clamping and the view signal. The
+  wheel has no test driver; its delta-to-notch and notch-to-factor math is
+  unit-tested.
 - `flow/minimap.ts` and `flow/minimap-loader.ts`: the document-to-panel
   mapping, press-to-world round trip, the debounced overview read and its
   revision guard. The overview query itself is covered in Rust: every card

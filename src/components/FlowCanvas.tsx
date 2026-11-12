@@ -6,6 +6,7 @@
 import {
   computed,
   effect,
+  platform,
   signal,
   View,
   type ContextMenuEvent,
@@ -13,7 +14,7 @@ import {
   type MouseEvent as NshMouseEvent,
   type PressEvent,
 } from "nsh";
-import { type CanvasCamera, type CameraSize, sameBounds } from "../flow/camera";
+import { type CanvasCamera, type CameraSize, sameBounds, wheelNotches } from "../flow/camera";
 import type { CanvasController } from "../flow/canvas-controller";
 import type { ContextMenuPoint } from "../flow/context-menu";
 import type { FlowScene } from "../flow/scene";
@@ -26,7 +27,6 @@ import { PortTooltip } from "./PortTooltip";
 import { SelectionFrame } from "./SelectionFrame";
 import { SelectionOverlay } from "./SelectionOverlay";
 import { SelectionPorts } from "./SelectionPorts";
-import { WheelSurface } from "./wheel-surface";
 
 export interface FlowCanvasProps {
   readonly scene: FlowScene;
@@ -339,7 +339,7 @@ export function FlowCanvas(props: FlowCanvasProps) {
         </If>
       </View>
       <SelectionOverlay controller={props.controller} />
-      <WheelSurface
+      <View
         testID="flow-canvas"
         accessibilityLabel="Flow canvas"
         style={{
@@ -351,7 +351,12 @@ export function FlowCanvas(props: FlowCanvasProps) {
           backgroundColor: "transparent",
           cursor: props.controller.cursor(),
         }}
-        onFlowWheel={(event) => props.onWheelZoom(event.notchesY, event.x, event.y)}
+        onWheel={(event) => {
+          const notches = wheelNotches(event.delta.y, event.deltaMode, platform.os);
+          if (notches !== 0) {
+            props.onWheelZoom(notches, event.position.x, event.position.y);
+          }
+        }}
         onPressDown={onDown}
         onPressUp={onUp}
         onMouseMove={onMove}

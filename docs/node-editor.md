@@ -162,10 +162,8 @@ resize, marquee, pan and connector gestures.
 Add image node place the card at the pressed point. `flow/right-gesture.ts`
 decides whether a right press becomes a camera pan or leaves the press to the
 menu, and `flow/context-menu.ts` holds the menu's anchor and delay.
-The canvas pointer surface is a native component, registered by the Rust crate
-(`src/native/src/wheel_surface.rs` on Windows): its invisible item receives
-the mouse wheel and touchpad scrolls and forwards them to TSX, which zooms the
-camera about the pointer.
+The canvas pointer surface listens with `onWheel`, so the mouse wheel and
+touchpad scrolls over it reach TSX, which zooms the camera about the pointer.
 
 The composer is a native panel (`components/NodeComposer.tsx`) in the same
 view tree as the rest of the app. `flow/overlay.ts` places it directly under
