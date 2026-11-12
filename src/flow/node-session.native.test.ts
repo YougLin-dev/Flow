@@ -5,7 +5,7 @@ import { IMAGE_NODE_ID, TEXT_NODE_ID, seedDocument } from "./data";
 import { NodeRunner } from "./execution";
 import { parseSettings } from "./node-kinds";
 import { NodeSession, type NodeSessionHost } from "./node-session";
-import type { FlowScene } from "./scene";
+import { FlowScene } from "./scene";
 
 /** Polls native async work: `app.waitUntil` only exists in an app test. */
 function until(check: () => boolean, timeout = 5000): Promise<void> {
@@ -28,6 +28,7 @@ function makeSession(
   document: Document,
   pickImages: NodeSessionHost["pickImages"] = async () => [],
   scene: FlowScene | null = null,
+  activated?: (nodeId: string) => void,
 ): {
   session: NodeSession;
   runner: NodeRunner;
@@ -45,9 +46,12 @@ function makeSession(
     assets: () => assets,
     runner: () => runner,
     pickImages,
-    applyChanges: (changes) => holder.session?.onChanges(changes),
+    applyChanges: (changes) => {
+      holder.session?.onChanges(changes);
+      scene?.applyChangeSet(changes);
+    },
     schedulePreviews: () => undefined,
-    activateNode: () => undefined,
+    activateNode: (nodeId) => activated?.(nodeId),
     isDisposed: () => false,
   };
   const session = new NodeSession(host);
@@ -182,6 +186,109 @@ test("double-clicking a non-text node opens its composer", async () => {
   await until(() => session.composerId() === IMAGE_NODE_ID && session.detail() !== null);
   expect(session.inlineId()).toBeNull();
   expect(session.detail()?.node.kind).toBe("image");
+
+  runner.dispose();
+  assets.dispose();
+  document.dispose();
+});
+
+test("copies a node beside it and selects the copy", async () => {
+  const document = await Document.open(":memory:");
+  await seedDocument(document);
+  const scene = new FlowScene();
+  scene.apply(await document.scene({ x: -1000, y: -1000, width: 4000, height: 4000 }, 0, 100));
+  let selected: string | null = null;
+  const { session, runner, assets } = makeSession(
+    document,
+    async () => [],
+    scene,
+    (nodeId) => {
+      selected = nodeId;
+    },
+  );
+
+  await session.copyNode(TEXT_NODE_ID);
+
+  const copyId = selected;
+  if (copyId === null) throw new Error("the copy was not selected");
+  const source = scene.node(TEXT_NODE_ID);
+  const copy = await document.getNode(copyId);
+  if (!source || !copy) throw new Error("the copy was not inserted");
+  expect(copy.id).not.toBe(source.id);
+  expect(copy.kind).toBe(source.kind);
+  expect(copy.title).toBe(source.title);
+  expect(copy.body).toBe(source.body);
+  expect(copy.settingsJson).toBe(source.settingsJson);
+  expect(copy.x).toBe(source.x + 24);
+  expect(copy.y).toBe(source.y + 24);
+  // The copy carries no inputs, outputs or connectors of its own.
+  expect(await document.count()).toBe(3);
+  const after = await document.scene({ x: -1000, y: -1000, width: 4000, height: 4000 }, 0, 100);
+  expect(after.edges.length).toBe(1);
+
+  runner.dispose();
+  assets.dispose();
+  document.dispose();
+});
+
+test("copies a node with an open composer's drafts", async () => {
+  const document = await Document.open(":memory:");
+  await seedDocument(document);
+  const scene = new FlowScene();
+  scene.apply(await document.scene({ x: -1000, y: -1000, width: 4000, height: 4000 }, 0, 100));
+  let selected: string | null = null;
+  const { session, runner, assets } = makeSession(
+    document,
+    async () => [],
+    scene,
+    (nodeId) => {
+      selected = nodeId;
+    },
+  );
+
+  session.openComposer(TEXT_NODE_ID);
+  await until(() => session.detail()?.node.id === TEXT_NODE_ID);
+  await session.copyNodeWithDrafts(TEXT_NODE_ID, {
+    settings: { version: 1, prompt: "Draft prompt", model: "mock-text" },
+    body: "Draft body",
+  });
+
+  const copyId = selected;
+  if (copyId === null) throw new Error("the copy was not selected");
+  const copy = await document.getNode(copyId);
+  const source = await document.getNode(TEXT_NODE_ID);
+  if (!copy || !source) throw new Error("the nodes were not read");
+  expect(copy.body).toBe("Draft body");
+  expect(source.body).toBe("Draft body");
+  expect(copy.settingsJson).toContain("Draft prompt");
+  expect(source.settingsJson).toContain("Draft prompt");
+
+  runner.dispose();
+  assets.dispose();
+  document.dispose();
+});
+
+test("deleting a node writes its draft so undo restores it", async () => {
+  const document = await Document.open(":memory:");
+  await seedDocument(document);
+  const scene = new FlowScene();
+  scene.apply(await document.scene({ x: -1000, y: -1000, width: 4000, height: 4000 }, 0, 100));
+  const { session, runner, assets } = makeSession(document, async () => [], scene);
+
+  session.openComposer(TEXT_NODE_ID);
+  await until(() => session.detail()?.node.id === TEXT_NODE_ID);
+  await session.deleteNodeWithDrafts(TEXT_NODE_ID, {
+    settings: { version: 1, prompt: "Draft prompt", model: "mock-text" },
+    body: "Draft body",
+  });
+
+  expect(await document.getNode(TEXT_NODE_ID)).toBe(null);
+  // One undo restores the delete, carrying the draft the user saw.
+  await document.undo();
+  const restored = await document.getNode(TEXT_NODE_ID);
+  if (!restored) throw new Error("the node did not come back");
+  expect(restored.body).toBe("Draft body");
+  expect(restored.settingsJson).toContain("Draft prompt");
 
   runner.dispose();
   assets.dispose();

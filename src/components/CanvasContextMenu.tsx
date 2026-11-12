@@ -1,7 +1,8 @@
 /**
  * The canvas context menu: a native popup opened by a secondary-button press.
- * Its backdrop closes it on a primary press; a right drag on the same overlay
- * is forwarded to the page, which drops the menu and pans the canvas.
+ * On empty canvas it adds a card; on a card it acts on that card. Its backdrop
+ * closes it on a primary press; a right drag on the same overlay is forwarded
+ * to the page, which drops the menu and pans the canvas.
  */
 import { Text, View } from "nsh";
 import { Button } from "nsh/base";
@@ -10,9 +11,13 @@ import { CONTEXT_MENU_WIDTH } from "../flow/context-menu";
 export interface CanvasContextMenuProps {
   readonly left: number;
   readonly top: number;
+  /** The pressed card, or null when the press landed on empty canvas. */
+  readonly nodeId: () => string | null;
   readonly onClose: () => void;
   readonly onAddText: () => void;
   readonly onAddImage: () => void;
+  readonly onCopyNode: () => void;
+  readonly onDeleteNode: () => void;
   /** A mouse move with a button held (the page may start a pan). */
   readonly onMove: (x: number, y: number, held: boolean) => void;
   /** A secondary press on the open menu re-anchors it, in overlay points. */
@@ -43,25 +48,47 @@ export function CanvasContextMenu(props: CanvasContextMenuProps) {
       />
       <View
         testID="canvas-menu"
-        accessibilityLabel="Canvas menu"
+        accessibilityLabel={props.nodeId() === null ? "Canvas menu" : "Node menu"}
         class="absolute gap-0.5 rounded-(--radius) border border-border bg-popover p-1 shadow-lg"
         style={{ left: props.left, top: props.top, width: CONTEXT_MENU_WIDTH }}
         onPressDown={() => undefined}
       >
-        <Button
-          testID="context-add-text"
-          onPress={props.onAddText}
-          class="w-full rounded-md px-2 py-1.5 active:bg-accent focus:bg-accent hover:bg-muted"
-        >
-          <Text class="text-sm text-popover-foreground">Add text node</Text>
-        </Button>
-        <Button
-          testID="context-add-image"
-          onPress={props.onAddImage}
-          class="w-full rounded-md px-2 py-1.5 active:bg-accent focus:bg-accent hover:bg-muted"
-        >
-          <Text class="text-sm text-popover-foreground">Add image node</Text>
-        </Button>
+        <If when={props.nodeId() === null}>
+          <>
+            <Button
+              testID="context-add-text"
+              onPress={props.onAddText}
+              class="w-full rounded-md px-2 py-1.5 active:bg-accent focus:bg-accent hover:bg-muted"
+            >
+              <Text class="text-sm text-popover-foreground">Add text node</Text>
+            </Button>
+            <Button
+              testID="context-add-image"
+              onPress={props.onAddImage}
+              class="w-full rounded-md px-2 py-1.5 active:bg-accent focus:bg-accent hover:bg-muted"
+            >
+              <Text class="text-sm text-popover-foreground">Add image node</Text>
+            </Button>
+          </>
+        </If>
+        <If when={props.nodeId() !== null}>
+          <>
+            <Button
+              testID="context-copy-node"
+              onPress={props.onCopyNode}
+              class="w-full rounded-md px-2 py-1.5 active:bg-accent focus:bg-accent hover:bg-muted"
+            >
+              <Text class="text-sm text-popover-foreground">Copy node</Text>
+            </Button>
+            <Button
+              testID="context-delete-node"
+              onPress={props.onDeleteNode}
+              class="w-full rounded-md px-2 py-1.5 active:bg-accent focus:bg-accent hover:bg-muted"
+            >
+              <Text class="text-sm text-destructive">Delete node</Text>
+            </Button>
+          </>
+        </If>
       </View>
     </View>
   );

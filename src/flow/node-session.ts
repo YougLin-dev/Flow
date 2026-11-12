@@ -1,13 +1,13 @@
 /**
- * The document side of the composer and inline text editor: opening a node,
- * saving settings, running the mock provider, managing inputs and uploading
- * images. It owns the small piece of UI state the page renders.
+ * The document side of the composer, inline text editor and card menu:
+ * opening a node, saving settings, running the mock provider, managing
+ * inputs, uploading images and copying or deleting cards. It owns the small
+ * piece of UI state the page renders.
  */
 import { signal } from "nsh";
 import type { PickedImage, PickImagesOptions } from "nsh";
 import type {
   ChangeSet,
-  Document,
   EdgeInput,
   NodeDetail,
   NodeInput,
@@ -18,6 +18,14 @@ import type {
 import type { ConnectionPair } from "./connection-gesture";
 import type { NodeRunner } from "./execution";
 import {
+  type ComposerDrafts,
+  copyNode as copyNodeCommand,
+  copyNodeWithDrafts as copyNodeWithDraftsCommand,
+  deleteNodes as deleteNodesCommand,
+  deleteNodeWithDrafts as deleteNodeWithDraftsCommand,
+  type NodeCommandHost,
+} from "./node-commands";
+import {
   canConnectPorts,
   defaultSettings,
   type NodeKindId,
@@ -25,7 +33,6 @@ import {
   nodeKind,
   serializeSettings,
 } from "./node-kinds";
-import type { FlowScene } from "./scene";
 import { capacityOf, hasPortEdge, incomingEdgeCount } from "./scene-ports";
 
 /** The asset URL cache the composer reads; `AssetUrls` implements it. */
@@ -34,17 +41,12 @@ export interface AssetUrlSource {
   get(id: string): string | null;
 }
 
-export interface NodeSessionHost {
-  document(): Document | null;
-  scene(): FlowScene | null;
+export interface NodeSessionHost extends NodeCommandHost {
   assets(): AssetUrlSource | null;
   runner(): NodeRunner | null;
   /** Shows the platform's image picker; a test host can answer it. */
   pickImages(options: PickImagesOptions): Promise<PickedImage[]>;
-  applyChanges(changes: ChangeSet): void;
   schedulePreviews(): void;
-  activateNode(nodeId: string): void;
-  isDisposed(): boolean;
 }
 
 export class NodeSession {
@@ -337,6 +339,37 @@ export class NodeSession {
     } catch (error) {
       console.error("Flow could not add a node", error);
     }
+  }
+
+  /**
+   * Inserts a copy of a card's content and settings, offset from the source,
+   * and selects it. Inputs, outputs and connectors are the original's, not
+   * the card's own content, so they are not copied.
+   */
+  async copyNode(id: string): Promise<void> {
+    return copyNodeCommand(this.host, id);
+  }
+
+  /**
+   * Copies a card as the user sees it: an open inline editor's or composer's
+   * drafts are written and awaited first, so the duplicate is not built from
+   * stale committed content.
+   */
+  async copyNodeWithDrafts(id: string, drafts: ComposerDrafts | null): Promise<void> {
+    return copyNodeWithDraftsCommand(this.host, this, id, drafts);
+  }
+
+  /** Deletes cards in one write; the change set also drops their connectors. */
+  async deleteNodes(ids: readonly string[]): Promise<void> {
+    return deleteNodesCommand(this.host, ids);
+  }
+
+  /**
+   * Deletes one card, writing its open editor's drafts first so undo
+   * restores the content the user saw.
+   */
+  async deleteNodeWithDrafts(id: string, drafts: ComposerDrafts | null): Promise<void> {
+    return deleteNodeWithDraftsCommand(this.host, this, id, drafts);
   }
 
   /** Connects one or more pairs in one write; duplicates and bad pairs skip. */

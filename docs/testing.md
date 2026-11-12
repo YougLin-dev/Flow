@@ -296,7 +296,8 @@ For behaviour below the pointer, test the pieces directly:
 
 `App.test.tsx` drives the mounted path end to end: box selection, pan, zoom,
 search reveal, opening the native composer, running a node, editing the body,
-removing an input and switching nodes. `App.host.test.tsx` repeats the subset
+removing an input, switching nodes and the canvas and card context menus.
+`App.host.test.tsx` repeats the subset
 whose subject is the platform itself (window, real input, rendering, desktop
 APIs); it is also the only file `bun run test:host` runs. The zoom label is the
 easiest observable: it is `—` before the first fit and `<n>%` afterwards.
@@ -362,8 +363,13 @@ easiest observable: it is `—` before the first fit and `<n>%` afterwards.
   the canvas.
 - `flow/context-menu.ts`: menu placement at the press and its clamping at the
   stage edges, a press that opens its menu only on release, a drag that leaves
-  none, the move fallback for a release the host did not report, and
-  re-anchoring an open menu. The menu's items and Escape path are app tests.
+  none, the move fallback for a release the host did not report, re-anchoring
+  an open menu, a press on a card's body, title row or port targeting that
+  card's own menu, and the selection a menu opening makes (keeping a multiple
+  selection, and never following a right drag). The menu's items, their
+  actions and Escape path are app tests, as are its dismissal when the camera
+  moves or the card moves or leaves the scene, and the composer staying
+  closed when a right click selects a card.
 - `flow/composer-state.ts`: draft loading, same-node sync, reset, count
   clamping and saving settings/body.
 - `flow/grid.ts`: the tile count covers the stage at every wrapped camera
@@ -386,10 +392,12 @@ easiest observable: it is `—` before the first fit and `<n>%` afterwards.
 - `flow/icon-shape.ts`: direct unit tests for Lucide node conversion — paths,
   circles, ellipses, rects with corner radii, lines, polylines/polygons and
   malformed values.
-- `flow/node-session.ts` and `flow/execution.ts`: `node-session.native.test.ts`
-  drives the real Rust document through a mock picker and the mock providers:
-  runs, stale propagation, manual text, inline editing and uploads. Provider
-  output goes through the immutable batch/asset path, not a fake.
+- `flow/node-session.ts`, `flow/node-commands.ts` and `flow/execution.ts`:
+  `node-session.native.test.ts` drives the real Rust document through a mock
+  picker and the mock providers: runs, stale propagation, manual text, inline
+  editing, copying a node (including an open composer's drafts), deleting one
+  with its drafts, and uploads. Provider output goes through the immutable
+  batch/asset path, not a fake.
 - `store.ts`: readers and actions directly in `store.test.ts`, and their page
   wiring through `App.test.tsx`; the signals stay private by design.
 - `lint/boundaries.js`: `lint/boundaries.test.js` covers layer classification,

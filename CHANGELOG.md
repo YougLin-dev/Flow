@@ -32,13 +32,21 @@ All notable changes to Flow are recorded here. The format follows
   the same way: one point thicker at full brightness, without any animation;
   the earlier comet of light is gone.
 - A secondary-button drag pans the canvas with any tool, without selecting,
-  box-selecting or moving a card, and a right click opens the canvas context
-  menu with Add text node and Add image node, placing the card at the pressed
-  point. The menu is a native-view popup rather than the system menu, because
+  box-selecting or moving a card, and a right click opens the context menu at
+  the pressed point: Add text node and Add image node on empty canvas, or
+  Copy node and Delete node on a card. The menu is a native-view popup rather than the system menu, because
   a system menu takes the pointer and would break the right-drag pan; it opens
   on the button's release when the press never became a drag, and a drag
   dismisses it and pans. The canvas listens to `onMouseUp`, which the NSH pin
   provides for every desktop host.
+- Right-clicking a card opens the card's own menu: Copy node duplicates its
+  content and settings beside it and selects the copy (writing an open
+  editor's drafts first, so the duplicate matches what is on screen), and
+  Delete node removes it and its connectors, writing those drafts first so
+  undo restores what the user saw. Opening the menu selects the card
+  (keeping a multiple selection it belongs to) without opening its composer.
+  The menu dismisses itself when the camera moves or the card moves or
+  leaves the scene.
 - Moved the document core to Rust: a mixed NSH crate owns SQLite with WAL,
   SeaORM entities and SeaQuery, FTS5 search and RTree viewport reads. The
   canvas reads only the viewport, sends one command per gesture, and keeps

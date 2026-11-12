@@ -20,7 +20,11 @@ import { bindFlowKeys } from "../flow/bindings";
 import { CanvasCamera, wheelZoomFactor } from "../flow/camera";
 import { CanvasController } from "../flow/canvas-controller";
 import { ComposerState } from "../flow/composer-state";
-import { CanvasMenuController, contextMenuPosition } from "../flow/context-menu";
+import {
+  CanvasMenuController,
+  contextMenuPosition,
+  dismissContextMenuOnChange,
+} from "../flow/context-menu";
 import { CONTENT } from "../flow/data";
 import { openFlowDocument } from "../flow/document-session";
 import { NodeRunner } from "../flow/execution";
@@ -195,11 +199,23 @@ export function FlowPage() {
       stage(),
     );
 
+  /** Copies the card as the user sees it, including an open editor's drafts. */
+  const copyNode = (nodeId: string): void => {
+    const session = currentSession();
+    if (session) void session.copyNodeWithDrafts(nodeId, composerState.drafts());
+  };
+
   const canvasMenu = new CanvasMenuController({
     camera: () => camera,
     controller: () => controller,
+    scene: () => scene,
     addNode: (kind, x, y) => void currentSession()?.addNode(kind, x, y),
+    copyNode,
+    deleteNode: (nodeId) =>
+      void currentSession()?.deleteNodeWithDrafts(nodeId, composerState.drafts()),
   });
+
+  dismissContextMenuOnChange(canvasMenu, camera, scene);
 
   const panBy = (dx: number, dy: number): void => {
     if (searchOpen()) return;
@@ -299,14 +315,7 @@ export function FlowPage() {
     const ids = [...scene.selection()];
     if (ids.length === 0) return;
     scene.select([]);
-    void (async () => {
-      try {
-        const changes = await doc.deleteNodes(ids);
-        if (!disposed) applyChanges(changes);
-      } catch (error) {
-        console.error("Flow could not delete the selection", error);
-      }
-    })();
+    if (!disposed) void currentSession()?.deleteNodes(ids);
   };
 
   const undoRedo = async (direction: "undo" | "redo"): Promise<void> => {
@@ -362,7 +371,16 @@ export function FlowPage() {
     untracked(() => {
       if (ids.length === 1) {
         const id = ids[0];
-        if (id !== undefined) openComposer(id);
+        if (id === undefined) return;
+        // A card selected by its own context menu shows the menu, not the
+        // composer; an editor left from the previous selection still closes
+        // and saves.
+        if (canvasMenu.open()?.nodeId === id) {
+          if (session !== null && session.inlineId() !== null) closeInlineDraft();
+          if ((session?.composerId() ?? null) !== null) closeComposer();
+          return;
+        }
+        openComposer(id);
         return;
       }
       if (session !== null && session.composerId() !== null) {
@@ -532,11 +550,14 @@ export function FlowPage() {
           <CanvasContextMenu
             left={contextMenuPosition(press(), stage()).left}
             top={contextMenuPosition(press(), stage()).top}
+            nodeId={() => press().nodeId}
             onClose={() => {
               canvasMenu.close();
             }}
             onAddText={() => canvasMenu.add("text", press())}
             onAddImage={() => canvasMenu.add("image", press())}
+            onCopyNode={() => canvasMenu.copyCard(press())}
+            onDeleteNode={() => canvasMenu.deleteCard(press())}
             onMove={(x, y, held) => canvasMenu.move(x, y, held)}
             onPress={(x, y) => canvasMenu.press({ x, y })}
             onRelease={() => canvasMenu.release()}

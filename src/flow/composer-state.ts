@@ -118,4 +118,9 @@ export class ComposerState {
       void session.commitBody(detail.node.id, this.body());
     }
   }
+
+  /** The current drafts, for a command that must snapshot them first. */
+  drafts(): { settings: NodeSettings | null; body: string } {
+    return { settings: this.settings(), body: this.body() };
+  }
 }

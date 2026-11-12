@@ -159,10 +159,17 @@ from `flow/group-ports.ts`. `flow/scene.ts` is the headless model,
 `flow/canvas-controller.ts` turns pointer events into selection, drag,
 resize, marquee, pan and connector gestures.
 `components/GridBackground.tsx` draws the dot grid in screen space.
-`components/CanvasContextMenu.tsx` is the right-click menu: Add text node and
-Add image node place the card at the pressed point. `flow/right-gesture.ts`
+`components/CanvasContextMenu.tsx` is the right-click menu: on empty canvas,
+Add text node and Add image node place the card at the pressed point; on a
+card, Copy node duplicates that card's content and settings beside it and
+Delete node removes it; both write an open editor's drafts first, so a copy
+matches what is on screen and undo restores what was deleted. Opening a
+card's menu selects that card, without opening its composer; a card already
+in a multiple selection keeps it. `flow/node-commands.ts` performs those two commands:
+a copy writes an open editor's drafts first, then inserts the card beside its
+source; delete removes the card and its connectors. `flow/right-gesture.ts`
 decides whether a right press becomes a camera pan or leaves the press to the
-menu, and `flow/context-menu.ts` holds the menu's anchor and delay.
+menu, and `flow/context-menu.ts` holds the menu's anchor, target and delay.
 The canvas pointer surface listens with `onWheel`, so the mouse wheel and
 touchpad scrolls over it reach TSX, which zooms the camera about the pointer.
 
@@ -183,8 +190,10 @@ reconciled while the camera moves.
 Keyboard: `Delete`/`Backspace` delete a selected edge or cards, `Mod+Z` /
 `Mod+Shift+Z` undo/redo, arrows pan, `Mod+=`/`Mod+-` zoom, `Mod+0` fits,
 `Mod+K` search. A secondary-button drag pans the canvas, and a right click
-opens the canvas menu. `Escape` closes the canvas menu, then search, the
-inline editor, a selected edge, the composer, and finally the selection.
+opens the context menu for what it pressed: a card's Copy node/Delete node
+menu, or the canvas's Add text node/Add image node menu. `Escape` closes the
+canvas menu, then search, the inline editor, a selected edge, the composer,
+and finally the selection.
 
 ## M1 non-goals
 

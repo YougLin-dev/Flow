@@ -446,19 +446,28 @@ export class FlowScene {
     return this.byId.get(id)?.kind ?? null;
   }
 
+  /** One card by id, when the scene holds it. */
+  node(id: string): NodeSummary | null {
+    return this.byId.get(id) ?? null;
+  }
+
   /** One connector by id, when the scene holds it. */
   edge(id: string): EdgeSummary | null {
     return this.edgeById.get(id) ?? null;
   }
 
-  /** The topmost card under a world point. */
-  nodeAt(x: number, y: number): string | null {
+  /**
+   * The topmost card under a world point. `withTitle` also accepts the title
+   * row above the card, for a menu opened on the card's own chrome.
+   */
+  nodeAt(x: number, y: number, withTitle = false): string | null {
     let hit: { id: string; z: number } | null = null;
     for (const node of this.byId.values()) {
       const rect = this.cardRect(node.id);
       if (!rect) continue;
+      const top = rect.y - (withTitle ? CARD_TITLE_BAND : 0);
       const inside =
-        x >= rect.x && x <= rect.x + rect.width && y >= rect.y && y <= rect.y + rect.height;
+        x >= rect.x && x <= rect.x + rect.width && y >= top && y <= rect.y + rect.height;
       if (!inside) continue;
       const depth = this.cardDepth(node.id);
       if (hit === null || depth >= hit.z) hit = { id: node.id, z: depth };

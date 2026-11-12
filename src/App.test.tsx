@@ -1,5 +1,5 @@
 import { type App, expect, open, type OpenOptions, test } from "nsh/test";
-import { CONTENT } from "./flow/data";
+import { CONTENT, seedNodes } from "./flow/data";
 
 /** Opens the composer of a seed node through search. */
 const selectSeed = async (app: App, query: string, testId: string): Promise<void> => {
@@ -8,6 +8,15 @@ const selectSeed = async (app: App, query: string, testId: string): Promise<void
   await app.type("id:search-input", query);
   await app.waitUntil(() => app.shows(testId));
   await app.press(testId);
+};
+
+/** Centres a seed card through search, then opens its own context menu. */
+const openNodeMenu = async (app: App, query: string, testId: string): Promise<void> => {
+  await selectSeed(app, query, testId);
+  await app.waitUntil(() => app.shows("id:composer-body"));
+  // The reveal centres the card, so the canvas's middle presses it.
+  await app.rightClick("id:flow-canvas");
+  await app.waitUntil(() => app.shows("id:context-copy-node"));
 };
 
 /** Opens the app with the probe a test reads the camera scale from. */
@@ -451,4 +460,146 @@ test("closes the canvas menu with Escape", async () => {
   await app.waitUntil(() => app.shows("id:canvas-menu"));
   await app.keyboard.press("escape");
   await app.waitUntil(() => !app.shows("id:canvas-menu"));
+});
+
+test("opens a node's own menu instead of the canvas menu", async () => {
+  const app = await openApp({ platform: "windows" });
+  await app.waitUntil(() => percentOf(app) > 0);
+
+  await openNodeMenu(app, "Text", "id:search-result-seed-text");
+
+  expect(app.shows("id:context-add-text")).toBe(false);
+  expect(app.shows("id:context-add-image")).toBe(false);
+  expect(app.shows("id:context-delete-node")).toBe(true);
+});
+
+test("selects a card when its menu opens without opening its composer", async () => {
+  const app = await openApp({ platform: "windows" });
+  await app.waitUntil(() => percentOf(app) > 0);
+
+  // A toolbar add lands at the canvas's middle; clear its selection but
+  // leave the card there for the right click.
+  await app.press("id:add-text-node");
+  await app.waitUntil(() => selectedOf(app) === 1);
+  await app.waitUntil(() => app.shows("id:node-composer"));
+  await app.keyboard.press("escape");
+  await app.keyboard.press("escape");
+  await app.waitUntil(() => selectedOf(app) === 0);
+
+  await app.rightClick("id:flow-canvas");
+  await app.waitUntil(() => app.shows("id:context-copy-node"));
+
+  expect(selectedOf(app)).toBe(1);
+  expect(app.shows("id:node-composer")).toBe(false);
+});
+
+test("copies a node from its menu", async () => {
+  const app = await openApp({ platform: "windows" });
+  await app.waitUntil(() => percentOf(app) > 0);
+
+  await openNodeMenu(app, "Text", "id:search-result-seed-text");
+  await app.press("id:context-copy-node");
+  await app.waitUntil(() => !app.shows("id:canvas-menu"));
+  // The copy must reach the canvas, not only the document: close the copy's
+  // composer and look for the seed body on two cards.
+  await app.keyboard.press("escape");
+  const body = seedNodes()[0]?.body ?? "";
+  await app.waitUntil(
+    () => body !== "" && app.texts().filter((text) => text === body).length === 2,
+  );
+});
+
+test("deletes a node from its menu", async () => {
+  const app = await openApp({ platform: "windows" });
+  await app.waitUntil(() => percentOf(app) > 0);
+
+  await openNodeMenu(app, "Text", "id:search-result-seed-text");
+  await app.press("id:context-delete-node");
+  await app.waitUntil(() => !app.shows("id:canvas-menu"));
+  await app.waitUntil(() => selectedOf(app) === 0);
+
+  await app.keyboard.press("mod+k");
+  await app.waitUntil(() => app.shows("id:search-input"));
+  await app.type("id:search-input", "Text");
+  await app.waitUntil(() => app.texts().includes("No cards match"));
+});
+
+test("copies a node with its unsaved composer text", async () => {
+  const app = await openApp({ platform: "windows" });
+  await app.waitUntil(() => percentOf(app) > 0);
+
+  await selectSeed(app, "Text", "id:search-result-seed-text");
+  await app.waitUntil(() => app.shows("id:composer-body"));
+  await app.clear("id:composer-body");
+  await app.type("id:composer-body", "Draft body");
+
+  await app.rightClick("id:flow-canvas");
+  await app.waitUntil(() => app.shows("id:context-copy-node"));
+  await app.press("id:context-copy-node");
+  await app.waitUntil(() => !app.shows("id:canvas-menu"));
+
+  // Both cards must show the draft the user was looking at, not the text the
+  // source had before the edit.
+  await app.waitUntil(() => app.texts().filter((text) => text === "Draft body").length >= 2);
+  await app.keyboard.press("escape");
+  await app.waitUntil(() => app.texts().filter((text) => text === "Draft body").length === 2);
+});
+
+test("closes a node's menu when the camera moves", async () => {
+  const app = await openApp({ platform: "windows" });
+  await app.waitUntil(() => percentOf(app) > 0);
+
+  await openNodeMenu(app, "Text", "id:search-result-seed-text");
+  const zoom = percentOf(app);
+  await app.keyboard.press("mod+=");
+  await app.waitUntil(() => percentOf(app) !== zoom);
+  await app.waitUntil(() => !app.shows("id:canvas-menu"));
+});
+
+test("closes a node's menu when undo removes its card", async () => {
+  const app = await openApp({ platform: "windows" });
+  await app.waitUntil(() => percentOf(app) > 0);
+
+  // The toolbar adds at the canvas's middle, so the card lands under the
+  // right click.
+  await app.press("id:add-text-node");
+  await app.waitUntil(() => selectedOf(app) === 1);
+  await app.rightClick("id:flow-canvas");
+  await app.waitUntil(() => app.shows("id:context-delete-node"));
+
+  await app.keyboard.press("mod+z");
+  await app.waitUntil(() => !app.shows("id:canvas-menu"));
+});
+
+test("closes a node's menu with Escape and keeps its card selected", async () => {
+  const app = await openApp({ platform: "windows" });
+  await app.waitUntil(() => percentOf(app) > 0);
+
+  await openNodeMenu(app, "Text", "id:search-result-seed-text");
+  await app.keyboard.press("escape");
+  await app.waitUntil(() => !app.shows("id:canvas-menu"));
+
+  expect(selectedOf(app)).toBe(1);
+});
+
+test("deletes a node with its unsaved composer text", async () => {
+  const app = await openApp({ platform: "windows" });
+  await app.waitUntil(() => percentOf(app) > 0);
+
+  await selectSeed(app, "Text", "id:search-result-seed-text");
+  await app.waitUntil(() => app.shows("id:composer-body"));
+  await app.clear("id:composer-body");
+  await app.type("id:composer-body", "Draft body");
+
+  await app.rightClick("id:flow-canvas");
+  await app.waitUntil(() => app.shows("id:context-delete-node"));
+  await app.press("id:context-delete-node");
+  await app.waitUntil(() => selectedOf(app) === 0);
+
+  // Undo restores the card with the text the user typed, not the old body.
+  await app.keyboard.press("mod+z");
+  await app.keyboard.press("mod+k");
+  await app.waitUntil(() => app.shows("id:search-input"));
+  await app.type("id:search-input", "Draft body");
+  await app.waitUntil(() => app.texts().includes("1 result"));
 });

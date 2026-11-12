@@ -1,9 +1,12 @@
-/** The canvas context menu's anchor, stage placement and gestures. */
-import { signal } from "nsh";
+/** The canvas context menu's anchor, target, stage placement and gestures. */
+import { effect, signal, untracked } from "nsh";
 import type { CanvasCamera } from "./camera";
 import type { CanvasController } from "./canvas-controller";
+import type { BoxGeometry } from "./connection";
 import type { NodeKindId } from "./node-kinds";
 import type { StageSize } from "./overlay";
+import type { FlowScene } from "./scene";
+import { portAt } from "./scene-ports";
 
 /** A secondary-button press in the canvas's screen points. */
 export interface ContextMenuPoint {
@@ -11,10 +14,12 @@ export interface ContextMenuPoint {
   readonly y: number;
 }
 
-/** The press with the world point a new card is centred on. */
+/** The press with the world point a new card is centred on, and the card
+ * under it when the menu belongs to a card rather than the canvas. */
 export interface ContextMenuPress extends ContextMenuPoint {
   readonly worldX: number;
   readonly worldY: number;
+  readonly nodeId: string | null;
 }
 
 /** The menu's fixed width and the height it reserves on the stage. */
@@ -70,13 +75,17 @@ class ContextMenuState {
 export interface CanvasMenuHost {
   camera(): CanvasCamera;
   controller(): CanvasController;
+  scene(): FlowScene;
   addNode(kind: NodeKindId, x: number, y: number): void;
+  copyNode(nodeId: string): void;
+  deleteNode(nodeId: string): void;
 }
 
 /**
  * Wires a secondary press to the right-button gesture and the menu: the press
  * opens the menu (unless a right drag claims it), a move over the menu can
- * start that drag, and an item adds a card at the pressed world point.
+ * start that drag, and an item adds a card at the pressed world point, or
+ * copies or deletes the card the press landed on.
  */
 export class CanvasMenuController {
   private readonly state = new ContextMenuState();
@@ -92,7 +101,12 @@ export class CanvasMenuController {
   press(at: ContextMenuPoint): void {
     if (!this.host.controller().right.down(at.x, at.y)) return;
     const world = this.host.camera().toWorld(at.x, at.y);
-    this.state.pressAt({ ...at, worldX: world.x, worldY: world.y });
+    const scene = this.host.scene();
+    // A port's disc sits just outside the body, but it is still the card's
+    // chrome: a press on it belongs to that card.
+    const nodeId =
+      scene.nodeAt(world.x, world.y, true) ?? portAt(scene, world.x, world.y)?.nodeId ?? null;
+    this.state.pressAt({ ...at, worldX: world.x, worldY: world.y, nodeId });
   }
 
   /**
@@ -109,6 +123,7 @@ export class CanvasMenuController {
       return;
     }
     this.state.release();
+    this.selectTarget();
   }
 
   /** A move over the menu: a secondary drag dismisses it and pans. */
@@ -126,10 +141,92 @@ export class CanvasMenuController {
     this.host.addNode(kind, at.worldX, at.worldY);
   }
 
+  /** Duplicates the pressed card and closes the menu. */
+  copyCard(at: ContextMenuPress): void {
+    const nodeId = at.nodeId;
+    if (nodeId === null) return;
+    this.state.close();
+    this.host.copyNode(nodeId);
+  }
+
+  /** Deletes the pressed card and closes the menu. */
+  deleteCard(at: ContextMenuPress): void {
+    const nodeId = at.nodeId;
+    if (nodeId === null) return;
+    // One menu delete removes one card; in a multi-card selection, clear the
+    // selection first as the Delete key does, so the survivors' composer does
+    // not pop open.
+    const scene = this.host.scene();
+    if (scene.selection().length > 1 && scene.selection().includes(nodeId)) scene.select([]);
+    this.state.close();
+    this.host.deleteNode(nodeId);
+  }
+
   /** Closes the menu; true when one was open or about to open. */
   close(): boolean {
     return this.state.close();
   }
+
+  /**
+   * A card's menu shows which card its items act on: the card becomes the
+   * selection. A press on a card already in a multiple selection keeps that
+   * selection, and empty canvas leaves the selection alone. The page opens
+   * the composer for a single selection except while this menu is open, so a
+   * right click never pops the editor.
+   */
+  private selectTarget(): void {
+    const nodeId = this.open()?.nodeId ?? null;
+    if (nodeId === null) return;
+    const scene = this.host.scene();
+    if (scene.selection().includes(nodeId)) return;
+    scene.select([nodeId]);
+  }
+}
+
+/**
+ * Dismisses an open menu when the camera moves, or when the card it targets
+ * leaves the scene or changes rectangle: its screen anchor and its items
+ * would otherwise point at something the user is no longer looking at. Call
+ * it during the page's render, in the page's owner.
+ */
+export function dismissContextMenuOnChange(
+  menu: CanvasMenuController,
+  camera: CanvasCamera,
+  scene: FlowScene,
+): void {
+  effect(() => {
+    camera.view();
+    untracked(() => menu.close());
+  });
+
+  // The rectangle the menu opened over; a re-anchored or freshly opened menu
+  // starts a new baseline, and a change from it moves the card out from under
+  // the menu.
+  let anchor: { id: string; rect: BoxGeometry } | null = null;
+  effect(() => {
+    const id = menu.open()?.nodeId ?? null;
+    if (id === null) {
+      anchor = null;
+      return;
+    }
+    const rect = scene.cardRect(id);
+    if (rect === null) {
+      anchor = null;
+      untracked(() => menu.close());
+      return;
+    }
+    if (anchor === null || anchor.id !== id) {
+      anchor = { id, rect };
+      return;
+    }
+    if (sameRect(anchor.rect, rect)) return;
+    anchor = null;
+    untracked(() => menu.close());
+  });
+}
+
+function sameRect(a: BoxGeometry, b: BoxGeometry): boolean {
+  return a.x === b.x && a.y === b.y && a.width === b.width && a.height === b.height;
 }
 
 function clamp(value: number, min: number, max: number): number {
