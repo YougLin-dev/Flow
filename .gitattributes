@@ -1,0 +1,5 @@
+# Check every text file out with LF on every desktop, so the format gate sees
+# the same bytes it does on macOS and Linux. Without this, the Windows runner's
+# default core.autocrlf=true rewrites the whole checkout to CRLF and the
+# formatter reports every file.
+* text=auto eol=lf
