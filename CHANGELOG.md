@@ -25,7 +25,8 @@ All notable changes to Flow are recorded here. The format follows
   view away from the content shrinks the silhouettes instead of hiding
   either. One coarse Rust read (`Document.overview()`) samples at most 400
   cards by the insertion hash, so cards outside the scene still appear
-  without instantiating the document in the view tree.
+  without instantiating the document in the view tree. Selected cards take
+  the primary color in the map and sit above the other silhouettes.
 - Connectors rest faint, at a third of their port type's color. Selecting a
   card relights its connectors, and clicking a line selects it and lights it
   the same way: one point thicker at full brightness, without any animation;
@@ -83,6 +84,12 @@ All notable changes to Flow are recorded here. The format follows
 
 ### Changed
 
+- A selected card keeps its neutral border and shows a neutral selection ring
+  just outside it instead of recoloring the card itself. Hovering no longer
+  changes a card's border; a marquee sweep takes the same selection border,
+  the marquee box and group frame use it with a faint foreground wash, and
+  only a snapped connector keeps the accent outline. The selection gray meets
+  the contrast the standard asks of state indicators.
 - Nodes now expose named, typed ports instead of one aggregated input and
   output per card. The text and image kinds declare a `prompt` text input, an
   `image` references input with its own capacity (4 for text, 16 for image)
@@ -204,12 +211,12 @@ All notable changes to Flow are recorded here. The format follows
   and right borders: they follow the pointer in a side zone through native
   animated values and spring back when it leaves. The pulled preview is
   dashed until the connection is written; it snaps to a valid card's port,
-  highlights that card's border like hover, and unsnaps when the pointer
+  gives that card the accent border, and unsnaps when the pointer
   leaves. Connectors end at the port icon's centre, not on the card border.
 - A card's title and status now sit above the card instead of inside it, and
   the body uses the full card area.
 - Selection no longer draws the eight resize handle dots or a square outline
-  around the card: the card's own rounded accent border marks selection, and
+  around the card: a neutral ring outside it marks selection, and
   its border stays a resize zone. A card resizes from anywhere along an edge,
   not only at the eight handle points; corners still win where an edge meets
   a corner. A corner drag keeps the card's aspect ratio with its opposite
@@ -220,8 +227,8 @@ All notable changes to Flow are recorded here. The format follows
   is the card that takes the press, and the pulled connector stays above even
   a large elevated selection.
 - Box selection previews its result while the pointer drags: every card the
-  box covers takes the selected accent border immediately. Releasing over more
-  than one card keeps a translucent accent frame around them, matching the
+  box covers takes the selection border immediately. Releasing over more
+  than one card keeps a translucent neutral frame around them, matching the
   marquee's fill and border; it includes their title rows, draws above every
   unselected card and below the selected ones so the swept area moves as one
   group, and clears on a press outside it. Pressing anywhere inside the frame

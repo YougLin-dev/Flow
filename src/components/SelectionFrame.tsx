@@ -25,10 +25,10 @@ export function SelectionFrame(props: SelectionFrameProps) {
       {(box) => (
         <View
           testID="selection-frame"
-          class="absolute border border-chart-1"
+          class="absolute border border-selection"
           style={frameStyle(box(), props.camera.scaleView(), props.scene.frameZ())}
         >
-          <View class="absolute left-0 top-0 h-full w-full bg-chart-1 opacity-10" />
+          <View class="absolute left-0 top-0 h-full w-full bg-foreground opacity-5" />
         </View>
       )}
     </If>

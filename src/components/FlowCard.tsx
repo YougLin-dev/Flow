@@ -8,7 +8,7 @@
  * refresh that carries the same card wakes no binding. Its pixel values
  * scale with the camera through the world view.
  */
-import { computed, host, Image, Text, View } from "nsh";
+import { computed, host, Image, Text, token, View } from "nsh";
 import { Input } from "nsh/base";
 import type { NodeSummary } from "@flow/native";
 import { Port } from "./Port";
@@ -73,6 +73,10 @@ const ACCENT_BG: Record<FlowAccent, string> = {
 
 /** The body inset inside the card. */
 const BODY_INSET = 16;
+/** The selection ring's width, and its radius around the card's `rounded-2xl`
+ * corner, so the ring stays concentric with the card. */
+const SELECTION_RING = 2;
+const SELECTION_RING_RADIUS = 18;
 /** Below this on-screen card height, idle connected ports are not mounted. */
 const PORT_MIN_SCREEN_HEIGHT = 56;
 
@@ -95,9 +99,13 @@ export function FlowCard(props: FlowCardProps) {
   const layout = () => cardLocalLayout(size());
 
   const accent = content.accent;
-  const active = computed(
-    () => props.selected() || props.previewed() || props.hovered() || props.target(),
-  );
+  // A snapped connector keeps the accent border, and a marquee sweep takes
+  // the selection border; hover leaves the border alone. A selected card
+  // keeps the neutral border and gets a selection ring outside it.
+  const borderClass = computed(() => {
+    if (props.target()) return "border-chart-1";
+    return props.previewed() ? "border-selection" : "border-border";
+  });
   const body = content.body;
   const status = content.status;
   const statusText = content.statusText;
@@ -220,11 +228,31 @@ export function FlowCard(props: FlowCardProps) {
           height: layout().body.height,
         }}
       >
+        {/* The selection ring: a border-only view under the card, in the
+            border's own color, that grows out from behind it when selected
+            instead of appearing at once. */}
+        <View
+          style={{
+            position: "absolute",
+            left: -SELECTION_RING,
+            top: -SELECTION_RING,
+            right: -SELECTION_RING,
+            bottom: -SELECTION_RING,
+            borderWidth: SELECTION_RING,
+            borderColor: token("selection"),
+            borderRadius: SELECTION_RING_RADIUS,
+            pointerEvents: "none",
+            opacity: props.selected() ? 1 : 0,
+            transform: props.selected() ? "scale(1)" : "scale(0.96)",
+            transitionProperty: "opacity, transform",
+            transitionDuration: "180ms",
+            transitionTimingFunction: "ease-out",
+          }}
+        />
         <View
           classList={{
             "absolute left-0 top-0 h-full w-full rounded-2xl border bg-card shadow-lg": true,
-            "border-chart-1": active(),
-            "border-border": !active(),
+            [borderClass()]: true,
           }}
         />
         {content.image() ? (

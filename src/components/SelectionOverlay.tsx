@@ -1,7 +1,7 @@
 /**
- * The marquee box, drawn in screen space. A selected card shows the same
- * rounded accent border it shows on hover, so this draws no card outline of
- * its own; resize handles are invisible hit targets in the controller.
+ * The marquee box, drawn in screen space. A selected card draws its own ring
+ * outside the card, so this draws no card outline of its own; resize handles
+ * are invisible hit targets in the controller.
  */
 import { View } from "nsh";
 import type { CanvasController } from "../flow/canvas-controller";
@@ -25,7 +25,7 @@ export function SelectionOverlay(props: SelectionOverlayProps) {
       <If when={props.controller.marquee()}>
         {(box) => (
           <View
-            class="absolute border border-chart-1"
+            class="absolute border border-selection"
             style={{
               left: box().x,
               top: box().y,
@@ -33,7 +33,7 @@ export function SelectionOverlay(props: SelectionOverlayProps) {
               height: box().height,
             }}
           >
-            <View class="absolute left-0 top-0 h-full w-full bg-chart-1 opacity-10" />
+            <View class="absolute left-0 top-0 h-full w-full bg-foreground opacity-5" />
           </View>
         )}
       </If>

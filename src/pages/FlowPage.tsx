@@ -510,6 +510,7 @@ export function FlowPage() {
             camera={camera}
             stage={stage}
             drag={minimapDrag}
+            selected={(id) => scene.isSelected(id)}
             onZoom={(notches) => setZoom(wheelZoomFactor(notches))}
           />
         ) : null}

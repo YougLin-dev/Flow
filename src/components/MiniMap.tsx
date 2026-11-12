@@ -41,6 +41,8 @@ export interface MiniMapProps {
   readonly stage: () => { width: number; height: number };
   /** The drag that pans the camera; the page mounts its capture surface. */
   readonly drag: MinimapController;
+  /** Whether a card is selected; its silhouette takes the accent. */
+  readonly selected: (id: string) => boolean;
   /** Wheel notches over the panel; the page zooms about the view's center. */
   readonly onZoom: (notches: number) => void;
 }
@@ -136,6 +138,9 @@ export function MiniMap(props: MiniMapProps) {
       top: rect.y,
       width: rect.width,
       height: rect.height,
+      // A selected card's silhouette sits above the others in the map, as
+      // the card itself sits above them on the canvas.
+      zIndex: props.selected(card.id) ? 1 : 0,
     };
   };
 
@@ -151,6 +156,9 @@ export function MiniMap(props: MiniMapProps) {
       width: rect.width,
       height: rect.height,
       borderRadius: 3,
+      // Above the selected silhouettes, so the viewport frame stays readable
+      // across them.
+      zIndex: 2,
     };
   };
 
@@ -177,7 +185,15 @@ export function MiniMap(props: MiniMapProps) {
         {(overview) => (
           <>
             <Each of={overview().cards} key={(card) => card.id}>
-              {(card) => <View class="absolute bg-minimap-card" style={cardStyle(card())} />}
+              {(card) => (
+                <View
+                  classList={{
+                    "absolute bg-minimap-card": !props.selected(card().id),
+                    "absolute bg-foreground": props.selected(card().id),
+                  }}
+                  style={cardStyle(card())}
+                />
+              )}
             </Each>
             <View class="absolute border border-primary" style={viewportStyle()} />
           </>

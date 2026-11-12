@@ -51,7 +51,7 @@ export class FlowScene {
   readonly selectedEdge = signal<string | null>(null);
   /** The temporary connectors while one or more ends are dragged. */
   readonly connectionPreviews = signal<readonly ConnectionPreview[] | null>(null);
-  /** The card a pulled connector is snapped to, highlighted like hover. */
+  /** The card a pulled connector is snapped to, taking the accent border. */
   readonly connectionTarget = signal<string | null>(null);
 
   private readonly byId = new Map<string, NodeSummary>();

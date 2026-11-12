@@ -191,11 +191,14 @@ events and renders four kinds of children:
   member input disables the group port before the gesture starts.
 - **Selection overlay** — the marquee box in screen space, derived from the
   controller each time the drag changes. It does not take pointer events. The
-  cards the box covers take the selected accent border while it sweeps, and
-  the frame above appears on release when the box selected more than one
-  card. A selected card itself shows the same
-  rounded accent border it shows on hover, so no square outline is laid over
-  it. The border is the resize zone: corners scale proportionally and any
+  box and the group frame above it share the selection gray with a faint
+  foreground wash; the cards the box covers take the selection border while
+  it sweeps, and the frame appears on release when the box
+  selected more than one card. A
+  selected card keeps its neutral border and draws a selection-gray ring
+  outside it, so selection frames the node instead of recoloring it. The
+  card's border is
+  the resize zone: corners scale proportionally and any
   point along an edge resizes that axis, with the cursor naming the side, so
   the card shows no handle dots.
 - **Interaction view** — a transparent, full-size view that owns the cursor
@@ -213,7 +216,9 @@ instead of moving the viewport frame out of the panel. The silhouettes come
 from `Document.overview()`, a coarse Rust read that samples at most 400 cards
 by the insertion hash the viewport reads use (not by stacking), so it shows
 cards outside the scene and costs one read per burst of geometry changes; the
-panel never instantiates the whole document. Dragging anywhere in the panel
+panel never instantiates the whole document. A selected card's silhouette
+takes the primary color and sits above the others, so the map shows what the
+canvas has selected. Dragging anywhere in the panel
 pans the camera by the pointer's movement (a press alone changes nothing); the
 drag converts its deltas with the scale captured at press, so the map's own
 rescaling cannot feed back into the drag. While a drag runs, a transparent
@@ -347,7 +352,7 @@ Pointer gestures above the canvas: dragging an output port previews a
 forward connection and an input port a reverse one; the preview is dashed
 until the connection is written. While the pointer is within the release
 snap of a compatible port, the preview snaps to that port and the target card
-highlights like hover, and the preview follows the pointer again when it
+takes the accent border, and the preview follows the pointer again when it
 leaves. A full input, a type mismatch and an already-connected pair never
 highlight, and a still press on a port writes nothing. Dragging either typed
 port of a selected edge's endpoints moves that end (source or target). A
