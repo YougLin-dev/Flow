@@ -1,10 +1,11 @@
 /**
- * The frame around a marquee's multi-card selection, drawn with the world so
- * it shares its stacking: above the unselected cards and below the selected
- * ones, the whole swept area reads as one group. The fill marks the region
- * without tinting the selected cards. A press anywhere inside the frame
- * drags the whole selection; a press outside it starts over. A marquee that
- * ends with one card shows no frame: that card is a normal selection.
+ * The frame around a marquee's multi-card selection, drawn with the world
+ * above the selected cards so its neutral outline and wash cover the whole
+ * swept group; its group ports and a pulled connector stay above it. The wash
+ * marks the region over the cards and the space between them. A press
+ * anywhere inside the frame drags the whole selection; a press outside it
+ * starts over. A marquee that ends with one card shows no frame: that card is
+ * a normal selection.
  */
 import { View } from "nsh";
 import type { CanvasCamera } from "../flow/camera";

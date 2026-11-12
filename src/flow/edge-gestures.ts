@@ -9,7 +9,7 @@ import { type ConnectionPair, ConnectionGesture, type FixedPort } from "./connec
 import type { GroupPort } from "./group-ports";
 import { isPortKind } from "./node-kinds";
 import type { FlowScene } from "./scene";
-import { portAt, portCenterWorld, portOffsetAt, type PortHit } from "./scene-ports";
+import { portCenterWorld, portOffsetAt, type PortHit } from "./scene-ports";
 
 export interface EdgeGestureHost {
   scene(): FlowScene | null;
@@ -32,20 +32,16 @@ export class EdgeGestures {
     this.reconnectEdgeId = null;
   }
 
-  /**
-   * Consumes a press that starts an edge gesture; returns whether it did.
-   * `portAllowed` lets the canvas mute a card's ports without hiding the rest
-   * of its press behavior (a framed selection replaces them with group ports).
-   */
-  down(x: number, y: number, portAllowed?: (nodeId: string) => boolean): boolean {
+  /** Consumes a press that starts an edge gesture; returns whether it did.
+   * The caller resolves the port hit, so one press scans the ports once. */
+  down(x: number, y: number, port: PortHit | null): boolean {
     const scene = this.host.scene();
     const camera = this.host.camera();
     if (!scene || !camera) return false;
     const world = camera.toWorld(x, y);
-    const port = portAt(scene, world.x, world.y);
     const selected = this.host.selectedEdge();
 
-    if (port !== null && (portAllowed === undefined || portAllowed(port.nodeId))) {
+    if (port !== null) {
       // Dragging a selected edge's endpoint moves that end. The edge being
       // reconnected tells which port stays fixed.
       const edge = selected === null ? null : scene.edge(selected);

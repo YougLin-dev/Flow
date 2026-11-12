@@ -44,13 +44,13 @@ export interface FlowCardProps {
   readonly selected: () => boolean;
   /** True while a marquee in progress covers this card. */
   readonly previewed: () => boolean;
+  /** True while a multi-card frame surrounds this selected card. */
+  readonly framed: () => boolean;
   readonly hovered: () => boolean;
   /** The port whose icon follows the pointer, if it belongs to this card. */
   readonly hoveredPort: () => PortHover | null;
   /** The hovered port's identity; stable while the pointer moves over it. */
   readonly hoveredPortKey: () => string | null;
-  /** True while a multi-card frame replaces this card's own ports. */
-  readonly portsSuppressed: () => boolean;
   /** True while this card has an edge on either side. */
   readonly connected: () => boolean;
   /** The camera scale: below a readable size, idle ports stay out of the tree. */
@@ -99,12 +99,13 @@ export function FlowCard(props: FlowCardProps) {
   const layout = () => cardLocalLayout(size());
 
   const accent = content.accent;
-  // A snapped connector keeps the accent border, and a marquee sweep takes
-  // the selection border; hover leaves the border alone. A selected card
-  // keeps the neutral border and gets a selection ring outside it.
-  const borderClass = computed(() => {
-    if (props.target()) return "border-chart-1";
-    return props.previewed() ? "border-selection" : "border-border";
+  const marked = computed(() => props.selected() || props.previewed());
+  // A marked card's border merges into its body, so the ring outside is its
+  // one outline instead of a third gray band; only a snapped connector
+  // recolors the border.
+  const borderColor = computed(() => {
+    if (props.target()) return token("chart-1");
+    return marked() ? token("card") : token("border");
   });
   const body = content.body;
   const status = content.status;
@@ -112,15 +113,16 @@ export function FlowCard(props: FlowCardProps) {
   const lineCount = () => Math.max(1, Math.floor((size().height - BODY_INSET * 2) / 19));
   const spec = nodeKind(props.kind);
   // Ports stay out of the tree for cards nobody is looking at: an idle board
-  // pays no per-port views. A connected card keeps them while its ports would
-  // be readable on screen, so a low-zoom 2000-card overview stays one card
-  // per node; hover, selection and a snapped connector always show them.
+  // pays no per-port views. A framed selection keeps them only while they are
+  // readable on screen; at an overview zoom the frame's group ports are the
+  // handles. A single selection, hover and a snapped connector always show.
+  const readable = () => size().height * props.zoom() >= PORT_MIN_SCREEN_HEIGHT;
   const portsShown = computed(
     () =>
-      props.selected() ||
+      (props.selected() && (!props.framed() || readable())) ||
       props.hovered() ||
       props.target() ||
-      (props.connected() && size().height * props.zoom() >= PORT_MIN_SCREEN_HEIGHT),
+      (props.connected() && readable()),
   );
   /** A port icon's card-local centre, just outside the matching border. */
   const portCenter = (
@@ -229,8 +231,8 @@ export function FlowCard(props: FlowCardProps) {
         }}
       >
         {/* The selection ring: a border-only view under the card, in the
-            border's own color, that grows out from behind it when selected
-            instead of appearing at once. */}
+            border's own color, that grows out from behind it when the card is
+            selected or covered by a marquee, instead of appearing at once. */}
         <View
           style={{
             position: "absolute",
@@ -242,18 +244,16 @@ export function FlowCard(props: FlowCardProps) {
             borderColor: token("selection"),
             borderRadius: SELECTION_RING_RADIUS,
             pointerEvents: "none",
-            opacity: props.selected() ? 1 : 0,
-            transform: props.selected() ? "scale(1)" : "scale(0.96)",
+            opacity: marked() ? 1 : 0,
+            transform: marked() ? "scale(1)" : "scale(0.96)",
             transitionProperty: "opacity, transform",
             transitionDuration: "180ms",
             transitionTimingFunction: "ease-out",
           }}
         />
         <View
-          classList={{
-            "absolute left-0 top-0 h-full w-full rounded-2xl border bg-card shadow-lg": true,
-            [borderClass()]: true,
-          }}
+          class="absolute left-0 top-0 h-full w-full rounded-2xl border bg-card shadow-lg"
+          style={{ borderColor: borderColor() }}
         />
         {content.image() ? (
           <View
@@ -338,7 +338,7 @@ export function FlowCard(props: FlowCardProps) {
         )}
       </View>
 
-      <If when={portsShown() && !props.portsSuppressed()}>
+      <If when={portsShown()}>
         <Each of={spec.inputs} key={(port) => port.id}>
           {(port, index) => (
             <Port

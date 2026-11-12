@@ -28,7 +28,8 @@ import { isPortKind } from "../flow/node-kinds";
 import { portVisual } from "../flow/port-visuals";
 import type { FlowScene } from "../flow/scene";
 
-/** The selected connector's stroke: one point thicker than the rest. */
+/** The selected connector's stroke: one point thicker than the rest, so a
+ * lit line reads as bold. */
 const SELECTED_THICKNESS = EDGE_THICKNESS + 1;
 /** Resting connectors are dimmed to this share of their type's color, so a
  * clicked one stands out. */
@@ -49,6 +50,8 @@ export interface FlowEdgesProps {
   readonly scene: FlowScene;
   /** The world rectangle the camera shows; null until it has a size. */
   readonly visible: Accessor<BoxGeometry | null>;
+  /** The cards a marquee currently covers: their connectors light at once. */
+  readonly previewed: Accessor<ReadonlySet<string>>;
 }
 
 export function FlowEdges(props: FlowEdgesProps) {
@@ -143,16 +146,23 @@ export function FlowEdges(props: FlowEdgesProps) {
     };
     // Read the scheme so a theme switch redraws every connector's color, and
     // the selection so selecting cards or clicking a connector relights it.
+    // A marquee's covered cards count as selected while it sweeps.
     colorScheme();
     const selected = props.scene.selectedEdge();
     const touching = selectedCards();
+    const previewing = props.previewed();
     cx.lineCap = "round";
     for (const { edge, ports, controls, runs } of drawable) {
       const { from, to } = ports;
       // A connector takes its port type's color: the clicked edge and every
-      // connector touching a selected card are thicker and fully lit, the
-      // rest rest faint.
-      const lit = edge.id === selected || touching.has(edge.fromId) || touching.has(edge.toId);
+      // connector touching a selected or marquee-covered card are thicker and
+      // fully lit, the rest rest faint.
+      const lit =
+        edge.id === selected ||
+        touching.has(edge.fromId) ||
+        touching.has(edge.toId) ||
+        previewing.has(edge.fromId) ||
+        previewing.has(edge.toId);
       cx.strokeStyle = portColor(edge.portKind);
       cx.lineWidth = lit ? SELECTED_THICKNESS : EDGE_THICKNESS;
       cx.globalAlpha = lit ? 1 : REST_ALPHA;

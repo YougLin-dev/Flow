@@ -176,31 +176,32 @@ events and renders four kinds of children:
   world coordinates: one `FlowEdges` canvas for every connector, the selection
   frame and a `FlowCard` per visible node. The camera's transform is the only
   mapping from world to screen; the scene never caches screen geometry on a
-  card. The frame and the cards share one stacking order: the frame draws
-  above every unselected card and below the selected ones, so a swept area
-  moves as one group; its padding and border are divided by the camera's scale
-  to stay one screen point wide. The frame exists only for a marquee that ends
+  card. The frame draws above every selected card, so its neutral outline and
+  wash cover the whole swept group; only its group ports and a pulled
+  connector stay above it. Its padding clears the cards' ports, and its
+  border is divided by the camera's scale to stay one screen point wide. The frame exists only for a marquee that ends
   with more than one card: a single card is selected as a press selects it,
   with no frame of its own. A press anywhere inside the frame—on empty space
   or a card border—drags the whole selection and shows the move cursor; a
-  press outside it starts a new marquee. A multi-card frame replaces the
-  cards' own ports with one group port per distinct input type on its left
-  and one per distinct output type on its right. A group port represents
+  press outside it starts a new marquee, and a press on a card's own port
+  still starts that card's connection. A multi-card frame adds one group port
+  per distinct input type on its left and one per distinct output type on its
+  right, alongside the cards' own ports. A group port represents
   every selected card's port of that type: dragging it pulls one preview per
   member and fans the connection out to the one external target port; a full
   member input disables the group port before the gesture starts.
 - **Selection overlay** — the marquee box in screen space, derived from the
   controller each time the drag changes. It does not take pointer events. The
-  box and the group frame above it share the selection gray with a faint
-  foreground wash; the cards the box covers take the selection border while
-  it sweeps, and the frame appears on release when the box
-  selected more than one card. A
-  selected card keeps its neutral border and draws a selection-gray ring
-  outside it, so selection frames the node instead of recoloring it. The
-  card's border is
-  the resize zone: corners scale proportionally and any
-  point along an edge resizes that axis, with the cursor naming the side, so
-  the card shows no handle dots.
+  box and the group frame above it keep the selection-gray outline and a faint
+  foreground wash above the cards, tinting the swept or selected group. The cards
+  the box covers take the selection ring, the lifted stacking and the lit
+  connectors their selection will have while it sweeps, and the frame appears
+  on release when the box selected more than one card. A selected card blends
+  its one-point border into the body and draws a
+  selection-gray ring outside it, so one outline frames the node instead of
+  recoloring it. The card's border is the resize zone: corners scale
+  proportionally and any point along an edge resizes that axis, with the
+  cursor naming the side, so the card shows no handle dots.
 - **Interaction view** — a transparent, full-size view that owns the cursor
   and dispatches presses, moves and touches to the `CanvasController`. It
   also listens with `onWheel`: NSH hands the nearest listener the mouse wheel
@@ -248,8 +249,8 @@ that paint when it is outside the damage rectangle. The card renders the title a
 status above the card, the body text or image thumbnails inside it (laid out
 inside the body box), and one typed port circle outside each side, shown when
 the card is selected, hovered, a connection target, or connected and readable
-on screen. On a multi-card frame those per-card ports give way to the frame's
-group ports. Per-card selection and connection
+on screen. A multi-card frame keeps those per-card ports while they are
+readable and adds the frame's group ports on its sides. Per-card selection and connection
 target flags come from `flow/keyed-flags.ts`, while `flow/hover-flags.ts`
 separately holds the controller's hover and marquee-preview mirrors; their
 source states write these flags in the same update round, so a change wakes
@@ -288,7 +289,9 @@ world-space hit questions (`nodeAt`, `edgeAt`); the typed-port queries
 (`portAt`, `nearestPort`, `portOffsetAt` in `flow/scene-ports.ts`) read it
 through that surface. Selected cards stack above every unselected one in
 selection order, so a pressed card comes to the front at once and a marquee
-brings its whole group forward; hit testing uses the same depth, and the
+brings its whole group forward; the cards a marquee covers take their final
+ranks while it sweeps, so the preview and the release share one stacking.
+Hit testing uses the same depth, and the
 connection previews stay above them all. A card under the pointer hides a
 lower card's port, just as it hides the card itself.
 `CanvasController` turns pointer events into commands: select/toggle, drag,

@@ -359,10 +359,13 @@ export class FlowScene {
     return this.byId.get(id)?.z ?? 0;
   }
 
-  /** The zIndex a card draws at; the selected group is above everything. */
-  cardZ(id: string): number {
+  /** The zIndex a card draws at; the selected group is above everything. A
+   * marquee passes the card's 1-based preview rank, which raises the cards it
+   * covers in sweep order exactly as the selection they become will. */
+  cardZ(id: string, previewRank?: number): number {
     // Track snapshot replacement and selection changes.
     this.nodes();
+    if (previewRank !== undefined) return this.baseZ + previewRank + 1;
     return this.cardDepth(id) + 1;
   }
 
@@ -381,22 +384,23 @@ export class FlowScene {
     return this.targetFlags.has(id);
   }
 
-  /** Between unselected cards and the elevated selection: the frame. */
+  /** Above every selected card: the frame's outline and wash stay on top of
+   * the group it frames. */
   frameZ(): number {
     this.nodes();
-    return this.baseZ + 1;
+    return this.baseZ + this.selectionRanks().size + 2;
   }
 
-  /** Above every card, including an elevated selection: a pulled connector. */
+  /** Above every card and the frame: a pulled connector. */
   previewZ(): number {
     this.nodes();
-    return this.baseZ + this.selectionRanks().size + 3;
+    return this.baseZ + this.selectionRanks().size + 4;
   }
 
-  /** Above the elevated selection and its frame: the group ports. */
+  /** Above the frame: its group ports stay grabbable through the wash. */
   selectionPortsZ(): number {
     this.nodes();
-    return this.baseZ + this.selectionRanks().size + 2;
+    return this.baseZ + this.selectionRanks().size + 3;
   }
 
   /**

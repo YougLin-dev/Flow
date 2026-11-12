@@ -198,12 +198,16 @@ export class CanvasController {
       this.gesture = { ...idle(), startX: x, startY: y, lastX: x, lastY: y };
       const framed = this.multiFrame();
       const frameBounds = framed ? scene.selectionBounds() : null;
+      const world = camera.toWorld(x, y);
+      const port = portAt(scene, world.x, world.y);
 
       // A group port is a connector handle for the whole selection. Test it
-      // before a press outside the frame would dismiss that frame. A disabled
-      // port consumes the press without starting anything.
+      // before a press outside the frame would dismiss that frame, but let a
+      // card's own port win when the pointer is closer to it: the group's wide
+      // reach overlaps the ports just inside and outside the frame. A disabled
+      // group port consumes the press without starting anything.
       const framePort = this.framePortAt(x, y, frameBounds);
-      if (framePort !== null) {
+      if (framePort !== null && (port === null || nearer(framePort.center, x, y, port.point))) {
         if (framePort.enabled && this.edges.beginGroup(framePort)) {
           this.edgeMode = true;
           this.gesturing.set(true);
@@ -220,13 +224,11 @@ export class CanvasController {
 
       // Ports come before resize handles: a selected card's east and west
       // handles sit exactly on its ports, and a connection is the more common
-      // gesture at that point. A framed selection hides its per-card ports,
-      // so their hits must not start a connection either. A connector inside
-      // the frame is part of the frame's drag surface too: pressing it must
-      // not select the edge and drop the multi-selection.
-      const portAllowed = (nodeId: string): boolean =>
-        !(this.multiFrame() && scene.selection().includes(nodeId));
-      if (!insideFrame && this.edges.down(x, y, portAllowed)) {
+      // gesture at that point. A framed selection keeps its cards' ports, so
+      // a press on one starts that card's connection there too. Every other
+      // press inside the frame belongs to the frame's drag surface: a press
+      // on a connector must not select the edge and drop the multi-selection.
+      if ((!insideFrame || port !== null) && this.edges.down(x, y, port)) {
         this.edgeMode = true;
         this.gesturing.set(true);
         this.gesture = { ...this.gesture, mode: "edge" };
@@ -234,7 +236,6 @@ export class CanvasController {
         return;
       }
 
-      const world = camera.toWorld(x, y);
       const id = scene.nodeAt(world.x, world.y);
       if (clickCount >= 2 && id !== null && scene.kindOf(id) === "text") {
         this.host.openInline(id);
@@ -467,11 +468,13 @@ export class CanvasController {
       const under = scene.nodeAt(world.x, world.y);
       const framed = this.multiFrame();
       const frameBounds = framed ? scene.selectionBounds() : null;
-      // A group port belongs to the frame, ahead of every per-card port or
-      // resize handle it overlaps. A full input group says so with its
-      // cursor instead of inviting a drag that would be rejected.
+      // A group port belongs to the frame, ahead of the resize handles it
+      // overlaps, but a card's own port wins when the pointer is closer to
+      // it. A full input group says so with its cursor instead of inviting a
+      // drag that would be rejected.
       const framePort = this.framePortAt(x, y, frameBounds);
-      if (framePort !== null) {
+      const port = portAt(scene, world.x, world.y);
+      if (framePort !== null && (port === null || nearer(framePort.center, x, y, port.point))) {
         this.setHovered(null);
         this.hoveredPort.set(null);
         this.hoveredGroup.set({
@@ -485,12 +488,10 @@ export class CanvasController {
       }
       this.hoveredGroup.set(null);
       // A typed port takes precedence over the east/west resize handles it
-      // overlaps: pressing a visible port starts a connection. Inside the
-      // frame, every card belongs to its single drag surface, so no port
-      // hover is offered there.
+      // overlaps: pressing a visible port starts a connection. A framed
+      // selection keeps each card's ports, so they hover there too.
       const insideFrame = this.frameContains(x, y, framed, frameBounds);
-      const port = portAt(scene, world.x, world.y);
-      if (port !== null && !insideFrame) {
+      if (port !== null) {
         this.setHovered(port.nodeId);
         this.hoveredPort.set({
           nodeId: port.nodeId,
@@ -617,6 +618,11 @@ function idle(): Gesture {
 
 function screenDistance(gesture: Gesture, x: number, y: number): number {
   return Math.hypot(x - gesture.startX, y - gesture.startY);
+}
+
+/** Whether `center` is at least as close to the pointer as `other`. */
+function nearer(center: Point, x: number, y: number, other: Point): boolean {
+  return Math.hypot(center.x - x, center.y - y) <= Math.hypot(other.x - x, other.y - y);
 }
 
 /** The stable identity of one typed port. */

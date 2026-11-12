@@ -84,12 +84,22 @@ All notable changes to Flow are recorded here. The format follows
 
 ### Changed
 
-- A selected card keeps its neutral border and shows a neutral selection ring
-  just outside it instead of recoloring the card itself. Hovering no longer
-  changes a card's border; a marquee sweep takes the same selection border,
-  the marquee box and group frame use it with a faint foreground wash, and
-  only a snapped connector keeps the accent outline. The selection gray meets
-  the contrast the standard asks of state indicators.
+- A multi-card selection keeps each selected card's own ports while they are
+  readable on screen instead of hiding them behind the frame's group ports:
+  hovering one springs it and pressing it starts that card's connection, while
+  the rest of the frame still drags the group. The frame's group ports join
+  them for connecting the whole selection at once.
+- A selected card blends its one-point border into the body and shows a
+  neutral selection ring just outside it instead of recoloring the card
+  itself, so the ring is the card's one outline rather than a third gray band.
+  Hovering no longer
+  changes a card's border; a marquee sweep gives every covered card the same
+  ring and lifted stacking as it enters the box, the marquee box and group
+  frame keep their selection-gray outline and a faint foreground wash, and
+  only a snapped connector
+  keeps the accent outline on a card. The dark theme's selection gray is
+  deliberately darker than the standard's 3:1 state-indicator floor, so the
+  ring stays quiet on the near-black canvas.
 - Nodes now expose named, typed ports instead of one aggregated input and
   output per card. The text and image kinds declare a `prompt` text input, an
   `image` references input with its own capacity (4 for text, 16 for image)
@@ -103,8 +113,9 @@ All notable changes to Flow are recorded here. The format follows
   inputs and duplicate port pairs never highlight as targets; a gesture that
   would overflow any port is rejected whole. Dragging a selected edge's
   endpoint moves that end to another port. The composer groups inputs by
-  input port and shows the edge slots in use. A multi-card frame exposes one
-  group port per input type and output type, icon only; dragging one fans the
+  input port and shows the edge slots in use. A multi-card frame adds one
+  group port per input type and output type beside the selected cards' own
+  ports, icon only; dragging one fans the
   connection out to every matching selected port, and a full member disables
   the group port. Connectors, previews and the selected edge take their
   port type's color. Schema version 5 resets the document like version 2
@@ -227,17 +238,21 @@ All notable changes to Flow are recorded here. The format follows
   is the card that takes the press, and the pulled connector stays above even
   a large elevated selection.
 - Box selection previews its result while the pointer drags: every card the
-  box covers takes the selection border immediately. Releasing over more
-  than one card keeps a translucent neutral frame around them, matching the
-  marquee's fill and border; it includes their title rows, draws above every
-  unselected card and below the selected ones so the swept area moves as one
-  group, and clears on a press outside it. Pressing anywhere inside the frame
+  box covers takes the full selected look immediately — the selection ring,
+  its place above the unselected cards and fully lit connectors. The box's
+  outline and wash stay above the cards while it sweeps. Releasing over more
+  than one card keeps a translucent selection-gray frame around them, matching the
+  marquee's fill and border; it includes their title rows, draws above the
+  selected cards too so its wash covers the whole swept group, and clears
+  their ports: its outline and group ports sit outside the port icons. It
+  clears on a press outside it. Pressing anywhere inside the frame
   drags the whole selection, including the empty space between its cards and
   their borders, instead of starting a new box or resizing one card; the
   frame shows the move cursor throughout. A box that ends with a single card
   is just that card's selection: no frame, no group drag, its own ports.
-- A multi-card frame exposes one typed group port per input and output type
-  on its sides. Dragging one pulls a dashed line from every selected card's
+- A multi-card frame adds one typed group port per input and output type on
+  its sides, alongside the selected cards' own ports. Dragging one pulls a
+  dashed line from every selected card's
   matching port and connects them all to the release target, or connects the
   target to every selected input; a full member disables the input group.
   The whole group is written in one Rust command, so one undo removes it in

@@ -1,7 +1,8 @@
 /**
- * The marquee box, drawn in screen space. A selected card draws its own ring
- * outside the card, so this draws no card outline of its own; resize handles
- * are invisible hit targets in the controller.
+ * The marquee box, drawn in screen space above the cards: its neutral outline
+ * and wash stay on top of the swept content. A selected card draws its own
+ * ring outside the card, so this draws no card outline of its own; resize
+ * handles are invisible hit targets in the controller.
  */
 import { View } from "nsh";
 import type { CanvasController } from "../flow/canvas-controller";

@@ -79,9 +79,10 @@ kind, `image` for the image kind.
   edge's endpoint moves that end and revalidates its type and capacity,
   excluding the edge itself. A port pair appears at most once; parallel edges
   between two cards on different ports are legal.
-- A multi-card selection frame exposes the union of its ports: one group port
+- A multi-card selection frame adds the union of its ports: one group port
   per distinct input type on the left and one per distinct output type on the
-  right, icon only. Dragging a group port proposes one edge per selected
+  right, icon only, alongside each selected card's own ports. Dragging a group
+  port proposes one edge per selected
   member port to the single external target. If any proposed edge would
   overflow a port, the whole gesture is rejected and nothing is written.
 - Provider runs never enter undo; document edits (connect, reconnect, delete,

@@ -1,13 +1,14 @@
 /**
  * The typed group ports of a multi-card marquee frame: where they rest, how
  * they take the press, the presence of one port per type, their capacity
- * state and the group connection they start.
+ * state, the per-card ports the frame keeps, and the group connection they
+ * start.
  */
 import { expect, test } from "nsh/test";
 import type { EdgeSummary, NodeSummary } from "@flow/native";
 import { CanvasCamera } from "./camera";
 import { type CanvasHost, CanvasController } from "./canvas-controller";
-import { PORT_CENTER_GAP, portOffset } from "./connection";
+import { PORT_CENTER_GAP, PORT_SIZE, portOffset } from "./connection";
 import { selectionFrame } from "./frame-surface";
 import { FlowScene } from "./scene";
 
@@ -96,6 +97,37 @@ function marquee(controller: CanvasController): void {
   controller.up(650, 220);
 }
 
+/** A group port's centre on the frame side, from the frame the scene draws. */
+function framePort(
+  scene: FlowScene,
+  side: "in" | "out",
+  index: number,
+  count: number,
+): { x: number; y: number } {
+  const bounds = scene.selectionBounds();
+  if (bounds === null) throw new Error("the selection has no bounds");
+  const frame = selectionFrame(bounds, 1);
+  return {
+    x: side === "in" ? frame.x - PORT_CENTER_GAP : frame.x + frame.width + PORT_CENTER_GAP,
+    y: frame.y + portOffset(index, count, frame.height),
+  };
+}
+
+test("keeps the frame clear of the cards' ports at every zoom", () => {
+  const scene = new FlowScene();
+  scene.apply({ rev: 1, nodes: [node("a", 100, 100)], edges: [] });
+  scene.select(["a"]);
+  const bounds = scene.selectionBounds();
+  if (bounds === null) throw new Error("the selection has no bounds");
+
+  const portExtent = PORT_CENTER_GAP + PORT_SIZE / 2;
+  for (const scale of [0.25, 1, 4]) {
+    const padding = bounds.x - selectionFrame(bounds, scale).x;
+    expect(padding).toBeGreaterThan(portExtent);
+    expect((padding - portExtent) * scale).toBe(8);
+  }
+});
+
 test("a still press on the frame's group port writes nothing", () => {
   const { scene, controller, connections } = setup([
     node("a", 100, 100),
@@ -106,10 +138,11 @@ test("a still press on the frame's group port writes nothing", () => {
   ]);
   marquee(controller);
 
-  controller.down(80, 109, false, 1);
+  const port = framePort(scene, "in", 0, 2);
+  controller.down(port.x, port.y, false, 1);
   expect(controller.gesturing()).toBe(true);
   expect(controller.gestureMoved()).toBe(false);
-  controller.up(80, 109);
+  controller.up(port.x, port.y);
   expect(connections).toEqual([]);
   expect(scene.connectionPreviews()).toBeNull();
 });
@@ -124,7 +157,8 @@ test("rejects a group fan-out that exceeds the target input's capacity", () => {
 
   // Two selected outputs cannot share c's single prompt slot; the whole
   // gesture is rejected rather than writing a partial fan-out.
-  controller.down(620, 129, false, 1);
+  const port = framePort(scene, "out", 0, 1);
+  controller.down(port.x, port.y, false, 1);
   controller.move(136, 442);
   expect(scene.connectionTarget()).toBeNull();
   controller.up(136, 442);
@@ -164,39 +198,79 @@ test("puts one typed group port per side and keeps the frame draggable", () => {
   marquee(controller);
   expect(controller.multiFrame()).toBe(true);
 
-  // The padded frame is x 94…606, y 68…190. Its ports spread evenly: the
-  // text prompt group at (80, 109), the image references group at (80, 149)
-  // and the single text output group at (620, 129).
-  controller.hover(80, 109);
+  // The padded frame exposes the text prompt and image references groups on
+  // its left, and the single text output group on its right.
+  const leftText = framePort(scene, "in", 0, 2);
+  const rightText = framePort(scene, "out", 0, 1);
+  controller.hover(leftText.x, leftText.y);
   expect(controller.cursor()).toBe("crosshair");
   expect(controller.hovered()).toBeNull();
   expect(controller.hoveredGroup()).toMatchObject({
     side: "in",
     portKind: "text",
-    point: { x: 80, y: 109 },
-    center: { x: 80, y: 68 + 122 / 3 },
+    point: leftText,
+    center: leftText,
   });
 
-  controller.hover(620, 129);
+  controller.hover(rightText.x, rightText.y);
   expect(controller.cursor()).toBe("crosshair");
   expect(controller.hoveredGroup()).toMatchObject({
     side: "out",
     portKind: "text",
-    point: { x: 620, y: 129 },
-    center: { x: 620, y: 129 },
+    point: rightText,
+    center: rightText,
   });
 
-  // A framed card's own port is muted; the frame drag owns the press.
-  controller.hover(316, 142);
+  // The frame drag owns the interior away from the cards' ports.
+  controller.hover(250, 142);
   expect(controller.hoveredGroup()).toBeNull();
   expect(controller.cursor()).toBe("grab");
 
-  controller.down(316, 142, false, 1);
+  controller.down(250, 142, false, 1);
   expect(controller.gesturing()).toBe(true);
-  controller.move(366, 192);
+  controller.move(300, 192);
   expect(scene.cardRect("a")).toEqual({ x: 150, y: 150, width: 200, height: 84 });
   expect(scene.connectionPreviews()).toBeNull();
-  controller.up(366, 192);
+  controller.up(300, 192);
+});
+
+test("keeps a framed card's own ports", () => {
+  const { scene, controller, connections } = setup([
+    node("a", 100, 100),
+    node("b", 400, 100),
+    node("c", 150, 400),
+  ]);
+  marquee(controller);
+
+  // Card a's output port rests just outside its right border. The frame's
+  // group ports join the cards' own ports instead of replacing them.
+  controller.hover(314, 142);
+  expect(controller.hovered()).toBe("a");
+  expect(controller.hoveredPort()).toMatchObject({ nodeId: "a", side: "out", portId: "text" });
+  expect(controller.cursor()).toBe("crosshair");
+
+  controller.down(314, 142, false, 1);
+  expect(controller.gesturing()).toBe(true);
+  controller.move(136, 428);
+  expect(scene.connectionTarget()).toBe("c");
+  controller.up(136, 428);
+  expect(connections).toEqual([{ fromId: "a", fromPort: "text", toId: "c", toPort: "prompt" }]);
+});
+
+test("a card's own port wins over a nearby group port", () => {
+  const { controller } = setup([
+    node("a", 100, 100),
+    node("b", 400, 100),
+    // Its output port (54, 109) lies inside the left text group port's reach.
+    node("c", -160, 67),
+  ]);
+  marquee(controller);
+
+  controller.hover(54, 109);
+  expect(controller.hoveredPort()).toMatchObject({ nodeId: "c", side: "out", portId: "text" });
+  expect(controller.hoveredGroup()).toBeNull();
+  expect(controller.hovered()).toBe("c");
+  expect(controller.cursor()).toBe("crosshair");
 });
 
 test("connects every selected output from the frame's group port", () => {
@@ -208,7 +282,8 @@ test("connects every selected output from the frame's group port", () => {
   marquee(controller);
 
   // Images fan out into one text node's references input (up to 4 edges).
-  controller.down(620, 129, false, 1);
+  const port = framePort(scene, "out", 0, 1);
+  controller.down(port.x, port.y, false, 1);
   expect(controller.gesturing()).toBe(true);
   controller.move(136, 456);
   expect(scene.connectionTarget()).toBe("c");
@@ -234,7 +309,8 @@ test("connects a target to every selected input from the frame's group port", ()
   ]);
   marquee(controller);
 
-  controller.down(80, 109, false, 1);
+  const port = framePort(scene, "in", 0, 2);
+  controller.down(port.x, port.y, false, 1);
   controller.move(364, 442);
   expect(scene.connectionPreviews()).toEqual([
     { from: { x: 364, y: 442 }, to: { x: 86, y: 128 }, portKind: "text" },
@@ -258,7 +334,8 @@ test("fans image inputs out to one image output", () => {
 
   // The second left group port is the image references group, below the
   // text prompt group.
-  controller.down(80, 149, false, 1);
+  const port = framePort(scene, "in", 1, 2);
+  controller.down(port.x, port.y, false, 1);
   controller.move(364, 442);
   expect(scene.connectionPreviews()).toEqual([
     { from: { x: 364, y: 442 }, to: { x: 86, y: 156 }, portKind: "image" },
@@ -281,14 +358,16 @@ test("disables an input group when one member port is full", () => {
   expect(controller.multiFrame()).toBe(true);
 
   // a's prompt is full, so the text input group cannot fan out at all.
-  controller.hover(80, 109);
+  const leftText = framePort(scene, "in", 0, 2);
+  controller.hover(leftText.x, leftText.y);
   expect(controller.cursor()).toBe("not-allowed");
-  controller.down(80, 109, false, 1);
+  controller.down(leftText.x, leftText.y, false, 1);
   expect(controller.gesturing()).toBe(false);
   expect(scene.connectionPreviews()).toBeNull();
 
   // The output side has no such limit.
-  controller.hover(620, 129);
+  const rightText = framePort(scene, "out", 0, 1);
+  controller.hover(rightText.x, rightText.y);
   expect(controller.cursor()).toBe("crosshair");
 });
 

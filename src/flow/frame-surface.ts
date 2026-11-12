@@ -6,16 +6,29 @@
  */
 import type { CanvasCamera } from "./camera";
 import type { BoxGeometry } from "./connection";
-import { PORT_CENTER_GAP, PORT_HIT_RADIUS } from "./connection";
+import { PORT_CENTER_GAP, PORT_HIT_RADIUS, PORT_SIZE } from "./connection";
 import type { GroupPort } from "./group-ports";
 import { groupPortAt } from "./group-ports";
 import type { FlowScene } from "./scene";
-import { containsPoint, SELECTION_FRAME_PADDING, type ScreenRect } from "./selection";
+import { containsPoint, type ScreenRect } from "./selection";
 
-/** The padded world rectangle the frame draws around `bounds`. The padding
- * is a screen distance, so it shrinks in world units as the camera zooms in. */
+/** How far a card's port icon reaches outside its border. */
+const PORT_EXTENT = PORT_CENTER_GAP + PORT_SIZE / 2;
+/** Clearance the frame leaves beyond the outermost port icon, in screen points. */
+const PORT_CLEARANCE = 8;
+
+/**
+ * The frame's padding, in screen points: enough to clear the cards' resting
+ * port icons, with a gap that stays one screen size while the ports scale
+ * with the camera.
+ */
+export function framePadding(scale: number): number {
+  return PORT_EXTENT * scale + PORT_CLEARANCE;
+}
+
+/** The padded world rectangle the frame draws around `bounds`. */
 export function selectionFrame(bounds: BoxGeometry, scale: number): BoxGeometry {
-  const padding = SELECTION_FRAME_PADDING / scale;
+  const padding = framePadding(scale) / scale;
   return {
     x: bounds.x - padding,
     y: bounds.y - padding,
@@ -42,7 +55,7 @@ export function frameContains(
   x: number,
   y: number,
 ): boolean {
-  return containsPoint(frameScreenRect(camera, bounds), x, y, SELECTION_FRAME_PADDING);
+  return containsPoint(frameScreenRect(camera, bounds), x, y, framePadding(camera.scale));
 }
 
 /** The group port under a screen point, on the frame's sides. The screen

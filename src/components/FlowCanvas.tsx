@@ -144,6 +144,21 @@ export function FlowCanvas(props: FlowCanvasProps) {
   );
 
   /**
+   * The marquee's covered cards in sweep order. A covered card draws at the
+   * rank it will hold once the release writes the selection, so the preview
+   * and the settled state share one stacking.
+   */
+  const previewRanks = computed(() => {
+    const ranks = new Map<string, number>();
+    let rank = 1;
+    for (const id of props.controller.marqueePreview()) {
+      ranks.set(id, rank);
+      rank += 1;
+    }
+    return ranks;
+  });
+
+  /**
    * Selection pins every selected card in the scene, because the group frame
    * and its connectors need the rectangle even off screen. At a high zoom
    * most of a box-selected board is outside the viewport, so those cards are
@@ -298,9 +313,13 @@ export function FlowCanvas(props: FlowCanvasProps) {
           transform: `translate(${props.camera.x}px, ${props.camera.y}px) scale(${props.camera.scale})`,
         }}
       >
-        <FlowEdges scene={props.scene} visible={view} />
-        {/* The frame shares the world's stacking: above unselected cards and
-            below the selected ones, so the swept area moves as one group. */}
+        <FlowEdges
+          scene={props.scene}
+          visible={view}
+          previewed={() => props.controller.marqueePreview()}
+        />
+        {/* The frame draws above the selected cards so its wash covers the
+            whole swept group; its group ports stay above it. */}
         <SelectionFrame scene={props.scene} camera={props.camera} controller={props.controller} />
         <Each of={props.scene.nodes()} key={(node) => node.id}>
           {(node) => {
@@ -316,14 +335,19 @@ export function FlowCanvas(props: FlowCanvasProps) {
                 nodeId={id}
                 kind={kind}
                 rect={() => props.scene.cardRect(id)}
-                zIndex={() => props.scene.cardZ(id)}
+                zIndex={() => {
+                  // Only covered cards read the preview's ranks; every other
+                  // card keeps its document depth and stays asleep.
+                  if (!props.controller.flags.isPreviewed(id)) return props.scene.cardZ(id);
+                  return props.scene.cardZ(id, previewRanks().get(id));
+                }}
                 preview={() => props.scene.previews().get(id) ?? null}
                 selected={() => props.scene.isSelectedKeyed(id)}
                 previewed={() => props.controller.flags.isPreviewed(id)}
+                framed={() => props.controller.multiFrame() && props.scene.isSelectedKeyed(id)}
                 hovered={() => props.controller.flags.isHovered(id)}
                 hoveredPort={() => props.controller.hoveredPort()}
                 hoveredPortKey={() => props.controller.hoveredPortKey()}
-                portsSuppressed={() => props.controller.multiFrame() && props.scene.isSelected(id)}
                 connected={() => connectedCards().has(id)}
                 zoom={() => props.camera.scaleView()}
                 target={() => props.scene.isConnectionTarget(id)}

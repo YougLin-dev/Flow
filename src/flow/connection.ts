@@ -53,8 +53,8 @@ export function portHit(
   return dx * dx + dy * dy <= PORT_HIT_RADIUS * PORT_HIT_RADIUS;
 }
 
-/** The connector's stroke width and hit distance, in world units. */
-export const EDGE_THICKNESS = 2;
+/** The resting connector's stroke width and hit distance, in world units. */
+export const EDGE_THICKNESS = 1;
 export const EDGE_HIT_DISTANCE = 8;
 /** The room a connector canvas leaves around its cubic for the stroke. */
 export const EDGE_PADDING = 4;

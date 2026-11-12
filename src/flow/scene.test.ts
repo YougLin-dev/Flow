@@ -349,11 +349,12 @@ test("raises selected cards above unselected ones for drawing and hits", () => {
   expect(scene.nodeAt(60, 50)).toBe("a");
   expect(scene.cardZ("a")).toBeGreaterThan(scene.cardZ("b"));
 
-  // Selecting b lifts it above every unselected card, whatever its z.
+  // Selecting b lifts it above every unselected card, whatever its z, and
+  // the frame's wash sits above the selected group.
   scene.select(["b"]);
   expect(scene.cardZ("b")).toBeGreaterThan(scene.cardZ("a"));
   expect(scene.frameZ()).toBeGreaterThan(scene.cardZ("a"));
-  expect(scene.frameZ()).toBeLessThan(scene.cardZ("b"));
+  expect(scene.frameZ()).toBeGreaterThan(scene.cardZ("b"));
   expect(scene.nodeAt(60, 50)).toBe("b");
   // The frame's world bounds include the card's title row.
   expect(scene.selectionBounds()).toEqual({ x: 50, y: 14, width: 200, height: 110 });
@@ -362,8 +363,8 @@ test("raises selected cards above unselected ones for drawing and hits", () => {
   scene.select(["b", "a"]);
   expect(scene.cardZ("a")).toBeGreaterThan(scene.cardZ("b"));
   expect(scene.selectionBounds()).toEqual({ x: 0, y: -26, width: 250, height: 150 });
-  // Group ports sit above the selection; the preview stays above them.
-  expect(scene.selectionPortsZ()).toBeGreaterThan(scene.cardZ("a"));
+  // Group ports sit above the frame; the preview stays above them.
+  expect(scene.selectionPortsZ()).toBeGreaterThan(scene.frameZ());
   expect(scene.previewZ()).toBeGreaterThan(scene.selectionPortsZ());
 });
 

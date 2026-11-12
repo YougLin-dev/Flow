@@ -10,9 +10,6 @@ export interface ScreenRect {
   readonly height: number;
 }
 
-/** Space between a selection's frame and the cards it surrounds, in screen points. */
-export const SELECTION_FRAME_PADDING = 6;
-
 /** Whether a screen point lies inside a rectangle, expanded by a margin. */
 export function containsPoint(rect: ScreenRect, x: number, y: number, margin = 0): boolean {
   return (
