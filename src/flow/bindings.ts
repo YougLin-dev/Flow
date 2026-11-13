@@ -1,5 +1,10 @@
 import { keymap } from "nsh";
 
+/** The canvas' zoom and fit shortcuts; the controls show the same keys in their hints. */
+export const ZOOM_IN_KEY = "mod+=";
+export const ZOOM_OUT_KEY = "mod+-";
+export const FIT_KEY = "mod+0";
+
 export interface FlowKeyActions {
   readonly setZoom: (factor: number) => void;
   readonly fit: () => void;
@@ -14,9 +19,9 @@ export interface FlowKeyActions {
 /** The canvas' global shortcuts. */
 export function bindFlowKeys(actions: FlowKeyActions): void {
   keymap.bind({
-    "mod+=": () => actions.setZoom(1.2),
-    "mod+-": () => actions.setZoom(1 / 1.2),
-    "mod+0": actions.fit,
+    [ZOOM_IN_KEY]: () => actions.setZoom(1.2),
+    [ZOOM_OUT_KEY]: () => actions.setZoom(1 / 1.2),
+    [FIT_KEY]: actions.fit,
     backspace: actions.deleteSelected,
     delete: actions.deleteSelected,
     "mod+z": actions.undo,

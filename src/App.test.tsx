@@ -19,6 +19,13 @@ const openNodeMenu = async (app: App, query: string, testId: string): Promise<vo
   await app.waitUntil(() => app.shows("id:context-copy-node"));
 };
 
+/** Rests the pointer on a canvas control and proves its tooltip shows `label`. */
+const expectTooltip = async (app: App, testID: string, label: string): Promise<void> => {
+  await app.hover(`id:${testID}`);
+  await app.waitUntil(() => app.shows(`text:${label}`));
+  expect(app.shows(`text:${label}`)).toBe(true);
+};
+
 /** Opens the app with the probe a test reads the camera scale from. */
 const openApp = (options: OpenOptions = {}): Promise<App> =>
   open("./App.tsx", {
@@ -171,6 +178,17 @@ test("zooms with the controls", async () => {
   await app.press("id:zoom-fit");
   await app.waitUntil(() => percentOf(app) === fitted);
   expect(percentOf(app)).toBe(fitted);
+});
+
+test("names the canvas controls in tooltips", async () => {
+  const app = await openApp({ platform: "macos" });
+  await app.waitUntil(() => percentOf(app) > 0);
+
+  // The controls share one column: resting on each shows its hint above it.
+  await expectTooltip(app, "zoom-in", "Zoom in");
+  await expectTooltip(app, "zoom-out", "Zoom out");
+  await expectTooltip(app, "zoom-fit", "Fit");
+  await expectTooltip(app, "minimap-toggle", "Hide minimap");
 });
 
 test("hides and shows the minimap", async () => {
