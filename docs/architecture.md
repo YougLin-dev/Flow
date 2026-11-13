@@ -146,11 +146,18 @@ result batches and the assets.
   A press on a port starts a connection from that specific port. Selecting a
   card opens `NodeComposer`, a native panel anchored directly under the card
   and centred on it; the placement follows the card and never flips or
-  clamps to stay inside the viewport. Its input groups follow the node
-  kind's input ports and show the edge slots in use. It is built from the
-  same controls as the rest of the app. The inline text editor is a
-  screen-space native overlay. Image cards and uploads with images show a
-  thumbnail grid; an upload without an output shows its upload empty state.
+  clamps to stay inside the viewport. A text node's sheet is chat-style: an
+  add-image button and the node's image inputs on top, the prompt with its
+  character counter below, then the model and a round send button; its
+  generated text appears on the card, never in the sheet. The image node's
+  panel keeps its input groups, which follow the node kind's input ports and
+  show the edge slots in use. Both are built from the same controls as the
+  rest of the app. A double-click edits a text card in place: a borderless
+  input takes the body's own inset, size, type and line height, laid out at
+  world type and scaled around the body's screen origin, so its font,
+  wrapping and box match the card's text exactly at every zoom. Image cards
+  and uploads with images show a thumbnail grid; an upload without an output
+  shows its upload empty state.
 - Mock text and mock image providers exercise the run lifecycle and the
   provider seam. See [the node editor contract](node-editor.md) for the full
   M1 rules and non-goals.
@@ -324,7 +331,10 @@ position is computed in screen points from the selected card's current screen
 rectangle (`flow/overlay.ts`), so it keeps its size at every zoom and tracks
 the card. It sits directly below the card, centred on it, and is allowed to
 extend past the viewport rather than move somewhere else. The inline editor
-is anchored inside the card body. A click on the selected card leaves the
+is the card body itself: a borderless input at the body's world inset, size
+and type, anchored at the body's screen origin and scaled there by the
+camera, so its text stays exactly where the static text was. A click on the
+selected card leaves the
 composer mounted, so its native input keeps its draft and caret. Once a card
 is dragged or resized past a small movement threshold, or a connector is
 pulled away from its press point, the composer hides so the gesture and its

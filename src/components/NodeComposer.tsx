@@ -1,4 +1,7 @@
-/** The composer sheet: the always-available native panel attached to a card. */
+/**
+ * The image node's composer sheet: the native panel attached to a card. The
+ * text node's chat-style sheet lives in `TextComposer.tsx`.
+ */
 import { computed, Image as NshImage, Text, token, View } from "nsh";
 import { Button, Input } from "nsh/base";
 import type {
@@ -9,6 +12,7 @@ import type {
   ResultItemSummary,
 } from "@flow/native";
 import type { ComposerState } from "../flow/composer-state";
+import { errorOf, inputUrl } from "../flow/composer-detail";
 import {
   IMAGE_ASPECTS,
   type ImageAspect,
@@ -35,18 +39,17 @@ export interface NodeComposerProps {
   readonly onRemoveInput: (id: string) => void;
   readonly onReorderInputs: (ids: string[]) => void;
   readonly onUpload: () => void;
-  readonly onSaveBody: () => void;
 }
 
 const sectionClass = "gap-1.5";
 const labelClass = "text-[11px] font-medium text-muted-foreground";
 
-/** The node's native composer: inputs, prompt, model and run. */
+/** The image node's native composer: inputs, prompt, model and run. */
 export function NodeComposer(props: NodeComposerProps) {
   // A detail reload replaces the record, not necessarily the content. These
   // derived accessors keep same-kind reloads from remounting sections and
-  // lists: the kind computed compares equal, and rows reconcile by key.
-  const kind = computed(() => props.detail.node.kind);
+  // lists: rows reconcile by key.
+  const isImage = (): boolean => props.detail.node.kind === "image";
   const imageItems = computed(
     () => props.detail.batch?.items.filter((item) => item.kind === "image") ?? [],
   );
@@ -154,16 +157,18 @@ export function NodeComposer(props: NodeComposerProps) {
             Model · {modelLabel(props.detail.node.kind)}
           </Text>
         </View>
-        <Button
-          testID="composer-upload"
-          onPress={props.onUpload}
-          class="rounded-md border border-border px-2 py-1.5 active:bg-muted"
-        >
-          <Text class="text-xs text-card-foreground">Upload</Text>
-        </Button>
+        <If when={isImage()}>
+          <Button
+            testID="composer-upload"
+            onPress={props.onUpload}
+            class="rounded-md border border-border px-2 py-1.5 active:bg-muted"
+          >
+            <Text class="text-xs text-card-foreground">Upload</Text>
+          </Button>
+        </If>
       </View>
 
-      <If when={kind() === "image"}>
+      <If when={isImage()}>
         <View class="flex-row items-center justify-between gap-2">
           <View class="flex-row items-center gap-1">
             {IMAGE_ASPECTS.map((aspect: ImageAspect) => (
@@ -198,38 +203,6 @@ export function NodeComposer(props: NodeComposerProps) {
           </View>
         </View>
       </If>
-
-      <If when={kind() === "text"}>
-        <View class={sectionClass}>
-          <View class="flex-row items-center justify-between">
-            <Text class={labelClass}>Text body</Text>
-            <Button
-              testID="composer-save-body"
-              onPress={props.onSaveBody}
-              class="rounded-md px-2 py-1 active:bg-muted"
-            >
-              <Text class="text-xs text-card-foreground">Save text</Text>
-            </Button>
-          </View>
-          <Input
-            testID="composer-body"
-            accessibilityLabel="Text body"
-            value={props.state.body()}
-            onChange={(event) => props.state.setBody(event.value)}
-            multiline
-            submitBehavior="newline"
-            onWheel={keepsWheel}
-            class="min-h-24 rounded-md border border-input bg-card px-2 py-1.5 text-sm text-card-foreground"
-          />
-        </View>
-      </If>
-
-      {resultTextOf(props.detail) === "" ? null : (
-        <View class={sectionClass}>
-          <Text class={labelClass}>Latest text</Text>
-          <Text class="max-h-40 text-xs text-card-foreground">{resultTextOf(props.detail)}</Text>
-        </View>
-      )}
 
       <If when={imageItems().length > 0}>
         <View class={sectionClass}>
@@ -424,26 +397,9 @@ function sourceLabel(input: InputItemSummary): string {
   return `${kind} · from ${input.sourceTitle ?? "upstream"}`;
 }
 
-function errorOf(detail: NodeDetail): string {
-  if (detail.node.status !== "failed") return "";
-  return detail.latestBatch?.status === "failed" ? detail.latestBatch.error : "";
-}
-
-function resultTextOf(detail: NodeDetail): string {
-  return detail.batch?.items.find((item) => item.kind === "text")?.text ?? "";
-}
-
 function itemUrl(
   item: ResultItemSummary,
   assetUrls: Readonly<Record<string, string>>,
 ): string | null {
   return item.assetId ? (assetUrls[item.assetId] ?? null) : null;
-}
-
-function inputUrl(
-  input: InputItemSummary,
-  assetUrls: Readonly<Record<string, string>>,
-): string | null {
-  const assetId = input.assetId ?? input.item?.assetId;
-  return assetId ? (assetUrls[assetId] ?? null) : null;
 }

@@ -120,8 +120,14 @@ or `interrupted` (`input-not-ready` is reserved for a later dependency gate).
 
 ## Text and images
 
-- A text node's body is editable in the composer or in an inline screen-space
-  editor opened by double-clicking the card.
+- A text node's body is edited in place by double-clicking the card, by
+  `Mod+Enter` with one text card selected, or with the card's menu item
+  (`Edit text`): a borderless input sits at the body's inset, size, type and
+  line height, anchored at the body's screen origin and scaled by the camera,
+  so its font, wrapping and box match the static text exactly at every zoom.
+  There is no panel, border or confirm control. A press elsewhere or a lost
+  focus writes the draft; Escape discards it. The composer only holds the
+  prompt and its image inputs; a run's text lands on the card.
 - Saving a manual edit creates a new manual text batch/item, sets the node's
   output and body, and marks downstream nodes stale.
 - Image nodes show up to four thumbnails in the card body and their latest
@@ -163,7 +169,11 @@ or `interrupted` (`input-not-ready` is reserved for a later dependency gate).
 `flow/execution.ts` owns the run lifecycle: one run per node, status
 `running`, input sync, provider call, asset import, batch save, cancellation
 and failure recording. `flow/node-session.ts` owns the document-facing
-composer state (settings, inputs, upload, body commit).
+composer state (settings, inputs, upload), and `flow/inline-editor.ts` owns
+the in-place body editor: its draft, the generation that keeps a late write
+from closing a reopened editor, and the write itself. An external body change
+under an open draft (a run, undo or another writer) closes it instead of
+letting the stale draft write back.
 
 M1 providers are deterministic mocks:
 
@@ -193,10 +203,11 @@ resize, marquee, pan and connector gestures.
 `components/GridBackground.tsx` draws the dot grid in screen space.
 `components/CanvasContextMenu.tsx` is the right-click menu: on empty canvas,
 Add text node, Add image node and Add upload node place the card at the
-pressed point; on a card, Copy node duplicates that card's content and
-settings beside it and Delete node removes it; both write an open editor's
-drafts first, so a copy matches what is on screen and undo restores what was
-deleted; on a connector, Delete connection removes it. Opening a card's menu
+pressed point; on a card, Edit text opens a text card's body in place,
+Copy node duplicates that card's content and settings beside it and Delete
+node removes it; both write an open editor's drafts first, so a copy matches
+what is on screen and undo restores what was deleted; on a connector, Delete
+connection removes it. Opening a card's menu
 selects that card, without opening its composer, and opening a connector's
 menu selects that connector; a card already in a multiple selection keeps it.
 `flow/node-commands.ts` performs those two commands:
@@ -219,23 +230,28 @@ pointer events through, and the button takes its own press before the canvas
 surface below sees it. Selecting the card raises it above unselected cards,
 so another card passing touches through cannot cover the button.
 
-The composer is a native panel (`components/NodeComposer.tsx`) in the same
-view tree as the rest of the app. `flow/overlay.ts` places it directly under
-the selected card, centred on it, so the placement follows the card as the
-camera or the card moves; it never flips above or beside the card, and it may
-extend past the viewport. Its drafts live in `flow/composer-state.ts` (the
-signal-backed settings and body), written when the composer closes or the
-selection changes, and the settings are also written before a run.
-All controls are ordinary NSH controls, so they carry names, focus, keyboard
-operation and screen-reader semantics without an alternative path.
+The composer is a native panel in the same view tree as the rest of the app.
+`flow/overlay.ts` places it directly under the selected card, centred on it,
+so the placement follows the card as the camera or the card moves; it never
+flips above or beside the card, and it may extend past the viewport. A text
+node gets the chat-style sheet (`components/TextComposer.tsx`): its image
+inputs from upstream cards or local uploads sit in the attach row with an
+add-image button, the prompt and its 10,000-character counter take the middle,
+and the model and round send button close the sheet; the generated text is
+shown only on the card. The image node keeps `components/NodeComposer.tsx`,
+whose input groups follow the node kind's input ports and show the edge slots
+in use. Its draft lives in `flow/composer-state.ts` (the signal-backed
+settings), written when the composer closes or the selection changes, and the
+settings are also written before a run. All controls are ordinary NSH
+controls, so they carry names, focus, keyboard operation and screen-reader
+semantics without an alternative path.
 
-`flow/overlay.ts` also converts a card's world rectangle to the inline text
-editor's screen anchor; `flow/viewport-controller.ts` keeps the scene
-reconciled while the camera moves.
+`flow/viewport-controller.ts` keeps the scene reconciled while the camera
+moves.
 
 Keyboard: `Delete`/`Backspace` delete a selected edge or cards, `Mod+Z` /
-`Mod+Shift+Z` undo/redo, arrows pan, `Mod+=`/`Mod+-` zoom, `Mod+0` fits,
-`Mod+K` search. A secondary-button drag pans the canvas, and a right click
+`Mod+Shift+Z` undo/redo, `Mod+Enter` edits a selected text card's body,
+arrows pan, `Mod+=`/`Mod+-` zoom, `Mod+0` fits, `Mod+K` search. A secondary-button drag pans the canvas, and a right click
 opens the context menu for what it pressed: a card's Copy node/Delete node
 menu, a connector's Delete connection menu, or the canvas's Add text node/Add
 image node/Add upload node menu. `Escape` closes the canvas menu, then search,

@@ -1,7 +1,9 @@
 /**
- * The composer's drafts: the settings and body the native panel edits before
- * they are written. The page owns one per open composer and saves it on close,
- * run or an explicit body save.
+ * The composer's settings draft: the values the native panel edits before
+ * they are written. The page owns one per open composer and saves it on
+ * close or run. A text card's body is not a composer draft: the card edits
+ * it in place (`InlineTextEditor`), so the composer only holds the prompt and
+ * the image settings.
  */
 import { signal, untracked } from "nsh";
 import type { NodeDetail } from "@flow/native";
@@ -15,18 +17,15 @@ import {
 /** The writes the composer drafts make; `NodeSession` implements it. */
 export interface ComposerSaver {
   saveSettings(nodeId: string, settings: NodeSettings): Promise<void>;
-  commitBody(nodeId: string, text: string): Promise<void>;
 }
 
 export class ComposerState {
   readonly settings = signal<NodeSettings | null>(null);
-  readonly body = signal("");
   private nodeId: string | null = null;
   /** The last document values the drafts came from, to detect user edits. */
   private syncedSettings: string | null = null;
-  private syncedBody: string | null = null;
 
-  /** Loads the drafts, adopting document changes the user has not edited. */
+  /** Loads the draft, adopting document changes the user has not edited. */
   sync(detail: NodeDetail | null): void {
     if (detail === null) {
       this.reset();
@@ -37,11 +36,10 @@ export class ComposerState {
     if (this.nodeId !== detail.node.id) {
       this.nodeId = detail.node.id;
       this.settings.set(settings);
-      this.body.set(detail.node.body);
     } else {
       // A run, undo or another command can rewrite the node while the
       // composer is open; adopt that value only when the user has not
-      // diverged from what was last loaded. The drafts are read untracked so
+      // diverged from what was last loaded. The draft is read untracked so
       // the page's sync effect depends on the document detail alone, never on
       // the values this method writes.
       untracked(() => {
@@ -50,21 +48,15 @@ export class ComposerState {
         if (currentJson === null || currentJson === this.syncedSettings) {
           if (currentJson !== settingsJson) this.settings.set(settings);
         }
-        if (this.body() === this.syncedBody && this.body() !== detail.node.body) {
-          this.body.set(detail.node.body);
-        }
       });
     }
     this.syncedSettings = settingsJson;
-    this.syncedBody = detail.node.body;
   }
 
   reset(): void {
     this.nodeId = null;
     this.syncedSettings = null;
-    this.syncedBody = null;
     this.settings.set(null);
-    this.body.set("");
   }
 
   prompt(): string {
@@ -75,10 +67,6 @@ export class ComposerState {
   setPrompt(prompt: string): void {
     const settings = this.settings();
     if (settings !== null && "prompt" in settings) this.settings.set({ ...settings, prompt });
-  }
-
-  setBody(body: string): void {
-    this.body.set(body);
   }
 
   aspect(): ImageAspect {
@@ -110,18 +98,10 @@ export class ComposerState {
     }
   }
 
-  /** Writes the drafts; the body only when it changed. */
+  /** Writes the draft. */
   save(session: ComposerSaver | null, detail: NodeDetail | null): void {
     if (session === null || detail === null) return;
     const settings = this.settings();
     if (settings !== null) void session.saveSettings(detail.node.id, settings);
-    if (this.body() !== detail.node.body) {
-      void session.commitBody(detail.node.id, this.body());
-    }
-  }
-
-  /** The current drafts, for a command that must snapshot them first. */
-  drafts(): { settings: NodeSettings | null; body: string } {
-    return { settings: this.settings(), body: this.body() };
   }
 }

@@ -6,13 +6,13 @@ import { CanvasMenuLayer } from "../components/CanvasMenuLayer";
 import { FlowCanvas } from "../components/FlowCanvas";
 import { ImageLoadProbe, imageProbeText } from "../components/FlowCard";
 import { FrameRate } from "../components/FrameRate";
-import { InlineEditor } from "../components/InlineEditor";
 import { MiniMap } from "../components/MiniMap";
 import { MinimapDragOverlay } from "../components/MinimapDragOverlay";
 import { NodeComposer } from "../components/NodeComposer";
 import { NodeToolbar } from "../components/NodeToolbar";
 import { SearchButton } from "../components/SearchButton";
 import { SearchPalette } from "../components/SearchPalette";
+import { TextComposer } from "../components/TextComposer";
 import { CanvasProbe } from "../components/CanvasProbe";
 import { ZoomControls, ZoomProbe } from "../components/ZoomControls";
 import { AssetUrls } from "../flow/asset-urls";
@@ -128,12 +128,7 @@ export function FlowPage() {
 
   /** Writes the inline editor's draft and closes it. */
   const closeInlineDraft = (): void => {
-    const session = currentSession();
-    const id = session?.inlineId() ?? null;
-    if (!session || id === null) return;
-    const text = session.inlineText();
-    session.closeInline();
-    void session.commitBody(id, text);
+    void currentSession()?.commitInline();
   };
 
   const openComposer = (id: string): void => {
@@ -198,7 +193,7 @@ export function FlowPage() {
   /** Copies the card as the user sees it, including an open editor's drafts. */
   const copyNode = (nodeId: string): void => {
     const session = currentSession();
-    if (session) void session.copyNodeWithDrafts(nodeId, composerState.drafts());
+    if (session) void session.copyNodeWithDrafts(nodeId, composerState.settings());
   };
 
   const canvasMenu = new CanvasMenuController({
@@ -208,7 +203,8 @@ export function FlowPage() {
     addNode: (kind, x, y) => void currentSession()?.addNode(kind, x, y),
     copyNode,
     deleteNode: (nodeId) =>
-      void currentSession()?.deleteNodeWithDrafts(nodeId, composerState.drafts()),
+      void currentSession()?.deleteNodeWithDrafts(nodeId, composerState.settings()),
+    editBody: (nodeId) => void currentSession()?.openInline(nodeId),
     selectEdge,
     deleteEdge: (edgeId) => void currentSession()?.deleteEdge(edgeId),
   });
@@ -355,6 +351,20 @@ export function FlowPage() {
     },
   });
 
+  // The body editor's keyboard path: double-clicking a text card opens it,
+  // and every edit that gesture reaches also has this one.
+  keymap.bind(
+    "mod+enter",
+    () => {
+      const session = currentSession();
+      if (searchOpen() || session === null || session.inlineId() !== null) return;
+      const ids = scene.selection();
+      if (ids.length !== 1) return;
+      if (scene.kindOf(ids[0]) === "text") void session.openInline(ids[0]);
+    },
+    { when: "notEditing" },
+  );
+
   effect(() => {
     const ids = scene.selection();
     const session = currentSession();
@@ -441,6 +451,10 @@ export function FlowPage() {
         }}
         uploadingNode={() => currentSession()?.uploadingNode() ?? null}
         onUploadNode={(nodeId) => void currentSession()?.uploadSource(nodeId)}
+        inlineId={() => currentSession()?.inlineId() ?? null}
+        inlineText={() => currentSession()?.inlineText() ?? ""}
+        onInlineChange={(text) => currentSession()?.setInlineText(text)}
+        onInlineCommit={() => void currentSession()?.commitInline()}
         imageEvent={(event) => imageProbe.set(imageProbeText(event))}
       />
 
@@ -466,34 +480,51 @@ export function FlowPage() {
         {(detail) => (
           <If when={composerPosition()}>
             {(position) => (
-              <NodeComposer
-                detail={detail()}
-                state={composerState}
-                left={position().left}
-                top={position().top}
-                width={position().width}
-                assetUrls={() => currentSession()?.assetUrls() ?? {}}
-                running={() => currentSession()?.running() ?? false}
-                onClose={closeComposer}
-                onRun={() => {
-                  const settings = composerState.settings();
-                  if (settings !== null) void currentSession()?.run(settings);
-                }}
-                onCancel={() => currentSession()?.cancel()}
-                onRemoveInput={(id) => void currentSession()?.removeInput(id)}
-                onReorderInputs={(ids) => void currentSession()?.reorderInputs(ids)}
-                onUpload={() => void currentSession()?.upload()}
-                onSaveBody={() => {
-                  const node = currentSession()?.detail();
-                  if (node) void currentSession()?.commitBody(node.node.id, composerState.body());
-                }}
-              />
+              <If
+                when={detail().node.kind === "text"}
+                else={
+                  <NodeComposer
+                    detail={detail()}
+                    state={composerState}
+                    left={position().left}
+                    top={position().top}
+                    width={position().width}
+                    assetUrls={() => currentSession()?.assetUrls() ?? {}}
+                    running={() => currentSession()?.running() ?? false}
+                    onClose={closeComposer}
+                    onRun={() => {
+                      const settings = composerState.settings();
+                      if (settings !== null) void currentSession()?.run(settings);
+                    }}
+                    onCancel={() => currentSession()?.cancel()}
+                    onRemoveInput={(id) => void currentSession()?.removeInput(id)}
+                    onReorderInputs={(ids) => void currentSession()?.reorderInputs(ids)}
+                    onUpload={() => void currentSession()?.upload()}
+                  />
+                }
+              >
+                <TextComposer
+                  detail={detail()}
+                  state={composerState}
+                  left={position().left}
+                  top={position().top}
+                  width={position().width}
+                  assetUrls={() => currentSession()?.assetUrls() ?? {}}
+                  running={() => currentSession()?.running() ?? false}
+                  onClose={closeComposer}
+                  onRun={() => {
+                    const settings = composerState.settings();
+                    if (settings !== null) void currentSession()?.run(settings);
+                  }}
+                  onCancel={() => currentSession()?.cancel()}
+                  onRemoveInput={(id) => void currentSession()?.removeInput(id)}
+                  onUpload={() => void currentSession()?.upload()}
+                />
+              </If>
             )}
           </If>
         )}
       </If>
-
-      <InlineEditor scene={scene} camera={camera} stage={stage} session={currentSession} />
 
       {/* The controls and the map share the bottom-left corner. They stay
           above a card's composer (z-20) and inline editor (z-30), while

@@ -20,6 +20,9 @@ export interface CanvasContextMenuProps {
   readonly onAddText: () => void;
   readonly onAddImage: () => void;
   readonly onAddUpload: () => void;
+  readonly onEditText: () => void;
+  /** The pressed card edits its body in place (a text card). */
+  readonly canEditText: () => boolean;
   readonly onCopyNode: () => void;
   readonly onDeleteNode: () => void;
   readonly onDeleteEdge: () => void;
@@ -93,6 +96,15 @@ export function CanvasContextMenu(props: CanvasContextMenuProps) {
         </If>
         <If when={props.nodeId() !== null}>
           <>
+            <If when={props.canEditText()}>
+              <Button
+                testID="context-edit-text"
+                onPress={props.onEditText}
+                class="w-full rounded-md px-2 py-1.5 active:bg-accent focus:bg-accent hover:bg-muted"
+              >
+                <Text class="text-sm text-popover-foreground">Edit text</Text>
+              </Button>
+            </If>
             <Button
               testID="context-copy-node"
               onPress={props.onCopyNode}

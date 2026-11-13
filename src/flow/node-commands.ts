@@ -4,24 +4,16 @@
  * and write through the document, so the menu stays a state and gesture
  * controller.
  */
-import type { ChangeSet, Document, NodeDetail, NodeInput } from "@flow/native";
+import type { ChangeSet, Document, NodeInput } from "@flow/native";
 import { type NodeSettings, serializeSettings } from "./node-kinds";
 import type { FlowScene } from "./scene";
-
-/** The open composer's unsaved values, which a copy writes before reading
- * the card so the duplicate carries what the user sees. */
-export interface ComposerDrafts {
-  readonly settings: NodeSettings | null;
-  readonly body: string;
-}
 
 /** The session state a draft-aware copy writes before reading the card. */
 export interface DraftSession {
   inlineId(): string | null;
-  inlineText(): string;
   composerId(): string | null;
-  detail(): NodeDetail | null;
-  commitBody(nodeId: string, text: string): Promise<void>;
+  /** Writes the inline editor's draft, waiting for a write already started. */
+  commitInline(): Promise<void>;
   saveSettings(nodeId: string, settings: NodeSettings): Promise<void>;
 }
 
@@ -136,10 +128,10 @@ export async function copyNodeWithDrafts(
   host: NodeCommandHost,
   session: DraftSession,
   id: string,
-  drafts: ComposerDrafts | null,
+  settings: NodeSettings | null,
 ): Promise<void> {
   const selection = host.scene()?.selection() ?? [];
-  await flushDrafts(session, id, drafts);
+  await flushDrafts(session, id, settings);
   await copyNode(host, id, selection);
 }
 
@@ -151,9 +143,9 @@ export async function deleteNodeWithDrafts(
   host: NodeCommandHost,
   session: DraftSession,
   id: string,
-  drafts: ComposerDrafts | null,
+  settings: NodeSettings | null,
 ): Promise<void> {
-  await flushDrafts(session, id, drafts);
+  await flushDrafts(session, id, settings);
   await deleteNodes(host, [id]);
 }
 
@@ -173,14 +165,14 @@ export async function deleteNodes(host: NodeCommandHost, ids: readonly string[])
 async function flushDrafts(
   session: DraftSession,
   id: string,
-  drafts: ComposerDrafts | null,
+  settings: NodeSettings | null,
 ): Promise<void> {
-  if (session.inlineId() === id) await session.commitBody(id, session.inlineText());
-  if (drafts === null || session.composerId() !== id) return;
-  const detail = session.detail();
-  if (detail === null) return;
-  if (drafts.settings !== null) await session.saveSettings(id, drafts.settings);
-  if (drafts.body !== detail.node.body) await session.commitBody(id, drafts.body);
+  // The press that opened this command wrote the draft already, but its
+  // document write may still be landing: wait for that write, not a second
+  // one, so the copy and a following undo see the body the user saw.
+  if (session.inlineId() === id) await session.commitInline();
+  if (settings === null || session.composerId() !== id) return;
+  await session.saveSettings(id, settings);
 }
 
 function sameSelection(a: readonly string[], b: readonly string[]): boolean {

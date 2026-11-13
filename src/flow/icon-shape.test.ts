@@ -11,6 +11,17 @@ test("keeps SVG path data and joins an icon's paths", () => {
   ).toBe("M5 12h14 M12 5v14");
 });
 
+test("restarts a relative path at the origin when joining paths", () => {
+  // Lucide's X: the second path is relative, so joining it verbatim would
+  // draw from the first path's end and leave the box.
+  expect(
+    iconPath([
+      ["path", { d: "M18 6 6 18" }],
+      ["path", { d: "m6 6 12 12" }],
+    ]),
+  ).toBe("M18 6 6 18 M 0 0 m6 6 12 12");
+});
+
 test("draws circles and ellipses as two half arcs", () => {
   expect(iconPath([["circle", { cx: 12, cy: 12, r: 1 }]])).toBe(
     "M 11 12 a 1 1 0 1 0 2 0 a 1 1 0 1 0 -2 0 Z",

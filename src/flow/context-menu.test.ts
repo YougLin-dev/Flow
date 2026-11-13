@@ -90,6 +90,7 @@ function menuWith(scene = new FlowScene()): {
     addNode: (kind) => actions.push(`add:${kind}`),
     copyNode: (id) => actions.push(`copy:${id}`),
     deleteNode: (id) => actions.push(`delete:${id}`),
+    editBody: (id) => actions.push(`edit:${id}`),
     selectEdge: (id) => {
       scene.selectEdge(id);
       scene.select([]);

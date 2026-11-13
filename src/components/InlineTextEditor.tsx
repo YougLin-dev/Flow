@@ -1,76 +1,54 @@
-import { effect, signal, Text, View } from "nsh";
-import { Button, Input } from "nsh/base";
+/**
+ * A text card's body in edit mode: a borderless input at the body's world
+ * size and type, under the camera's scale (applied by `FlowCanvas`), so its
+ * font, wrapping and box are identical to the card's static text. Entering
+ * edit mode changes nothing but the caret and any overflow scrolling; there
+ * is no separate panel, border or confirm control.
+ */
+import { token } from "nsh";
+import { Input } from "nsh/base";
+import { CARD_BODY_FONT_SIZE, CARD_BODY_LINE_HEIGHT } from "../flow/card-layout";
 import { keepsWheel } from "../flow/page-chrome";
 
 export interface InlineTextEditorProps {
-  /** The node being edited; a change resets the draft to that node's body. */
-  readonly nodeId: () => string | null;
-  readonly text: () => string;
-  readonly left: number;
-  readonly top: number;
+  /** The body's world size; the surrounding view scales it with the camera. */
   readonly width: number;
   readonly height: number;
+  /** The draft, owned by the page's session so a remount keeps it. */
+  readonly text: () => string;
   readonly onChange: (text: string) => void;
-  readonly onSave: (text: string) => void;
-  readonly onCancel: () => void;
+  /** Clicking away or losing focus writes the draft and closes the editor. */
+  readonly onCommit: () => void;
 }
 
-/** A screen-space editor laid over a text node's card body. */
 export function InlineTextEditor(props: InlineTextEditorProps) {
-  const draft = signal(props.text());
-  let currentNodeId = props.nodeId();
-
-  effect(() => {
-    const id = props.nodeId();
-    if (id === currentNodeId) return;
-    currentNodeId = id;
-    draft.set(props.text());
-  });
-
   return (
-    <View
-      testID="inline-text-editor"
-      class="absolute z-30 gap-2 rounded-md border border-border bg-popover p-2 shadow-lg"
+    <Input
+      testID="inline-text-input"
+      accessibilityLabel="Text body"
+      value={props.text()}
+      onChange={(event) => props.onChange(event.value)}
+      onBlur={props.onCommit}
+      multiline
+      autoFocus
+      submitBehavior="newline"
+      scrollbar={false}
+      onWheel={keepsWheel}
+      class="text-card-foreground"
       style={{
-        left: props.left,
-        top: props.top,
-        width: Math.max(220, props.width),
-        minHeight: Math.max(120, props.height),
+        position: "absolute",
+        left: 0,
+        top: 0,
+        width: props.width,
+        height: props.height,
+        fontSize: CARD_BODY_FONT_SIZE,
+        lineHeight: CARD_BODY_LINE_HEIGHT,
+        padding: 0,
+        borderWidth: 0,
+        outlineWidth: 0,
+        backgroundColor: "transparent",
+        caretColor: token("card-foreground"),
       }}
-    >
-      <Input
-        testID="inline-text-input"
-        accessibilityLabel="Text body"
-        value={draft()}
-        onChange={(event) => {
-          draft.set(event.value);
-          // Keep the draft in the session too: the editor unmounts when its
-          // card leaves the viewport and must come back with the same text.
-          props.onChange(event.value);
-        }}
-        onSubmit={(event) => props.onSave(event.text)}
-        multiline
-        autoFocus
-        submitBehavior="submit"
-        onWheel={keepsWheel}
-        class="flex-1 rounded-md border border-input bg-card px-2 py-1.5 text-sm text-card-foreground"
-      />
-      <View class="flex-row items-center justify-end gap-2">
-        <Button
-          accessibilityLabel="Cancel text edit"
-          onPress={props.onCancel}
-          class="rounded-md px-2 py-1 active:bg-muted"
-        >
-          <Text class="text-xs text-card-foreground">Cancel</Text>
-        </Button>
-        <Button
-          accessibilityLabel="Save text"
-          onPress={() => props.onSave(draft())}
-          class="rounded-md bg-primary px-2 py-1 active:opacity-90"
-        >
-          <Text class="text-xs font-medium text-primary-foreground">Save</Text>
-        </Button>
-      </View>
-    </View>
+    />
   );
 }

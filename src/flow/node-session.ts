@@ -5,20 +5,13 @@
  * piece of UI state the page renders.
  */
 import { signal } from "nsh";
-import type { PickedImage, PickImagesOptions } from "nsh";
-import type {
-  ChangeSet,
-  EdgeInput,
-  NodeDetail,
-  NodeInput,
-  NodeSummary,
-  ResultBatchInput,
-  ResultItemInput,
-} from "@flow/native";
+import type { PickedImage, PickImagesOptions, Signal } from "nsh";
+import type { ChangeSet, EdgeInput, NodeDetail, NodeInput } from "@flow/native";
+import { canSkipDetailReload, detailAssetIds } from "./composer-detail";
 import type { ConnectionPair } from "./connection-gesture";
 import type { NodeRunner } from "./execution";
+import { InlineEditor } from "./inline-editor";
 import {
-  type ComposerDrafts,
   copyNode as copyNodeCommand,
   copyNodeWithDrafts as copyNodeWithDraftsCommand,
   deleteNodes as deleteNodesCommand,
@@ -59,16 +52,27 @@ export class NodeSession {
   /** The upload node whose picked files are importing, if any. */
   readonly uploadingNode = signal<string | null>(null);
   readonly assetVersion = signal(0);
-  readonly inlineId = signal<string | null>(null);
-  readonly inlineText = signal("");
+  /** The card whose body is edited in place, and the draft it shows. */
+  readonly inlineId: Signal<string | null>;
+  readonly inlineText: Signal<string>;
 
+  private readonly inline: InlineEditor;
   private readonly announced = new Set<string>();
   private generation = 0;
-  private inlineGeneration = 0;
   /** A pick, import or write is in flight; not the same as the Saving label. */
   private uploadInFlight = false;
 
-  constructor(private readonly host: NodeSessionHost) {}
+  constructor(private readonly host: NodeSessionHost) {
+    this.inline = new InlineEditor({
+      document: () => this.host.document(),
+      isDisposed: () => this.host.isDisposed(),
+      applyChanges: (changes) => this.host.applyChanges(changes),
+      openComposer: (nodeId) => this.openComposer(nodeId),
+      closeComposer: () => this.closeComposer(),
+    });
+    this.inlineId = this.inline.nodeId;
+    this.inlineText = this.inline.text;
+  }
 
   /**
    * Reloads a composer whose node a command changed. A summary that differs
@@ -103,7 +107,17 @@ export class NodeSession {
       }
     }
     const inline = this.inlineId();
-    if (inline !== null && changes.removed.includes(inline)) this.closeInline();
+    if (inline !== null) {
+      if (changes.removed.includes(inline)) {
+        this.inline.close();
+      } else if (!this.inline.applying()) {
+        // A run, an undo or another editor changed the body under the
+        // draft: the new content wins, and the stale draft must not write
+        // back over it.
+        const changed = changes.changed.find((node) => node.id === inline);
+        if (changed !== undefined && this.inline.replaced(changed.body)) this.inline.close();
+      }
+    }
   }
 
   onSettled(nodeId: string): void {
@@ -128,14 +142,17 @@ export class NodeSession {
   }
 
   closeInline(): void {
-    this.inlineGeneration += 1;
-    this.inlineId.set(null);
-    this.inlineText.set("");
+    this.inline.close();
   }
 
   /** Keeps the inline editor's uncommitted draft across a remount. */
   setInlineText(text: string): void {
-    this.inlineText.set(text);
+    this.inline.setText(text);
+  }
+
+  /** Writes the inline editor's draft and closes it once the write lands. */
+  commitInline(): Promise<void> {
+    return this.inline.commit();
   }
 
   /** Asset URLs for the composer's current images. */
@@ -145,7 +162,7 @@ export class NodeSession {
     const assets = this.host.assets();
     if (detail === null || assets === null) return {};
     const entries: Array<readonly [string, string]> = [];
-    for (const id of assetIds(detail)) {
+    for (const id of detailAssetIds(detail)) {
       const url = assets.get(id);
       if (url !== null) entries.push([id, url]);
     }
@@ -291,56 +308,12 @@ export class NodeSession {
   }
 
   async openInline(nodeId: string): Promise<void> {
-    const document = this.host.document();
-    if (!document || this.host.isDisposed()) return;
-    const generation = ++this.inlineGeneration;
-    try {
-      const node = await document.getNode(nodeId);
-      if (this.host.isDisposed() || generation !== this.inlineGeneration || !node) return;
-      if (node.kind !== "text") {
-        this.openComposer(nodeId);
-        return;
-      }
-      this.closeComposer();
-      this.inlineText.set(node.body);
-      this.inlineId.set(nodeId);
-    } catch (error) {
-      console.error("Flow could not open the text editor", error);
-    }
+    return this.inline.open(nodeId);
   }
 
-  async commitBody(nodeId: string, text: string): Promise<void> {
-    const document = this.host.document();
-    if (!document || this.host.isDisposed()) return;
-    try {
-      const current = await document.getNode(nodeId);
-      if (!current || current.body === text) {
-        if (this.inlineId() === nodeId) this.closeInline();
-        return;
-      }
-      const batch: ResultBatchInput = {
-        id: `batch-${crypto.randomUUID()}`,
-        nodeId,
-        trigger: "manual",
-        provider: "manual",
-        model: "",
-        paramsJson: "{}",
-        status: "done",
-      };
-      const item: ResultItemInput = {
-        id: `item-${crypto.randomUUID()}`,
-        position: 0,
-        portId: "text",
-        kind: "text",
-        text,
-      };
-      const changes = await document.setManualText(nodeId, text, batch, item);
-      if (this.host.isDisposed()) return;
-      this.host.applyChanges(changes);
-      if (this.inlineId() === nodeId) this.closeInline();
-    } catch (error) {
-      console.error("Flow could not save the text", error);
-    }
+  /** Writes `text` as the node's body: one undoable manual text item. */
+  async writeBody(nodeId: string, text: string): Promise<void> {
+    await this.inline.write(nodeId, text);
   }
 
   async addNode(kind: NodeKindId, x: number, y: number): Promise<void> {
@@ -385,8 +358,8 @@ export class NodeSession {
    * drafts are written and awaited first, so the duplicate is not built from
    * stale committed content.
    */
-  async copyNodeWithDrafts(id: string, drafts: ComposerDrafts | null): Promise<void> {
-    return copyNodeWithDraftsCommand(this.host, this, id, drafts);
+  async copyNodeWithDrafts(id: string, settings: NodeSettings | null): Promise<void> {
+    return copyNodeWithDraftsCommand(this.host, this, id, settings);
   }
 
   /** Deletes cards in one write; the change set also drops their connectors. */
@@ -398,8 +371,8 @@ export class NodeSession {
    * Deletes one card, writing its open editor's drafts first so undo
    * restores the content the user saw.
    */
-  async deleteNodeWithDrafts(id: string, drafts: ComposerDrafts | null): Promise<void> {
-    return deleteNodeWithDraftsCommand(this.host, this, id, drafts);
+  async deleteNodeWithDrafts(id: string, settings: NodeSettings | null): Promise<void> {
+    return deleteNodeWithDraftsCommand(this.host, this, id, settings);
   }
 
   /** Connects one or more pairs in one write; duplicates and bad pairs skip. */
@@ -563,37 +536,4 @@ export class NodeSession {
     this.assetVersion.update((value) => value + 1);
     return true;
   }
-}
-
-/** The asset IDs a detail's composer shows, matching `ensureAssets`. */
-function assetIds(detail: NodeDetail): Set<string> {
-  const ids = new Set<string>();
-  for (const item of detail.batch?.items ?? []) {
-    if (item.assetId) ids.add(item.assetId);
-  }
-  for (const input of detail.inputs) {
-    if (input.assetId) ids.add(input.assetId);
-    if (input.item?.assetId) ids.add(input.item.assetId);
-  }
-  return ids;
-}
-
-/**
- * Whether an incoming summary differs from the open detail's node only in
- * the fields the composer does not render: its card bounds. Identical
- * summaries skip too. Every other field, including z and rev, is content.
- */
-function canSkipDetailReload(current: NodeSummary, incoming: NodeSummary): boolean {
-  const sameContent =
-    current.id === incoming.id &&
-    current.kind === incoming.kind &&
-    current.title === incoming.title &&
-    current.body === incoming.body &&
-    current.z === incoming.z &&
-    current.rev === incoming.rev &&
-    current.dataJson === incoming.dataJson &&
-    current.settingsJson === incoming.settingsJson &&
-    current.status === incoming.status &&
-    (current.outputBatchId ?? null) === (incoming.outputBatchId ?? null);
-  return sameContent;
 }

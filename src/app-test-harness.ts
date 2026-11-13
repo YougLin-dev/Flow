@@ -37,3 +37,19 @@ export const selectSeed = async (app: App, query: string, testId: string): Promi
   await app.waitUntil(() => app.shows(testId));
   await app.press(testId);
 };
+
+/** Centres a seed card through search, then opens its own context menu. */
+export const openNodeMenu = async (app: App, query: string, testId: string): Promise<void> => {
+  await selectSeed(app, query, testId);
+  await app.waitUntil(() => app.shows("id:composer-prompt"));
+  // The reveal centres the card, so the canvas's middle presses it.
+  await app.rightClick("id:flow-canvas");
+  await app.waitUntil(() => app.shows("id:context-copy-node"));
+};
+
+/** A 1×1 transparent PNG, so the headless picker reads a real size. */
+export const PNG_1X1 = Uint8Array.from([
+  137, 80, 78, 71, 13, 10, 26, 10, 0, 0, 0, 13, 73, 72, 68, 82, 0, 0, 0, 1, 0, 0, 0, 1, 8, 6, 0, 0,
+  0, 31, 21, 196, 137, 0, 0, 0, 13, 73, 68, 65, 84, 120, 218, 99, 252, 207, 192, 80, 15, 0, 4, 133,
+  1, 128, 132, 169, 140, 33, 0, 0, 0, 0, 73, 69, 78, 68, 174, 66, 96, 130,
+]);

@@ -17,12 +17,14 @@ import {
 import { type CanvasCamera, type CameraSize, sameBounds, wheelNotches } from "../flow/camera";
 import type { CanvasController } from "../flow/canvas-controller";
 import type { ContextMenuPoint } from "../flow/context-menu";
+import { inlineBodyBox } from "../flow/overlay";
 import type { FlowScene } from "../flow/scene";
 import { cardInView } from "../flow/view-culling";
 import { FlowCard, type CardImageEvent } from "./FlowCard";
 import { FlowEdges } from "./FlowEdges";
 import { FlowPreviews } from "./FlowPreviews";
 import { GridBackground } from "./GridBackground";
+import { InlineTextEditor } from "./InlineTextEditor";
 import { PortTooltip } from "./PortTooltip";
 import { SelectionFrame } from "./SelectionFrame";
 import { SelectionOverlay } from "./SelectionOverlay";
@@ -52,6 +54,13 @@ export interface FlowCanvasProps {
   readonly uploadingNode: () => string | null;
   /** Picks and replaces the file of the pressed upload card. */
   readonly onUploadNode: (nodeId: string) => void;
+  /** The text card whose body is edited in place, if any. */
+  readonly inlineId: () => string | null;
+  /** The inline editor's draft, owned by the page's session. */
+  readonly inlineText: () => string;
+  readonly onInlineChange: (text: string) => void;
+  /** Writes the inline draft and closes the editor. */
+  readonly onInlineCommit: () => void;
   /** The test-only image observation path; normal rendering has no hook. */
   readonly imageEvent?: ((event: CardImageEvent) => void) | undefined;
 }
@@ -106,6 +115,9 @@ export function FlowCanvas(props: FlowCanvasProps) {
     if (pinching || (Date.now() < suppressUntil && !touchActive)) return;
     props.controller.right.cancel();
     props.onMenuCancel();
+    // A press anywhere off the editor leaves it: writing the draft before the
+    // gesture starts keeps its body and the press's command in one order.
+    props.onInlineCommit();
     pressed = true;
     lastX = event.position.x;
     lastY = event.position.y;
@@ -216,6 +228,19 @@ export function FlowCanvas(props: FlowCanvasProps) {
     return (target.node.outputBatchId ?? null) !== null ? "replace" : "upload";
   });
 
+  /**
+   * The edited card's body box in screen points, at the camera's scale. The
+   * editor is a screen-space input like every other one in the app (so its
+   * text renders through the proven input path); scaling its type and box
+   * with the camera keeps it exactly where the card's own text sits.
+   */
+  const inlineTarget = computed(() => {
+    const id = props.inlineId();
+    if (id === null) return null;
+    const rect = props.scene.cardRect(id);
+    return rect === null ? null : inlineBodyBox(rect, props.camera);
+  });
+
   /** The cards with an edge on either side; one set per edge change. */
   const connectedCards = computed(() => {
     const ids = new Set<string>();
@@ -240,6 +265,7 @@ export function FlowCanvas(props: FlowCanvasProps) {
     // so the tap's touch end set `suppressUntil` — which is for the press
     // events some platforms emulate after a touch, not for the next click.
     if (touchActive || pressed) return;
+    props.onInlineCommit();
     props.onMenuPress({ x: event.position.x, y: event.position.y });
   };
 
@@ -263,6 +289,7 @@ export function FlowCanvas(props: FlowCanvasProps) {
   const onTouchStart = (event: GestureResponderEvent): void => {
     props.controller.right.cancel();
     props.onMenuCancel();
+    props.onInlineCommit();
     touchActive = true;
     if (event.touches.length > 1) {
       pressed = false;
@@ -401,6 +428,7 @@ export function FlowCanvas(props: FlowCanvasProps) {
                 connected={() => connectedCards().has(id)}
                 zoom={() => props.camera.scaleView()}
                 target={() => props.scene.isConnectionTarget(id)}
+                editing={() => props.inlineId() === id}
                 visible={() => cardVisible(id)}
                 imageEvent={props.imageEvent}
               />
@@ -443,6 +471,35 @@ export function FlowCanvas(props: FlowCanvasProps) {
         onTouchEnd={onTouchEnd}
         onTouchCancel={onTouchCancel}
       />
+      {/* The in-place body editor: a borderless input laid out at the card's
+          world type, then scaled by the camera like the card's own text. It
+          sits above the pointer surface so it takes its typing, and nowhere
+          else does it draw chrome. */}
+      <If when={inlineTarget()}>
+        {(target) => (
+          <View
+            style={{
+              position: "absolute",
+              left: target().left,
+              top: target().top,
+              width: target().width,
+              height: target().height,
+              overflow: "visible",
+              pointerEvents: "box-none",
+              transformOrigin: "0 0",
+              transform: `scale(${target().scale})`,
+            }}
+          >
+            <InlineTextEditor
+              width={target().width}
+              height={target().height}
+              text={props.inlineText}
+              onChange={props.onInlineChange}
+              onCommit={props.onInlineCommit}
+            />
+          </View>
+        )}
+      </If>
       <If when={uploadTarget()}>
         {(target) => (
           <View

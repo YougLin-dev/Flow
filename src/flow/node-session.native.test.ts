@@ -87,7 +87,7 @@ test("a manual body edit is an undoable text item", async () => {
   await seedDocument(document);
   const { session, runner, assets } = makeSession(document);
 
-  await session.commitBody(TEXT_NODE_ID, "A new line");
+  await session.writeBody(TEXT_NODE_ID, "A new line");
   const changed = await document.nodeDetail(TEXT_NODE_ID);
   expect(changed?.node.body).toBe("A new line");
   expect(changed?.batch?.trigger).toBe("manual");
@@ -97,41 +97,6 @@ test("a manual body edit is an undoable text item", async () => {
   const restored = await document.nodeDetail(TEXT_NODE_ID);
   expect(restored?.node.body).not.toBe("A new line");
   expect(restored?.batch?.trigger).toBe("manual");
-
-  runner.dispose();
-  assets.dispose();
-  document.dispose();
-});
-
-test("edits a text node inline and closes the editor on save", async () => {
-  const document = await Document.open(":memory:");
-  await seedDocument(document);
-  const { session, runner, assets } = makeSession(document);
-
-  await session.openInline(TEXT_NODE_ID);
-  await until(() => session.inlineId() === TEXT_NODE_ID);
-  expect(session.inlineText()).toBe((await document.getNode(TEXT_NODE_ID))?.body);
-
-  await session.commitBody(TEXT_NODE_ID, "An inline edit");
-  expect(session.inlineId()).toBeNull();
-  const after = await document.nodeDetail(TEXT_NODE_ID);
-  expect(after?.node.body).toBe("An inline edit");
-  expect(after?.batch?.items[0]?.text).toBe("An inline edit");
-
-  runner.dispose();
-  assets.dispose();
-  document.dispose();
-});
-
-test("double-clicking a non-text node opens its composer", async () => {
-  const document = await Document.open(":memory:");
-  await seedDocument(document);
-  const { session, runner, assets } = makeSession(document);
-
-  await session.openInline(IMAGE_NODE_ID);
-  await until(() => session.composerId() === IMAGE_NODE_ID && session.detail() !== null);
-  expect(session.inlineId()).toBeNull();
-  expect(session.detail()?.node.kind).toBe("image");
 
   runner.dispose();
   assets.dispose();
@@ -177,7 +142,7 @@ test("copies a node beside it and selects the copy", async () => {
   document.dispose();
 });
 
-test("copies a node with an open composer's drafts", async () => {
+test("copies a node with an open composer's settings draft", async () => {
   const document = await Document.open(":memory:");
   await seedDocument(document);
   const scene = new FlowScene();
@@ -195,8 +160,9 @@ test("copies a node with an open composer's drafts", async () => {
   session.openComposer(TEXT_NODE_ID);
   await until(() => session.detail()?.node.id === TEXT_NODE_ID);
   await session.copyNodeWithDrafts(TEXT_NODE_ID, {
-    settings: { version: 1, prompt: "Draft prompt", model: "mock-text" },
-    body: "Draft body",
+    version: 1,
+    prompt: "Draft prompt",
+    model: "mock-text",
   });
 
   const copyId = selected;
@@ -204,8 +170,9 @@ test("copies a node with an open composer's drafts", async () => {
   const copy = await document.getNode(copyId);
   const source = await document.getNode(TEXT_NODE_ID);
   if (!copy || !source) throw new Error("the nodes were not read");
-  expect(copy.body).toBe("Draft body");
-  expect(source.body).toBe("Draft body");
+  // The draft prompt is written first, so the copy carries it; the body is
+  // the seed's, since this composer never edits it.
+  expect(copy.body).toBe(source.body);
   expect(copy.settingsJson).toContain("Draft prompt");
   expect(source.settingsJson).toContain("Draft prompt");
 
@@ -214,7 +181,7 @@ test("copies a node with an open composer's drafts", async () => {
   document.dispose();
 });
 
-test("deleting a node writes its draft so undo restores it", async () => {
+test("deleting a node writes its settings draft so undo restores it", async () => {
   const document = await Document.open(":memory:");
   await seedDocument(document);
   const scene = new FlowScene();
@@ -223,9 +190,12 @@ test("deleting a node writes its draft so undo restores it", async () => {
 
   session.openComposer(TEXT_NODE_ID);
   await until(() => session.detail()?.node.id === TEXT_NODE_ID);
+  const before = await document.getNode(TEXT_NODE_ID);
+  if (!before) throw new Error("the seed node is missing");
   await session.deleteNodeWithDrafts(TEXT_NODE_ID, {
-    settings: { version: 1, prompt: "Draft prompt", model: "mock-text" },
-    body: "Draft body",
+    version: 1,
+    prompt: "Draft prompt",
+    model: "mock-text",
   });
 
   expect(await document.getNode(TEXT_NODE_ID)).toBe(null);
@@ -233,7 +203,7 @@ test("deleting a node writes its draft so undo restores it", async () => {
   await document.undo();
   const restored = await document.getNode(TEXT_NODE_ID);
   if (!restored) throw new Error("the node did not come back");
-  expect(restored.body).toBe("Draft body");
+  expect(restored.body).toBe(before.body);
   expect(restored.settingsJson).toContain("Draft prompt");
 
   runner.dispose();

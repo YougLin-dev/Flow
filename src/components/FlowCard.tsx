@@ -17,7 +17,12 @@ import { Port } from "./Port";
 import { portKey, type PortHover } from "../flow/canvas-controller";
 import { CardContent } from "../flow/card-content";
 import { CardGeometry, type CardSize, cardLocalLayout } from "../flow/card-geometry";
-import { CARD_TITLE_HEIGHT } from "../flow/card-layout";
+import {
+  CARD_BODY_FONT_SIZE,
+  CARD_BODY_INSET,
+  CARD_BODY_LINE_HEIGHT,
+  CARD_TITLE_HEIGHT,
+} from "../flow/card-layout";
 import { type BoxGeometry, PORT_CENTER_GAP, portOffset } from "../flow/connection";
 import { type FlowAccent, portsOfNode } from "../flow/node-kinds";
 import { previewCell } from "../flow/preview-grid";
@@ -57,6 +62,8 @@ export interface FlowCardProps {
   readonly zoom: () => number;
   /** True while a pulled connector is snapped to this card. */
   readonly target: () => boolean;
+  /** True while the card's body is edited in place; the editor draws over it. */
+  readonly editing: () => boolean;
   /** False while the card lies wholly outside the camera's view. */
   readonly visible: () => boolean;
   /** The test-only image observation path; normal rendering has no hook. */
@@ -71,8 +78,6 @@ const ACCENT_BG: Record<FlowAccent, string> = {
   "chart-5": "bg-chart-5",
 };
 
-/** The body inset inside the card. */
-const BODY_INSET = 16;
 /** The selection ring's width, and its radius around the card's `rounded-2xl`
  * corner, so the ring stays concentric with the card. */
 const SELECTION_RING = 2;
@@ -110,10 +115,11 @@ export function FlowCard(props: FlowCardProps) {
   const body = content.body;
   const status = content.status;
   const statusText = content.statusText;
-  const lineCount = () => Math.max(1, Math.floor((size().height - BODY_INSET * 2) / 19));
+  const lineCount = () =>
+    Math.max(1, Math.floor((size().height - CARD_BODY_INSET * 2) / CARD_BODY_LINE_HEIGHT));
   // An upload's image is the card: no body inset, just the card's border, and
   // the inner clip follows the card's rounded corners.
-  const imageInset = () => (content.upload() ? 1 : BODY_INSET);
+  const imageInset = () => (content.upload() ? 1 : CARD_BODY_INSET);
   const imageRadius = () => (content.upload() ? 15 : 8);
   // A single upload image is the card, and contain guarantees the whole file
   // shows even when an extreme ratio hit the card's floors; a grid of several
@@ -321,15 +327,18 @@ export function FlowCard(props: FlowCardProps) {
           </View>
         ) : (
           <>
-            {body() !== "" ? (
+            {/* The in-place editor draws the same text in the same box; the
+                static body steps aside so the two never show at once. */}
+            {body() !== "" && !props.editing() ? (
               <Text
-                class="absolute text-[13px] text-card-foreground"
+                class="absolute text-card-foreground"
                 style={{
-                  left: BODY_INSET,
-                  top: BODY_INSET,
-                  width: Math.max(1, size().width - BODY_INSET * 2),
-                  height: Math.max(1, size().height - BODY_INSET * 2),
-                  lineHeight: 19,
+                  left: CARD_BODY_INSET,
+                  top: CARD_BODY_INSET,
+                  width: Math.max(1, size().width - CARD_BODY_INSET * 2),
+                  height: Math.max(1, size().height - CARD_BODY_INSET * 2),
+                  fontSize: CARD_BODY_FONT_SIZE,
+                  lineHeight: CARD_BODY_LINE_HEIGHT,
                   numberOfLines: lineCount(),
                   textOverflow: "ellipsis",
                 }}
@@ -337,10 +346,10 @@ export function FlowCard(props: FlowCardProps) {
                 {truncate(body(), 600)}
               </Text>
             ) : null}
-            <If when={body() === ""}>
+            <If when={body() === "" && !props.editing()}>
               <Text
                 class="absolute text-xs text-muted-foreground"
-                style={{ left: BODY_INSET, top: BODY_INSET }}
+                style={{ left: CARD_BODY_INSET, top: CARD_BODY_INSET }}
               >
                 No output yet
               </Text>

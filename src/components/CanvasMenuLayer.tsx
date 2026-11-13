@@ -29,6 +29,8 @@ export function CanvasMenuLayer(props: CanvasMenuLayerProps) {
           onAddText={() => props.menu.add("text", press())}
           onAddImage={() => props.menu.add("image", press())}
           onAddUpload={() => props.menu.add("upload", press())}
+          canEditText={() => props.menu.canEditBody()}
+          onEditText={() => props.menu.editBody(press())}
           onCopyNode={() => props.menu.copyCard(press())}
           onDeleteNode={() => props.menu.deleteCard(press())}
           onDeleteEdge={() => props.menu.deleteEdge(press())}

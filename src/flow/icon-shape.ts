@@ -16,10 +16,20 @@ export const ICON_GRID = 24;
 export function iconPath(node: IconNode): string {
   const parts: string[] = [];
   for (const [tag, attrs] of node) {
-    const path = shapePath(tag, attrs);
-    if (path !== null) parts.push(path);
+    let path = shapePath(tag, attrs);
+    if (path === null) continue;
+    // Each SVG path starts at the origin, but joined into one Path2D a part
+    // opening with a relative command (Lucide's X) would continue from the
+    // previous part's end instead. Reset the current point first.
+    if (parts.length > 0 && startsRelative(path)) path = `M 0 0 ${path}`;
+    parts.push(path);
   }
   return parts.join(" ");
+}
+
+/** Whether path data opens with a relative command (its moveto included). */
+function startsRelative(path: string): boolean {
+  return /^[mzlhvcsqta]/.test(path.trim());
 }
 
 function shapePath(tag: string, attrs: IconAttrs): string | null {

@@ -1,5 +1,16 @@
+import { CARD_BODY_INSET } from "./card-layout";
 import type { CanvasCamera } from "./camera";
 import type { BoxGeometry } from "./connection";
+
+/** The in-place text editor's anchor: the body's world size and the camera's
+ * scale, so the editor lays out at world type and scales like the card. */
+export interface InlineBodyBox {
+  readonly left: number;
+  readonly top: number;
+  readonly width: number;
+  readonly height: number;
+  readonly scale: number;
+}
 
 export interface StageSize {
   readonly width: number;
@@ -9,13 +20,6 @@ export interface StageSize {
 export interface ComposerAnchor {
   readonly left: number;
   readonly top: number;
-}
-
-export interface InlineAnchor {
-  readonly left: number;
-  readonly top: number;
-  readonly width: number;
-  readonly height: number;
 }
 
 export interface ComposerBox extends ComposerAnchor {
@@ -41,18 +45,6 @@ export function composerPlacement(
   return { left: anchor.left, top: anchor.top, width };
 }
 
-/** The inline editor's box for `inlineId`, or null when it has no card. */
-export function inlinePlacement(
-  inlineId: string | null,
-  cardRect: (id: string) => BoxGeometry | null,
-  camera: CanvasCamera,
-  stage: StageSize,
-): InlineAnchor | null {
-  if (inlineId === null) return null;
-  const rect = cardRect(inlineId);
-  return rect === null ? null : inlineAnchor(rect, camera, stage);
-}
-
 /**
  * Where the native composer sits, in screen points: directly under the card,
  * centred on it. The placement depends only on the card, never on the stage,
@@ -74,31 +66,20 @@ export function composerAnchor(
   };
 }
 
-/** The text editor's rect, laid inside a text node's card body. */
-export function inlineAnchor(
-  rect: BoxGeometry,
-  camera: CanvasCamera,
-  stage: StageSize,
-): InlineAnchor {
-  const scale = camera.scale;
-  const screen = camera.toScreen(rect.x, rect.y);
-  const margin = 8;
-  const width = Math.min(
-    Math.max(220, rect.width * scale - 24 * scale),
-    Math.max(1, stage.width - margin * 2),
-  );
-  const height = Math.min(
-    Math.max(120, rect.height * scale - 64 * scale),
-    Math.max(1, stage.height - margin * 2),
-  );
+/**
+ * The in-place text editor's anchor: the card body's screen origin, its world
+ * size and the camera's scale. The editor lays its text out at world type and
+ * the view transform scales it, so its font, wrapping and box are identical
+ * to the card's own text at every zoom (scaling a font size instead rounds at
+ * fractional zooms and narrows the text column).
+ */
+export function inlineBodyBox(rect: BoxGeometry, camera: CanvasCamera): InlineBodyBox {
+  const origin = camera.toScreen(rect.x + CARD_BODY_INSET, rect.y + CARD_BODY_INSET);
   return {
-    left: clamp(screen.x + 12 * scale, margin, Math.max(margin, stage.width - width - margin)),
-    top: clamp(screen.y + 48 * scale, margin, Math.max(margin, stage.height - height - margin)),
-    width,
-    height,
+    left: origin.x,
+    top: origin.y,
+    width: Math.max(1, rect.width - CARD_BODY_INSET * 2),
+    height: Math.max(1, rect.height - CARD_BODY_INSET * 2),
+    scale: camera.scale,
   };
-}
-
-function clamp(value: number, min: number, max: number): number {
-  return Math.min(max, Math.max(min, value));
 }

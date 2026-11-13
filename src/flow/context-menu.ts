@@ -25,7 +25,7 @@ export interface ContextMenuPress extends ContextMenuPoint {
 }
 
 /** The menu's fixed width, and the height of its tallest form: the empty
- * canvas's three rows (a card's menu has two). */
+ * canvas's three rows and a text card's (edit, copy, delete). */
 export const CONTEXT_MENU_WIDTH = 180;
 export const CONTEXT_MENU_HEIGHT = 108;
 const MARGIN = 8;
@@ -82,6 +82,8 @@ export interface CanvasMenuHost {
   addNode(kind: NodeKindId, x: number, y: number): void;
   copyNode(nodeId: string): void;
   deleteNode(nodeId: string): void;
+  /** Opens a text card's body in the in-place editor. */
+  editBody(nodeId: string): void;
   /** Selects a connector, dropping any card selection. */
   selectEdge(edgeId: string): void;
   deleteEdge(edgeId: string): void;
@@ -165,6 +167,19 @@ export class CanvasMenuController {
   add(kind: NodeKindId, at: ContextMenuPress): void {
     this.state.close();
     this.host.addNode(kind, at.worldX, at.worldY);
+  }
+
+  /** Whether the pressed card edits its body in place (a text card). */
+  canEditBody(): boolean {
+    const id = this.open()?.nodeId ?? null;
+    return id !== null && this.host.scene().kindOf(id) === "text";
+  }
+
+  /** Opens the pressed text card's body editor and closes the menu. */
+  editBody(press: ContextMenuPress): void {
+    const id = press.nodeId;
+    this.state.close();
+    if (id !== null) this.host.editBody(id);
   }
 
   /** Duplicates the pressed card and closes the menu. */

@@ -7,7 +7,10 @@ publish = false
 [workspace]
 
 [dependencies]
-nsh-core = { git = "https://github.com/YougLin-dev/nsh.git", rev = "ee1e1faee88428425b5ddaa05e6f2798cbe6262d" }
+# The `macos/lifted-inputs` branch until longbridge/nsh#1965 merges: an input
+# under the canvas's scaled camera draws, places its caret and takes clicks
+# where it shows.
+nsh-core = { git = "https://github.com/YougLin-dev/nsh.git", rev = "b3698ad703d29f4fb0062f393b74669afde63caa" }
 # Synchronous SeaORM. `rusqlite` is the SQLite driver; the direct dependency
 # enables the bundled SQLite build (including FTS5 and RTree).
 sea-orm-sync = { version = "2.0.4", default-features = false, features = [
