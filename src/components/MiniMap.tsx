@@ -41,7 +41,7 @@ export interface MiniMapProps {
   readonly stage: () => { width: number; height: number };
   /** The drag that pans the camera; the page mounts its capture surface. */
   readonly drag: MinimapController;
-  /** Whether a card is selected; its silhouette takes the accent. */
+  /** Whether a card is selected; its silhouette takes the primary color. */
   readonly selected: (id: string) => boolean;
   /** Wheel notches over the panel; the page zooms about the view's center. */
   readonly onZoom: (notches: number) => void;
@@ -189,7 +189,7 @@ export function MiniMap(props: MiniMapProps) {
                 <View
                   classList={{
                     "absolute bg-minimap-card": !props.selected(card().id),
-                    "absolute bg-foreground": props.selected(card().id),
+                    "absolute bg-primary": props.selected(card().id),
                   }}
                   style={cardStyle(card())}
                 />
