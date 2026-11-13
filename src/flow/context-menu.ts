@@ -135,6 +135,23 @@ export class CanvasMenuController {
     if (this.host.controller().right.move(x, y)) this.state.close();
   }
 
+  /**
+   * A secondary press over the page's own views (the composer, its dock, the
+   * minimap), which sit above the canvas overlay and never let it see the
+   * press. A drag pans through the same right gesture; a still press opens
+   * no menu.
+   */
+  pressChrome(at: ContextMenuPoint): void {
+    if (!this.host.controller().right.down(at.x, at.y)) return;
+    this.state.close();
+  }
+
+  /** A pointer move over those views while the secondary gesture is tracked. */
+  moveChrome(at: ContextMenuPoint, held: boolean): void {
+    if (!this.host.controller().right.active()) return;
+    this.move(at.x, at.y, held);
+  }
+
   /** Adds the pressed card and closes the menu. */
   add(kind: NodeKindId, at: ContextMenuPress): void {
     this.state.close();

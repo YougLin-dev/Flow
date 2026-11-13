@@ -346,7 +346,9 @@ target stay visible.
   button's release: a card's copy/delete menu, or the canvas's add-card menu. NSH reports the press through `onContextMenu`, the moves
   while it is held, and the release through `onMouseUp`: a press that never
   moved past the drag threshold opens its menu at the pressed point, and a
-  drag never opens one. The menu is the app's own view rather than
+  drag never opens one. Over the composer, its dock and the minimap the page
+  forwards the same gesture itself, because those views sit above the canvas
+  overlay: a right drag there still pans, and a still press opens no menu. The menu is the app's own view rather than
   `Menu.popup`, so it never takes the pointer from the drag.
 
 Keyboard commands are declared in `flow/bindings.ts` (`bindFlowKeys`) and

@@ -244,6 +244,17 @@ test("re-anchoring the menu on another card selects it", () => {
   expect(scene.selection()).toEqual(["two"]);
 });
 
+test("a secondary press on page chrome pans without opening a menu", () => {
+  const { menu, controller } = menuWith(sceneWithCard());
+  menu.pressChrome({ x: 60, y: 60 });
+  expect(controller.right.active()).toBe(true);
+  expect(menu.open()).toBe(null);
+
+  expect(controller.right.move(120, 60)).toBe(true);
+  menu.release();
+  expect(menu.open()).toBe(null);
+});
+
 test("dismisses the card menu when its card moves", () => {
   const scene = sceneWithCard();
   const { menu, camera } = menuWith(scene);

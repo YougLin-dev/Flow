@@ -234,15 +234,10 @@ export function FlowPage() {
     zoomCanvas(factor, size.width / 2, size.height / 2);
   };
 
-  const fit = (): void => {
-    void viewport.fitToDocument();
-  };
+  const fit = (): void => void viewport.fitToDocument();
 
-  const searchCards = async (query: string, kind: string | null): Promise<SearchHit[]> => {
-    const doc = document;
-    if (!doc) return [];
-    return doc.search(query, { kind }, 20);
-  };
+  const searchCards = async (query: string, kind: string | null): Promise<SearchHit[]> =>
+    document?.search(query, { kind }, 20) ?? [];
 
   const revealNode = (id: string): Promise<void> =>
     revealSearchHit({ document, viewport, scene, isDisposed: () => disposed, openComposer }, id);
@@ -414,7 +409,16 @@ export function FlowPage() {
   const composerOpen = (): boolean => (currentSession()?.composerId() ?? null) !== null;
 
   return (
-    <View class="flex-1" style={{ position: "relative", overflow: "hidden" }}>
+    <View
+      class="flex-1"
+      style={{ position: "relative", overflow: "hidden" }}
+      // Secondary presses over the composer, its dock and the minimap never
+      // reach the canvas overlay, so forward them: a drag pans the canvas and
+      // a still press opens no menu.
+      onContextMenu={(event) => canvasMenu.pressChrome(event.position)}
+      onMouseMove={(event) => canvasMenu.moveChrome(event.position, event.pressedButton !== null)}
+      onMouseUp={() => canvasMenu.release()}
+    >
       <FlowCanvas
         scene={scene}
         camera={camera}
