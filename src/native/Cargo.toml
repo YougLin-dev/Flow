@@ -7,7 +7,7 @@ publish = false
 [workspace]
 
 [dependencies]
-nsh-core = { git = "https://github.com/YougLin-dev/nsh.git", rev = "0c8db00845a52eb8ac81a08c535384a823d34ee8" }
+nsh-core = { git = "https://github.com/YougLin-dev/nsh.git", rev = "ee1e1faee88428425b5ddaa05e6f2798cbe6262d" }
 # Synchronous SeaORM. `rusqlite` is the SQLite driver; the direct dependency
 # enables the bundled SQLite build (including FTS5 and RTree).
 sea-orm-sync = { version = "2.0.4", default-features = false, features = [

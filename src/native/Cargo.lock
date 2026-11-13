@@ -1128,7 +1128,7 @@ dependencies = [
 [[package]]
 name = "nsh-core"
 version = "0.5.0"
-source = "git+https://github.com/YougLin-dev/nsh.git?rev=0c8db00845a52eb8ac81a08c535384a823d34ee8#0c8db00845a52eb8ac81a08c535384a823d34ee8"
+source = "git+https://github.com/YougLin-dev/nsh.git?rev=ee1e1faee88428425b5ddaa05e6f2798cbe6262d#ee1e1faee88428425b5ddaa05e6f2798cbe6262d"
 dependencies = [
  "cap-std",
  "crc32fast",
@@ -1163,7 +1163,7 @@ dependencies = [
 [[package]]
 name = "nsh-macros"
 version = "0.5.0"
-source = "git+https://github.com/YougLin-dev/nsh.git?rev=0c8db00845a52eb8ac81a08c535384a823d34ee8#0c8db00845a52eb8ac81a08c535384a823d34ee8"
+source = "git+https://github.com/YougLin-dev/nsh.git?rev=ee1e1faee88428425b5ddaa05e6f2798cbe6262d#ee1e1faee88428425b5ddaa05e6f2798cbe6262d"
 dependencies = [
  "imagesize",
  "proc-macro2",
@@ -1176,7 +1176,7 @@ dependencies = [
 [[package]]
 name = "nsh-updater"
 version = "0.5.0"
-source = "git+https://github.com/YougLin-dev/nsh.git?rev=0c8db00845a52eb8ac81a08c535384a823d34ee8#0c8db00845a52eb8ac81a08c535384a823d34ee8"
+source = "git+https://github.com/YougLin-dev/nsh.git?rev=ee1e1faee88428425b5ddaa05e6f2798cbe6262d#ee1e1faee88428425b5ddaa05e6f2798cbe6262d"
 dependencies = [
  "base64 0.22.1",
  "ed25519-dalek",
