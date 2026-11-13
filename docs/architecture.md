@@ -344,6 +344,13 @@ finger:
   notches per doubling, clamped to the camera's scale range. NSH delivers the
   window's wheel to the nearest view listening with `onWheel`, so the pointer
   view owns the listener and converts a precise device's points to notches.
+  Over the composer and the page's other chrome the page root hears it and
+  zooms about the pointer; the minimap keeps its own listener and zooms about
+  the viewport's center. A scroll view under the pointer wins, and a listener
+  around one only observes: NSH still calls it while the view scrolls. A
+  multiline field therefore listens itself (`keepsWheel` in
+  `flow/page-chrome.ts`), so the wheel scrolls the field and the page does not
+  zoom as well; the open context menu keeps its own wheel the same way.
 - **Secondary button** — holding the right button and dragging pans the
   camera, without selecting, starting a marquee or moving a card. A right click that stays put opens the context menu for what it pressed on the
   button's release: a card's copy/delete menu, or the canvas's add-card menu. NSH reports the press through `onContextMenu`, the moves
@@ -353,6 +360,13 @@ finger:
   forwards the same gesture itself, because those views sit above the canvas
   overlay: a right drag there still pans, and a still press opens no menu. The menu is the app's own view rather than
   `Menu.popup`, so it never takes the pointer from the drag.
+
+Navigation is the page's and object interaction is the canvas's. `FlowPage`
+decides every pan and zoom (the camera is page state), so the page root
+forwards navigation for its own views through `flow/page-chrome.ts`; a view
+that consumes or keeps the wheel declares its own listener instead.
+Presses, hovers and the marquee stay on the canvas interaction view, because
+they hit-test world geometry.
 
 Keyboard commands are declared in `flow/bindings.ts` (`bindFlowKeys`) and
 bound once by the page: `mod+=`/`mod+-`/`mod+0`

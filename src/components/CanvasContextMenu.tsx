@@ -7,6 +7,7 @@
 import { Text, View } from "nsh";
 import { Button } from "nsh/base";
 import { CONTEXT_MENU_WIDTH } from "../flow/context-menu";
+import { keepsWheel } from "../flow/page-chrome";
 
 export interface CanvasContextMenuProps {
   readonly left: number;
@@ -52,6 +53,7 @@ export function CanvasContextMenu(props: CanvasContextMenuProps) {
         class="absolute gap-0.5 rounded-(--radius) border border-border bg-popover p-1 shadow-lg"
         style={{ left: props.left, top: props.top, width: CONTEXT_MENU_WIDTH }}
         onPressDown={() => undefined}
+        onWheel={keepsWheel}
       >
         <If when={props.nodeId() === null}>
           <>

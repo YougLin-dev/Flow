@@ -1,5 +1,6 @@
 import { effect, signal, Text, View } from "nsh";
 import { Button, Input } from "nsh/base";
+import { keepsWheel } from "../flow/page-chrome";
 
 export interface InlineTextEditorProps {
   /** The node being edited; a change resets the draft to that node's body. */
@@ -51,6 +52,7 @@ export function InlineTextEditor(props: InlineTextEditorProps) {
         multiline
         autoFocus
         submitBehavior="submit"
+        onWheel={keepsWheel}
         class="flex-1 rounded-md border border-input bg-card px-2 py-1.5 text-sm text-card-foreground"
       />
       <View class="flex-row items-center justify-end gap-2">

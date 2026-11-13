@@ -33,6 +33,7 @@ import { MinimapController } from "../flow/minimap-controller";
 import type { NodeKindId } from "../flow/node-kinds";
 import { NodeSession } from "../flow/node-session";
 import { composerPlacement, inlinePlacement } from "../flow/overlay";
+import { pageChromeHandlers } from "../flow/page-chrome";
 import { PreviewLoader } from "../flow/preview-loader";
 import { SEARCH_FILTERS } from "../flow/search-filters";
 import { revealSearchHit } from "../flow/search-navigation";
@@ -412,12 +413,10 @@ export function FlowPage() {
     <View
       class="flex-1"
       style={{ position: "relative", overflow: "hidden" }}
-      // Secondary presses over the composer, its dock and the minimap never
-      // reach the canvas overlay, so forward them: a drag pans the canvas and
-      // a still press opens no menu.
-      onContextMenu={(event) => canvasMenu.pressChrome(event.position)}
-      onMouseMove={(event) => canvasMenu.moveChrome(event.position, event.pressedButton !== null)}
-      onMouseUp={() => canvasMenu.release()}
+      // Secondary presses and the wheel over the composer, its dock and the
+      // other page views never reach the canvas overlay, so the page
+      // forwards them itself.
+      {...pageChromeHandlers(canvasMenu, zoomCanvas)}
     >
       <FlowCanvas
         scene={scene}

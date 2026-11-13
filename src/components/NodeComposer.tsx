@@ -11,6 +11,7 @@ import {
   nodeKind,
   statusLabel,
 } from "../flow/node-kinds";
+import { keepsWheel } from "../flow/page-chrome";
 import { type PortVisual, portVisual } from "../flow/port-visuals";
 import { Icon } from "./Icon";
 
@@ -136,6 +137,7 @@ export function NodeComposer(props: NodeComposerProps) {
           multiline
           maxLength={4000}
           submitBehavior="newline"
+          onWheel={keepsWheel}
           class="min-h-16 rounded-md border border-input bg-card px-2 py-1.5 text-sm text-card-foreground placeholder:text-muted-foreground"
         />
       </View>
@@ -210,6 +212,7 @@ export function NodeComposer(props: NodeComposerProps) {
             onChange={(event) => props.state.setBody(event.value)}
             multiline
             submitBehavior="newline"
+            onWheel={keepsWheel}
             class="min-h-24 rounded-md border border-input bg-card px-2 py-1.5 text-sm text-card-foreground"
           />
         </View>
