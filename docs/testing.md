@@ -294,10 +294,10 @@ For behaviour below the pointer, test the pieces directly:
   clamping.
 - `ComposerState` in `flow/composer-state.test.ts`: drafts, reloads and saves.
 
-`App.test.tsx` drives the mounted path end to end: box selection, pan, zoom,
-search reveal, opening the native composer, running a node, editing the body,
-removing an input, switching nodes and the canvas and card context menus.
-`App.host.test.tsx` repeats the subset
+`App.test.tsx` drives the mounted path end to end: box selection, Shift
+toggling, pan, zoom, search reveal, opening the native composer, running a
+node, editing the body, removing an input, switching nodes and the canvas and
+card context menus. `App.host.test.tsx` repeats the subset
 whose subject is the platform itself (window, real input, rendering, desktop
 APIs); it is also the only file `bun run test:host` runs. The zoom label is the
 easiest observable: it is `—` before the first fit and `<n>%` afterwards.

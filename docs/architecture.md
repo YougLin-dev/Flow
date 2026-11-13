@@ -319,7 +319,10 @@ target stay visible.
 ## Input
 
 `FlowCanvas` feeds NSH's press, mouse and touch events into
-`CanvasController`:
+`CanvasController`. NSH also reports a mouse press to the touch handlers, so a
+single-pointer gesture starts from the press event — which carries Shift and
+the click count — while the touch events drive its moves, release and a second
+finger:
 
 - **Pointer** — a press selects a card (Shift toggles), starts a drag when the
   press lands on a selected card, starts a resize when it lands near any

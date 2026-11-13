@@ -603,3 +603,22 @@ test("deletes a node with its unsaved composer text", async () => {
   await app.type("id:search-input", "Draft body");
   await app.waitUntil(() => app.texts().includes("1 result"));
 });
+
+test("toggles a card with a shift click", async () => {
+  const app = await openApp({ platform: "windows" });
+  await app.waitUntil(() => percentOf(app) > 0);
+
+  await selectSeed(app, "Text", "id:search-result-seed-text");
+  await app.waitUntil(() => app.shows("id:composer-body"));
+  await app.keyboard.press("escape");
+  await app.waitUntil(() => !app.shows("id:node-composer"));
+
+  // The reveal centred the text card, so a still drag at the canvas's middle
+  // is a click on it. The pointer surface has no `onPress` (it hears the
+  // press down and up), so the pointer is driven through a zero drag.
+  await app.keyboard.down("shift");
+  await app.drag("id:flow-canvas", { x: 0, y: 0 });
+  await app.keyboard.up("shift");
+
+  await app.waitUntil(() => selectedOf(app) === 0);
+});

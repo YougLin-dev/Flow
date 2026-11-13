@@ -88,7 +88,11 @@ export function FlowCanvas(props: FlowCanvasProps) {
   };
 
   const onDown = (event: PressEvent): void => {
-    if (touchActive || Date.now() < suppressUntil) return;
+    // A press starts the gesture for every pointer. NSH also reports a mouse
+    // press to the touch handlers first, with no modifiers or click count, so
+    // those handlers must not start it; and a press a touch emulates after it
+    // ended is suppressed (the touch already did its work).
+    if (pinching || (Date.now() < suppressUntil && !touchActive)) return;
     props.controller.right.cancel();
     props.onMenuCancel();
     pressed = true;
@@ -236,7 +240,8 @@ export function FlowCanvas(props: FlowCanvasProps) {
     const point = pointOf(touch);
     lastX = point.x;
     lastY = point.y;
-    props.controller.down(point.x, point.y, false, 1);
+    // The press event that follows begins the gesture with its modifiers and
+    // click count; this handler only owns moves, the end and two fingers.
   };
 
   const onTouchMove = (event: GestureResponderEvent): void => {
@@ -279,6 +284,7 @@ export function FlowCanvas(props: FlowCanvasProps) {
       return;
     }
     props.controller.up(lastX, lastY);
+    pressed = false;
     touchActive = false;
     suppressUntil = Date.now() + 500;
   };
