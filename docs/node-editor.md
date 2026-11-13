@@ -194,10 +194,12 @@ resize, marquee, pan and connector gestures.
 `components/CanvasContextMenu.tsx` is the right-click menu: on empty canvas,
 Add text node, Add image node and Add upload node place the card at the
 pressed point; on a card, Copy node duplicates that card's content and
-settings beside it and Delete node removes it; both write an open editor's drafts first, so a copy
-matches what is on screen and undo restores what was deleted. Opening a
-card's menu selects that card, without opening its composer; a card already
-in a multiple selection keeps it. `flow/node-commands.ts` performs those two commands:
+settings beside it and Delete node removes it; both write an open editor's
+drafts first, so a copy matches what is on screen and undo restores what was
+deleted; on a connector, Delete connection removes it. Opening a card's menu
+selects that card, without opening its composer, and opening a connector's
+menu selects that connector; a card already in a multiple selection keeps it.
+`flow/node-commands.ts` performs those two commands:
 a copy writes an open editor's drafts first, then inserts the card beside its
 source; delete removes the card and its connectors. An upload copy carries
 its output batch in the same command, so one undo removes the whole copy
@@ -235,10 +237,9 @@ Keyboard: `Delete`/`Backspace` delete a selected edge or cards, `Mod+Z` /
 `Mod+Shift+Z` undo/redo, arrows pan, `Mod+=`/`Mod+-` zoom, `Mod+0` fits,
 `Mod+K` search. A secondary-button drag pans the canvas, and a right click
 opens the context menu for what it pressed: a card's Copy node/Delete node
-menu, or the canvas's Add text node/Add image node/Add upload node menu.
-`Escape` closes the
-canvas menu, then search, the inline editor, a selected edge, the composer,
-and finally the selection.
+menu, a connector's Delete connection menu, or the canvas's Add text node/Add
+image node/Add upload node menu. `Escape` closes the canvas menu, then search,
+the inline editor, a selected edge, the composer, and finally the selection.
 
 ## M1 non-goals
 

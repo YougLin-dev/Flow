@@ -1,8 +1,8 @@
 /**
  * The canvas context menu: a native popup opened by a secondary-button press.
- * On empty canvas it adds a card; on a card it acts on that card. Its backdrop
- * closes it on a primary press; a right drag on the same overlay is forwarded
- * to the page, which drops the menu and pans the canvas.
+ * On empty canvas it adds a card; on a card or a connector it acts on that
+ * object. Its backdrop closes it on a primary press; a right drag on the same
+ * overlay is forwarded to the page, which drops the menu and pans the canvas.
  */
 import { Text, View } from "nsh";
 import { Button } from "nsh/base";
@@ -12,14 +12,17 @@ import { keepsWheel } from "../flow/page-chrome";
 export interface CanvasContextMenuProps {
   readonly left: number;
   readonly top: number;
-  /** The pressed card, or null when the press landed on empty canvas. */
+  /** The pressed card, or null when the press landed elsewhere. */
   readonly nodeId: () => string | null;
+  /** The pressed connector, or null when the press landed elsewhere. */
+  readonly edgeId: () => string | null;
   readonly onClose: () => void;
   readonly onAddText: () => void;
   readonly onAddImage: () => void;
   readonly onAddUpload: () => void;
   readonly onCopyNode: () => void;
   readonly onDeleteNode: () => void;
+  readonly onDeleteEdge: () => void;
   /** A mouse move with a button held (the page may start a pan). */
   readonly onMove: (x: number, y: number, held: boolean) => void;
   /** A secondary press on the open menu re-anchors it, in overlay points. */
@@ -27,6 +30,13 @@ export interface CanvasContextMenuProps {
   /** A mouse button was released over the overlay (only a tracked secondary
    * press acts). */
   readonly onRelease: () => void;
+}
+
+/** The menu's name for assistive technology, from what it acts on. */
+function menuLabel(nodeId: string | null, edgeId: string | null): string {
+  if (nodeId !== null) return "Node menu";
+  if (edgeId !== null) return "Connection menu";
+  return "Canvas menu";
 }
 
 export function CanvasContextMenu(props: CanvasContextMenuProps) {
@@ -50,13 +60,13 @@ export function CanvasContextMenu(props: CanvasContextMenuProps) {
       />
       <View
         testID="canvas-menu"
-        accessibilityLabel={props.nodeId() === null ? "Canvas menu" : "Node menu"}
+        accessibilityLabel={menuLabel(props.nodeId(), props.edgeId())}
         class="absolute gap-0.5 rounded-(--radius) border border-border bg-popover p-1 shadow-lg"
         style={{ left: props.left, top: props.top, width: CONTEXT_MENU_WIDTH }}
         onPressDown={() => undefined}
         onWheel={keepsWheel}
       >
-        <If when={props.nodeId() === null}>
+        <If when={props.nodeId() === null && props.edgeId() === null}>
           <>
             <Button
               testID="context-add-text"
@@ -98,6 +108,15 @@ export function CanvasContextMenu(props: CanvasContextMenuProps) {
               <Text class="text-sm text-destructive">Delete node</Text>
             </Button>
           </>
+        </If>
+        <If when={props.edgeId() !== null}>
+          <Button
+            testID="context-delete-edge"
+            onPress={props.onDeleteEdge}
+            class="w-full rounded-md px-2 py-1.5 active:bg-accent focus:bg-accent hover:bg-muted"
+          >
+            <Text class="text-sm text-destructive">Delete connection</Text>
+          </Button>
         </If>
       </View>
     </View>

@@ -1,14 +1,6 @@
-import { type App, expect, open, type OpenOptions, test } from "nsh/test";
+import { type App, expect, test } from "nsh/test";
+import { canvasState, openApp, percentOf, selectSeed, selectedOf } from "./app-test-harness";
 import { CONTENT, seedNodes } from "./flow/data";
-
-/** Opens the composer of a seed node through search. */
-const selectSeed = async (app: App, query: string, testId: string): Promise<void> => {
-  await app.keyboard.press("mod+k");
-  await app.waitUntil(() => app.shows("id:search-input"));
-  await app.type("id:search-input", query);
-  await app.waitUntil(() => app.shows(testId));
-  await app.press(testId);
-};
 
 /** Centres a seed card through search, then opens its own context menu. */
 const openNodeMenu = async (app: App, query: string, testId: string): Promise<void> => {
@@ -26,33 +18,11 @@ const expectTooltip = async (app: App, testID: string, label: string): Promise<v
   expect(app.shows(`text:${label}`)).toBe(true);
 };
 
-/** Opens the app with the probe a test reads the camera scale from. */
-const openApp = (options: OpenOptions = {}): Promise<App> =>
-  open("./App.tsx", {
-    ...options,
-    host: {
-      ...options.host,
-      params: { ...options.host?.params, flowZoomProbe: 1, flowSelectionProbe: 1 },
-    },
-  });
-
 /**
  * The composer always sits directly below its card and a revealed card is
  * centered, so its full sheet needs a stage taller than the default phone.
  */
 const openTallApp = (): Promise<App> => openApp({ width: 900, height: 1300 });
-
-const percentOf = (app: App): number => {
-  const value = app.value("id:zoom-probe");
-  return value ? Number(value) : Number.NaN;
-};
-
-const canvasState = (app: App): { selected: number; composing: boolean } => {
-  const [selected = "0", composing = "0"] = (app.value("id:canvas-probe") ?? "").split(";");
-  return { selected: Number(selected), composing: composing === "1" };
-};
-
-const selectedOf = (app: App): number => canvasState(app).selected;
 
 /** A 1×1 transparent PNG, so the headless picker reads a real size. */
 const PNG_1X1 = Uint8Array.from([
@@ -579,6 +549,36 @@ test("deletes a node from its menu", async () => {
   await app.waitUntil(() => app.shows("id:search-input"));
   await app.type("id:search-input", "Text");
   await app.waitUntil(() => app.texts().includes("No cards match"));
+});
+
+test("deletes a connection from its menu", async () => {
+  const app = await openApp({ platform: "windows" });
+  await app.waitUntil(() => percentOf(app) > 0);
+
+  // The seed connector's curve passes just above the fitted centre. Zooming
+  // in shortens the keyboard's 40-point pan to less than the edge hit
+  // distance in world points, so one Up press brings the curve under the
+  // canvas's middle for the right click. One extra press absorbs the zoom
+  // probe's whole-percent rounding.
+  const zoomPresses = Math.ceil(Math.log(1.6 / (percentOf(app) / 100)) / Math.log(1.2)) + 1;
+  const zoomIn = async (remaining: number): Promise<void> => {
+    if (remaining === 0) return;
+    await app.keyboard.press("mod+=");
+    await zoomIn(remaining - 1);
+  };
+  await zoomIn(zoomPresses);
+  await app.waitUntil(() => percentOf(app) >= 160);
+  await app.keyboard.press("up");
+
+  await app.rightClick("id:flow-canvas");
+  await app.waitUntil(() => app.shows("id:context-delete-edge"));
+  expect(app.shows("id:context-delete-node")).toBe(false);
+  await app.press("id:context-delete-edge");
+  await app.waitUntil(() => !app.shows("id:canvas-menu"));
+
+  // Both cards remain, but the image card's prompt input lost its source.
+  await selectSeed(app, "Image", "id:search-result-seed-image");
+  await app.waitUntil(() => app.texts().includes("Inputs · 0"));
 });
 
 test("copies a node with its unsaved composer text", async () => {

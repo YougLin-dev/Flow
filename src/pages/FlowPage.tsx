@@ -2,7 +2,7 @@ import { cleanup, effect, host, keymap, Picker, platform, signal, untracked, Vie
 import { isAvailable } from "nsh/desktop";
 import type { ChangeSet, Document, NodeBounds, SearchHit } from "@flow/native";
 import { BrandCard } from "../components/BrandCard";
-import { CanvasContextMenu } from "../components/CanvasContextMenu";
+import { CanvasMenuLayer } from "../components/CanvasMenuLayer";
 import { FlowCanvas } from "../components/FlowCanvas";
 import { ImageLoadProbe, imageProbeText } from "../components/FlowCard";
 import { FrameRate } from "../components/FrameRate";
@@ -20,11 +20,7 @@ import { bindFlowKeys } from "../flow/bindings";
 import { CanvasCamera, wheelZoomFactor } from "../flow/camera";
 import { CanvasController } from "../flow/canvas-controller";
 import { ComposerState } from "../flow/composer-state";
-import {
-  CanvasMenuController,
-  contextMenuPosition,
-  dismissContextMenuOnChange,
-} from "../flow/context-menu";
+import { CanvasMenuController, dismissContextMenuOnChange } from "../flow/context-menu";
 import { CONTENT } from "../flow/data";
 import { openFlowDocument } from "../flow/document-session";
 import { NodeRunner } from "../flow/execution";
@@ -213,6 +209,8 @@ export function FlowPage() {
     copyNode,
     deleteNode: (nodeId) =>
       void currentSession()?.deleteNodeWithDrafts(nodeId, composerState.drafts()),
+    selectEdge,
+    deleteEdge: (edgeId) => void currentSession()?.deleteEdge(edgeId),
   });
 
   dismissContextMenuOnChange(canvasMenu, camera, scene);
@@ -531,26 +529,7 @@ export function FlowPage() {
         )}
       </If>
 
-      <If when={canvasMenu.open()}>
-        {(press) => (
-          <CanvasContextMenu
-            left={contextMenuPosition(press(), stage()).left}
-            top={contextMenuPosition(press(), stage()).top}
-            nodeId={() => press().nodeId}
-            onClose={() => {
-              canvasMenu.close();
-            }}
-            onAddText={() => canvasMenu.add("text", press())}
-            onAddImage={() => canvasMenu.add("image", press())}
-            onAddUpload={() => canvasMenu.add("upload", press())}
-            onCopyNode={() => canvasMenu.copyCard(press())}
-            onDeleteNode={() => canvasMenu.deleteCard(press())}
-            onMove={(x, y, held) => canvasMenu.move(x, y, held)}
-            onPress={(x, y) => canvasMenu.press({ x, y })}
-            onRelease={() => canvasMenu.release()}
-          />
-        )}
-      </If>
+      <CanvasMenuLayer menu={canvasMenu} stage={stage} />
 
       {minimapDrag.dragging() ? (
         <MinimapDragOverlay

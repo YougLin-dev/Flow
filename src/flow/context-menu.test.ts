@@ -1,5 +1,5 @@
 import { expect, test } from "nsh/test";
-import type { NodeSummary } from "@flow/native";
+import type { EdgeSummary, NodeSummary } from "@flow/native";
 import { CanvasCamera } from "./camera";
 import { CanvasController } from "./canvas-controller";
 import {
@@ -15,7 +15,7 @@ import { FlowScene } from "./scene";
 const STAGE = { width: 900, height: 700 };
 
 function press(x: number, y: number): ContextMenuPress {
-  return { x, y, worldX: 0, worldY: 0, nodeId: null };
+  return { x, y, worldX: 0, worldY: 0, nodeId: null, edgeId: null };
 }
 
 function node(id: string, x: number, y: number): NodeSummary {
@@ -34,6 +34,21 @@ function node(id: string, x: number, y: number): NodeSummary {
     settingsJson: "{}",
     status: "idle",
     outputBatchId: null,
+  };
+}
+
+function edge(id: string, fromId: string, toId: string): EdgeSummary {
+  return {
+    id,
+    fromId,
+    toId,
+    fromPort: "text",
+    toPort: "prompt",
+    portKind: "text",
+    fromOffset: 42,
+    toOffset: 28,
+    kind: "flow",
+    dataJson: "{}",
   };
 }
 
@@ -75,6 +90,11 @@ function menuWith(scene = new FlowScene()): {
     addNode: (kind) => actions.push(`add:${kind}`),
     copyNode: (id) => actions.push(`copy:${id}`),
     deleteNode: (id) => actions.push(`delete:${id}`),
+    selectEdge: (id) => {
+      scene.selectEdge(id);
+      scene.select([]);
+    },
+    deleteEdge: (id) => actions.push(`delete-edge:${id}`),
   });
   return { menu, controller, camera, actions };
 }
@@ -313,5 +333,110 @@ test("deleting from a card's menu deletes that card", () => {
 
   menu.deleteCard(open);
   expect(actions).toEqual(["delete:card"]);
+  expect(menu.open()).toBe(null);
+});
+
+/** Two text cards joined by one connector; its curve passes (320, 75). */
+function sceneWithEdge(): FlowScene {
+  const scene = new FlowScene();
+  scene.apply({
+    rev: 1,
+    nodes: [node("source", 40, 40), node("target", 400, 40)],
+    edges: [edge("line", "source", "target")],
+  });
+  return scene;
+}
+
+test("a press on a connector opens its menu and selects it", () => {
+  const scene = sceneWithEdge();
+  const { menu } = menuWith(scene);
+  // Between the two cards, on the cubic: the output sits at (254, 82) and the
+  // input at (386, 68), halfway between them.
+  menu.press({ x: 320, y: 75 });
+  menu.release();
+
+  expect(menu.open()?.edgeId).toBe("line");
+  expect(menu.open()?.nodeId).toBe(null);
+  expect(scene.selectedEdge()).toBe("line");
+  expect(scene.selection()).toEqual([]);
+});
+
+test("opening a connector's menu drops the card selection", () => {
+  const scene = sceneWithEdge();
+  scene.select(["target"]);
+  const { menu } = menuWith(scene);
+  menu.press({ x: 320, y: 75 });
+  menu.release();
+
+  expect(scene.selection()).toEqual([]);
+  expect(scene.selectedEdge()).toBe("line");
+});
+
+test("a card over a connector takes the press", () => {
+  const scene = new FlowScene();
+  scene.apply({
+    rev: 1,
+    nodes: [node("source", 0, 0), node("target", 400, 0), node("cover", 150, 0)],
+    edges: [edge("line", "source", "target")],
+  });
+  const { menu } = menuWith(scene);
+  // The connector runs through the covering card at (300, 42).
+  menu.press({ x: 300, y: 42 });
+  menu.release();
+
+  expect(menu.open()?.nodeId).toBe("cover");
+  expect(menu.open()?.edgeId).toBe(null);
+});
+
+test("deleting from a connector's menu deletes that connector", () => {
+  const { menu, actions } = menuWith(sceneWithEdge());
+  menu.press({ x: 320, y: 75 });
+  menu.release();
+  const open = menu.open();
+  if (open === null) throw new Error("the connector menu did not open");
+
+  menu.deleteEdge(open);
+  expect(actions).toEqual(["delete-edge:line"]);
+  expect(menu.open()).toBe(null);
+});
+
+test("dismisses a connector's menu when the connector leaves the scene", () => {
+  const scene = sceneWithEdge();
+  const { menu, camera } = menuWith(scene);
+  dismissContextMenuOnChange(menu, camera, scene);
+  menu.press({ x: 320, y: 75 });
+  menu.release();
+  expect(menu.open()?.edgeId).toBe("line");
+
+  scene.applyChangeSet({ changed: [], removed: [], edgesChanged: [], edgesRemoved: ["line"] });
+  expect(menu.open()).toBe(null);
+});
+
+test("dismisses a connector's menu when an endpoint card moves", () => {
+  const scene = sceneWithEdge();
+  const { menu, camera } = menuWith(scene);
+  dismissContextMenuOnChange(menu, camera, scene);
+  menu.press({ x: 320, y: 75 });
+  menu.release();
+  expect(menu.open()?.edgeId).toBe("line");
+
+  // Another command (an undo, say) moves the source; the curve no longer
+  // passes under the menu's anchor.
+  scene.apply({
+    rev: 2,
+    nodes: [node("source", 40, 200), node("target", 400, 40)],
+    edges: [edge("line", "source", "target")],
+  });
+  expect(menu.open()).toBe(null);
+});
+
+test("dismisses a connector's menu when the camera moves", () => {
+  const scene = sceneWithEdge();
+  const { menu, camera } = menuWith(scene);
+  dismissContextMenuOnChange(menu, camera, scene);
+  menu.press({ x: 320, y: 75 });
+  menu.release();
+
+  camera.panBy(40, 40);
   expect(menu.open()).toBe(null);
 });

@@ -243,16 +243,18 @@ wheel over it zooms the canvas about the viewport's center.
 The canvas context menu (`components/CanvasContextMenu.tsx`) is a native-view
 popup anchored at a secondary-button press: on empty canvas it adds a text or
 image card at the pressed world point, on a card it copies or deletes the
-pressed card, and it closes on a primary press or Escape. Opening a card's
-menu selects that card (a card already inside a multiple selection keeps the
-selection) without opening its composer, so the menu visibly names what its
-items act on. It is drawn
-from ordinary views rather than opened with `Menu.popup`, because a system
-menu takes the pointer and would prevent the right-button drag from panning;
-`flow/context-menu.ts` wires the press, the pending press a release opens, the
-dismissal when the camera or the pressed card moves away, and the item
-actions; `flow/node-commands.ts` performs the copy (writing an open editor's
-drafts first) and delete commands.
+pressed card, on a connector it deletes that connector, and it closes on a
+primary press or Escape. Opening a card's menu selects that card (a card
+already inside a multiple selection keeps the selection) without opening its
+composer, and opening a connector's menu selects that connector, so the menu
+visibly names what its items act on. A card under the press wins over a
+connector drawn behind it. It is drawn from ordinary views rather than opened
+with `Menu.popup`, because a system menu takes the pointer and would prevent
+the right-button drag from panning; `flow/context-menu.ts` wires the press,
+the pending press a release opens, the dismissal when the camera or the
+pressed card or connector moves away, and the item actions;
+`flow/node-commands.ts` performs the copy (writing an open editor's drafts
+first) and delete commands.
 
 `FlowCard`'s root carries the node's world position and lays its chrome out
 in card-local points (`flow/card-geometry.ts`). The rectangle reaches the card
@@ -365,7 +367,8 @@ finger:
   zoom as well; the open context menu keeps its own wheel the same way.
 - **Secondary button** — holding the right button and dragging pans the
   camera, without selecting, starting a marquee or moving a card. A right click that stays put opens the context menu for what it pressed on the
-  button's release: a card's copy/delete menu, or the canvas's add-card menu. NSH reports the press through `onContextMenu`, the moves
+  button's release: a card's copy/delete menu, a connector's delete menu, or
+  the canvas's add-card menu. NSH reports the press through `onContextMenu`, the moves
   while it is held, and the release through `onMouseUp`: a press that never
   moved past the drag threshold opens its menu at the pressed point, and a
   drag never opens one. Over the composer, its dock and the minimap the page

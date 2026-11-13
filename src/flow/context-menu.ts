@@ -2,7 +2,7 @@
 import { effect, signal, untracked } from "nsh";
 import type { CanvasCamera } from "./camera";
 import type { CanvasController } from "./canvas-controller";
-import type { BoxGeometry } from "./connection";
+import type { BoxGeometry, Point } from "./connection";
 import type { NodeKindId } from "./node-kinds";
 import type { StageSize } from "./overlay";
 import type { FlowScene } from "./scene";
@@ -14,12 +14,14 @@ export interface ContextMenuPoint {
   readonly y: number;
 }
 
-/** The press with the world point a new card is centred on, and the card
- * under it when the menu belongs to a card rather than the canvas. */
+/** The press with the world point a new card is centred on, and the card or
+ * connector under it when the menu belongs to one rather than the canvas. A
+ * card wins over a connector it covers, as it does for a left press. */
 export interface ContextMenuPress extends ContextMenuPoint {
   readonly worldX: number;
   readonly worldY: number;
   readonly nodeId: string | null;
+  readonly edgeId: string | null;
 }
 
 /** The menu's fixed width, and the height of its tallest form: the empty
@@ -80,13 +82,17 @@ export interface CanvasMenuHost {
   addNode(kind: NodeKindId, x: number, y: number): void;
   copyNode(nodeId: string): void;
   deleteNode(nodeId: string): void;
+  /** Selects a connector, dropping any card selection. */
+  selectEdge(edgeId: string): void;
+  deleteEdge(edgeId: string): void;
 }
 
 /**
  * Wires a secondary press to the right-button gesture and the menu: the press
  * opens the menu (unless a right drag claims it), a move over the menu can
- * start that drag, and an item adds a card at the pressed world point, or
- * copies or deletes the card the press landed on.
+ * start that drag, and an item adds a card at the pressed world point, copies
+ * or deletes the card the press landed on, or deletes the connector it
+ * landed on.
  */
 export class CanvasMenuController {
   private readonly state = new ContextMenuState();
@@ -104,10 +110,12 @@ export class CanvasMenuController {
     const world = this.host.camera().toWorld(at.x, at.y);
     const scene = this.host.scene();
     // A port's disc sits just outside the body, but it is still the card's
-    // chrome: a press on it belongs to that card.
+    // chrome: a press on it belongs to that card. Only a press that missed
+    // every card can belong to a connector drawn behind them.
     const nodeId =
       scene.nodeAt(world.x, world.y, true) ?? portAt(scene, world.x, world.y)?.nodeId ?? null;
-    this.state.pressAt({ ...at, worldX: world.x, worldY: world.y, nodeId });
+    const edgeId = nodeId === null ? scene.edgeAt(world.x, world.y) : null;
+    this.state.pressAt({ ...at, worldX: world.x, worldY: world.y, nodeId, edgeId });
   }
 
   /**
@@ -180,6 +188,14 @@ export class CanvasMenuController {
     this.host.deleteNode(nodeId);
   }
 
+  /** Deletes the pressed connector and closes the menu. */
+  deleteEdge(at: ContextMenuPress): void {
+    const edgeId = at.edgeId;
+    if (edgeId === null) return;
+    this.state.close();
+    this.host.deleteEdge(edgeId);
+  }
+
   /** Closes the menu; true when one was open or about to open. */
   close(): boolean {
     return this.state.close();
@@ -190,14 +206,23 @@ export class CanvasMenuController {
    * selection. A press on a card already in a multiple selection keeps that
    * selection, and empty canvas leaves the selection alone. The page opens
    * the composer for a single selection except while this menu is open, so a
-   * right click never pops the editor.
+   * right click never pops the editor. A connector's menu likewise selects
+   * that connector, as a left press on it does.
    */
   private selectTarget(): void {
-    const nodeId = this.open()?.nodeId ?? null;
-    if (nodeId === null) return;
-    const scene = this.host.scene();
-    if (scene.selection().includes(nodeId)) return;
-    scene.select([nodeId]);
+    const open = this.open();
+    if (open === null) return;
+    const nodeId = open.nodeId;
+    if (nodeId !== null) {
+      const scene = this.host.scene();
+      if (scene.selection().includes(nodeId)) return;
+      scene.select([nodeId]);
+      return;
+    }
+    const edgeId = open.edgeId;
+    if (edgeId === null) return;
+    if (this.host.scene().selectedEdge() === edgeId) return;
+    this.host.selectEdge(edgeId);
   }
 }
 
@@ -241,10 +266,40 @@ export function dismissContextMenuOnChange(
     anchor = null;
     untracked(() => menu.close());
   });
+
+  // The connector's endpoints when the menu opened over it; a connector that
+  // left the scene, or a curve a card move pulled away, no longer sits under
+  // the menu's anchor.
+  let edgeAnchor: { id: string; from: Point; to: Point } | null = null;
+  effect(() => {
+    const id = menu.open()?.edgeId ?? null;
+    if (id === null) {
+      edgeAnchor = null;
+      return;
+    }
+    const edge = scene.edges().find((candidate) => candidate.id === id) ?? null;
+    const ports = edge === null ? null : scene.edgePorts(edge);
+    if (ports === null) {
+      edgeAnchor = null;
+      untracked(() => menu.close());
+      return;
+    }
+    if (edgeAnchor === null || edgeAnchor.id !== id) {
+      edgeAnchor = { id, from: ports.from, to: ports.to };
+      return;
+    }
+    if (samePoint(edgeAnchor.from, ports.from) && samePoint(edgeAnchor.to, ports.to)) return;
+    edgeAnchor = null;
+    untracked(() => menu.close());
+  });
 }
 
 function sameRect(a: BoxGeometry, b: BoxGeometry): boolean {
   return a.x === b.x && a.y === b.y && a.width === b.width && a.height === b.height;
+}
+
+function samePoint(a: Point, b: Point): boolean {
+  return a.x === b.x && a.y === b.y;
 }
 
 function clamp(value: number, min: number, max: number): number {
