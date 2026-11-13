@@ -6,7 +6,7 @@
 import type { EdgeSummary } from "@flow/native";
 import type { PortSide, Point } from "./connection";
 import { portCenter, portHit, portOffset, PORT_CENTER_GAP } from "./connection";
-import { type PortKind, nodeKind } from "./node-kinds";
+import { type PortKind, portsOfNode } from "./node-kinds";
 import type { FlowScene } from "./scene";
 
 /** One typed port under a pointer. `point` is the icon's centre, where its
@@ -27,10 +27,10 @@ export function portOffsetAt(
   side: PortSide,
   portId: string,
 ): number | null {
-  const kind = scene.kindOf(id);
+  const node = scene.node(id);
   const rect = scene.cardRect(id);
-  if (kind === null || rect === null) return null;
-  const ports = side === "in" ? nodeKind(kind).inputs : nodeKind(kind).outputs;
+  if (node === null || rect === null) return null;
+  const ports = side === "in" ? portsOfNode(node).inputs : portsOfNode(node).outputs;
   const index = ports.findIndex((port) => port.id === portId);
   return index < 0 ? null : portOffset(index, ports.length, rect.height);
 }
@@ -62,7 +62,7 @@ export function portAt(
     const rect = scene.cardRect(node.id);
     if (!rect) continue;
     const depth = scene.cardDepth(node.id);
-    const spec = nodeKind(node.kind);
+    const spec = portsOfNode(node);
     for (const portSide of side === undefined ? (["in", "out"] as const) : [side]) {
       const ports = portSide === "in" ? spec.inputs : spec.outputs;
       for (let index = 0; index < ports.length; index += 1) {
@@ -129,7 +129,7 @@ export function nearestPort(
     if (exclude?.has(node.id)) continue;
     const rect = scene.cardRect(node.id);
     if (!rect) continue;
-    const ports = side === "in" ? nodeKind(node.kind).inputs : nodeKind(node.kind).outputs;
+    const ports = side === "in" ? portsOfNode(node).inputs : portsOfNode(node).outputs;
     const centerX =
       side === "in" ? rect.x - PORT_CENTER_GAP : rect.x + rect.width + PORT_CENTER_GAP;
     for (let index = 0; index < ports.length; index += 1) {
@@ -171,9 +171,9 @@ export function nearestPort(
 
 /** The most edges an input port may receive; null for a missing port. */
 export function capacityOf(scene: FlowScene, nodeId: string, portId: string): number | null {
-  const kind = scene.kindOf(nodeId);
-  if (kind === null) return null;
-  return nodeKind(kind).inputs.find((port) => port.id === portId)?.capacity ?? null;
+  const node = scene.node(nodeId);
+  if (node === null) return null;
+  return portsOfNode(node).inputs.find((port) => port.id === portId)?.capacity ?? null;
 }
 
 /** How many edges already enter one input port. */

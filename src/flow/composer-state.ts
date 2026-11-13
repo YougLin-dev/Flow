@@ -68,12 +68,13 @@ export class ComposerState {
   }
 
   prompt(): string {
-    return this.settings()?.prompt ?? "";
+    const settings = this.settings();
+    return settings !== null && "prompt" in settings ? settings.prompt : "";
   }
 
   setPrompt(prompt: string): void {
     const settings = this.settings();
-    if (settings !== null) this.settings.set({ ...settings, prompt });
+    if (settings !== null && "prompt" in settings) this.settings.set({ ...settings, prompt });
   }
 
   setBody(body: string): void {

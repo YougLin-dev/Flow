@@ -109,6 +109,34 @@ impl Database {
         self.run_mutation(move |conn| mutation::set_manual_text(conn, id, text, batch, item))
     }
 
+    /// A local upload's output: the batch, the node's derived ports, its
+    /// body and its fitted card rectangle in one undoable write.
+    pub fn set_manual_upload(
+        &self,
+        id: String,
+        settings_json: String,
+        body: String,
+        batch: ResultBatchInput,
+        items: Vec<ResultItemInput>,
+        bounds: Option<NodeBounds>,
+    ) -> Result<Mutation, String> {
+        self.run_mutation(move |conn| {
+            mutation::set_manual_upload(conn, id, settings_json, body, batch, items, bounds)
+        })
+    }
+
+    /// Inserts a node with its uploaded output already in place, in one
+    /// undoable write: a copied upload card must not exist empty until a
+    /// second history entry fills it.
+    pub fn insert_upload_node(
+        &self,
+        node: NodeInput,
+        batch: ResultBatchInput,
+        items: Vec<ResultItemInput>,
+    ) -> Result<Mutation, String> {
+        self.run_mutation(move |conn| mutation::insert_upload_node(conn, node, batch, items))
+    }
+
     /// Inserts an edge and snapshots the source's current output into the
     /// target's input list.
     pub fn connect_edge(&self, edge: EdgeInput) -> Result<Mutation, String> {
@@ -2450,6 +2478,267 @@ mod tests {
                 .map(|batch| batch.id),
             None
         );
+    }
+
+    #[test]
+    fn an_upload_writes_its_ports_and_output_in_one_undoable_step() {
+        let db = Database::open(":memory:").expect("open");
+        let mut upload = node("upload", "Upload", "", &["upload"], 0.0, 0.0);
+        upload.kind = "upload".to_owned();
+        upload.settings_json = Some(r#"{"version":1,"media":[]}"#.to_owned());
+        db.insert_nodes(vec![upload]).expect("insert");
+
+        let changes = db
+            .set_manual_upload(
+                "upload".to_owned(),
+                r#"{"version":1,"media":["image"]}"#.to_owned(),
+                "cat.png".to_owned(),
+                ResultBatchInput {
+                    id: "batch-upload".to_owned(),
+                    node_id: "upload".to_owned(),
+                    trigger: "upload".to_owned(),
+                    provider: "local".to_owned(),
+                    model: String::new(),
+                    params_json: "{}".to_owned(),
+                    status: "done".to_owned(),
+                    error: None,
+                },
+                vec![ResultItemInput {
+                    id: "item-upload".to_owned(),
+                    position: 0.0,
+                    port_id: "image".to_owned(),
+                    kind: "image".to_owned(),
+                    text: String::new(),
+                    asset_id: Some("asset-cat".to_owned()),
+                    meta_json: Some(r#"{"width":2,"height":1}"#.to_owned()),
+                }],
+                Some(NodeBounds {
+                    id: "upload".to_owned(),
+                    x: -10.0,
+                    y: 30.0,
+                    width: 320.0,
+                    height: 160.0,
+                }),
+            )
+            .expect("upload");
+        let changed = &changes.changes.changed[0];
+        assert_eq!(changed.settings_json, r#"{"version":1,"media":["image"]}"#);
+        assert_eq!(changed.body, "cat.png");
+        assert_eq!(changed.status, "done");
+        assert_eq!((changed.width, changed.height), (320.0, 160.0));
+
+        let detail = db
+            .node_detail("upload".to_owned())
+            .expect("detail")
+            .expect("upload detail");
+        let batch = detail.batch.expect("batch");
+        assert_eq!(batch.id, "batch-upload");
+        assert_eq!(batch.items[0].port_id, "image");
+        assert_eq!(batch.items[0].asset_id.as_deref(), Some("asset-cat"));
+        assert_eq!(
+            db.search("cat".to_owned(), SearchFilters::default(), 20)
+                .expect("search")
+                .len(),
+            1
+        );
+
+        db.undo().expect("undo upload");
+        let restored = db
+            .node_detail("upload".to_owned())
+            .expect("detail")
+            .expect("upload detail");
+        assert_eq!(restored.node.settings_json, r#"{"version":1,"media":[]}"#);
+        assert_eq!(restored.node.body, "");
+        assert_eq!(restored.node.output_batch_id, None);
+        // The same undo also restores the rectangle the upload fitted.
+        assert_eq!(
+            (
+                restored.node.x,
+                restored.node.y,
+                restored.node.width,
+                restored.node.height
+            ),
+            (0.0, 0.0, 200.0, 84.0)
+        );
+
+        db.redo().expect("redo upload");
+        let again = db
+            .node_detail("upload".to_owned())
+            .expect("detail")
+            .expect("upload detail");
+        assert_eq!(
+            again.node.settings_json,
+            r#"{"version":1,"media":["image"]}"#
+        );
+        assert_eq!(again.node.output_batch_id.as_deref(), Some("batch-upload"));
+    }
+
+    #[test]
+    fn copies_an_upload_in_one_undoable_step() {
+        let db = Database::open(":memory:").expect("open");
+        let mut upload = node("copy", "Upload", "cat.png", &["upload"], 24.0, 24.0);
+        upload.kind = "upload".to_owned();
+        upload.settings_json = Some(r#"{"version":1,"media":["image"]}"#.to_owned());
+        db.insert_upload_node(
+            upload,
+            ResultBatchInput {
+                id: "batch-copy".to_owned(),
+                node_id: "copy".to_owned(),
+                trigger: "upload".to_owned(),
+                provider: "local".to_owned(),
+                model: String::new(),
+                params_json: "{}".to_owned(),
+                status: "done".to_owned(),
+                error: None,
+            },
+            vec![ResultItemInput {
+                id: "item-copy".to_owned(),
+                position: 0.0,
+                port_id: "image".to_owned(),
+                kind: "image".to_owned(),
+                text: String::new(),
+                asset_id: Some("asset-cat".to_owned()),
+                meta_json: Some(r#"{"width":2,"height":1}"#.to_owned()),
+            }],
+        )
+        .expect("copy");
+
+        let copy = db
+            .node_detail("copy".to_owned())
+            .expect("detail")
+            .expect("copy detail");
+        assert_eq!(copy.node.status, "done");
+        assert_eq!(copy.node.output_batch_id.as_deref(), Some("batch-copy"));
+        assert_eq!(copy.batch.expect("batch").items.len(), 1);
+
+        // One undo removes the whole copy, output included.
+        db.undo().expect("undo copy");
+        assert_eq!(db.get_node("copy".to_owned()).expect("get"), None);
+
+        // Redo puts the card back with its output, not empty.
+        db.redo().expect("redo copy");
+        let again = db
+            .node_detail("copy".to_owned())
+            .expect("detail")
+            .expect("copy detail");
+        assert_eq!(again.node.output_batch_id.as_deref(), Some("batch-copy"));
+        assert_eq!(again.batch.expect("batch").items.len(), 1);
+    }
+
+    #[test]
+    fn undoing_an_upload_restores_its_edge_anchors() {
+        let db = Database::open(":memory:").expect("open");
+        let mut upload = node("upload", "Upload", "", &["upload"], 0.0, 0.0);
+        upload.kind = "upload".to_owned();
+        upload.settings_json = Some(r#"{"version":1,"media":[]}"#.to_owned());
+        db.insert_nodes(vec![upload, node("target", "Target", "", &[], 400.0, 0.0)])
+            .expect("insert");
+        db.connect_edge(EdgeInput {
+            id: "edge-upload".to_owned(),
+            from_id: "upload".to_owned(),
+            to_id: "target".to_owned(),
+            from_port: "image".to_owned(),
+            to_port: "references".to_owned(),
+            port_kind: "image".to_owned(),
+            from_offset: 42.0,
+            to_offset: 42.0,
+            kind: "flow".to_owned(),
+            data_json: None,
+        })
+        .expect("edge");
+
+        db.set_manual_upload(
+            "upload".to_owned(),
+            r#"{"version":1,"media":["image"]}"#.to_owned(),
+            "cat.png".to_owned(),
+            ResultBatchInput {
+                id: "batch-upload".to_owned(),
+                node_id: "upload".to_owned(),
+                trigger: "upload".to_owned(),
+                provider: "local".to_owned(),
+                model: String::new(),
+                params_json: "{}".to_owned(),
+                status: "done".to_owned(),
+                error: None,
+            },
+            vec![ResultItemInput {
+                id: "item-upload".to_owned(),
+                position: 0.0,
+                port_id: "image".to_owned(),
+                kind: "image".to_owned(),
+                text: String::new(),
+                asset_id: Some("asset-cat".to_owned()),
+                meta_json: None,
+            }],
+            Some(NodeBounds {
+                id: "upload".to_owned(),
+                x: 0.0,
+                y: 0.0,
+                width: 320.0,
+                height: 160.0,
+            }),
+        )
+        .expect("upload");
+
+        // 84 → 160 scales the connector anchor by 160/84.
+        let grown = db
+            .scene(
+                Viewport {
+                    x: -100.0,
+                    y: -100.0,
+                    width: 1000.0,
+                    height: 1000.0,
+                },
+                0.0,
+                100,
+            )
+            .expect("scene");
+        let edge = grown
+            .edges
+            .iter()
+            .find(|edge| edge.id == "edge-upload")
+            .expect("the connector was indexed");
+        assert!((edge.from_offset - 80.0).abs() < 0.001);
+
+        db.undo().expect("undo upload");
+        let restored = db
+            .scene(
+                Viewport {
+                    x: -100.0,
+                    y: -100.0,
+                    width: 1000.0,
+                    height: 1000.0,
+                },
+                0.0,
+                100,
+            )
+            .expect("scene");
+        let edge = restored
+            .edges
+            .iter()
+            .find(|edge| edge.id == "edge-upload")
+            .expect("the connector is still indexed");
+        assert!((edge.from_offset - 42.0).abs() < 0.001);
+
+        db.redo().expect("redo upload");
+        let again = db
+            .scene(
+                Viewport {
+                    x: -100.0,
+                    y: -100.0,
+                    width: 1000.0,
+                    height: 1000.0,
+                },
+                0.0,
+                100,
+            )
+            .expect("scene");
+        let edge = again
+            .edges
+            .iter()
+            .find(|edge| edge.id == "edge-upload")
+            .expect("the connector is indexed after redo");
+        assert!((edge.from_offset - 80.0).abs() < 0.001);
     }
 
     #[test]

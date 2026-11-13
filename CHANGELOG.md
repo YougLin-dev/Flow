@@ -8,13 +8,34 @@ All notable changes to Flow are recorded here. The format follows
 
 ### Added
 
+- An Upload node turns a local image into a source: it has no inputs, and an
+  Image output port appears once its card holds an upload. The card shows an
+  upload empty state with a bottom-right Upload pill and its image-upload
+  icon, which becomes Replace after the first file (a refresh icon, or a
+  busy state while the import runs, never while the picker is open); the
+  pill is drawn in world points in a controls layer over the canvas, so it
+  scales with the camera and stays on the card, and selecting the card never
+  opens the composer. The file
+  goes through the content-addressed asset store and is written as one
+  immutable result batch together with the node's derived ports and searchable
+  body and fitted card rectangle in a single undoable command
+  (`Document.setManualUpload`), so one undo restores the previous output and
+  size together. Re-uploading replaces the output and marks downstream nodes
+  stale; a failed upload keeps the previous output. The card resizes to the
+  image's aspect ratio, keeping its centre, and the image is contained in the
+  body inside the card's border without the usual inset, so portrait photos
+  are no longer cropped; an extreme ratio stops at the card's floors instead
+  of stretching the card across the board. Copying an upload card inserts its
+  output in the same command, so one undo removes the whole copy. The output schema
+  is resolved per node from its settings, so video and 3D outputs can join the
+  same kind later.
 - `bun run dev:release` runs the development app against the same persistent
   `.nsh/dev` document on an optimized host for meaningful performance checks.
 
 - The mouse wheel and touchpad zoom the canvas about the pointer on every
   desktop: four notches double or halve the scale, within the camera's
-  limits. The canvas's pointer surface hears them with `onWheel`, converting
-  a precise device's points to notches, and the page zooms about the pointer.
+  limits. The canvas root hears them with `onWheel`, converting a precise
+  device's points to notches, and the page zooms about the pointer.
 - A minimap in the canvas's bottom-left corner shows the whole document's
   card silhouettes and the camera's current viewport; the hint bar moved above
   it. Dragging anywhere on the map pans the camera (a press alone does

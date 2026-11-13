@@ -6,7 +6,7 @@ import { CanvasContextMenu } from "../components/CanvasContextMenu";
 import { FlowCanvas } from "../components/FlowCanvas";
 import { ImageLoadProbe, imageProbeText } from "../components/FlowCard";
 import { FrameRate } from "../components/FrameRate";
-import { InlineTextEditor } from "../components/InlineTextEditor";
+import { InlineEditor } from "../components/InlineEditor";
 import { MiniMap } from "../components/MiniMap";
 import { MinimapDragOverlay } from "../components/MinimapDragOverlay";
 import { NodeComposer } from "../components/NodeComposer";
@@ -32,7 +32,7 @@ import { MinimapLoader } from "../flow/minimap-loader";
 import { MinimapController } from "../flow/minimap-controller";
 import type { NodeKindId } from "../flow/node-kinds";
 import { NodeSession } from "../flow/node-session";
-import { composerPlacement, inlinePlacement } from "../flow/overlay";
+import { composerPlacement } from "../flow/overlay";
 import { pageChromeHandlers } from "../flow/page-chrome";
 import { PreviewLoader } from "../flow/preview-loader";
 import { SEARCH_FILTERS } from "../flow/search-filters";
@@ -143,6 +143,13 @@ export function FlowPage() {
   const openComposer = (id: string): void => {
     const session = currentSession();
     if (!session) return;
+    // An upload card is its own control: selecting it closes an editor left
+    // open elsewhere, but shows the card's own button instead of a composer.
+    if (scene.node(id)?.kind === "upload") {
+      if (session.inlineId() !== null) closeInlineDraft();
+      if (session.composerId() !== null) closeComposer();
+      return;
+    }
     const previous = session.composerId();
     if (previous === id) return;
     // Switching cards directly (a click or a search result) must keep the
@@ -187,14 +194,6 @@ export function FlowPage() {
       // drag, a resize or a pulled connector) hides the composer, so its
       // native input keeps its draft and caret while the press is held.
       controller.gestureMoved(),
-      (id) => scene.cardRect(id),
-      camera,
-      stage(),
-    );
-
-  const inlinePosition = () =>
-    inlinePlacement(
-      currentSession()?.inlineId() ?? null,
       (id) => scene.cardRect(id),
       camera,
       stage(),
@@ -442,6 +441,8 @@ export function FlowPage() {
         onMenuCancel={() => {
           canvasMenu.close();
         }}
+        uploadingNode={() => currentSession()?.uploadingNode() ?? null}
+        onUploadNode={(nodeId) => void currentSession()?.uploadSource(nodeId)}
         imageEvent={(event) => imageProbe.set(imageProbeText(event))}
       />
 
@@ -494,25 +495,7 @@ export function FlowPage() {
         )}
       </If>
 
-      <If when={currentSession()?.inlineId()}>
-        {(id) => (
-          <If when={inlinePosition()}>
-            {(position) => (
-              <InlineTextEditor
-                nodeId={() => currentSession()?.inlineId() ?? null}
-                text={() => currentSession()?.inlineText() ?? ""}
-                left={position().left}
-                top={position().top}
-                width={position().width}
-                height={position().height}
-                onChange={(text) => currentSession()?.setInlineText(text)}
-                onSave={(text) => void currentSession()?.commitBody(id(), text)}
-                onCancel={() => currentSession()?.closeInline()}
-              />
-            )}
-          </If>
-        )}
-      </If>
+      <InlineEditor scene={scene} camera={camera} stage={stage} session={currentSession} />
 
       {/* The controls and the map share the bottom-left corner. They stay
           above a card's composer (z-20) and inline editor (z-30), while
@@ -559,6 +542,7 @@ export function FlowPage() {
             }}
             onAddText={() => canvasMenu.add("text", press())}
             onAddImage={() => canvasMenu.add("image", press())}
+            onAddUpload={() => canvasMenu.add("upload", press())}
             onCopyNode={() => canvasMenu.copyCard(press())}
             onDeleteNode={() => canvasMenu.deleteCard(press())}
             onMove={(x, y, held) => canvasMenu.move(x, y, held)}

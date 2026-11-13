@@ -111,6 +111,41 @@ impl Document {
         .await
     }
 
+    /// A local upload's output: the immutable batch, the node's derived ports
+    /// (settings), its body and its fitted card rectangle, in one undoable
+    /// write.
+    pub async fn set_manual_upload(
+        this: Instance<Self>,
+        id: String,
+        settings_json: String,
+        body: String,
+        batch: ResultBatchInput,
+        items: Vec<ResultItemInput>,
+        bounds: Option<NodeBounds>,
+    ) -> Result<ChangeSet, String> {
+        let db = this.with(|document| document.db.clone());
+        off_thread(move || {
+            db.set_manual_upload(id, settings_json, body, batch, items, bounds)
+                .map(|mutation| mutation.changes)
+        })
+        .await
+    }
+
+    /// Inserts a node with its uploaded output in one undoable write.
+    pub async fn insert_upload_node(
+        this: Instance<Self>,
+        node: NodeInput,
+        batch: ResultBatchInput,
+        items: Vec<ResultItemInput>,
+    ) -> Result<ChangeSet, String> {
+        let db = this.with(|document| document.db.clone());
+        off_thread(move || {
+            db.insert_upload_node(node, batch, items)
+                .map(|mutation| mutation.changes)
+        })
+        .await
+    }
+
     /// Connects two nodes and snapshots the source's current output items.
     pub async fn connect_edge(this: Instance<Self>, edge: EdgeInput) -> Result<ChangeSet, String> {
         let db = this.with(|document| document.db.clone());

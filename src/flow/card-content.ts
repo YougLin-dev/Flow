@@ -7,7 +7,7 @@
  */
 import { type Accessor, computed } from "nsh";
 import type { NodeSummary } from "@flow/native";
-import { type FlowAccent, nodeKind, statusLabel } from "./node-kinds";
+import { type FlowAccent, hasImageOutput, nodeKind, statusLabel } from "./node-kinds";
 
 export class CardContent {
   readonly title: Accessor<string>;
@@ -18,6 +18,10 @@ export class CardContent {
   readonly statusText: Accessor<string>;
   readonly accent: Accessor<FlowAccent>;
   readonly image: Accessor<boolean>;
+  /** The card is an upload source; its image fills the body without a margin. */
+  readonly upload: Accessor<boolean>;
+  /** An upload card with no output yet shows its upload empty state. */
+  readonly uploadEmpty: Accessor<boolean>;
 
   constructor(node: () => NodeSummary) {
     this.title = computed(() => node().title);
@@ -25,6 +29,10 @@ export class CardContent {
     this.status = computed(() => node().status);
     this.statusText = computed(() => statusLabel(node().status));
     this.accent = computed(() => nodeKind(node().kind).accent);
-    this.image = computed(() => node().kind === "image");
+    this.image = computed(() => hasImageOutput(node()));
+    this.upload = computed(() => node().kind === "upload");
+    this.uploadEmpty = computed(
+      () => node().kind === "upload" && (node().outputBatchId ?? null) === null,
+    );
   }
 }

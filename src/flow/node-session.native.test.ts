@@ -1,63 +1,9 @@
 import { expect, test } from "nsh/test";
-import { Document, type ChangeSet } from "@flow/native";
-import { AssetUrls } from "./asset-urls";
+import { Document } from "@flow/native";
 import { IMAGE_NODE_ID, TEXT_NODE_ID, seedDocument } from "./data";
-import { NodeRunner } from "./execution";
 import { parseSettings } from "./node-kinds";
-import { NodeSession, type NodeSessionHost } from "./node-session";
+import { makeSession, until } from "./node-session-harness";
 import { FlowScene } from "./scene";
-
-/** Polls native async work: `app.waitUntil` only exists in an app test. */
-function until(check: () => boolean, timeout = 5000): Promise<void> {
-  const started = Date.now();
-  return new Promise((resolve, reject) => {
-    const tick = (): void => {
-      if (check()) {
-        resolve();
-      } else if (Date.now() - started > timeout) {
-        reject(new Error("the condition never held"));
-      } else {
-        setTimeout(tick, 10);
-      }
-    };
-    tick();
-  });
-}
-
-function makeSession(
-  document: Document,
-  pickImages: NodeSessionHost["pickImages"] = async () => [],
-  scene: FlowScene | null = null,
-  activated?: (nodeId: string) => void,
-): {
-  session: NodeSession;
-  runner: NodeRunner;
-  assets: AssetUrls;
-} {
-  const assets = new AssetUrls(document);
-  const holder: { session: NodeSession | null } = { session: null };
-  const runner = new NodeRunner(document, {
-    onChange: (changes: ChangeSet) => holder.session?.onChanges(changes),
-    onSettled: (nodeId: string) => holder.session?.onSettled(nodeId),
-  });
-  const host: NodeSessionHost = {
-    document: () => document,
-    scene: () => scene,
-    assets: () => assets,
-    runner: () => runner,
-    pickImages,
-    applyChanges: (changes) => {
-      holder.session?.onChanges(changes);
-      scene?.applyChangeSet(changes);
-    },
-    schedulePreviews: () => undefined,
-    activateNode: (nodeId) => activated?.(nodeId),
-    isDisposed: () => false,
-  };
-  const session = new NodeSession(host);
-  holder.session = session;
-  return { session, runner, assets };
-}
 
 test("runs the mock image provider and stores an immutable batch", async () => {
   const document = await Document.open(":memory:");
@@ -487,6 +433,73 @@ test("closes the composer when its node is removed", async () => {
   });
   expect(session.composerId()).toBeNull();
   expect(session.detail()).toBeNull();
+
+  runner.dispose();
+  assets.dispose();
+  document.dispose();
+});
+
+test("copies an upload's output in one undoable step", async () => {
+  const document = await Document.open(":memory:");
+  const sourceId = "upload-source";
+  await document.insertNodes([
+    {
+      id: sourceId,
+      kind: "upload",
+      title: "Upload",
+      body: "",
+      tags: ["upload"],
+      x: 0,
+      y: 0,
+      width: 300,
+      height: 220,
+      z: 0,
+      settingsJson: JSON.stringify({ version: 1, media: [] }),
+    },
+  ]);
+  const scene = new FlowScene();
+  scene.apply(await document.scene({ x: -1000, y: -1000, width: 4000, height: 4000 }, 0, 100));
+  let selected: string | null = null;
+  const { session, runner, assets } = makeSession(
+    document,
+    async () => [
+      {
+        file: {
+          name: "cat.png",
+          type: "image/png",
+          arrayBuffer: async () => Uint8Array.from([137, 80, 78, 71]).buffer,
+        } as unknown as File,
+        size: { width: 2, height: 1 },
+      },
+    ],
+    scene,
+    (nodeId) => {
+      selected = nodeId;
+    },
+  );
+  await session.uploadSource(sourceId);
+  await session.copyNode(sourceId);
+
+  const copyId = selected;
+  if (copyId === null) throw new Error("the copy was not selected");
+  const copy = await document.nodeDetail(copyId);
+  if (!copy) throw new Error("the copy was not inserted");
+  expect(copy.node.settingsJson).toBe('{"version":1,"media":["image"]}');
+  expect(copy.batch?.items.length).toBe(1);
+  expect(copy.batch?.items[0]?.assetId).toBeTruthy();
+
+  // One undo removes the whole copy; the source keeps its own output.
+  await document.undo();
+  expect(await document.getNode(copyId)).toBe(null);
+  const source = await document.nodeDetail(sourceId);
+  expect(source?.node.outputBatchId).not.toBe(null);
+  expect(source?.batch?.items.length).toBe(1);
+
+  // Redo brings the copy back complete, not as an empty upload card.
+  await document.redo();
+  const again = await document.nodeDetail(copyId);
+  expect(again?.batch?.items.length).toBe(1);
+  expect(again?.node.settingsJson).toBe('{"version":1,"media":["image"]}');
 
   runner.dispose();
   assets.dispose();

@@ -1,14 +1,20 @@
 /** The composer sheet: the always-available native panel attached to a card. */
 import { computed, Image as NshImage, Text, token, View } from "nsh";
 import { Button, Input } from "nsh/base";
-import type { InputItemSummary, NodeDetail, PortIncoming, ResultItemSummary } from "@flow/native";
+import type {
+  InputItemSummary,
+  NodeDetail,
+  NodeSummary,
+  PortIncoming,
+  ResultItemSummary,
+} from "@flow/native";
 import type { ComposerState } from "../flow/composer-state";
 import {
   IMAGE_ASPECTS,
   type ImageAspect,
   type InputPort,
   modelLabel,
-  nodeKind,
+  portsOfNode,
   statusLabel,
 } from "../flow/node-kinds";
 import { keepsWheel } from "../flow/page-chrome";
@@ -45,7 +51,7 @@ export function NodeComposer(props: NodeComposerProps) {
     () => props.detail.batch?.items.filter((item) => item.kind === "image") ?? [],
   );
   const groupRows = computed(() =>
-    inputGroups(props.detail.inputs, props.detail.node.kind, props.detail.incoming),
+    inputGroups(props.detail.inputs, props.detail.node, props.detail.incoming),
   );
 
   return (
@@ -364,10 +370,10 @@ interface InputGroup {
 /** One group per input port that has items, in the schema's order. */
 function inputGroups(
   inputs: readonly InputItemSummary[],
-  kind: string,
+  node: NodeSummary,
   incoming: readonly PortIncoming[],
 ): InputGroup[] {
-  const ports = nodeKind(kind).inputs;
+  const ports = portsOfNode(node).inputs;
   const counts = new Map(incoming.map((entry) => [entry.portId, entry.edges]));
   const groups: InputGroup[] = [];
   for (const port of ports) {

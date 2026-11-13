@@ -164,6 +164,13 @@ export class NodeRunner {
   async run(detail: NodeDetail, settings: NodeSettings): Promise<void> {
     const nodeId = detail.node.id;
     if (this.disposed || this.runs.has(nodeId)) return;
+    // An upload node has no provider; its output comes from the local file.
+    // The kind registry keeps one from reaching a run, but settle the caller
+    // if it ever does rather than leaving its Run state busy.
+    if (!("prompt" in settings)) {
+      this.callbacks.onSettled(nodeId);
+      return;
+    }
     if (settings.prompt.trim() === "") {
       await this.settleFailure(nodeId, "Prompt cannot be empty", settings);
       this.callbacks.onSettled(nodeId);
@@ -290,8 +297,8 @@ export class NodeRunner {
 }
 
 function asTextSettings(settings: NodeSettings): TextSettings {
-  if (settings.version === 1 && !("aspect" in settings)) return settings;
-  throw new Error("an image settings object reached the text provider");
+  if (settings.version === 1 && "prompt" in settings && !("aspect" in settings)) return settings;
+  throw new Error("a non-text settings object reached the text provider");
 }
 
 function asImageSettings(settings: NodeSettings): ImageSettings {

@@ -31,11 +31,14 @@ pointer. Old batches stay because downstream input snapshots may still refer to
 their items.
 
 Rust stores `kind` and `settings_json` opaquely. The TSX kind registry
-(`flow/node-kinds.ts`) owns ports, default size and settings parsing, and
-`flow/execution.ts` owns the provider for each kind. M1 has `text` and
-`image`. Both declare a `prompt` text input (capacity 1), a `references` image
-input (capacity 4 for text, 16 for image) and one output: `text` for the text
-kind, `image` for the image kind.
+(`flow/node-kinds.ts`) owns each node's ports, default size and settings
+parsing, and `flow/execution.ts` owns the provider for each runnable kind.
+M1 has `text`, `image` and `upload`. Text and image declare a `prompt` text
+input (capacity 1), a `references` image input (capacity 4 for text, 16 for
+image) and one output: `text` for the text kind, `image` for the image kind.
+An upload has no inputs; its outputs are derived from its settings, one port
+per media kind it currently holds (`image` in this release), so an empty
+upload card has no output port.
 
 ## Ports and connections
 
@@ -57,7 +60,10 @@ kind, `image` for the image kind.
   stage edge); a group port shows its type and side.
 - Only ports of the same item type connect. A prompt accepts one incoming
   edge; an image references port accepts up to its capacity. A full input, a
-  type mismatch and a self-connection never highlight as a target.
+  type mismatch and a self-connection never highlight as a target. An upload
+  node's output ports are resolved from its `settings_json` when the node is
+  read, not declared for the whole kind; the scene caches the result by node
+  record, so a pan or zoom parses no settings again.
 - A connection snapshots **the source items whose `portId` matches the edge's
   output port** into the target's matching input port. A source with no
   output contributes no items.
@@ -126,6 +132,31 @@ or `interrupted` (`input-not-ready` is reserved for a later dependency gate).
   revocation until the page closes.
 - Uploads use the NSH image picker (`"picker": true` in `nsh.json`); the
   composer appends them as local inputs.
+- An Upload node writes its file as its **output**, not as an input: the
+  picked images are imported as content-addressed assets and become one
+  immutable result batch whose items carry `portId = "image"`. The same write
+  stores the node's media settings (`{"version":1,"media":["image"]}`), its
+  body (the file names, for search), the output pointer and the fitted card
+  rectangle, and is undoable like a manual text edit: one undo restores the
+  previous output and size together. Replacing the upload switches the output to a new
+  batch and marks downstream nodes stale; a failed import records a failed
+  batch and keeps the previous output. The card resizes to the image's aspect
+  ratio (fitted in a 320-point box, with a 220-point minimum width that keeps
+  the button usable) and keeps its centre, so the image shows whole instead
+  of being cropped. A ratio too extreme for both the box and the minimum
+  stops at the floor with its long side in the box; that image is contained
+  rather than stretched. The image is contained in the body without the
+  usual inset, inside the card's rounded border. The card's own bottom-right Upload/Replace button is a native pill
+  in the canvas's world-point controls layer above the pointer surface, with
+  an icon for its state (image upload, refresh, or a busy import), so it
+  scales with the camera and holds its place on the card. The
+  layer takes no pointer events itself and the button sets
+  `pointerEvents: "auto"`, so the button takes its press while the rest of
+  the canvas still receives its gestures. Its busy state belongs to the
+  import and write, not to the picker: an open picker leaves the button
+  reading Upload/Replace. The button shows on the selected
+  upload card, which the canvas stacks above every unselected card; selecting
+  an upload card opens no composer.
 
 ## Execution
 
@@ -149,7 +180,8 @@ new provider and, if it needs network access, a deliberate host entry in
 
 The canvas is a native NSH view tree. `components/FlowCanvas.tsx` holds the
 world-space cards and edges, the screen-space selection frame and marquee
-overlay and the interaction surface; `components/FlowCard.tsx` renders one
+overlay, the interaction surface and the selected upload card's world-point
+controls layer; `components/FlowCard.tsx` renders one
 card with its typed ports (`components/Port.tsx`), `components/FlowEdges.tsx`
 strokes the viewport's connectors in one native canvas and
 `components/FlowPreviews.tsx` the pulled connection previews.
@@ -160,18 +192,30 @@ from `flow/group-ports.ts`. `flow/scene.ts` is the headless model,
 resize, marquee, pan and connector gestures.
 `components/GridBackground.tsx` draws the dot grid in screen space.
 `components/CanvasContextMenu.tsx` is the right-click menu: on empty canvas,
-Add text node and Add image node place the card at the pressed point; on a
-card, Copy node duplicates that card's content and settings beside it and
-Delete node removes it; both write an open editor's drafts first, so a copy
+Add text node, Add image node and Add upload node place the card at the
+pressed point; on a card, Copy node duplicates that card's content and
+settings beside it and Delete node removes it; both write an open editor's drafts first, so a copy
 matches what is on screen and undo restores what was deleted. Opening a
 card's menu selects that card, without opening its composer; a card already
 in a multiple selection keeps it. `flow/node-commands.ts` performs those two commands:
 a copy writes an open editor's drafts first, then inserts the card beside its
-source; delete removes the card and its connectors. `flow/right-gesture.ts`
+source; delete removes the card and its connectors. An upload copy carries
+its output batch in the same command, so one undo removes the whole copy
+rather than leaving an empty card behind. `flow/right-gesture.ts`
 decides whether a right press becomes a camera pan or leaves the press to the
 menu, and `flow/context-menu.ts` holds the menu's anchor, target and delay.
-The canvas pointer surface listens with `onWheel`, so the mouse wheel and
-touchpad scrolls over it reach TSX, which zooms the camera about the pointer.
+The canvas root listens with `onWheel`, so the mouse wheel and touchpad
+scrolls over any part of it reach TSX, which zooms the camera about the
+pointer.
+
+An Upload card has no composer. Its empty body shows the upload icon, label
+and format hint, and `components/UploadButton.tsx` renders its native
+Upload/Replace pill, icon included, in the canvas's world-point controls
+layer above the pointer surface, so the button scales with the camera and
+stays where the card's bottom-right corner is. The layer is `box-none`: its own area passes
+pointer events through, and the button takes its own press before the canvas
+surface below sees it. Selecting the card raises it above unselected cards,
+so another card passing touches through cannot cover the button.
 
 The composer is a native panel (`components/NodeComposer.tsx`) in the same
 view tree as the rest of the app. `flow/overlay.ts` places it directly under
@@ -191,7 +235,8 @@ Keyboard: `Delete`/`Backspace` delete a selected edge or cards, `Mod+Z` /
 `Mod+Shift+Z` undo/redo, arrows pan, `Mod+=`/`Mod+-` zoom, `Mod+0` fits,
 `Mod+K` search. A secondary-button drag pans the canvas, and a right click
 opens the context menu for what it pressed: a card's Copy node/Delete node
-menu, or the canvas's Add text node/Add image node menu. `Escape` closes the
+menu, or the canvas's Add text node/Add image node/Add upload node menu.
+`Escape` closes the
 canvas menu, then search, the inline editor, a selected edge, the composer,
 and finally the selection.
 

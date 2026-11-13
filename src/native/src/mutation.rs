@@ -870,6 +870,145 @@ pub fn set_manual_text(
     .map_err(|error| error.to_string())
 }
 
+/// A local upload's output: one immutable batch and its items plus the node's
+/// derived port schema (settings), searchable body and fitted rectangle, in
+/// one undoable write. The batches stay on undo, like a manual text edit,
+/// because downstream snapshots may still refer to their items.
+pub fn set_manual_upload(
+    conn: &DatabaseConnection,
+    id: String,
+    settings_json: String,
+    body: String,
+    batch: ResultBatchInput,
+    items: Vec<ResultItemInput>,
+    bounds: Option<NodeBounds>,
+) -> Result<Mutation, String> {
+    conn.transaction::<_, _, DbErr>(|txn| {
+        if batch.node_id != id {
+            return Err(DbErr::Custom(
+                "the upload batch belongs to another node".to_owned(),
+            ));
+        }
+        if let Some(next) = &bounds
+            && next.id != id
+        {
+            return Err(DbErr::Custom(
+                "the upload bounds belong to another node".to_owned(),
+            ));
+        }
+        if batch.status != "done" || items.is_empty() {
+            return Err(DbErr::Custom(
+                "an upload batch must be done and hold at least one item".to_owned(),
+            ));
+        }
+        let before = find_node_tx(txn, &id)?;
+        insert_batch_tx(txn, &batch)?;
+        for item in &items {
+            insert_result_item_tx(txn, &batch.id, item)?;
+        }
+
+        let mut node = nodes::ActiveModel {
+            seq: Unchanged(before.seq),
+            settings_json: Set(settings_json),
+            body: Set(body),
+            status: Set("done".to_owned()),
+            output_batch_id: Set(Some(batch.id.clone())),
+            rev: Set(before.rev + 1),
+            updated_at: Set(now_ms()),
+            ..Default::default()
+        };
+        if let Some(next) = &bounds {
+            node.x = Set(next.x);
+            node.y = Set(next.y);
+            node.width = Set(next.width);
+            node.height = Set(next.height);
+        }
+        let updated = nodes::Entity::update(node).exec(txn)?;
+        // The upload's own write moves the card too: keep its spatial and
+        // connector indexes in step in the same transaction, so one undo
+        // restores the output and the previous rectangle together.
+        if bounds.is_some() {
+            sync_bounds_tx(txn, &before, &updated)?;
+            edge_index::sync_node_edges(txn, &updated.id)?;
+        }
+        let after = node_row(&updated);
+        refresh_fts_tx(txn, &updated)?;
+        let mut changed = vec![after.summary()];
+        changed.extend(
+            mark_downstream_stale_tx(txn, &id)?
+                .into_iter()
+                .map(|row| node_row(&row).summary()),
+        );
+
+        let rev = bump_document_rev(txn)?;
+        Ok(Mutation {
+            changes: ChangeSet {
+                rev: rev as f64,
+                changed,
+                removed: Vec::new(),
+                edges_changed: Vec::new(),
+                edges_removed: Vec::new(),
+            },
+            forward: vec![HistoryOp::Replace(after)],
+            inverse: vec![HistoryOp::Replace(node_row(&before))],
+        })
+    })
+    .map_err(|error| error.to_string())
+}
+
+/// Inserts a node together with its upload output batch, items and current
+/// output pointer in one transaction and one undo step. Copying an upload
+/// card goes through here: inserting it empty and writing its output after
+/// would leave a half-copied card on the first undo.
+pub fn insert_upload_node(
+    conn: &DatabaseConnection,
+    node: NodeInput,
+    batch: ResultBatchInput,
+    items: Vec<ResultItemInput>,
+) -> Result<Mutation, String> {
+    conn.transaction::<_, _, DbErr>(|txn| {
+        if batch.node_id != node.id {
+            return Err(DbErr::Custom(
+                "the upload batch belongs to another node".to_owned(),
+            ));
+        }
+        if batch.status != "done" || items.is_empty() {
+            return Err(DbErr::Custom(
+                "an upload batch must be done and hold at least one item".to_owned(),
+            ));
+        }
+        insert_node_tx(txn, &node)?;
+        insert_batch_tx(txn, &batch)?;
+        for item in &items {
+            insert_result_item_tx(txn, &batch.id, item)?;
+        }
+        let inserted = find_node_tx(txn, &node.id)?;
+        let updated = nodes::Entity::update(nodes::ActiveModel {
+            seq: Unchanged(inserted.seq),
+            status: Set("done".to_owned()),
+            output_batch_id: Set(Some(batch.id.clone())),
+            rev: Set(inserted.rev + 1),
+            updated_at: Set(now_ms()),
+            ..Default::default()
+        })
+        .exec(txn)?;
+        let after = node_row(&updated);
+        let rev = bump_document_rev(txn)?;
+        Ok(Mutation {
+            changes: ChangeSet {
+                rev: rev as f64,
+                changed: vec![after.summary()],
+                removed: Vec::new(),
+                edges_changed: Vec::new(),
+                edges_removed: Vec::new(),
+            },
+            forward: vec![HistoryOp::Insert(after)],
+            inverse: vec![HistoryOp::Delete { id: node.id }],
+        })
+    })
+    .map_err(|error| error.to_string())
+}
+
 /// Stores a provider run's batch and items and switches the node's output to
 /// it (for a successful run). Provider runs are not undoable.
 pub fn save_run(
@@ -1469,25 +1608,7 @@ fn set_node_bounds_batched(
         // scales every touching edge's stored offsets by the same ratio. The
         // edge row is the fallback anchor when its card is outside a viewport
         // read, and the connector RTree below is built from it.
-        if before.height > 0.0 && (next.height - before.height).abs() > f64::EPSILON {
-            let ratio = next.height / before.height;
-            edges::Entity::update_many()
-                .col_expr(
-                    edges::Column::FromOffset,
-                    Expr::col(edges::Column::FromOffset).mul(Expr::value(ratio)),
-                )
-                .filter(edges::Column::DocumentId.eq(DOCUMENT_ID))
-                .filter(edges::Column::FromId.eq(next.id.clone()))
-                .exec(txn)?;
-            edges::Entity::update_many()
-                .col_expr(
-                    edges::Column::ToOffset,
-                    Expr::col(edges::Column::ToOffset).mul(Expr::value(ratio)),
-                )
-                .filter(edges::Column::DocumentId.eq(DOCUMENT_ID))
-                .filter(edges::Column::ToId.eq(next.id.clone()))
-                .exec(txn)?;
-        }
+        scale_edge_offsets_tx(txn, &next.id, before.height, next.height)?;
 
         // The edge index must see the post-move geometry, with the original
         // row kept for the history pair above.
@@ -1944,15 +2065,7 @@ fn replace_node_tx(txn: &DatabaseTransaction, row: &NodeRow) -> Result<nodes::Mo
     })
     .exec(txn)?;
 
-    nodes_rtree::Entity::delete_by_id(updated.seq).exec(txn)?;
-    nodes_rtree::Entity::insert(nodes_rtree::ActiveModel {
-        id: Set(updated.seq),
-        min_x: Set(updated.x),
-        max_x: Set(updated.x + updated.width),
-        min_y: Set(updated.y),
-        max_y: Set(updated.y + updated.height),
-    })
-    .exec(txn)?;
+    sync_bounds_tx(txn, &before, &updated)?;
     nodes_fts::Entity::delete_by_id(updated.seq).exec(txn)?;
     nodes_fts::Entity::insert(nodes_fts::ActiveModel {
         rowid: Set(updated.seq),
@@ -1964,6 +2077,61 @@ fn replace_node_tx(txn: &DatabaseTransaction, row: &NodeRow) -> Result<nodes::Mo
     edge_index::sync_node_edges(txn, &updated.id)?;
 
     Ok(updated)
+}
+
+/// The spatial side of a node's new bounds: its RTree entry and the stored
+/// connector offsets, which scale with the card's height. The edge index is
+/// the caller's (`edge_index::sync_node_edges`), so a command that already
+/// touches connectors syncs them once.
+fn sync_bounds_tx(
+    txn: &DatabaseTransaction,
+    before: &nodes::Model,
+    after: &nodes::Model,
+) -> Result<(), DbErr> {
+    nodes_rtree::Entity::delete_by_id(before.seq).exec(txn)?;
+    nodes_rtree::Entity::insert(nodes_rtree::ActiveModel {
+        id: Set(after.seq),
+        min_x: Set(after.x),
+        max_x: Set(after.x + after.width),
+        min_y: Set(after.y),
+        max_y: Set(after.y + after.height),
+    })
+    .exec(txn)?;
+
+    scale_edge_offsets_tx(txn, &after.id, before.height, after.height)?;
+    Ok(())
+}
+
+/// A card's port layout is proportional to its height: a resize scales every
+/// touching edge's stored offsets by the same ratio, so a connector's fallback
+/// anchor (the edge row) stays on its port outside a viewport read.
+fn scale_edge_offsets_tx(
+    txn: &DatabaseTransaction,
+    node_id: &str,
+    before_height: f64,
+    after_height: f64,
+) -> Result<(), DbErr> {
+    if before_height <= 0.0 || (after_height - before_height).abs() <= f64::EPSILON {
+        return Ok(());
+    }
+    let ratio = after_height / before_height;
+    edges::Entity::update_many()
+        .col_expr(
+            edges::Column::FromOffset,
+            Expr::col(edges::Column::FromOffset).mul(Expr::value(ratio)),
+        )
+        .filter(edges::Column::DocumentId.eq(DOCUMENT_ID))
+        .filter(edges::Column::FromId.eq(node_id.to_owned()))
+        .exec(txn)?;
+    edges::Entity::update_many()
+        .col_expr(
+            edges::Column::ToOffset,
+            Expr::col(edges::Column::ToOffset).mul(Expr::value(ratio)),
+        )
+        .filter(edges::Column::DocumentId.eq(DOCUMENT_ID))
+        .filter(edges::Column::ToId.eq(node_id.to_owned()))
+        .exec(txn)?;
+    Ok(())
 }
 
 fn input_row(row: &node_inputs::Model) -> InputRow {

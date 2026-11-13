@@ -6,7 +6,7 @@
  */
 import type { BoxGeometry, Point, PortSide } from "./connection";
 import { PORT_CENTER_GAP, PORT_HIT_RADIUS, portOffset } from "./connection";
-import { type PortKind, nodeKind } from "./node-kinds";
+import { PORT_KINDS, type PortKind, portsOfNode } from "./node-kinds";
 import type { FlowScene } from "./scene";
 import { capacityOf, portCenterWorld, portOffsetAt } from "./scene-ports";
 
@@ -31,9 +31,6 @@ export interface GroupPort {
   readonly remaining: number;
 }
 
-/** The order group ports stack in; unknown types never reach the UI. */
-const PORT_KINDS: readonly PortKind[] = ["text", "image"];
-
 /** The group ports a selection frame exposes, centred on each side. */
 export function groupPorts(scene: FlowScene, frame: BoxGeometry): GroupPort[] {
   const ids = scene.selection();
@@ -51,9 +48,9 @@ export function groupPorts(scene: FlowScene, frame: BoxGeometry): GroupPort[] {
       const members: GroupPortMember[] = [];
       let remaining = Number.POSITIVE_INFINITY;
       for (const id of ids) {
-        const kind = scene.kindOf(id);
-        if (kind === null) continue;
-        const ports = side === "in" ? nodeKind(kind).inputs : nodeKind(kind).outputs;
+        const node = scene.node(id);
+        if (node === null) continue;
+        const ports = side === "in" ? portsOfNode(node).inputs : portsOfNode(node).outputs;
         for (const port of ports) {
           if (port.kind !== portKind) continue;
           const offset = portOffsetAt(scene, id, side, port.id);

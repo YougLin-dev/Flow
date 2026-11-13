@@ -113,6 +113,25 @@ test("drags a card through the canvas pointer surface", async () => {
   await app.waitUntil(() => selectedOf(app) === 0);
 });
 
+test("drags an upload card on the canvas", async () => {
+  // The headless/host screen lays views out without the camera transform, so
+  // the centred card needs a window wide enough for its world rectangle.
+  const app = await openApp({ width: 900 });
+  await app.waitUntil(() => percentOf(app) > 0);
+
+  // The upload card's button layer sits above the canvas surface; a press on
+  // the card body away from the button must still start a canvas drag.
+  await app.press("id:add-upload-node");
+  await app.waitUntil(() => selectedOf(app) === 1);
+  await app.waitUntil(() => app.shows("id:upload-node-button"));
+
+  await app.drag("id:flow-canvas", { x: 300, y: 200 });
+  // The card left the centre, so a click there clears the selection: the
+  // drag reached the native canvas through the button's layer.
+  await app.drag("id:flow-canvas", { x: 0, y: 0 });
+  await app.waitUntil(() => selectedOf(app) === 0);
+});
+
 test("searches cards and reveals the chosen one", async () => {
   const app = await openApp();
   await app.waitUntil(() => percentOf(app) > 0);

@@ -22,9 +22,10 @@ export interface ContextMenuPress extends ContextMenuPoint {
   readonly nodeId: string | null;
 }
 
-/** The menu's fixed width and the height it reserves on the stage. */
+/** The menu's fixed width, and the height of its tallest form: the empty
+ * canvas's three rows (a card's menu has two). */
 export const CONTEXT_MENU_WIDTH = 180;
-export const CONTEXT_MENU_HEIGHT = 84;
+export const CONTEXT_MENU_HEIGHT = 108;
 const MARGIN = 8;
 
 /** The menu's top-left corner, kept on the stage. */

@@ -27,6 +27,13 @@ import { PortTooltip } from "./PortTooltip";
 import { SelectionFrame } from "./SelectionFrame";
 import { SelectionOverlay } from "./SelectionOverlay";
 import { SelectionPorts } from "./SelectionPorts";
+import {
+  UploadButton,
+  UPLOAD_BUTTON_HEIGHT,
+  UPLOAD_BUTTON_INSET,
+  UPLOAD_BUTTON_WIDTH,
+  type UploadButtonState,
+} from "./UploadButton";
 
 export interface FlowCanvasProps {
   readonly scene: FlowScene;
@@ -41,6 +48,10 @@ export interface FlowCanvasProps {
   readonly onMenuPress: (at: ContextMenuPoint) => void;
   readonly onMenuRelease: () => void;
   readonly onMenuCancel: () => void;
+  /** The upload node whose picked files are importing, for the button state. */
+  readonly uploadingNode: () => string | null;
+  /** Picks and replaces the file of the pressed upload card. */
+  readonly onUploadNode: (nodeId: string) => void;
   /** The test-only image observation path; normal rendering has no hook. */
   readonly imageEvent?: ((event: CardImageEvent) => void) | undefined;
 }
@@ -176,6 +187,35 @@ export function FlowCanvas(props: FlowCanvasProps) {
     return rect !== null && cardInView(rect, shown);
   };
 
+  /**
+   * The one selected upload card whose own button is shown. A framed
+   * multi-card selection has group ports instead, and an unselected card
+   * keeps its empty state's call to action.
+   */
+  const uploadTarget = computed(() => {
+    // Track viewport replacements so a changed record wakes the button; the
+    // lookup itself is the scene's O(1) identity map. A selected card is
+    // pinned, so it is present even off screen.
+    props.scene.nodes();
+    const selection = props.scene.selection();
+    if (selection.length !== 1) return null;
+    const id = selection[0];
+    if (id === undefined) return null;
+    const node = props.scene.node(id);
+    if (node === null || node.kind !== "upload") return null;
+    const rect = props.scene.cardRect(id);
+    if (rect === null) return null;
+    return { id, node, rect };
+  });
+
+  /** The target card's button state: its first file, a replacement, or busy. */
+  const uploadState = computed<UploadButtonState>(() => {
+    const target = uploadTarget();
+    if (target === null) return "upload";
+    if (props.uploadingNode() === target.id) return "saving";
+    return (target.node.outputBatchId ?? null) !== null ? "replace" : "upload";
+  });
+
   /** The cards with an edge on either side; one set per edge change. */
   const connectedCards = computed(() => {
     const ids = new Set<string>();
@@ -300,6 +340,12 @@ export function FlowCanvas(props: FlowCanvasProps) {
     <View
       class="flex-1 bg-background"
       style={{ position: "relative", overflow: "hidden" }}
+      onWheel={(event) => {
+        const notches = wheelNotches(event.delta.y, event.deltaMode, platform.os);
+        if (notches !== 0) {
+          props.onWheelZoom(notches, event.position.x, event.position.y);
+        }
+      }}
       onLayout={(event) => {
         props.onSize({ width: event.bounds.size.width, height: event.bounds.size.height });
         if (!laidOut()) laidOut.set(true);
@@ -329,17 +375,15 @@ export function FlowCanvas(props: FlowCanvasProps) {
         <SelectionFrame scene={props.scene} camera={props.camera} controller={props.controller} />
         <Each of={props.scene.nodes()} key={(node) => node.id}>
           {(node) => {
-            // The id and kind never change for a row. Reading them once keeps
-            // the card's signals from all depending on the node accessor: a
+            // The id never changes for a row. Reading it once keeps the
+            // card's signals from all depending on the node accessor: a
             // viewport refresh replaces the node record, and a card whose
             // bindings read that record would be rebuilt on every refresh.
             const id = node().id;
-            const kind = node().kind;
             return (
               <FlowCard
                 node={node}
                 nodeId={id}
-                kind={kind}
                 rect={() => props.scene.cardRect(id)}
                 zIndex={() => {
                   // Only covered cards read the preview's ranks; every other
@@ -368,7 +412,11 @@ export function FlowCanvas(props: FlowCanvasProps) {
           {(previews) => <FlowPreviews previews={previews} zIndex={props.scene.previewZ()} />}
         </If>
       </View>
-      <SelectionOverlay controller={props.controller} />
+
+      {/* The canvas surface sits above the world's pointer-transparent
+          chrome, so card presses reach the controller. The upload button's
+          own layer stays above the surface: a native control in world points
+          that takes its press while the rest of the layer lets it through. */}
       <View
         testID="flow-canvas"
         accessibilityLabel="Flow canvas"
@@ -380,12 +428,6 @@ export function FlowCanvas(props: FlowCanvasProps) {
           height: "100%",
           backgroundColor: "transparent",
           cursor: props.controller.cursor(),
-        }}
-        onWheel={(event) => {
-          const notches = wheelNotches(event.delta.y, event.deltaMode, platform.os);
-          if (notches !== 0) {
-            props.onWheelZoom(notches, event.position.x, event.position.y);
-          }
         }}
         onPressDown={onDown}
         onPressUp={onUp}
@@ -401,6 +443,36 @@ export function FlowCanvas(props: FlowCanvasProps) {
         onTouchEnd={onTouchEnd}
         onTouchCancel={onTouchCancel}
       />
+      <If when={uploadTarget()}>
+        {(target) => (
+          <View
+            style={{
+              position: "absolute",
+              left: 0,
+              top: 0,
+              width: 1,
+              height: 1,
+              overflow: "visible",
+              pointerEvents: "box-none",
+              transformOrigin: "0 0",
+              transform: `translate(${props.camera.x}px, ${props.camera.y}px) scale(${props.camera.scale})`,
+            }}
+          >
+            <UploadButton
+              left={
+                target().rect.x + target().rect.width - UPLOAD_BUTTON_WIDTH - UPLOAD_BUTTON_INSET
+              }
+              top={
+                target().rect.y + target().rect.height - UPLOAD_BUTTON_HEIGHT - UPLOAD_BUTTON_INSET
+              }
+              state={uploadState()}
+              disabled={() => props.uploadingNode() === target().id}
+              onPress={() => props.onUploadNode(target().id)}
+            />
+          </View>
+        )}
+      </If>
+      <SelectionOverlay controller={props.controller} />
       <PortTooltip
         scene={props.scene}
         camera={props.camera}

@@ -28,12 +28,15 @@ import {
 import {
   canConnectPorts,
   defaultSettings,
+  isRunnableKind,
   type NodeKindId,
   type NodeSettings,
   nodeKind,
+  portsOfNode,
   serializeSettings,
 } from "./node-kinds";
 import { capacityOf, hasPortEdge, incomingEdgeCount } from "./scene-ports";
+import { uploadSource as uploadSourceFile } from "./upload-source";
 
 /** The asset URL cache the composer reads; `AssetUrls` implements it. */
 export interface AssetUrlSource {
@@ -53,6 +56,8 @@ export class NodeSession {
   readonly composerId = signal<string | null>(null);
   readonly detail = signal<NodeDetail | null>(null);
   readonly running = signal(false);
+  /** The upload node whose picked files are importing, if any. */
+  readonly uploadingNode = signal<string | null>(null);
   readonly assetVersion = signal(0);
   readonly inlineId = signal<string | null>(null);
   readonly inlineText = signal("");
@@ -60,6 +65,8 @@ export class NodeSession {
   private readonly announced = new Set<string>();
   private generation = 0;
   private inlineGeneration = 0;
+  /** A pick, import or write is in flight; not the same as the Saving label. */
+  private uploadInFlight = false;
 
   constructor(private readonly host: NodeSessionHost) {}
 
@@ -164,6 +171,7 @@ export class NodeSession {
     const id = this.composerId();
     const runner = this.host.runner();
     if (!detail || !id || !runner || this.running()) return;
+    if (!isRunnableKind(detail.node.kind)) return;
     this.running.set(true);
     await this.saveSettings(id, settings);
     if (this.host.isDisposed()) return;
@@ -257,6 +265,28 @@ export class NodeSession {
       this.host.schedulePreviews();
     } catch (error) {
       console.error("Flow could not upload an image", error);
+    }
+  }
+
+  /**
+   * Uploads a local file as an upload node's output. The card's own button
+   * calls this; one upload runs at a time.
+   */
+  async uploadSource(nodeId: string): Promise<void> {
+    // The guard also covers the picker, but only the import and write are
+    // "saving": the button must stay Upload/Replace while the picker is open.
+    if (this.uploadInFlight || this.host.isDisposed()) return;
+    this.uploadInFlight = true;
+    try {
+      await uploadSourceFile(this.host, nodeId, (saving) => {
+        if (this.host.isDisposed()) return;
+        this.uploadingNode.set(saving ? nodeId : null);
+      });
+    } catch (error) {
+      console.error("Flow could not upload the file", error);
+    } finally {
+      this.uploadInFlight = false;
+      if (this.uploadingNode() === nodeId) this.uploadingNode.set(null);
     }
   }
 
@@ -380,10 +410,14 @@ export class NodeSession {
     const valid: ConnectionPair[] = [];
     for (const pair of pairs) {
       if (pair.fromId === pair.toId) continue;
-      const fromKind = scene.kindOf(pair.fromId);
-      const toKind = scene.kindOf(pair.toId);
-      if (!fromKind || !toKind) continue;
-      if (!canConnectPorts(fromKind, pair.fromPort, toKind, pair.toPort)) continue;
+      const fromNode = scene.node(pair.fromId);
+      const toNode = scene.node(pair.toId);
+      if (fromNode === null || toNode === null) continue;
+      if (
+        !canConnectPorts(portsOfNode(fromNode), pair.fromPort, portsOfNode(toNode), pair.toPort)
+      ) {
+        continue;
+      }
       if (hasPortEdge(scene, pair.fromId, pair.fromPort, pair.toId, pair.toPort)) continue;
       valid.push(pair);
     }
@@ -436,10 +470,12 @@ export class NodeSession {
     const document = this.host.document();
     const scene = this.host.scene();
     if (!document || !scene || pair.fromId === pair.toId || this.host.isDisposed()) return;
-    const fromKind = scene.kindOf(pair.fromId);
-    const toKind = scene.kindOf(pair.toId);
-    if (!fromKind || !toKind) return;
-    if (!canConnectPorts(fromKind, pair.fromPort, toKind, pair.toPort)) return;
+    const fromNode = scene.node(pair.fromId);
+    const toNode = scene.node(pair.toId);
+    if (fromNode === null || toNode === null) return;
+    if (!canConnectPorts(portsOfNode(fromNode), pair.fromPort, portsOfNode(toNode), pair.toPort)) {
+      return;
+    }
     // The pair a reconnect would write must not already belong to another
     // edge: the writer rejects it, and the gesture should never have offered it.
     if (hasPortEdge(scene, pair.fromId, pair.fromPort, pair.toId, pair.toPort)) return;

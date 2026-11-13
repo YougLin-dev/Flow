@@ -11,7 +11,7 @@ import { cleanup, computed, effect, signal, Text, View } from "nsh";
 import type { CanvasCamera, CameraSize } from "../flow/camera";
 import type { CanvasController } from "../flow/canvas-controller";
 import type { Point, PortSide } from "../flow/connection";
-import { nodeKind } from "../flow/node-kinds";
+import { portsOfNode } from "../flow/node-kinds";
 import { portVisual } from "../flow/port-visuals";
 import type { FlowScene } from "../flow/scene";
 import { tipWidth, tooltipBox, type TipPlacement } from "../flow/tooltip";
@@ -163,9 +163,9 @@ interface TipView {
 function readTip(props: PortTooltipProps, key: string): Tip | null {
   const port = props.controller.hoveredPort();
   if (port !== null) {
-    const kind = props.scene.kindOf(port.nodeId);
-    if (kind === null) return null;
-    const spec = nodeKind(kind);
+    const node = props.scene.node(port.nodeId);
+    if (node === null) return null;
+    const spec = portsOfNode(node);
     const schema =
       port.side === "in"
         ? spec.inputs.find((candidate) => candidate.id === port.portId)

@@ -17,6 +17,7 @@ export interface CanvasContextMenuProps {
   readonly onClose: () => void;
   readonly onAddText: () => void;
   readonly onAddImage: () => void;
+  readonly onAddUpload: () => void;
   readonly onCopyNode: () => void;
   readonly onDeleteNode: () => void;
   /** A mouse move with a button held (the page may start a pan). */
@@ -70,6 +71,13 @@ export function CanvasContextMenu(props: CanvasContextMenuProps) {
               class="w-full rounded-md px-2 py-1.5 active:bg-accent focus:bg-accent hover:bg-muted"
             >
               <Text class="text-sm text-popover-foreground">Add image node</Text>
+            </Button>
+            <Button
+              testID="context-add-upload"
+              onPress={props.onAddUpload}
+              class="w-full rounded-md px-2 py-1.5 active:bg-accent focus:bg-accent hover:bg-muted"
+            >
+              <Text class="text-sm text-popover-foreground">Add upload node</Text>
             </Button>
           </>
         </If>

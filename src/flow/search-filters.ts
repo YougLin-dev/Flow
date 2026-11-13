@@ -10,4 +10,5 @@ export const SEARCH_FILTERS: readonly FlowSearchFilter[] = [
   { label: "All", kind: null },
   { label: "Text", kind: "text" },
   { label: "Images", kind: "image" },
+  { label: "Uploads", kind: "upload" },
 ];

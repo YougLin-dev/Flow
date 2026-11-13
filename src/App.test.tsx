@@ -54,6 +54,13 @@ const canvasState = (app: App): { selected: number; composing: boolean } => {
 
 const selectedOf = (app: App): number => canvasState(app).selected;
 
+/** A 1×1 transparent PNG, so the headless picker reads a real size. */
+const PNG_1X1 = Uint8Array.from([
+  137, 80, 78, 71, 13, 10, 26, 10, 0, 0, 0, 13, 73, 72, 68, 82, 0, 0, 0, 1, 0, 0, 0, 1, 8, 6, 0, 0,
+  0, 31, 21, 196, 137, 0, 0, 0, 13, 73, 68, 65, 84, 120, 218, 99, 252, 207, 192, 80, 15, 0, 4, 133,
+  1, 128, 132, 169, 140, 33, 0, 0, 0, 0, 73, 69, 78, 68, 174, 66, 96, 130,
+]);
+
 /** Half the flow's size in world coordinates. */
 const HALF_WIDTH = CONTENT.width / 2;
 const HALF_HEIGHT = CONTENT.height / 2;
@@ -141,6 +148,25 @@ test("adds an image node from the toolbar", async () => {
   await app.waitUntil(() => selectedOf(app) === 1);
   await app.waitUntil(() => app.texts().includes("Model · Mock Image"));
   expect(selectedOf(app)).toBe(1);
+});
+
+test("adds an upload node and uploads from its card", async () => {
+  // A headless screen lays views out without the canvas transform, so a card
+  // at the canvas centre sits at its world point: a phone-width window cuts
+  // the card's bottom-right button off even though the camera shows it.
+  const app = await openApp({ width: 900 });
+  await app.waitUntil(() => percentOf(app) > 0);
+  app.onPick(() => [{ name: "cat.png", type: "image/png", data: PNG_1X1 }]);
+
+  await app.press("id:add-upload-node");
+  await app.waitUntil(() => selectedOf(app) === 1);
+  await app.waitFor("id:upload-node-button");
+
+  await app.press("id:upload-node-button");
+  await app.waitFor("text:Replace");
+  expect(app.shows("label:Replace the image")).toBe(true);
+  // An upload card is its own control: it never opens a composer.
+  expect(canvasState(app).composing).toBe(false);
 });
 
 test("clears the selection with Escape", async () => {
@@ -468,6 +494,19 @@ test("adds an image node from the canvas menu", async () => {
   await app.press("id:context-add-image");
 
   await app.waitUntil(() => app.texts().includes("Model · Mock Image"));
+});
+
+test("adds an upload node from the canvas menu", async () => {
+  const app = await openApp({ width: 900, platform: "windows" });
+  await app.waitUntil(() => percentOf(app) > 0);
+
+  await app.rightClick("id:flow-canvas");
+  await app.waitUntil(() => app.shows("id:canvas-menu"));
+  await app.press("id:context-add-upload");
+
+  await app.waitUntil(() => app.shows("id:upload-node-button"));
+  // An upload card is its own control: selecting it opens no composer.
+  expect(canvasState(app).composing).toBe(false);
 });
 
 test("closes the canvas menu with Escape", async () => {

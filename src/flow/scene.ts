@@ -17,7 +17,7 @@ import {
 } from "./connection";
 import { CARD_TITLE_BAND } from "./card-layout";
 import { KeyedFlags } from "./keyed-flags";
-import type { PortKind } from "./node-kinds";
+import { hasImageOutput, type PortKind } from "./node-kinds";
 import { sameEdge, sameNode, samePreviewMap, samePreviewView } from "./record-equality";
 import { edgePortOffsets } from "./scene-ports";
 import { containsPoint } from "./selection";
@@ -569,7 +569,7 @@ export class FlowScene {
   previewTargets(): { id: string; batchId: string }[] {
     const targets: { id: string; batchId: string }[] = [];
     for (const node of this.byId.values()) {
-      if (node.kind === "image" && node.outputBatchId) {
+      if (node.outputBatchId && hasImageOutput(node)) {
         targets.push({ id: node.id, batchId: node.outputBatchId });
       }
     }

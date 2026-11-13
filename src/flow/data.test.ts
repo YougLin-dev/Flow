@@ -25,6 +25,7 @@ test("the content bounds enclose both cards", () => {
 test("the seed's image settings are valid", () => {
   const image = seedNodes()[1];
   const settings = parseSettings("image", image?.settingsJson ?? "{}");
+  if (!("prompt" in settings)) throw new Error("the seed's image settings lost their prompt");
   expect(settings.prompt.length).toBeGreaterThan(0);
   expect(settings.version).toBe(1);
   if (settings.version === 1 && "aspect" in settings) {

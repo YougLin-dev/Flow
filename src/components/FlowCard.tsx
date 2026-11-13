@@ -10,14 +10,16 @@
  */
 import { computed, host, Image, Text, token, View } from "nsh";
 import { Input } from "nsh/base";
+import { Image as ImageIcon } from "lucide";
 import type { NodeSummary } from "@flow/native";
+import { Icon } from "./Icon";
 import { Port } from "./Port";
 import { portKey, type PortHover } from "../flow/canvas-controller";
 import { CardContent } from "../flow/card-content";
 import { CardGeometry, type CardSize, cardLocalLayout } from "../flow/card-geometry";
 import { CARD_TITLE_HEIGHT } from "../flow/card-layout";
 import { type BoxGeometry, PORT_CENTER_GAP, portOffset } from "../flow/connection";
-import { type FlowAccent, nodeKind } from "../flow/node-kinds";
+import { type FlowAccent, portsOfNode } from "../flow/node-kinds";
 import { previewCell } from "../flow/preview-grid";
 import type { PreviewView } from "../flow/scene";
 
@@ -35,8 +37,6 @@ export interface FlowCardProps {
   readonly node: () => NodeSummary;
   /** The card's document id; the hovered port matches against it. */
   readonly nodeId: string;
-  /** The kind's port schema; a card's kind never changes for its row id. */
-  readonly kind: string;
   readonly rect: () => BoxGeometry | null;
   /** The card's draw order: selected cards sit above every other card. */
   readonly zIndex: () => number;
@@ -111,7 +111,15 @@ export function FlowCard(props: FlowCardProps) {
   const status = content.status;
   const statusText = content.statusText;
   const lineCount = () => Math.max(1, Math.floor((size().height - BODY_INSET * 2) / 19));
-  const spec = nodeKind(props.kind);
+  // An upload's image is the card: no body inset, just the card's border, and
+  // the inner clip follows the card's rounded corners.
+  const imageInset = () => (content.upload() ? 1 : BODY_INSET);
+  const imageRadius = () => (content.upload() ? 15 : 8);
+  // A single upload image is the card, and contain guarantees the whole file
+  // shows even when an extreme ratio hit the card's floors; a grid of several
+  // uploads uses cover like the image cards' thumbnails.
+  const singleUploadImage = () => content.upload() && (props.preview()?.urls.length ?? 0) === 1;
+  const spec = computed(() => portsOfNode(props.node()));
   // Ports stay out of the tree for cards nobody is looking at: an idle board
   // pays no per-port views. A framed selection keeps them only while they are
   // readable on screen; at an overview zoom the frame's group ports are the
@@ -255,14 +263,17 @@ export function FlowCard(props: FlowCardProps) {
           class="absolute left-0 top-0 h-full w-full rounded-2xl border bg-card shadow-lg"
           style={{ borderColor: borderColor() }}
         />
-        {content.image() ? (
+        {content.uploadEmpty() ? (
+          <UploadEmpty />
+        ) : content.image() ? (
           <View
             class="absolute"
             style={{
-              left: BODY_INSET,
-              top: BODY_INSET,
-              width: Math.max(1, size().width - BODY_INSET * 2),
-              height: Math.max(1, size().height - BODY_INSET * 2),
+              left: imageInset(),
+              top: imageInset(),
+              width: Math.max(1, size().width - imageInset() * 2),
+              height: Math.max(1, size().height - imageInset() * 2),
+              borderRadius: imageRadius(),
               overflow: "hidden",
             }}
           >
@@ -296,13 +307,13 @@ export function FlowCard(props: FlowCardProps) {
                   style={{
                     position: "absolute",
                     ...previewCell(
-                      Math.max(1, size().width - BODY_INSET * 2),
-                      Math.max(1, size().height - BODY_INSET * 2),
+                      Math.max(1, size().width - imageInset() * 2),
+                      Math.max(1, size().height - imageInset() * 2),
                       index(),
                       props.preview()?.urls.length ?? 0,
                     ),
-                    borderRadius: 8,
-                    objectFit: "cover",
+                    borderRadius: content.upload() ? 0 : 8,
+                    objectFit: singleUploadImage() ? "contain" : "cover",
                   }}
                 />
               )}
@@ -339,25 +350,41 @@ export function FlowCard(props: FlowCardProps) {
       </View>
 
       <If when={portsShown()}>
-        <Each of={spec.inputs} key={(port) => port.id}>
+        <Each of={spec().inputs} key={(port) => port.id}>
           {(port, index) => (
             <Port
               port={port()}
-              center={() => portCenter("in", index(), spec.inputs.length)}
+              center={() => portCenter("in", index(), spec().inputs.length)}
               follow={() => portFollow("in", port().id)}
             />
           )}
         </Each>
-        <Each of={spec.outputs} key={(port) => port.id}>
+        <Each of={spec().outputs} key={(port) => port.id}>
           {(port, index) => (
             <Port
               port={port()}
-              center={() => portCenter("out", index(), spec.outputs.length)}
+              center={() => portCenter("out", index(), spec().outputs.length)}
               follow={() => portFollow("out", port().id)}
             />
           )}
         </Each>
       </If>
+    </View>
+  );
+}
+
+/** The upload card's empty body: the icon, the call to action and the
+ * accepted formats. The card's own Upload button draws over it. */
+function UploadEmpty() {
+  return (
+    <View class="absolute left-0 top-0 flex-col h-full w-full items-center justify-center gap-2 overflow-hidden">
+      <Icon icon={ImageIcon} size={40} tint={() => token("muted-foreground")} />
+      <Text class="text-[13px] font-medium text-card-foreground" style={{ textAlign: "center" }}>
+        Upload an image
+      </Text>
+      <Text class="text-[11px] text-muted-foreground" style={{ textAlign: "center" }}>
+        PNG, JPG, WEBP, or GIF
+      </Text>
     </View>
   );
 }

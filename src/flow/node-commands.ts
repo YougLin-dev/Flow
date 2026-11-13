@@ -5,7 +5,7 @@
  * controller.
  */
 import type { ChangeSet, Document, NodeDetail, NodeInput } from "@flow/native";
-import type { NodeSettings } from "./node-kinds";
+import { type NodeSettings, serializeSettings } from "./node-kinds";
 import type { FlowScene } from "./scene";
 
 /** The open composer's unsaved values, which a copy writes before reading
@@ -59,12 +59,28 @@ export async function copyNode(
   // The effective rectangle includes a drag or resize not yet committed.
   const rect = scene.cardRect(id);
   if (!source || !rect) return;
+  // An upload node's ports are derived from its output; a copy without the
+  // output would otherwise show a port that can never produce items. Read
+  // the source batch first, insert the copy empty, then copy its items.
+  const uploadDetail = source.kind === "upload" ? await document.nodeDetail(id) : null;
+  if (host.isDisposed()) return;
+  const uploadNode = uploadDetail?.node ?? null;
+  const uploadBatch = uploadDetail?.batch ?? null;
   const copyId = `node-${crypto.randomUUID()}`;
+  // An upload whose output is missing keeps an empty media list: copying its
+  // settings would advertise a port that no batch can fill. Otherwise the
+  // detail's settings and body are the latest the document holds.
+  const settingsJson =
+    source.kind !== "upload"
+      ? source.settingsJson
+      : uploadBatch === null
+        ? serializeSettings({ version: 1, media: [] })
+        : (uploadNode?.settingsJson ?? source.settingsJson);
   const input: NodeInput = {
     id: copyId,
     kind: source.kind,
     title: source.title,
-    body: source.body,
+    body: uploadNode?.body ?? source.body,
     // A summary carries no tags; the kind is the same tag a new card gets.
     tags: [source.kind],
     x: rect.x + COPY_OFFSET,
@@ -73,10 +89,35 @@ export async function copyNode(
     height: rect.height,
     z: source.z,
     dataJson: source.dataJson,
-    settingsJson: source.settingsJson,
+    settingsJson,
   };
   try {
-    const changes = await document.insertNodes([input]);
+    // An upload copy is one command: inserting it empty and filling its
+    // output after would make the first undo leave a half-copied card.
+    const changes =
+      uploadBatch === null
+        ? await document.insertNodes([input])
+        : await document.insertUploadNode(
+            input,
+            {
+              id: `batch-${crypto.randomUUID()}`,
+              nodeId: copyId,
+              trigger: uploadBatch.trigger,
+              provider: uploadBatch.provider,
+              model: uploadBatch.model,
+              paramsJson: uploadBatch.paramsJson,
+              status: "done",
+            },
+            uploadBatch.items.map((item, position) => ({
+              id: `item-${crypto.randomUUID()}`,
+              position,
+              portId: item.portId,
+              kind: item.kind,
+              text: item.text,
+              assetId: item.assetId ?? null,
+              metaJson: item.metaJson,
+            })),
+          );
     if (host.isDisposed()) return;
     host.applyChanges(changes);
     if (activateIf !== null && !sameSelection(scene.selection(), activateIf)) return;

@@ -113,8 +113,12 @@ its views.
 M1 adds one generic executable node shape: several named, typed input and
 output ports, and many-to-many directed connections carrying typed text and
 image items. A TSX kind registry (`flow/node-kinds.ts`) declares each kind's
-ports, per-input capacity, defaults and settings schema; `flow/execution.ts`
-owns its provider. Rust stores only `kind` and opaque `settings_json`.
+appearance, per-input capacity, defaults and settings schema, and resolves
+each node's ports from its settings (`portsOfNode`); `flow/execution.ts` owns
+the provider for a runnable kind. An upload node has no inputs and derives
+one output per media kind it holds, so its output port appears with its
+first upload. Rust stores only `kind`, opaque `settings_json`, the immutable
+result batches and the assets.
 
 - A connection binds one output port to one input port; only ports of the
   same item type can join. Connecting snapshots the source items whose
@@ -145,7 +149,8 @@ owns its provider. Rust stores only `kind` and opaque `settings_json`.
   clamps to stay inside the viewport. Its input groups follow the node
   kind's input ports and show the edge slots in use. It is built from the
   same controls as the rest of the app. The inline text editor is a
-  screen-space native overlay. The image node's body shows a thumbnail grid.
+  screen-space native overlay. Image cards and uploads with images show a
+  thumbnail grid; an upload without an output shows its upload empty state.
 - Mock text and mock image providers exercise the run lifecycle and the
   provider seam. See [the node editor contract](node-editor.md) for the full
   M1 rules and non-goals.
@@ -167,7 +172,7 @@ the store. `App` binds the store's `isPinned`/`togglePinned` into
 ## The canvas
 
 `FlowCanvas` is one native view with `testID="flow-canvas"`. It reads pointer
-events and renders four kinds of children:
+events and renders these layers:
 
 - **Grid** — a tiled dot-grid background in screen space, regenerated with the
   current `grid-dot` token when the appearance changes.
@@ -176,7 +181,10 @@ events and renders four kinds of children:
   world coordinates: one `FlowEdges` canvas for every connector, the selection
   frame and a `FlowCard` per visible node. The camera's transform is the only
   mapping from world to screen; the scene never caches screen geometry on a
-  card. The frame draws above every selected card, so its neutral outline and
+  card. The world takes no pointer events, so its chrome never holds a press;
+  the interaction surface above it owns canvas gestures. The selected upload
+  card's own button lives instead in a world-point controls layer above that
+  surface, so it is the one native control here that takes a press. The frame draws above every selected card, so its neutral outline and
   wash cover the whole swept group; only its group ports and a pulled
   connector stay above it. Its padding clears the cards' ports, and its
   border is divided by the camera's scale to stay one screen point wide. The frame exists only for a marquee that ends
@@ -202,11 +210,15 @@ events and renders four kinds of children:
   recoloring it. The card's border is the resize zone: corners scale
   proportionally and any point along an edge resizes that axis, with the
   cursor naming the side, so the card shows no handle dots.
-- **Interaction view** — a transparent, full-size view that owns the cursor
-  and dispatches presses, moves and touches to the `CanvasController`. It
-  also listens with `onWheel`: NSH hands the nearest listener the mouse wheel
-  and touchpad scrolls, so the view converts each one to notches and the page
-  zooms about the pointer.
+- **Interaction view** — a transparent, full-size view above the world that
+  owns the cursor and dispatches presses, moves and touches to the
+  `CanvasController`. The canvas root listens with `onWheel`: NSH hands the
+  nearest listener the mouse wheel and touchpad scrolls, so the root converts
+  each one to notches and the page zooms about the pointer.
+- **Upload controls** — a world-point layer above the interaction view,
+  rendered only for the one selected upload card and `box-none` itself: only
+  its native Upload/Replace button takes presses, so the camera scales the
+  button with the card while every other point still reaches the canvas.
 
 The minimap (`components/MiniMap.tsx`) is a screen-space panel rendered by
 `FlowPage` beside `FlowCanvas`, not inside it, in the bottom-left corner and
@@ -419,10 +431,13 @@ unrestricted to allow-list; keep it in place.
 
 - **A new page** — one file in `pages/`, mounted by `App.tsx` (or a nav stack);
   share state through `store.ts`, never through another page.
-- **A new node kind** — add it to `flow/node-kinds.ts` (ports, size, settings
-  parsing, accent), give it a provider in `flow/execution.ts`, and extend
-  `components/FlowCard.tsx` if the generic text/image body is not enough.
-  Rust needs no change: `kind` and `settings_json` are opaque.
+- **A new node kind** — add it to `flow/node-kinds.ts` (appearance, settings
+  parsing, ports through its resolver), give it a provider in
+  `flow/execution.ts` if it runs, and extend `components/FlowCard.tsx` if the
+  generic text/image body is not enough. Rust needs no schema change: `kind`
+  and `settings_json` are opaque. A source kind that writes local output needs
+  a command like `Document.setManualUpload`, which stores its batch, derived
+  settings and body in one undoable transaction.
 - **A new control** — a component in `components/` that takes values and
   callbacks as props; the page binds them to the store.
 - **A new canvas feature** — keep pure geometry in `flow/selection.ts` or
