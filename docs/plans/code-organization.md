@@ -4,7 +4,7 @@
   in progress on stacked branches (standard and tooling, shared kernel and
   first reuse, composer shell, AsyncDrain core, connector layer, the eight
   `flow/` area moves, `components/app`, the canvas world and its overlays,
-  the composer, minimap and search areas).
+  the composer, minimap and search areas, the probes).
 - **Scope:** `src/` (TSX app) and `src/native/` (Rust document core).
 - **Related:** [standards](../standards.md), [architecture](../architecture.md),
   [conventions](../conventions.md), [testing](../testing.md),
@@ -1846,6 +1846,13 @@ entry point, palette and the one `SearchFilter` definition (from
 `flow/search-filters.ts`) into `components/search`; the palette's duplicate
 filter type is gone and the page imports the new facades. `LEGACY_FLAT` is
 down to 5 modules.
+
+Phase 3 step 5 (plan item 6) moved `CanvasProbe` to `components/probes` and
+the `ImageLoadProbe`/`imageProbeText` and `ZoomProbe` test views out of
+`FlowCard`/`ZoomControls` into their own files there, behind the probes
+facade; the canvas facade no longer exports probes, and `FlowCard` keeps only
+the optional `imageEvent` observation seam. `LEGACY_FLAT` is down to 4
+modules.
 
 ---
 

@@ -141,6 +141,10 @@ src/                   the NSH app: its root, entry, config and assets
       SearchButton.tsx   floating search entry point
       SearchPalette.tsx  debounced full-text search, filters and result navigation
       search-filters.ts  the palette's one type filter definition
+    probes/
+      CanvasProbe.tsx    the selection and composer state a host test reads
+      ImageLoadProbe.tsx the last image event a host test reads
+      ZoomProbe.tsx      the camera scale a host test reads
   flow/
     document/
       index.ts         the area facade: lifecycle, sessions and loaders

@@ -116,9 +116,11 @@ the context menu into the area's `selection/`, `editing/`, `controls/`,
 (the attachment tile, model select and `detail-view.ts`; the sheet and
 variants landed in Phase 1b), `components/minimap` and `components/search`
 (including the one `search-filters.ts` type); the page imports both new
-facades. The remaining flat modules are `CanvasProbe`, `pages/FlowPage.tsx`,
-`flow/bindings.ts`, `flow/page-chrome.ts` and `flow/search-navigation.ts`; the
-probe moves next, and the page with its `flow/` helpers moves in Phase 4.
+facades. Phase 3 step 5 moved the three host-test probes out of the production
+views into `components/probes` behind a facade; `FlowCard` keeps only the
+optional `imageEvent` observation seam. The remaining flat modules are
+`pages/FlowPage.tsx`, `flow/bindings.ts`, `flow/page-chrome.ts` and
+`flow/search-navigation.ts`, which move in Phase 4.
 The old → new map is in
 [the plan's Appendix A](plans/code-organization.md#appendix-a--tsx-placement-map);
 `LEGACY_FLAT` in the manifest shrinks with every move and disappears in
