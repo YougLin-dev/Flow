@@ -1,4 +1,7 @@
-/** The world-space box every connector canvas positions itself from. */
+/**
+ * The world-space box every connector canvas positions itself from, and the
+ * cubic trace both connector layers share.
+ */
 import type { Accessor, CanvasRenderingContext2D } from "nsh";
 import type { Point, Rect } from "../../../flow/shared";
 

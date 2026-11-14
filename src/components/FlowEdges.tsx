@@ -18,7 +18,7 @@ import {
 import { cubicInsideView, visibleCubicRuns } from "../flow/edge-clip";
 import { connectorLayerBox, trimConnectorBox } from "../flow/edge-layer";
 import type { FlowScene } from "../flow/scene";
-import { ConnectorCanvas, connectorColor, traceCubic as traceConnector } from "./canvas";
+import { ConnectorCanvas, connectorColor, traceCubic } from "./canvas";
 
 /** The selected connector's stroke: one point thicker than the rest, so a
  * lit line reads as bold. */
@@ -142,7 +142,7 @@ export function FlowEdges(props: FlowEdgesProps) {
       cx.lineWidth = lit ? SELECTED_THICKNESS : EDGE_THICKNESS;
       cx.globalAlpha = lit ? 1 : REST_ALPHA;
       cx.beginPath();
-      if (runs === null) traceConnector(cx, origin, from, controls.c1, controls.c2, to);
+      if (runs === null) traceCubic(cx, origin, from, controls.c1, controls.c2, to);
       else traceRuns(runs);
       cx.stroke();
     }
