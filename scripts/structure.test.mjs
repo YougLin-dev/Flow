@@ -19,12 +19,16 @@ const tree = {
   "src/.nsh/generated.ts": "",
   "src/native/src/db.rs": "",
   "src/flow/scene.ts":
-    '// import x from "./test/helper"\nimport "./data";\nexport { x } from "./data";\nexport const later = () => import("./data");',
-  "src/flow/data.ts": "",
+    '// import x from "./test/helper"\nimport "./fixtures/a";\nexport { x } from "./fixtures/b";\nexport const later = () => import("./fixtures/c");',
+  "src/flow/fixtures/a.ts": "",
+  "src/flow/fixtures/b.ts": "",
+  "src/flow/fixtures/c.ts": "",
   "src/flow/new.ts": "",
   "src/flow/utils/thing.ts": "",
   "src/flow/canvas/index.ts": "",
   "src/flow/canvas/model/camera.ts": "",
+  "src/flow/canvas/geometry/point.ts": 'import "../model/camera";',
+  "src/components/search/SearchPalette.tsx": 'import "../../flow/canvas";',
   "src/flow/document/session/session.ts": 'import "../test/helper";',
   "src/flow/document/session/deep.ts": 'import "../../canvas/model/camera";',
   "src/flow/document/test/helper.ts": "",
@@ -85,15 +89,23 @@ test("reports a new flat module, a missing facade and a forbidden folder", () =>
       "src/flow/document/session/deep.ts deep-imports flow/canvas (../../canvas/model/camera)",
     );
     expect(result.reports).toContain(
+      "src/components/search/SearchPalette.tsx may not import flow/canvas (../../flow/canvas)",
+    );
+    expect(result.reports).toContain(
+      "src/flow/canvas/geometry/point.ts (geometry) may not import src/flow/canvas/model/camera.ts",
+    );
+    expect(result.reports).toContain(
       "src/components/canvas/helper.ts imports @flow/native outside the document seam",
     );
   });
 });
 
-test("reads imports without comment or duplicate noise", () => {
+test("reads static, re-export and dynamic imports but not comments", () => {
   withTree(tree, (root) => {
     const imports = readImports(root, "src/flow/scene.ts");
-    expect(imports).toContain("./data");
+    expect(imports).toEqual(
+      expect.arrayContaining(["./fixtures/a", "./fixtures/b", "./fixtures/c"]),
+    );
     expect(imports).not.toContain("./test/helper");
   });
 });
@@ -140,6 +152,7 @@ test("Phase 5 turns the area findings into failures", () => {
   withTree(tree, (root) => {
     const previous = { ...ENFORCEMENT };
     ENFORCEMENT.areas = true;
+    ENFORCEMENT.nativeSeam = true;
     ENFORCEMENT.unclassified = true;
     try {
       const result = runStructureCheck(root);
@@ -148,6 +161,18 @@ test("Phase 5 turns the area findings into failures", () => {
       );
       expect(result.failures).toContain('forbidden folder "utils" in src/flow/utils/thing.ts');
       expect(result.failures).toContain("unclassified module: src/flow/utils/thing.ts");
+      expect(result.failures).toContain(
+        "src/flow/document/session/deep.ts deep-imports flow/canvas (../../canvas/model/camera)",
+      );
+      expect(result.failures).toContain(
+        "src/components/search/SearchPalette.tsx may not import flow/canvas (../../flow/canvas)",
+      );
+      expect(result.failures).toContain(
+        "src/flow/canvas/geometry/point.ts (geometry) may not import src/flow/canvas/model/camera.ts",
+      );
+      expect(result.failures).toContain(
+        "src/components/canvas/helper.ts imports @flow/native outside the document seam",
+      );
     } finally {
       Object.assign(ENFORCEMENT, previous);
     }
