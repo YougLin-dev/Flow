@@ -1906,6 +1906,17 @@ nested `native/` or `assets/` part folder is classified like any other. The
 gate on the final tree is green and the structure report prints
 `183 source files, 17 areas`.
 
+Phase 5 exit: the report-only mode, `ENFORCEMENT` and the legacy allow-list
+are gone; every gating rule fails `bun run check`; the tooling suite asserts
+the by-default failures, the advisory Rust/budget channels and the nested
+part-folder walk; the final gate is 183 source files, 17 areas, 22 lint
+tests/169 expects and 550 app/Rust tests (548 passed, 2 pre-existing
+ignored benchmarks). §14 status at this point: gates green, no root modules,
+every area has a facade, lint/structure fail on violations, FlowPage is
+208 lines, and the §6.4 duplicates routed so far are cleared. Remaining §14
+items are the Rust core split (Phase 6) and the internal splits plus the
+remaining §6.4 sweep (Phase 7).
+
 ---
 
 ## Appendix A — TSX placement map (non-test)
