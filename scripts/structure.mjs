@@ -8,7 +8,8 @@
  * Phase 5 flips `ENFORCEMENT` and makes the area rules fail too.
  */
 import { readdirSync, readFileSync, statSync } from "node:fs";
-import { dirname, join, relative, resolve, sep } from "node:path";
+import { join, relative, resolve, sep } from "node:path";
+import { resolveProjectImport } from "../lint/import-resolver.js";
 import {
   AREAS,
   AREA_BUDGET,
@@ -17,9 +18,16 @@ import {
   LEGACY_FLAT,
   STRUCTURE_EXCEPTIONS,
   areaOf,
+  canImportArea,
+  isFacadeOf,
+  isLayerIndex,
   isProductionFile,
+  isSameFeatureDeep,
   isTestFile,
   isTestSupportPath,
+  isTestSupportTarget,
+  layerOf,
+  segmentOf,
 } from "../lint/structure-map.js";
 
 const SKIP_DIRS = new Set([".nsh", "node_modules", "target", "assets", "native"]);
@@ -47,45 +55,27 @@ export function collectSourceFiles(root) {
   return files.toSorted((first, second) => first.localeCompare(second));
 }
 
-/** The relative specifiers an app file imports or re-exports. */
+/** The specifiers an app file imports or re-exports, parsed by Bun. */
 export function readImports(root, file) {
   const text = readFileSync(join(root, file), "utf8");
-  const specifiers = new Set();
-  const patterns = [
-    /\b(?:import|export)\s+(?:type\s+)?(?:[^"'`]*?\s+from\s+)?["']([^"']+)["']/g,
-    /\bimport\s*\(\s*["']([^"']+)["']\s*\)/g,
-  ];
-  for (const pattern of patterns) {
-    for (const match of text.matchAll(pattern)) {
-      if (match[1].startsWith(".")) specifiers.add(match[1]);
-    }
-  }
-  return [...specifiers];
+  const loader = file.endsWith(".tsx") ? "tsx" : "ts";
+  return new Bun.Transpiler({ loader }).scanImports(text).map((entry) => entry.path);
 }
 
 /** Resolve a relative import the way NSH's bundler does. */
 export function resolveImport(root, fromFile, specifier) {
-  if (!specifier.startsWith(".")) return null;
-  const base = resolve(root, dirname(fromFile), specifier);
-  const candidates = [
-    base,
-    `${base}.ts`,
-    `${base}.tsx`,
-    join(base, "index.ts"),
-    join(base, "index.tsx"),
-  ];
-  for (const candidate of candidates) {
-    if (statSync(candidate, { throwIfNoEntry: false })?.isFile()) {
-      return toPosix(relative(root, candidate));
-    }
-  }
-  return null;
+  return resolveProjectImport(root, join(root, fromFile), specifier);
 }
 
 function isDirectRootModule(file, rootDirectory) {
   const parts = file.split("/");
   return (
-    parts.length === 3 && parts[1] === rootDirectory && !isTestFile(file) && !LEGACY_FLAT.has(file)
+    parts.length === 3 &&
+    parts[1] === rootDirectory &&
+    parts[2] !== "index.ts" &&
+    parts[2] !== "index.tsx" &&
+    !isTestFile(file) &&
+    !LEGACY_FLAT.has(file)
   );
 }
 
@@ -108,7 +98,7 @@ export function checkFacades(root, files) {
   for (const [area, rule] of Object.entries(AREAS)) {
     const directory = join(root, "src", area);
     if (!statSync(directory, { throwIfNoEntry: false })?.isDirectory()) continue;
-    if (!files.includes(`src/${area}/index.ts`)) {
+    if (!files.includes(rule.facade)) {
       reports.push(`area ${area} is missing its ${rule.facade} facade`);
     }
   }
@@ -170,7 +160,7 @@ export function checkTestSupportImports(root, files) {
     for (const specifier of readImports(root, file)) {
       const target = resolveImport(root, file, specifier);
       const matches =
-        (target !== null && (isTestFile(target) || isTestSupportPath(target))) ||
+        (target !== null && isTestSupportTarget(target)) ||
         /(?:^|\/)test-support(?:\/|$)/.test(specifier) ||
         /(?:^|\/)test(?:\/|$)/.test(specifier);
       if (matches) failures.push(`${file} imports test support (${specifier})`);
@@ -179,13 +169,20 @@ export function checkTestSupportImports(root, files) {
   return failures;
 }
 
+/** Legacy allow-list entries whose file is gone; the list must shrink. */
+export function checkLegacyAllowList(files) {
+  return [...LEGACY_FLAT]
+    .filter((file) => !files.includes(file))
+    .map((file) => `stale legacy allow-list entry: ${file}`);
+}
+
 /** Unclassified app modules outside the legacy allow-list. */
 export function checkUnclassified(files) {
   const reports = [];
   for (const file of files) {
     if (!isProductionFile(file) || !file.startsWith("src/")) continue;
     if (file === "src/App.tsx" || file === "src/store.ts") continue;
-    if (areaOf(file) !== null || LEGACY_FLAT.has(file)) continue;
+    if (areaOf(file) !== null || LEGACY_FLAT.has(file) || isLayerIndex(file)) continue;
     reports.push(`unclassified module: ${file}`);
   }
   return reports;
@@ -201,6 +198,8 @@ export function checkRustLayout(root) {
     "db",
     "mutation.rs",
     "mutation",
+    "reads",
+    "store",
     "document.rs",
     "history.rs",
     "asset.rs",
@@ -220,22 +219,99 @@ export function checkRustLayout(root) {
     .map((entry) => `Rust module at the crate root: src/native/src/${entry}`);
 }
 
-/** The whole Phase 0 report. */
+/**
+ * Import-level area findings for the report. The lint plugin enforces the
+ * same rules; this walk keeps `check:structure` honest while the plugin's
+ * area rules are report-only.
+ */
+export function checkAreaImports(root, files) {
+  const areaReports = [];
+  const nativeReports = [];
+  for (const file of files) {
+    if (!isProductionFile(file) || !file.startsWith("src/")) continue;
+    const sourceArea = areaOf(file);
+    const sourceSegment = segmentOf(file);
+    for (const specifier of readImports(root, file)) {
+      if (specifier === "@flow/native") {
+        if (file !== "src/flow/shared/native-types.ts" && !file.startsWith("src/flow/document/")) {
+          nativeReports.push(`${file} imports @flow/native outside the document seam`);
+        }
+        continue;
+      }
+      if (!specifier.startsWith(".")) continue;
+      const target = resolveImport(root, file, specifier);
+      if (target === null) continue;
+      const targetArea = areaOf(target);
+      const targetSegment = segmentOf(target);
+      const targetLayer = layerOf(target);
+
+      if (sourceArea && targetArea && sourceArea !== targetArea) {
+        if (!canImportArea(sourceArea, targetArea)) {
+          areaReports.push(`${file} may not import ${targetArea} (${specifier})`);
+        } else if (
+          !AREAS[sourceArea]?.compositionRoot &&
+          !isSameFeatureDeep(sourceArea, targetArea) &&
+          !isFacadeOf(targetArea, target)
+        ) {
+          areaReports.push(`${file} deep-imports ${targetArea} (${specifier})`);
+        }
+      }
+
+      if (!sourceSegment || !sourceArea?.startsWith("flow/")) continue;
+      let violation = false;
+      if (sourceSegment === "geometry") {
+        violation =
+          targetArea !== null &&
+          !(
+            targetArea === "flow/shared" ||
+            (targetArea === sourceArea && targetSegment === "geometry")
+          );
+      } else if (sourceSegment === "model") {
+        violation =
+          (targetArea === sourceArea && targetSegment === "interaction") ||
+          targetArea === "flow/document" ||
+          targetLayer === "component";
+      } else if (sourceSegment === "interaction") {
+        violation = targetLayer === "component" || targetArea === "flow/document";
+      }
+      if (violation) {
+        areaReports.push(`${file} (${sourceSegment}) may not import ${target}`);
+      }
+    }
+  }
+  return { areaReports, nativeReports };
+}
+
+/** The whole Phase 0 report; Phase 5 moves the area findings into failures. */
 export function runStructureCheck(root) {
   const files = collectSourceFiles(root);
   const budget = checkBudget(root);
+  const facades = checkFacades(root, files);
+  const forbidden = checkForbiddenFolders(files);
+  const unclassified = checkUnclassified(files);
+  const imports = checkAreaImports(root, files);
+  const legacy = checkLegacyAllowList(files);
   const failures = [
     ...checkRootModules(files),
     ...checkTestSupportImports(root, files),
+    ...(ENFORCEMENT.areas ? facades : []),
+    ...(ENFORCEMENT.areas ? forbidden : []),
     ...(ENFORCEMENT.areas ? budget.failures : []),
+    ...(ENFORCEMENT.areas ? imports.areaReports : []),
+    ...(ENFORCEMENT.nativeSeam ? imports.nativeReports : []),
+    ...(ENFORCEMENT.areas ? legacy : []),
+    ...(ENFORCEMENT.unclassified ? unclassified : []),
   ];
   const reports = [
-    ...checkFacades(root, files),
-    ...checkForbiddenFolders(files),
+    ...(ENFORCEMENT.areas ? [] : facades),
+    ...(ENFORCEMENT.areas ? [] : forbidden),
     ...budget.reports,
-    ...checkUnclassified(files),
-    ...checkRustLayout(root),
     ...(ENFORCEMENT.areas ? [] : budget.failures),
+    ...(ENFORCEMENT.areas ? [] : imports.areaReports),
+    ...(ENFORCEMENT.nativeSeam ? [] : imports.nativeReports),
+    ...(ENFORCEMENT.areas ? [] : legacy),
+    ...(ENFORCEMENT.unclassified ? [] : unclassified),
+    ...checkRustLayout(root),
   ];
   return { files, failures, reports };
 }

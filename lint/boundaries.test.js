@@ -1,7 +1,5 @@
 import { expect, test } from "bun:test";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { dirname, join } from "node:path";
+import { join } from "node:path";
 import {
   deepCrossFeature,
   forbiddenArea,
@@ -13,11 +11,12 @@ import {
   unclassifiedSource,
 } from "./boundaries";
 import { ENFORCEMENT, areaOf, canImport, isFacade, layerOf, segmentOf } from "./structure-map";
+import { withTree } from "./test-tree";
 
 const cwd = process.cwd();
 
 /** Runs one import through a rule in a fake file and returns its reports. */
-function reportsForRule(rule, relativeFile, source, root = cwd) {
+function reportsForRule(rule, relativeFile, source, root = cwd, visitor = "ImportDeclaration") {
   const reports = [];
   const context = {
     cwd: root,
@@ -25,27 +24,12 @@ function reportsForRule(rule, relativeFile, source, root = cwd) {
     report: (report) => reports.push(report),
   };
   const visitors = rule.create(context);
-  visitors.ImportDeclaration({ source: { type: "Literal", value: source } });
+  visitors[visitor]?.({ source: { type: "Literal", value: source } });
   return reports;
 }
 
 function reportsFor(relativeFile, source) {
   return reportsForRule(noUpwardImport, relativeFile, source);
-}
-
-/** Creates a temporary project tree and cleans it up after the callback. */
-function withTree(files, run) {
-  const root = mkdtempSync(join(tmpdir(), "flow-structure-"));
-  try {
-    for (const [path, text] of Object.entries(files)) {
-      const full = join(root, path);
-      mkdirSync(dirname(full), { recursive: true });
-      writeFileSync(full, text);
-    }
-    return run(root);
-  } finally {
-    rmSync(root, { recursive: true, force: true });
-  }
 }
 
 /** Turns the Phase 5 area rules on only for one test. */
@@ -67,15 +51,24 @@ const areaTree = {
   "src/flow/canvas/model/scene/scene.ts": "",
   "src/flow/canvas/interaction/canvas-controller.ts": "",
   "src/flow/canvas/geometry/connection.ts": "",
+  "src/flow/canvas/geometry/edge-clip.ts": "",
+  "src/flow/canvas/port-visuals.ts": "",
   "src/flow/document/index.ts": "",
   "src/flow/document/session/session.ts": "",
+  "src/flow/document/session/harness.ts": "",
   "src/flow/document/test/helper.ts": "",
+  "src/app-test-harness.ts": "",
+  "src/flow/nodes/index.ts": "",
+  "src/flow/nodes/node-kinds.ts": "",
   "src/flow/shared/index.ts": "",
   "src/flow/shared/native-types.ts": "",
   "src/components/canvas/index.ts": "",
   "src/components/canvas/world/Card.tsx": "",
+  "src/components/search/index.ts": "",
   "src/components/search/SearchPalette.tsx": "",
+  "src/pages/flow/index.ts": "",
   "src/pages/flow/FlowPage.tsx": "",
+  "src/App.tsx": "",
 };
 
 test("classifies layers, including test support", () => {
@@ -91,6 +84,26 @@ test("classifies layers, including test support", () => {
   expect(layerOf("src/flow/document/test/helper.ts")).toBe("test");
   expect(layerOf("src/tool.ts")).toBe("other");
   expect(layerOf("src/unclassified/module.ts")).toBe("other");
+});
+
+test("resolves .tsx, .js, .jsx and both index spellings", () => {
+  withTree(
+    {
+      "src/a/index.tsx": "",
+      "src/a/b.js": "",
+      "src/a/c.jsx": "",
+      "src/a/d.tsx": "",
+      "src/a/e/f.ts": "",
+    },
+    (root) => {
+      const from = join(root, "src/a/d.tsx");
+      expect(resolveProjectImport(root, from, ".")).toBe("src/a/index.tsx");
+      expect(resolveProjectImport(root, from, "./b")).toBe("src/a/b.js");
+      expect(resolveProjectImport(root, from, "./c")).toBe("src/a/c.jsx");
+      expect(resolveProjectImport(root, from, "./e/f")).toBe("src/a/e/f.ts");
+      expect(resolveProjectImport(root, from, "./e")).toBeNull();
+    },
+  );
 });
 
 test("allows only downward layer imports", () => {
@@ -115,10 +128,13 @@ test("classifies files and bare directory imports", () => {
   expect(areaOf("src/components/FlowCard.tsx")).toBeNull();
   expect(areaOf("src/pages/flow/FlowPage.tsx")).toBe("pages/flow");
   expect(areaOf("src/pages/FlowPage.tsx")).toBeNull();
+  expect(areaOf("src/App.tsx")).toBe("shell");
   expect(segmentOf("src/flow/canvas/model/scene/scene.ts")).toBe("model");
   expect(segmentOf("src/flow/canvas/index.ts")).toBeNull();
   expect(isFacade("src/flow/canvas/index.ts")).toBe(true);
   expect(isFacade("src/flow/canvas/model/camera.ts")).toBe(false);
+  expect(isFacade("src/store.ts")).toBe(true);
+  expect(isFacade("src/App.tsx")).toBe(true);
 });
 
 test("resolves exact files, extensions and directory indexes", () => {
@@ -134,7 +150,7 @@ test("resolves exact files, extensions and directory indexes", () => {
   });
 });
 
-test("allows only downward layer imports", () => {
+test("reports upward, unknown and unclassified imports", () => {
   expect(reportsFor("src/components/Card.tsx", "../pages/FlowPage")).toHaveLength(1);
   expect(reportsFor("src/components/Card.tsx", "../pages/FlowPage")[0].messageId).toBe("upward");
   expect(reportsFor("src/components/Card.tsx", "../pages")).toHaveLength(1);
@@ -200,6 +216,27 @@ test("reports an area pair missing from the matrix", () => {
   );
 });
 
+test("enforces the shell and allowed-area rows", () => {
+  withTree(areaTree, (root) =>
+    withAreas(() => {
+      expect(
+        reportsForRule(forbiddenArea, "src/App.tsx", "./components/search", root).map(
+          (report) => report.messageId,
+        ),
+      ).toEqual(["forbidden"]);
+      expect(reportsForRule(forbiddenArea, "src/App.tsx", "./pages/flow", root)).toEqual([]);
+      expect(
+        reportsForRule(
+          forbiddenArea,
+          "src/components/canvas/world/Card.tsx",
+          "../../../flow/canvas",
+          root,
+        ),
+      ).toEqual([]);
+    }),
+  );
+});
+
 test("keeps geometry pure and model/interaction view-free", () => {
   withTree(areaTree, (root) =>
     withAreas(() => {
@@ -229,6 +266,42 @@ test("keeps geometry pure and model/interaction view-free", () => {
           root,
         ),
       ).toEqual([]);
+
+      expect(
+        reportsForRule(
+          segmentDirection,
+          "src/flow/canvas/geometry/connection.ts",
+          "../../nodes/node-kinds",
+          root,
+        ).map((report) => report.messageId),
+      ).toEqual(["segment"]);
+
+      expect(
+        reportsForRule(
+          segmentDirection,
+          "src/flow/canvas/geometry/connection.ts",
+          "../port-visuals",
+          root,
+        ).map((report) => report.messageId),
+      ).toEqual(["segment"]);
+
+      expect(
+        reportsForRule(
+          segmentDirection,
+          "src/flow/canvas/geometry/connection.ts",
+          "./edge-clip",
+          root,
+        ),
+      ).toEqual([]);
+
+      expect(
+        reportsForRule(
+          forbiddenArea,
+          "src/flow/canvas/interaction/canvas-controller.ts",
+          "../../document",
+          root,
+        ).map((report) => report.messageId),
+      ).toEqual(["forbidden"]);
     }),
   );
 });
@@ -252,6 +325,15 @@ test("reports production imports of test support", () => {
         root,
       ),
     ).toEqual([]);
+
+    expect(
+      reportsForRule(
+        testSupportInProduction,
+        "src/flow/document/session/harness.ts",
+        "../../../app-test-harness",
+        root,
+      ).map((report) => report.messageId),
+    ).toEqual(["testSupport"]);
   });
 });
 
@@ -260,6 +342,24 @@ test("confines the native module to flow/document and the type seam", () => {
     withAreas(() => {
       expect(
         reportsForRule(nativeOutsideSeam, "src/components/FlowCard.tsx", "@flow/native", root),
+      ).toHaveLength(1);
+      expect(
+        reportsForRule(
+          nativeOutsideSeam,
+          "src/components/FlowCard.tsx",
+          "@flow/native",
+          root,
+          "ExportNamedDeclaration",
+        ),
+      ).toHaveLength(1);
+      expect(
+        reportsForRule(
+          nativeOutsideSeam,
+          "src/components/FlowCard.tsx",
+          "@flow/native",
+          root,
+          "ImportExpression",
+        ),
       ).toHaveLength(1);
       expect(
         reportsForRule(

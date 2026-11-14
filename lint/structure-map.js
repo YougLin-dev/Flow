@@ -266,8 +266,8 @@ export const LEGACY_FLAT = new Set([
 
 /** The layer graph `no-upward-import` enforces. Tests may reach everywhere. */
 export const LAYERS = {
-  shell: new Set(["shell", "page", "component", "store", "foundation", "test", "asset"]),
-  page: new Set(["page", "component", "store", "foundation", "test", "asset"]),
+  shell: new Set(["shell", "page", "component", "store", "foundation", "asset"]),
+  page: new Set(["page", "component", "store", "foundation", "asset"]),
   component: new Set(["component", "foundation", "asset"]),
   store: new Set(["store", "foundation", "asset"]),
   foundation: new Set(["foundation", "asset"]),
@@ -296,6 +296,17 @@ export function isTestSupportPath(file) {
 /** Whether a source file is production code (not a test or a test helper). */
 export function isProductionFile(file) {
   return !isTestFile(file) && !isTestSupportPath(file);
+}
+
+/** Whether a resolved target is test-only (a test file or a test helper). */
+export function isTestSupportTarget(file) {
+  return isTestFile(file) || isTestSupportPath(file);
+}
+
+/** A layer-level index, which is allowed at a layer root during the migration. */
+export function isLayerIndex(file) {
+  const path = projectPath(file);
+  return path === "components/index" || path === "flow/index" || path === "pages/index";
 }
 
 /** The layer of a project file, from its path relative to the repository. */
@@ -329,6 +340,7 @@ const AREA_NAMES = Object.keys(AREAS).toSorted((first, second) => second.length 
 /** The area a file belongs to, or null for a legacy/unclassified file. */
 export function areaOf(file) {
   const path = projectPath(file);
+  if (path === "App") return "shell";
   for (const area of AREA_NAMES) {
     if (path === area || path.startsWith(`${area}/`)) return area;
   }
@@ -353,10 +365,8 @@ export function featureOf(area) {
 /** Whether a file is the public entry of its area. */
 export function isFacade(file) {
   const area = areaOf(file);
-  if (!area) {
-    return projectPath(file) === "store" || projectPath(file) === "App";
-  }
-  return projectPath(file) === `${area}/index`;
+  if (!area) return false;
+  return projectPath(file) === projectPath(AREAS[area].facade);
 }
 
 /** Whether `target` is the facade for `area`, from the caller's path. */

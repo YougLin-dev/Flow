@@ -80,16 +80,16 @@ root `.nsh/out` MUST NOT be edited or committed. Asset and theme paths in
 `boundaries/no-upward-import` in `lint/boundaries.js` enforces this table for
 relative imports. Tests are exempt because they may reach into any layer.
 
-| Layer        | Path                            | MAY import                                          |
-| ------------ | ------------------------------- | --------------------------------------------------- |
-| Shell        | `src/App.tsx`                   | every layer                                         |
-| Page         | `src/pages/**`                  | pages, components, store, foundations, test, assets |
-| Component    | `src/components/**`             | components, foundations, assets                     |
-| Store        | `src/store.ts`                  | store, foundations, assets                          |
-| Foundation   | `src/flow/`, `src/native/`      | foundations, assets                                 |
-| Test         | `src/test-support/`, `**/test/` | every layer; production MUST NOT import it          |
-| Asset        | `src/assets/**`                 | nothing                                             |
-| Unclassified | any other `src/` module         | nothing until classified                            |
+| Layer        | Path                                                                                           | MAY import                                    |
+| ------------ | ---------------------------------------------------------------------------------------------- | --------------------------------------------- |
+| Shell        | `src/App.tsx`                                                                                  | pages, components, store, foundations, assets |
+| Page         | `src/pages/**`                                                                                 | pages, components, store, foundations, assets |
+| Component    | `src/components/**`                                                                            | components, foundations, assets               |
+| Store        | `src/store.ts`                                                                                 | store, foundations, assets                    |
+| Foundation   | `src/flow/`, `src/native/`                                                                     | foundations, assets                           |
+| Test         | `src/test-support/`, `**/test/`, `src/app-test-harness.ts`, `src/flow/node-session-harness.ts` | every layer; production MUST NOT import it    |
+| Asset        | `src/assets/**`                                                                                | nothing                                       |
+| Unclassified | any other `src/` module                                                                        | nothing until classified                      |
 
 Components, the store and foundations MUST NOT import a page or `src/App.tsx`.
 Foundations MUST NOT import the store. Cycles are forbidden. A page MAY import
@@ -110,11 +110,13 @@ and the `pages/flow` composition root. A new directory or facade MUST extend
 plus an allowed and a disallowed direction; an unexplained `other`
 classification is a review failure. (Lint, Lint test, Review)
 
-`src/native/` is a Rust foundation, not a second app layer. TSX imports only
-its generated `@flow/native` surface; Rust code owns SQLite, FTS5, RTree, undo
-history and asset metadata, and MUST NOT import TSX or the canvas. No TSX
-module may open SQLite or write SQL. Database calls cross the boundary in
-batches, not per node or per frame. (Review)
+`src/native/` is a Rust foundation, not a second app layer. Only
+`flow/document` calls `@flow/native` at runtime; outside it, TSX imports the
+generated native types through `flow/shared/native-types.ts`. Rust code owns
+SQLite, FTS5, RTree, undo history and asset metadata, and MUST NOT import TSX
+or the canvas. No TSX module may open SQLite or write SQL. Database calls
+cross the boundary in batches, not per node or per frame. (Review;
+`boundaries/native-outside-seam`.)
 
 Ordinary database work uses SeaORM entities and SeaQuery in `src/native/`;
 handwritten SQL is limited to the FTS5/RTree virtual-table adapters
@@ -473,14 +475,15 @@ mounted behind `host.params`, and carry no production logic. (Lint, Review)
 | --------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------ |
 | Unit      | `src/flow/camera.test.ts`, `src/flow/scene.test.ts`, `src/flow/selection.test.ts`, `src/flow/overlay.test.ts`, `src/flow/canvas-controller.test.ts`, `src/flow/composer-state.test.ts`, `src/flow/grid.test.ts`, `src/flow/connection.test.ts`, `src/flow/preview-grid.test.ts`, `src/flow/data.test.ts`, `src/flow/database-path.test.ts`, `src/flow/node-kinds.test.ts`, `src/store.test.ts` | Pure logic, the scene model, gestures, placement, drafts, grid and preview coverage, data and store behavior |
 | Native    | `src/native.test.ts`, `src/flow/node-session.native.test.ts`, `src/flow/node-session-inline.native.test.ts`, Rust tests in `src/native/src/db.rs`, `search.rs`, `viewport.rs`, `schema.rs`                                                                                                                                                                                                     | SeaORM persistence, FTS5/RTree plans, commands, history and search                                           |
-| Lint rule | `lint/boundaries.test.js`                                                                                                                                                                                                                                                                                                                                                                      | Layer classification and the rule's upward/unknown reports                                                   |
+| Lint rule | `lint/boundaries.test.js`, `scripts/structure.test.mjs`                                                                                                                                                                                                                                                                                                                                        | Layer/area classification, rule reports, fs resolution, roots, facades and budgets                           |
 | App       | `src/App.test.tsx`                                                                                                                                                                                                                                                                                                                                                                             | The mounted app headless: text, presses, drags, keyboard, composer and inputs                                |
 | Host      | `src/App.host.test.tsx`                                                                                                                                                                                                                                                                                                                                                                        | The mounted app on the real window: rendering, native input, title bar, pinning and appearance repaint       |
 
 Tests under `src/` MUST sit beside the subject, import from `nsh/test`, and use
 the lowest level that catches the bug. Tooling tests such as
-`lint/boundaries.test.js` use `bun:test` because they run under Bun, not NSH,
-and are part of `bun run check` through `bun run test:lint`. Each test MUST
+`lint/boundaries.test.js` and `scripts/structure.test.mjs` use `bun:test`
+because they run under Bun, not NSH, and are part of `bun run check` through
+`bun run test:lint`. Each test MUST
 cover one behavior and be named for the user action or invariant. A test whose
 subject is the platform itself (window, native input, rendering, desktop APIs)
 MUST live in a `*.host.test.tsx` file: `bun run test:host` runs only those
@@ -561,8 +564,9 @@ PRs, and each split MUST leave the gate green. (Review)
    user-reachable, an app test.
 5. Affected docs, `CLAUDE.md`, this standard, the changelog and any required
    ADR are updated in the same PR.
-6. No probe/scratch file, commented-out code, `console.log`, `any`,
-   unreviewed suppression or warning remains.
+6. No undeclared probe/scratch file, commented-out code, `console.log`, `any`,
+   unreviewed suppression or warning remains. A declared probe lives in
+   `components/probes/` behind `host.params`.
 7. New colors use tokens and their pairs were contrast-checked; new controls
    have a name, role, state, keyboard path and a non-drag alternative where
    needed.
@@ -610,6 +614,7 @@ formatting owned by Oxfmt is not a review topic. (Review)
 | `any`, unsafe values, assertions, promises, exhaustive unions | Oxlint in `vite.config.ts`                                                                                                                                   | A lint error                                                                                              |
 | Names, default exports, 500-line cap                          | `unicorn/filename-case`, `import/no-default-export`, `max-lines`                                                                                             | A lint error                                                                                              |
 | Layer direction and cycles                                    | `boundaries/no-upward-import`, `import/no-cycle`, `lint/boundaries.test.js`                                                                                  | A lint error, including bare directory and unclassified imports; a failing rule test                      |
+| Native seam                                                   | `boundaries/native-outside-seam`, `flow/shared/native-types.ts`                                                                                              | `@flow/native` outside `flow/document`, or a type import outside the seam                                 |
 | Area structure, facades and segments                          | `boundaries/{deep-cross-feature,forbidden-area,segment-direction,native-outside-seam,unclassified-source}`, `scripts/structure.mjs`, `lint/structure-map.js` | A lint/structure finding; a root module, a deep cross-area import, a missing facade or a forbidden folder |
 | Store privacy, derivation, props, resources                   | Review; `store.test.ts`, `App.test.tsx`                                                                                                                      | A review finding; no lint rule sees these                                                                 |
 | Tokens, contrast                                              | Review; Manual light/dark                                                                                                                                    | A raw color, a new token without both schemes, a failing pair                                             |
@@ -660,15 +665,16 @@ be fixed when its file is touched:
 
 ## 13. Recipes for common changes
 
-**New page.** Add one `src/pages/<Name>Page.tsx` exporting one PascalCase
-component; mount it in `src/App.tsx`. When a second page exists, create one
-`createNavStack<Route>()` at the root and render through `<NavStack>`; pages
-stay mounted, so use stable route identity and carry page data in the route.
-Share mutable state only through `src/store.ts`; keep camera and scene state
-in the page. Add an `App.test.tsx` flow and update `docs/architecture.md` if
-ownership changes. (Test, Review)
+**New page.** Add `src/pages/<name>/` with an `index.ts` facade and one
+PascalCase `<Name>Page.tsx`; mount it in `src/App.tsx`. Until the page moves,
+the one existing page stays `src/pages/FlowPage.tsx` (plan Appendix A). When a
+second page exists, create one `createNavStack<Route>()` at the root and render
+through `<NavStack>`; pages stay mounted, so use stable route identity and
+carry page data in the route. Share mutable state only through `src/store.ts`;
+keep camera and scene state in the page. Add an `App.test.tsx` flow and update
+`docs/architecture.md` if ownership changes. (Test, Review)
 
-**New component.** Add one `src/components/<Name>.tsx` with an exported
+**New component.** Add one `src/components/<area>/<Name>.tsx` with an exported
 `interface <Name>Props`; take current values and intent callbacks, not setters.
 Do not import the store, a page or `App.tsx`; the page binds readers and
 actions. Use tokens, a stable `testID`, an accessible name and the documented
@@ -682,14 +688,14 @@ one disallowed direction. If it has app-wide state, decide explicitly between
 `store.ts` (App/chrome) and `flow/<area>/model` (feature-local). A new
 top-level layer, not an area, requires an ADR. (Review, Lint test.)
 
-**New canvas feature.** Keep pure geometry in `src/flow/selection.ts`,
-`src/flow/connection.ts` or `src/flow/overlay.ts`; the model in
-`src/flow/scene.ts`; gestures in `src/flow/canvas-controller.ts`; camera math
-in `src/flow/camera.ts`; and the view in the matching component under
-`src/components/`. Add the unit test for the new rule and an `App.test.tsx`
-flow when the user can reach it. Do not add a canvas library or a second
-render loop. Update the module list in `docs/architecture.md` and the coverage
-list in `docs/testing.md`. (Test, Review)
+**New canvas feature.** Keep pure geometry in `flow/canvas/geometry/`, the
+model in `flow/canvas/model/`, gestures in `flow/canvas/interaction/`, camera
+math in `flow/canvas/model/camera.ts`, and the view in
+`components/canvas/`. Until a module moves, plan Appendix A maps the current
+flat file. Add the unit test for the new rule and an `App.test.tsx` flow when
+the user can reach it. Do not add a canvas library or a second render loop.
+Update the area map in `docs/code-map.md` and the coverage list in
+`docs/testing.md`. (Test, Review)
 
 **New dependency.** Add an ADR first for a runtime dependency. Use
 `bun add --exact <package>`, commit the updated `bun.lock`, verify
@@ -730,9 +736,9 @@ test. (Review, Test, Manual)
   pointer exception, not a precedent for chrome.
 - **Process and security:** removing `capabilities` or adding a wildcard host;
   `eval` or `new Function`; an unpinned action tag or `curl | sh` in the
-  release path; `console.log`, probe tests or commented-out code left in
-  `src/`; a large mixed-purpose PR; a behavior change with no test, doc,
-  changelog or ADR where required.
+  release path; `console.log`, an undeclared probe test or commented-out code
+  left in `src/`; a large mixed-purpose PR; a behavior change with no test,
+  doc, changelog or ADR where required.
 
 ## Sources
 

@@ -15,9 +15,9 @@
  *
  * Loaded by `vite.config.ts` (`lint.jsPlugins`).
  */
-import { existsSync, statSync } from "node:fs";
-import { dirname, join, relative, resolve, sep } from "node:path";
+import { dirname, resolve } from "node:path";
 import { definePlugin, defineRule } from "vite-plus/lint/plugins";
+import { resolveProjectImport, toProjectPath } from "./import-resolver.js";
 import {
   AREAS,
   ENFORCEMENT,
@@ -26,43 +26,17 @@ import {
   canImport,
   canImportArea,
   isFacadeOf,
+  isLayerIndex,
   isProductionFile,
   isSameFeatureDeep,
   isTestFile,
+  isTestSupportTarget,
   layerOf,
   segmentOf,
 } from "./structure-map.js";
 
 export { canImport, layerOf } from "./structure-map.js";
-
-function toProjectPath(cwd, filename) {
-  return relative(cwd, filename).split(sep).join("/");
-}
-
-/**
- * Resolve a relative import to an existing project file. The linter sees a
- * specifier, not a resolved target, so try the spellings NSH accepts:
- * the exact file, `.ts`, `.tsx`, then a directory `index.ts`/`index.tsx`.
- */
-export function resolveProjectImport(cwd, filename, specifier) {
-  if (!specifier.startsWith(".")) return null;
-  const base = resolve(dirname(filename), specifier);
-  const candidates = [
-    base,
-    `${base}.ts`,
-    `${base}.tsx`,
-    `${base}.js`,
-    `${base}.jsx`,
-    join(base, "index.ts"),
-    join(base, "index.tsx"),
-  ];
-  for (const candidate of candidates) {
-    if (existsSync(candidate) && statSync(candidate).isFile()) {
-      return toProjectPath(cwd, candidate);
-    }
-  }
-  return null;
-}
+export { resolveProjectImport } from "./import-resolver.js";
 
 /** The literal source of an import/export node, or null. */
 function sourceOf(node) {
@@ -228,15 +202,23 @@ const segmentDirection = defineRule({
       const targetArea = target ? areaOf(target) : null;
       const targetSegment = target ? segmentOf(target) : null;
       const targetLayer = target ? layerOf(target) : "other";
+      // A forbidden area pair is reported by `forbidden-area`; do not double
+      // report it here as a segment problem.
+      if (targetArea !== sourceArea && !canImportArea(sourceArea, targetArea)) return;
 
       let violation = false;
       if (sourceSegment === "geometry") {
         // Geometry is pure math: same-area geometry or the shared kernel.
         violation =
-          targetArea === sourceArea && targetSegment !== null && targetSegment !== "geometry";
+          targetArea !== null &&
+          !(
+            targetArea === "flow/shared" ||
+            (targetArea === sourceArea && targetSegment === "geometry")
+          );
       } else if (sourceSegment === "model") {
         violation =
           (targetArea === sourceArea && targetSegment === "interaction") ||
+          targetArea === "flow/document" ||
           targetLayer === "component";
       } else if (sourceSegment === "interaction") {
         violation = targetLayer === "component" || targetArea === "flow/document";
@@ -267,10 +249,7 @@ const testSupportInProduction = defineRule({
     return forEachImport(context, ({ node, specifier, target, file }) => {
       if (!isProductionFile(file)) return;
       const targetIsTest =
-        (target !== null &&
-          (isTestFile(target) ||
-            target.includes("/test/") ||
-            target.startsWith("src/test-support/"))) ||
+        (target !== null && isTestSupportTarget(target)) ||
         /(?:^|\/)test-support(?:\/|$)/.test(specifier) ||
         /(?:^|\/)test(?:\/|$)/.test(specifier);
       if (!targetIsTest) return;
@@ -292,17 +271,21 @@ const nativeOutsideSeam = defineRule({
   },
   create(context) {
     if (!ENFORCEMENT.nativeSeam) return {};
+    const check = (node) => {
+      const specifier = sourceOf(node);
+      if (specifier !== "@flow/native") return;
+      const file = toProjectPath(context.cwd, context.filename);
+      if (!isProductionFile(file)) return;
+      if (file === "src/flow/shared/native-types.ts" || file.startsWith("src/flow/document/")) {
+        return;
+      }
+      report(context, node.source, "native", {});
+    };
     return {
-      ImportDeclaration(node) {
-        const specifier = sourceOf(node);
-        if (specifier !== "@flow/native") return;
-        const file = toProjectPath(context.cwd, context.filename);
-        if (!isProductionFile(file)) return;
-        if (file === "src/flow/shared/native-types.ts" || file.startsWith("src/flow/document/")) {
-          return;
-        }
-        report(context, node.source, "native", {});
-      },
+      ImportDeclaration: check,
+      ExportNamedDeclaration: check,
+      ExportAllDeclaration: check,
+      ImportExpression: check,
     };
   },
 });
@@ -323,8 +306,8 @@ const unclassifiedSource = defineRule({
     const file = toProjectPath(context.cwd, context.filename);
     if (!file.startsWith("src/") || !isAreaChecked(file)) return {};
     if (areaOf(file) !== null) return {};
-    if (LEGACY_FLAT.has(file)) return {};
-    if (layerOf(file) === "asset" || layerOf(file) === "type") return {};
+    if (LEGACY_FLAT.has(file) || isLayerIndex(file)) return {};
+    if (layerOf(file) === "asset") return {};
     if (file === "src/App.tsx" || file === "src/store.ts") return {};
     return {
       Program(node) {

@@ -1,46 +1,47 @@
 import { expect, test } from "bun:test";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { dirname, join } from "node:path";
+import { readFileSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
+import { AREAS, ENFORCEMENT, STRUCTURE_EXCEPTIONS } from "../lint/structure-map.js";
+import { withTree } from "../lint/test-tree.js";
 import {
-  checkFacades,
-  checkForbiddenFolders,
+  checkBudget,
+  checkLegacyAllowList,
   checkRustLayout,
   checkTestSupportImports,
   checkUnclassified,
   collectSourceFiles,
+  readImports,
   resolveImport,
   runStructureCheck,
 } from "./structure.mjs";
 
-/** Creates a temporary project tree and cleans it up after the callback. */
-function withTree(files, run) {
-  const root = mkdtempSync(join(tmpdir(), "flow-structure-"));
-  try {
-    for (const [path, text] of Object.entries(files)) {
-      const full = join(root, path);
-      mkdirSync(dirname(full), { recursive: true });
-      writeFileSync(full, text);
-    }
-    return run(root);
-  } finally {
-    rmSync(root, { recursive: true, force: true });
-  }
-}
-
 const tree = {
   "src/.nsh/generated.ts": "",
   "src/native/src/db.rs": "",
-  "src/flow/scene.ts": "",
+  "src/flow/scene.ts":
+    '// import x from "./test/helper"\nimport "./data";\nexport { x } from "./data";\nexport const later = () => import("./data");',
+  "src/flow/data.ts": "",
   "src/flow/new.ts": "",
   "src/flow/utils/thing.ts": "",
+  "src/flow/canvas/index.ts": "",
+  "src/flow/canvas/model/camera.ts": "",
   "src/flow/document/session/session.ts": 'import "../test/helper";',
+  "src/flow/document/session/deep.ts": 'import "../../canvas/model/camera";',
   "src/flow/document/test/helper.ts": "",
   "src/components/canvas/index.ts": "",
-  "src/components/canvas/helper.ts": "",
+  "src/components/canvas/helper.ts": 'import "@flow/native";',
   "src/components/Widget.tsx": "",
   "src/pages/FlowPage.tsx": "",
 };
+
+test("code map mirrors the manifest areas and facades", () => {
+  const map = readFileSync(new URL("../docs/code-map.md", import.meta.url), "utf8");
+  for (const [area, rule] of Object.entries(AREAS)) {
+    expect(map).toContain(`\`${area}\``);
+    expect(map).toContain(`\`${rule.facade}\``);
+  }
+  expect(map).not.toContain("src/tool.ts");
+});
 
 test("collects app modules but skips generated and Rust folders", () => {
   withTree(tree, (root) => {
@@ -67,19 +68,33 @@ test("resolves exact files, extensions and directory indexes", () => {
 
 test("reports a new flat module, a missing facade and a forbidden folder", () => {
   withTree(tree, (root) => {
-    const files = collectSourceFiles(root);
     const result = runStructureCheck(root);
-    expect(result.failures).toContain("new flat module at the flow/ root: src/flow/new.ts");
-    expect(result.failures).toContain(
-      "new flat module at the components/ root: src/components/Widget.tsx",
+    expect(result.failures.toSorted()).toEqual(
+      [
+        "new flat module at the flow/ root: src/flow/new.ts",
+        "new flat module at the components/ root: src/components/Widget.tsx",
+        "src/flow/document/session/session.ts imports test support (../test/helper)",
+      ].toSorted(),
     );
-    expect(checkFacades(root, files)).toContain(
+    expect(result.reports).toContain(
       "area flow/document is missing its src/flow/document/index.ts facade",
     );
-    expect(checkForbiddenFolders(files)).toContain(
-      'forbidden folder "utils" in src/flow/utils/thing.ts',
+    expect(result.reports).toContain('forbidden folder "utils" in src/flow/utils/thing.ts');
+    expect(result.reports).toContain("unclassified module: src/flow/utils/thing.ts");
+    expect(result.reports).toContain(
+      "src/flow/document/session/deep.ts deep-imports flow/canvas (../../canvas/model/camera)",
     );
-    expect(checkUnclassified(files)).toContain("unclassified module: src/flow/utils/thing.ts");
+    expect(result.reports).toContain(
+      "src/components/canvas/helper.ts imports @flow/native outside the document seam",
+    );
+  });
+});
+
+test("reads imports without comment or duplicate noise", () => {
+  withTree(tree, (root) => {
+    const imports = readImports(root, "src/flow/scene.ts");
+    expect(imports).toContain("./data");
+    expect(imports).not.toContain("./test/helper");
   });
 });
 
@@ -90,6 +105,59 @@ test("fails a production import of test support and allows test code to import i
       "src/flow/document/session/session.ts imports test support (../test/helper)",
     ]);
   });
+});
+
+test("reports the direct-entry budget and fails above the hard cap", () => {
+  withTree({ "src/flow/canvas/index.ts": "" }, (root) => {
+    for (let index = 0; index < 21; index += 1) {
+      writeFileSync(join(root, `src/flow/canvas/part-${index}.ts`), "");
+      if (index === 12) {
+        const budget = checkBudget(root);
+        expect(budget.reports).toContain(
+          "area flow/canvas has 13 direct entries (report at 12, fail at 20)",
+        );
+        expect(budget.failures).toEqual([]);
+      }
+    }
+    expect(checkBudget(root).failures).toContain(
+      "area flow/canvas has 21 direct entries (report at 12, fail at 20)",
+    );
+    STRUCTURE_EXCEPTIONS.push({
+      path: "flow/canvas",
+      owner: "@test",
+      expires: "2026-12-31",
+      reason: "fixture",
+    });
+    try {
+      expect(checkBudget(root).failures).toEqual([]);
+    } finally {
+      STRUCTURE_EXCEPTIONS.pop();
+    }
+  });
+});
+
+test("Phase 5 turns the area findings into failures", () => {
+  withTree(tree, (root) => {
+    const previous = { ...ENFORCEMENT };
+    ENFORCEMENT.areas = true;
+    ENFORCEMENT.unclassified = true;
+    try {
+      const result = runStructureCheck(root);
+      expect(result.failures).toContain(
+        "area flow/document is missing its src/flow/document/index.ts facade",
+      );
+      expect(result.failures).toContain('forbidden folder "utils" in src/flow/utils/thing.ts');
+      expect(result.failures).toContain("unclassified module: src/flow/utils/thing.ts");
+    } finally {
+      Object.assign(ENFORCEMENT, previous);
+    }
+  });
+});
+
+test("reports stale legacy allow-list entries so the list shrinks", () => {
+  const reports = checkLegacyAllowList(["src/flow/scene.ts"]);
+  expect(reports).not.toContain("stale legacy allow-list entry: src/flow/scene.ts");
+  expect(reports).toContain("stale legacy allow-list entry: src/flow/camera.ts");
 });
 
 test("keeps the legacy allow-list and the Rust report non-failing", () => {

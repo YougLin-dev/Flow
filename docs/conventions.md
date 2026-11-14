@@ -34,9 +34,10 @@ A module belongs to one **layer** (`pages`, `components`, `flow`) and one
 **area** inside it (`flow/canvas`, `flow/document`, `components/canvas`,
 `components/composer`). Each area has one `index.ts` facade. Inside an area,
 `geometry/`, `model/`, `interaction/` and `test/` are reserved segments; any
-other folder is a part folder named after what it draws or does. No module at
-the `components/`, `flow/` or `pages/` root; no `utils/`, `helpers/`,
-`common/`, `misc/`, `data/` or `types/`.
+other folder is a part folder named after what it draws or does. No new module
+at the `components/`, `flow/` or `pages/` root; no `utils/`, `helpers/`,
+`common/`, `misc/`, `data/` or `types/`. During the migration the plan's
+Appendix A lists the remaining root modules; add no new one.
 
 Decision tree:
 
@@ -97,9 +98,11 @@ Decision tree:
   dependency graph acyclic; use it when a directory actually has internal
   modules, not as indirection everywhere.
 - The mixed Rust crate lives in `src/native/`. Its `#[native_module]` exports
-  are the only surface TSX sees, imported as `@flow/native`; do not add a
-  second Rust-backed import path. Keep SQLite and search code in Rust, and
-  keep TSX/canvas code out of the crate.
+  are the only surface TSX sees: only `flow/document` imports `@flow/native`
+  at runtime; every other module imports the generated types through
+  `flow/shared/native-types.ts`. Do not add a second Rust-backed import path.
+  Keep SQLite and search code in Rust, and keep TSX/canvas code out of the
+  crate.
 - SeaORM entities are one file per table under `src/native/src/entity/`, named
   after the table. Today commands live in `mutation.rs`; reads in `search.rs`,
   `viewport.rs`, `scene.rs` or `detail.rs`; asset bytes in `asset.rs`; `db.rs`
@@ -205,18 +208,19 @@ run `bun run check:fix` before committing.
 
 ## Checks
 
-| Command             | Checks                                          |
-| ------------------- | ----------------------------------------------- |
-| `bun run fmt`       | Formatting only                                 |
-| `bun run lint`      | NSH check, then Oxlint (names and boundaries)   |
-| `bun run typecheck` | NSH's TypeScript settings via `nsh check src`   |
-| `bun run check`     | Formatting + lint + type check + boundary tests |
-| `bun run test`      | Headless tests                                  |
-| `bun run test:lint` | Dependency-boundary rule tests (part of check)  |
+| Command                   | Checks                                                |
+| ------------------------- | ----------------------------------------------------- |
+| `bun run fmt`             | Formatting only                                       |
+| `bun run lint`            | NSH check, then Oxlint (names and boundaries)         |
+| `bun run typecheck`       | NSH's TypeScript settings via `nsh check src`         |
+| `bun run check`           | Formatting + lint + type check + rule/structure tests |
+| `bun run check:structure` | Area, facade, root and budget report (part of check)  |
+| `bun run test`            | Headless tests                                        |
+| `bun run test:lint`       | Boundary and structure rule tests (part of check)     |
 
 `bun run check` must pass before a commit, warnings included
 (`--deny-warnings`). It also runs `bun run test:lint`, the tests for the local
-boundary rule. `--fix` variants are for the working tree; CI runs the
+boundary and structure rules. `--fix` variants are for the working tree; CI runs the
 non-fix command. File names and dependency direction are both lint rules
 (`unicorn/filename-case` and the local `boundaries/no-upward-import` plugin),
 so there is no separate convention script to keep in sync.

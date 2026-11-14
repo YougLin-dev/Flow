@@ -12,9 +12,10 @@ changing code; this file is the short list. The structure decision is
 Run `bun run check` (format + lint + type check + Rust format/clippy +
 boundary-rule tests; file names and dependency direction are lint rules) and
 `bun run test` (Rust unit tests plus TSX tests) before you finish.
-`bun run check:fix` applies safe fixes. `bun run check:structure` reports the
-area shape and fails a new module at the `components/`, `flow/` or `pages/`
-root; Phase 5 wires it into `check`. `bun run test:host` repeats the
+`bun run check:fix` applies safe fixes. `bun run check:structure` (part of
+`check`) reports the area shape and fails a new module at the `components/`,
+`flow/` or `pages/` root or a production import of test support; Phase 5
+turns on the rest of the area rules. `bun run test:host` repeats the
 platform tests (`*.host.test.tsx`) on this OS's real desktop host. `bun run test:bench` runs the ignored 100k
 SQLite/search benchmark.
 

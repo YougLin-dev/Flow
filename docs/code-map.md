@@ -8,17 +8,16 @@ updates the owner.
 
 ## Layers
 
-| Layer      | Path                            | May import                                   |
-| ---------- | ------------------------------- | -------------------------------------------- |
-| Shell      | `src/App.tsx`                   | every layer                                  |
-| Page       | `src/pages/`                    | pages, components, store, foundations, tests |
-| Component  | `src/components/`               | components, types, foundations, assets       |
-| Store      | `src/store.ts`                  | store, types, foundations, assets            |
-| Foundation | `src/flow/`                     | foundations, types, assets                   |
-| Test       | `src/test-support/`, `**/test/` | every layer; never imported by production    |
-| Type       | `src/tool.ts` if it returns     | types only                                   |
-| Asset      | `src/assets/`                   | nothing                                      |
-| Other      | any other `src/` module         | nothing until classified or allow-listed     |
+| Layer      | Path                                                                                           | May import                                    |
+| ---------- | ---------------------------------------------------------------------------------------------- | --------------------------------------------- |
+| Shell      | `src/App.tsx`                                                                                  | pages, components, store, foundations, assets |
+| Page       | `src/pages/`                                                                                   | pages, components, store, foundations, assets |
+| Component  | `src/components/`                                                                              | components, foundations, assets               |
+| Store      | `src/store.ts`                                                                                 | store, foundations, assets                    |
+| Foundation | `src/flow/`                                                                                    | foundations, assets                           |
+| Test       | `src/test-support/`, `**/test/`, `src/app-test-harness.ts`, `src/flow/node-session-harness.ts` | every layer; never imported by production     |
+| Asset      | `src/assets/`                                                                                  | nothing                                       |
+| Other      | any other `src/` module                                                                        | nothing until classified or allow-listed      |
 
 `boundaries/no-upward-import` enforces this table. Tests are exempt because
 they may reach into any layer on purpose.

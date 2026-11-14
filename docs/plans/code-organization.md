@@ -1,7 +1,7 @@
 # Code organization and architecture standard
 
-- **Status:** Revised proposal for cross-review (2026-11-14). No source file
-  has been changed for this proposal.
+- **Status:** Accepted 2026-11-14; Phase 0 (standard, ownership and
+  report-only tooling) is implemented. No source file has moved yet.
 - **Scope:** `src/` (TSX app) and `src/native/` (Rust document core).
 - **Related:** [standards](../standards.md), [architecture](../architecture.md),
   [conventions](../conventions.md), [testing](../testing.md),
@@ -1652,6 +1652,24 @@ codemod can create self-imports/cycles; cross-feature type seams
 decisions; the test harness and `NodeSession` protected seam need explicit
 handling; and Phase 2/3 PRs must be split by area. The first PR is **Phase
 1a**, with no loader or composer rewrite.
+
+### 16.2 Phase 0 implementation review
+
+Three independent reviewers checked the Phase 0 commit
+(`chore: establish the area structure standard`): architecture/correctness,
+tests/reuse and risk/rollback. All three returned **CHANGES REQUESTED**; the
+findings below were closed in the follow-up commit before Phase 1a.
+
+| Lens          | Main findings                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   | Disposition                                                                                                                                                                                                                                                                                                                                                                                                                                             |
+| ------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Architecture  | `areaOf("src/App.tsx")` was null so the shell row was dead; `isFacade` missed the store; geometry could import `flow/nodes` or a same-area root file; the structure report did not walk imports; standards recipes still told readers to add root modules; code-map listed the stale Type layer; page/shell allowed test imports; native docs did not state the seam; native rule missed export/import forms; root `index.ts` was rejected; plan status stale; `edge-flow.test.ts` missing; dead `type` branch; conventions command table stale | Fixed: `App` classifies as shell and `isFacade` compares the manifest facade; geometry allows only `flow/shared` and same-area `geometry/`; `checkAreaImports` reports deep/forbidden/segment/native findings and Phase 5 gates each flag; §13 recipes use area paths; code-map mirrors `LAYERS`; Test rows list `TEST_SUPPORT_FILES`; native docs and rule forms align; layer `index.ts` is allowed; plan status accepted; testing/conventions updated |
+| Tests/reuse   | `test-support-in-production` missed `TEST_SUPPORT_FILES`; `check:structure` was not in `check`; tests did not prove the exact failure set, budget exception or export/dynamic forms; geometry under-enforced; resolver logic duplicated and partly untested; `readImports` regex read comments; `isFacade` store; missing allowed-direction fixtures; duplicate `withTree`                                                                                                                                                                      | Fixed: one `isTestSupportTarget` predicate in both detectors; `check:structure` is part of `check`; exact failure-set, 13/21-entry budget and owner+expiry exception tests; geometry allowed/disallowed fixtures; shared `lint/import-resolver.js` with `.ts/.tsx/.js/.jsx/index` tests; `Bun.Transpiler.scanImports` replaces the regex; shell/area allowed-direction tests; `lint/test-tree.js` shared helper                                         |
+| Risk/rollback | `check` omitted the structure guard; standards §13 contradicted the placement rule; code-map Type layer; `isFacade` store; native rule export forms; stale `LEGACY_FLAT` entries undetected; plan status stale; conventions described the end state as current                                                                                                                                                                                                                                                                                  | Fixed: guard wired into `check`/`check:fix`; recipes rewritten; code-map mirror corrected; `isFacade` fixed; native rule covers import/export/dynamic; `checkLegacyAllowList` reports stale entries and fails in Phase 5; plan status and conventions wording updated                                                                                                                                                                                   |
+
+After the fixes: `bun run check` (including `check:structure`), `bun run test`
+(520 tests, 518 passed, 2 skipped) and `bun run check:structure` are green.
+No source file moved; `LEGACY_FLAT` still matches the 81 flat modules exactly.
+Phase 0 is complete; Phase 1a is the next PR.
 
 ---
 

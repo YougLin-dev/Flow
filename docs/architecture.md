@@ -53,9 +53,10 @@ are.
 
 `src/native/` is a Rust crate in NSH's mixed-app mode. It owns the document
 database, commands and undo, full-text search, viewport queries and asset
-metadata. TSX imports its generated API from `@flow/native`; it must not open
-SQLite or write SQL. The canvas stays in TSX and owns only the scene model and
-its views.
+metadata. Only `flow/document` calls the generated API from `@flow/native` at
+runtime; every other TSX module imports the types through
+`flow/shared/native-types.ts`. TSX must not open SQLite or write SQL. The
+canvas stays in TSX and owns only the scene model and its views.
 
 - `src/nsh.json` declares `"rust": "native"`; `App.tsx` remains the app entry.
 - The database is SQLite with WAL, FTS5 (trigram tokenizer) and two RTree
