@@ -111,12 +111,12 @@ plus an allowed and a disallowed direction; an unexplained `other`
 classification is a review failure. (Lint, Lint test, Review)
 
 `src/native/` is a Rust foundation, not a second app layer. Only
-`flow/document` calls `@flow/native` at runtime; outside it, TSX imports the
-generated native types through `flow/shared/native-types.ts`. Rust code owns
-SQLite, FTS5, RTree, undo history and asset metadata, and MUST NOT import TSX
-or the canvas. No TSX module may open SQLite or write SQL. Database calls
-cross the boundary in batches, not per node or per frame. (Review;
-`boundaries/native-outside-seam`.)
+`flow/document` may call `@flow/native` at runtime; outside it, TSX MUST
+import the generated native types through `flow/shared/native-types.ts`.
+Rust code owns SQLite, FTS5, RTree, undo history and asset metadata, and
+MUST NOT import TSX or the canvas. No TSX module may open SQLite or write
+SQL. Database calls cross the boundary in batches, not per node or per
+frame. (Review; `boundaries/native-outside-seam`.)
 
 Ordinary database work uses SeaORM entities and SeaQuery in `src/native/`;
 handwritten SQL is limited to the FTS5/RTree virtual-table adapters

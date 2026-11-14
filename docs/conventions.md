@@ -98,8 +98,8 @@ Decision tree:
   dependency graph acyclic; use it when a directory actually has internal
   modules, not as indirection everywhere.
 - The mixed Rust crate lives in `src/native/`. Its `#[native_module]` exports
-  are the only surface TSX sees: only `flow/document` imports `@flow/native`
-  at runtime; every other module imports the generated types through
+  are the only surface TSX sees: only `flow/document` may import `@flow/native`
+  at runtime; every other module must import the generated types through
   `flow/shared/native-types.ts`. Do not add a second Rust-backed import path.
   Keep SQLite and search code in Rust, and keep TSX/canvas code out of the
   crate.
