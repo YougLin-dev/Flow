@@ -128,6 +128,9 @@ src/                   the NSH app: its root, entry, config and assets
     selection.ts       selection handles, resize and marquee geometry
     overlay.ts         composer and inline-editor placement
     composer-state.ts  the composer's drafts
+    nodes/
+      node-kinds.ts    the node kinds: ports, settings and model catalogs
+    shared/            the shared kernel: geometry, equality, DTO factories
   native/              mixed NSH Rust crate (SQLite/FTS5/RTree document core)
     Cargo.toml
     src/lib.rs         exports the @flow/native Document class

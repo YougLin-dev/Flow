@@ -1,8 +1,9 @@
 # Code organization and architecture standard
 
-- **Status:** Accepted 2026-11-14; Phases 0–1d are implemented on stacked
-  branches (standard and tooling, shared kernel and first reuse, composer
-  shell, AsyncDrain core, connector layer).
+- **Status:** Accepted 2026-11-14; Phases 0–1d are implemented and Phase 2
+  is in progress on stacked branches (standard and tooling, shared kernel and
+  first reuse, composer shell, AsyncDrain core, connector layer, leaf area
+  moves).
 - **Scope:** `src/` (TSX app) and `src/native/` (Rust document core).
 - **Related:** [standards](../standards.md), [architecture](../architecture.md),
   [conventions](../conventions.md), [testing](../testing.md),
@@ -1748,6 +1749,12 @@ gate — four components use the base card chrome and two use its pill — so
 context-menu rows live in one component, the two tooltip implementations use
 different mechanisms, and the icon-only buttons carry distinct sizes and
 colors; those wait for the Phase 3 area moves.
+
+Phase 2 step 1 moved the leaf modules: `flow/nodes/node-kinds.ts` (the kind
+registry) now leaves through the `flow/nodes` facade, and `KeyedFlags` lives
+in `flow/shared/keyed-flags.ts` behind the shared kernel's facade. Every
+cross-area importer names the facade, and the moved tests stayed beside their
+subjects. `LEGACY_FLAT` is down to 74 modules.
 
 ---
 

@@ -79,7 +79,9 @@ the native type seam), `components/primitives` (`Icon`, `icon-shape`) and
 minimap loaders migrate in Phase 7. Phase 1d added
 `components/canvas/world/{connector-layer,ConnectorCanvas}` for the two
 connector layers and `components/primitives/panel.ts` for the floating-panel
-chrome. The rest of the source tree is still the legacy flat layout. The old → new map is in
+chrome. Phase 2 step 1 moved the node-kind registry to `flow/nodes` and
+`KeyedFlags` to `flow/shared`, both behind their area facades. The rest of
+the source tree is still the legacy flat layout. The old → new map is in
 [the plan's Appendix A](plans/code-organization.md#appendix-a--tsx-placement-map);
 `LEGACY_FLAT` in the manifest shrinks with every move and disappears in
 Phase 5. Do not add a new file at the `components/`, `flow/` or `pages/`

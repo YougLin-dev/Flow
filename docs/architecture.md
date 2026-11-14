@@ -127,7 +127,7 @@ canvas stays in TSX and owns only the scene model and its views.
 
 M1 adds one generic executable node shape: several named, typed input and
 output ports, and many-to-many directed connections carrying typed text and
-image items. A TSX kind registry (`flow/node-kinds.ts`) declares each kind's
+image items. A TSX kind registry (`flow/nodes/node-kinds.ts`) declares each kind's
 appearance, per-input capacity, defaults and settings schema, and resolves
 each node's ports from its settings (`portsOfNode`); `flow/execution.ts` owns
 the provider for a runnable kind. An upload node has no inputs and derives
@@ -296,7 +296,7 @@ inside the body box), and one typed port circle outside each side, shown when
 the card is selected, hovered, a connection target, or connected and readable
 on screen. A multi-card frame keeps those per-card ports while they are
 readable and adds the frame's group ports on its sides. Per-card selection and connection
-target flags come from `flow/keyed-flags.ts`, while `flow/hover-flags.ts`
+target flags come from `flow/shared/keyed-flags.ts`, while `flow/hover-flags.ts`
 separately holds the controller's hover and marquee-preview mirrors; their
 source states write these flags in the same update round, so a change wakes
 only the cards whose membership flipped. A port rests just outside the

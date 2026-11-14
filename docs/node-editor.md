@@ -34,7 +34,7 @@ pointer. Old batches stay because downstream input snapshots may still refer to
 their items.
 
 Rust stores `kind` and `settings_json` opaquely. The TSX kind registry
-(`flow/node-kinds.ts`) owns each node's ports, default size and settings
+(`flow/nodes/node-kinds.ts`) owns each node's ports, default size and settings
 parsing, and `flow/execution.ts` owns the provider for each runnable kind.
 M1 has `text`, `image` and `upload`. Text and image declare a `prompt` text
 input (capacity 1), a `references` image input (capacity 4 for text, 16 for
