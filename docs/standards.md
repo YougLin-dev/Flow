@@ -220,12 +220,12 @@ two independently useful parts or grows past about 300 code lines. `utils/`,
 
 ### 6.1 State has one narrow owner
 
-| Owner                           | Owns                                                                 |
-| ------------------------------- | -------------------------------------------------------------------- |
-| `src/store.ts`                  | tool, zoom percentage, selection count, window pin                   |
-| Page (`src/pages/FlowPage.tsx`) | `FlowScene`, `CanvasCamera`, `CanvasController`, stage size, session |
-| Component                       | transient press, hover, cursor and pinch state it renders            |
-| Future route (`NavStack`)       | stable route identity and the data the page needs                    |
+| Owner                                | Owns                                                                 |
+| ------------------------------------ | -------------------------------------------------------------------- |
+| `src/store.ts`                       | tool, zoom percentage, selection count, window pin                   |
+| Page (`src/pages/flow/FlowPage.tsx`) | `FlowScene`, `CanvasCamera`, `CanvasController`, stage size, session |
+| Component                            | transient press, hover, cursor and pinch state it renders            |
+| Future route (`NavStack`)            | stable route identity and the data the page needs                    |
 
 Every signal in `src/store.ts` MUST stay module-private. The module MUST export
 readers (`currentTool()`, `zoomPercent()`) and actions (`setTool`,
@@ -372,7 +372,7 @@ ignored. Hover MUST NOT change the selection. (Test, Host for real pointers)
 Every object the page creates — the scene, camera, controller, viewport
 refresh, preview loader, document session and runner — MUST be disposed by
 the page's `cleanup`, exactly once and idempotently. Key bindings MUST be
-owned by the page's scope (declared in `flow/bindings.ts` and bound by the
+owned by the page's scope (declared in `pages/flow/workspace/bindings.ts` and bound by the
 page) or the mounted palette, and every command
 MUST exist once. Async work MUST drop its result after disposal. Tests that
 construct a scene, camera or controller MUST keep them local to the test.
@@ -666,8 +666,8 @@ be fixed when its file is touched:
 ## 13. Recipes for common changes
 
 **New page.** Add `src/pages/<name>/` with an `index.ts` facade and one
-PascalCase `<Name>Page.tsx`; mount it in `src/App.tsx`. Until the page moves,
-the one existing page stays `src/pages/FlowPage.tsx` (plan Appendix A). When a
+PascalCase `<Name>Page.tsx`; mount it in `src/App.tsx`. The one existing page
+is `src/pages/flow/FlowPage.tsx` (plan Appendix A). When a
 second page exists, create one `createNavStack<Route>()` at the root and render
 through `<NavStack>`; pages stay mounted, so use stable route identity and
 carry page data in the route. Share mutable state only through `src/store.ts`;

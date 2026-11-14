@@ -118,9 +118,12 @@ variants landed in Phase 1b), `components/minimap` and `components/search`
 (including the one `search-filters.ts` type); the page imports both new
 facades. Phase 3 step 5 moved the three test probes out of the production views
 (and the components root) into `components/probes` behind a facade; `FlowCard`
-keeps only the optional `imageEvent` observation seam. The remaining flat modules are
-`pages/FlowPage.tsx`, `flow/bindings.ts`, `flow/page-chrome.ts` and
-`flow/search-navigation.ts`, which move in Phase 4.
+keeps only the optional `imageEvent` observation seam. Phase 4 started with the page
+move: `FlowPage` now lives at `pages/flow/FlowPage.tsx` behind the page area
+facade, and `bindings`, `page-chrome` and `search-navigation` (with their
+tests) live in `pages/flow/workspace`. `LEGACY_FLAT` is empty and the structure
+report lists no root modules; the workspace/effects split and the final page
+size are the rest of Phase 4.
 The old → new map is in
 [the plan's Appendix A](plans/code-organization.md#appendix-a--tsx-placement-map);
 `LEGACY_FLAT` in the manifest shrinks with every move and disappears in

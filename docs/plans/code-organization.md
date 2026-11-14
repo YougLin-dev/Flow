@@ -1,10 +1,10 @@
 # Code organization and architecture standard
 
 - **Status:** Accepted 2026-11-14; Phases 0–3 are implemented and Phase 4 is
-  next on stacked branches (standard and tooling, shared kernel and first
-  reuse, composer shell, AsyncDrain core, connector layer, the eight `flow/`
-  area moves, `components/app`, the canvas world and its overlays, the
-  composer, minimap and search areas, the probes).
+  in progress on stacked branches (standard and tooling, shared kernel and
+  first reuse, composer shell, AsyncDrain core, connector layer, the eight
+  `flow/` area moves, `components/app`, the canvas world and its overlays, the
+  composer, minimap and search areas, the probes, the page area).
 - **Scope:** `src/` (TSX app) and `src/native/` (Rust document core).
 - **Related:** [standards](../standards.md), [architecture](../architecture.md),
   [conventions](../conventions.md), [testing](../testing.md),
@@ -1862,6 +1862,14 @@ stays unextracted because the touch state must live on the mounted view
 (recorded under Phase 2 step 4). The page imports the area facades for every
 moved component; `bun run test:host` passes 14/14. `LEGACY_FLAT` holds only
 the page and its three `flow/` helpers, which Phase 4 moves.
+
+Phase 4 step 1 moved `FlowPage` to `pages/flow` behind its `index.ts` facade
+and moved `bindings`, `page-chrome` and `search-navigation` (with their
+colocated tests) to `pages/flow/workspace`; the page imports the component
+areas through their facades. `LEGACY_FLAT` is empty. The tooling tests now
+inject synthetic entries so the allow-list report stays covered until Phase 5
+removes it. The workspace/effects split and the page-size target are the rest
+of Phase 4.
 
 ---
 

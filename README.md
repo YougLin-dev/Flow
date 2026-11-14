@@ -88,7 +88,13 @@ src/                   the NSH app: its root, entry, config and assets
   tsconfig.json        NSH's TypeScript settings
   store.ts             app state: private signals behind readers and actions
   pages/
-    FlowPage.tsx       the workspace: document session, camera, overlays
+    flow/
+      index.ts         the page area facade
+      FlowPage.tsx     the workspace: document session, camera, overlays
+      workspace/
+        bindings.ts    the global keyboard commands
+        page-chrome.ts the page root's pointer and wheel forwarding
+        search-navigation.ts revealing a search hit
   components/
     app/
       TitleBar.tsx     custom title bar (pin, drag, native window controls)

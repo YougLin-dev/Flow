@@ -15,7 +15,7 @@ together, while the repository root holds `package.json`, `vite.config.ts`,
 
 ```
 App.tsx                     app shell: title bar + page, nothing else
- ├─ pages/FlowPage.tsx      the workspace: document session, camera, overlays
+ ├─ pages/flow/FlowPage.tsx the workspace: document session, camera, overlays
  │   ├─ components/*        presentational views and the canvas surface
  │   ├─ flow/*              node kinds, execution, scene, camera, gestures
  │   └─ store.ts            shared state behind readers and actions
@@ -396,7 +396,7 @@ finger:
   the viewport's center. A scroll view under the pointer wins, and a listener
   around one only observes: NSH still calls it while the view scrolls. A
   multiline field therefore listens itself (`keepsWheel` in
-  `flow/page-chrome.ts`), so the wheel scrolls the field and the page does not
+  `flow/shared/wheel.ts`), so the wheel scrolls the field and the page does not
   zoom as well; the open context menu keeps its own wheel the same way.
 - **Secondary button** — holding the right button and dragging pans the
   camera, without selecting, starting a marquee or moving a card. A right click that stays put opens the context menu for what it pressed on the
@@ -411,12 +411,12 @@ finger:
 
 Navigation is the page's and object interaction is the canvas's. `FlowPage`
 decides every pan and zoom (the camera is page state), so the page root
-forwards navigation for its own views through `flow/page-chrome.ts`; a view
+forwards navigation for its own views through `pages/flow/workspace/page-chrome.ts`; a view
 that consumes or keeps the wheel declares its own listener instead.
 Presses, hovers and the marquee stay on the canvas interaction view, because
 they hit-test world geometry.
 
-Keyboard commands are declared in `flow/bindings.ts` (`bindFlowKeys`) and
+Keyboard commands are declared in `pages/flow/workspace/bindings.ts` (`bindFlowKeys`) and
 bound once by the page: `mod+=`/`mod+-`/`mod+0`
 zoom and fit, `mod+z`/`mod+shift+z` undo and redo, Delete/Backspace delete
 the selected edge or cards, arrows pan, `mod+k` opens search, and Escape
@@ -480,8 +480,8 @@ Paths below are the post-migration homes. Until a move lands, Appendix A of
 
 - **A new page** — `pages/<name>/` with its `index.ts` facade, mounted by
   `App.tsx` (or a nav stack); share state through `store.ts`, never through
-  another page. Until a second page exists, the one page stays
-  `pages/FlowPage.tsx`.
+  another page. Until a second page exists, the one page is
+  `pages/flow/FlowPage.tsx`.
 - **A new node kind** — add it to `flow/nodes/node-kinds.ts` (appearance,
   settings parsing, ports through its resolver), give it a provider in
   `flow/execution/providers.ts` if it runs, and extend
