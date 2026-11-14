@@ -1765,6 +1765,15 @@ model: `tooltip`/`view-culling` take shared `Size`/`BoxGeometry` instead of
 camera types. The extracted helpers gained direct tests in
 `flow/shared/geometry.test.ts`. `LEGACY_FLAT` is down to 67 modules.
 
+Phase 2 step 3 moved the canvas model to `flow/canvas/model` (camera, scene,
+scene ports, record equality, group ports, edge layer, card content/geometry/
+layout) and extracted `scene-types.ts` (`SceneReader`, `PreviewView`,
+`ConnectionPreview`), `cursor.ts`, `cards/card-image.ts` and
+`cards/inline-body.ts`; the scene ↔ helper and controller ↔ handle cycles are
+gone. `CameraSize`/`CameraBounds` are now aliases of the shared `Size`/
+`BoxGeometry`. The inline-editor test moved beside `inline-body.ts`.
+`LEGACY_FLAT` is down to 58 modules.
+
 ---
 
 ## Appendix A — TSX placement map (non-test)

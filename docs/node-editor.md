@@ -202,8 +202,8 @@ card with its typed ports (`components/Port.tsx`), `components/FlowEdges.tsx`
 strokes the viewport's connectors in one native canvas and
 `components/FlowPreviews.tsx` the pulled connection previews.
 `components/SelectionPorts.tsx` renders the multi-card frame's group ports
-from `flow/group-ports.ts`. `flow/scene.ts` is the headless model,
-`flow/scene-ports.ts` answers typed-port hits and capacity queries, and
+from `flow/canvas/model/scene/group-ports.ts`. `flow/canvas/model/scene/scene.ts` is the headless model,
+`flow/canvas/model/scene/scene-ports.ts` answers typed-port hits and capacity queries, and
 `flow/canvas-controller.ts` turns pointer events into selection, drag,
 resize, marquee, pan and connector gestures.
 `components/GridBackground.tsx` draws the dot grid in screen space.

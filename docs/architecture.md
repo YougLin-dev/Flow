@@ -282,11 +282,11 @@ pressed card or connector moves away, and the item actions;
 first) and delete commands.
 
 `FlowCard`'s root carries the node's world position and lays its chrome out
-in card-local points (`flow/card-geometry.ts`). The rectangle reaches the card
+in card-local points (`flow/canvas/model/cards/card-geometry.ts`). The rectangle reaches the card
 as two memoized halves — position and size — so a drag wakes only the root's
 `left`/`top` and a resize only the styles that read the size, instead of every
 geometry-derived style on every pointer move. Its title, status and body come
-from equality-gated values (`flow/card-content.ts`), so a viewport read that
+from equality-gated values (`flow/canvas/model/cards/card-content.ts`), so a viewport read that
 carries the same card wakes nothing; that keeps a zoom or pan from resubmitting
 every visible card's text. The body's rounded background, border and shadow
 are a childless plate under the content, so the Windows renderer can skip
@@ -328,12 +328,12 @@ canvas above the cards, holding one line per fixed end, so a group drag pulls
 a line from every selected card. Both are presentational: props are
 accessors, and the page passes scene signals to them.
 
-The scene model (`flow/scene.ts`) is headless: it holds the visible nodes and
+The scene model (`flow/canvas/model/scene/scene.ts`) is headless: it holds the visible nodes and
 edges, the selection, transient drag geometry (`overrides`, read per card so
 a drag updates only the cards it moves and their connectors), previews, the
 connection previews and the card a pulled connector would join, and answers
 world-space hit questions (`nodeAt`, `edgeAt`); the typed-port queries
-(`portAt`, `nearestPort`, `portOffsetAt` in `flow/scene-ports.ts`) read it
+(`portAt`, `nearestPort`, `portOffsetAt` in `flow/canvas/model/scene/scene-ports.ts`) read it
 through that surface. Selected cards stack above every unselected one in
 selection order, so a pressed card comes to the front at once and a marquee
 brings its whole group forward; the cards a marquee covers take their final

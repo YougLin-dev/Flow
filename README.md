@@ -121,17 +121,23 @@ src/                   the NSH app: its root, entry, config and assets
   flow/
     data.ts            the demo nodes/edges used to seed an empty document
     database-path.ts   resolves the document path from host/env/data-dir
-    scene.ts           headless scene model: cards, edges, selection, previews
-    camera.ts          infinite-canvas camera (pan, zoom, fit)
     canvas-controller.ts pointer gestures: select, drag, resize, marquee, connect
-    overlay.ts         composer and inline-editor placement
+    overlay.ts         composer placement
     composer-state.ts  the composer's drafts
     nodes/
       node-kinds.ts    the node kinds: ports, settings and model catalogs
     canvas/
-      index.ts         the area facade: the geometry views and features use
+      index.ts         the area facade: the model and geometry other areas use
       geometry/        connection curves, edge clipping, grid and preview cells,
                        selection handles, tooltip and culling math
+      model/
+        camera.ts      infinite-canvas camera (pan, zoom, fit)
+        cursor.ts      the canvas cursor type
+        edge-layer.ts  the connector canvas box
+        scene/         the headless scene model, its record equality, ports and
+                       reader types
+        cards/         card content, geometry, layout, image events and the
+                       inline editor's body anchor
     shared/            the shared kernel: geometry, equality, DTO factories
   native/              mixed NSH Rust crate (SQLite/FTS5/RTree document core)
     Cargo.toml

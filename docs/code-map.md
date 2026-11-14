@@ -84,7 +84,12 @@ chrome. Phase 2 step 1 moved the node-kind registry to `flow/nodes` and
 the pure-math modules to `flow/canvas/geometry` behind the `flow/canvas`
 facade and moved the generic rectangle types and helpers (`BoxGeometry`,
 `overlaps`, `mergeBounds`, `containsPoint`) into `flow/shared/geometry.ts`.
-The rest of the source tree is still the legacy flat layout. The old → new map is in
+Step 3 moved the canvas model to `flow/canvas/model` (camera, the scene and its
+ports/record equality, the card content/geometry/layout and the connector
+layer), added `scene-types.ts`, `cursor.ts`, `cards/card-image.ts` and
+`cards/inline-body.ts` to break the scene/helper and controller/handle cycles,
+and left the placement half of `overlay.ts` for the composer step. The rest of
+the source tree is still the legacy flat layout. The old → new map is in
 [the plan's Appendix A](plans/code-organization.md#appendix-a--tsx-placement-map);
 `LEGACY_FLAT` in the manifest shrinks with every move and disappears in
 Phase 5. Do not add a new file at the `components/`, `flow/` or `pages/`
