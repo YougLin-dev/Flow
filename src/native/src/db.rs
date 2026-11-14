@@ -496,7 +496,7 @@ fn has_edges(conn: &DatabaseConnection) -> Result<bool, String> {
         .map_err(|error| error.to_string())
 }
 
-fn sqlite_url(path: &str) -> Result<String, String> {
+pub(crate) fn sqlite_url(path: &str) -> Result<String, String> {
     if path == ":memory:" {
         return Ok("sqlite::memory:".to_owned());
     }

@@ -22,10 +22,10 @@ bun run test:junit                 # also write src/.nsh/junit.xml for CI
 
 Rust tests live beside the native crate in `src/native/src/`. `nsh test src`
 runs `cargo test` before the TSX tests; `bun run test:bench` runs the release
-benchmark that is ignored by the normal suite. The document tests open a real
-SeaORM/SQLite database; the frozen v1 schema and guard tests open raw rusqlite
-(in-memory plus a file-backed round-trip) so commit, rollback and pragma
-persistence are exercised. `search.rs` and `viewport.rs` assert that the generated
+benchmark that is ignored by the normal suite. The document and frozen v1
+schema/guard tests open real SeaORM/SQLite connections (in-memory plus a
+file-backed round-trip) so commit, rollback and pragma persistence are
+exercised on the production connection surface. `search.rs` and `viewport.rs` assert that the generated
 queries keep FTS5/RTree as the outer table with `CROSS JOIN`,
 `edge_index.rs` checks the connector box against the UI's curve geometry, and
 `db.rs` covers a scene read between two off-screen cards plus its maintenance

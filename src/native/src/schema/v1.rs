@@ -2,9 +2,11 @@
 //!
 //! The DDL is a literal file (`v1.sql`), never generated from entities. The
 //! guard runs before any DDL so a foreign SQLite file or a future schema is
-//! refused without dropping anything. `create` is the only writer here.
+//! refused without dropping anything. `create` is the only writer here. The
+//! module uses the same SeaORM connection surface as the live database so the
+//! guard can run on the production handle without a second implementation.
 
-use rusqlite::{Connection, OptionalExtension, Transaction, TransactionBehavior, params};
+use sea_orm::{ConnectionTrait, DbBackend, Statement, Value};
 
 /// `0x464C4F57`, "FLOW".
 pub const APPLICATION_ID: i64 = 1_179_406_167;
@@ -105,19 +107,13 @@ pub enum FileState {
 /// Sets the schema-context pragmas and asserts them. Connection tuning
 /// (`busy_timeout`, `cache_size`, WAL, `synchronous`) stays in `db.rs` until
 /// the legacy and v1 open paths merge.
-pub fn configure(conn: &Connection) -> Result<(), String> {
-    conn.execute_batch("PRAGMA foreign_keys = ON; PRAGMA recursive_triggers = OFF;")
+pub fn configure<C: ConnectionTrait>(conn: &C) -> Result<(), String> {
+    conn.execute_unprepared("PRAGMA foreign_keys = ON; PRAGMA recursive_triggers = OFF;")
         .map_err(|error| error.to_string())?;
-    let foreign_keys: i64 = conn
-        .pragma_query_value(None, "foreign_keys", |row| row.get(0))
-        .map_err(|error| error.to_string())?;
-    let recursive_triggers: i64 = conn
-        .pragma_query_value(None, "recursive_triggers", |row| row.get(0))
-        .map_err(|error| error.to_string())?;
-    if foreign_keys != 1 {
+    if pragma(conn, "foreign_keys")? != 1 {
         return Err("SQLite refused PRAGMA foreign_keys = ON".to_owned());
     }
-    if recursive_triggers != 0 {
+    if pragma(conn, "recursive_triggers")? != 0 {
         return Err("SQLite refused PRAGMA recursive_triggers = OFF".to_owned());
     }
     Ok(())
@@ -130,22 +126,16 @@ pub fn configure(conn: &Connection) -> Result<(), String> {
 /// missing schema object, or an invalid document row. The caller adds the
 /// package path and the recovery suggestion (`verify()` or a reset/deletion);
 /// this function sees only the connection.
-pub fn inspect(conn: &Connection) -> Result<FileState, String> {
-    let application_id: i64 = conn
-        .pragma_query_value(None, "application_id", |row| row.get(0))
-        .map_err(|error| error.to_string())?;
-    let user_version: i64 = conn
-        .pragma_query_value(None, "user_version", |row| row.get(0))
-        .map_err(|error| error.to_string())?;
-    let user_objects: i64 = conn
-        .query_row(
-            "SELECT count(*) FROM sqlite_master \
-             WHERE type IN ('table', 'view') \
-               AND substr(name, 1, 7) <> 'sqlite_'",
-            [],
-            |row| row.get(0),
-        )
-        .map_err(|error| error.to_string())?;
+pub fn inspect<C: ConnectionTrait>(conn: &C) -> Result<FileState, String> {
+    let application_id = pragma(conn, "application_id")?;
+    let user_version = pragma(conn, "user_version")?;
+    let user_objects = scalar_i64(
+        conn,
+        "SELECT count(*) FROM sqlite_master \
+         WHERE type IN ('table', 'view') \
+           AND substr(name, 1, 7) <> 'sqlite_'",
+        vec![],
+    )?;
 
     if application_id == 0 {
         if user_version == 0 && user_objects == 0 {
@@ -172,29 +162,23 @@ pub fn inspect(conn: &Connection) -> Result<FileState, String> {
     require_objects(conn)?;
 
     let row = conn
-        .query_row(
+        .query_one_raw(statement(
             "SELECT project_id, title, camera_x, camera_y, camera_zoom \
              FROM document WHERE id = 1",
-            [],
-            |row| {
-                Ok((
-                    row.get::<_, String>(0)?,
-                    row.get::<_, String>(1)?,
-                    row.get::<_, f64>(2)?,
-                    row.get::<_, f64>(3)?,
-                    row.get::<_, f64>(4)?,
-                ))
-            },
-        )
-        .optional()
-        .map_err(|error| format!("the Flow database is incomplete: {error}"))?
+        ))
+        .map_err(incomplete)?
         .ok_or_else(|| "the Flow database has no document row".to_owned())?;
+    let project_id: String = row.try_get_by_index(0).map_err(incomplete)?;
+    let title: String = row.try_get_by_index(1).map_err(incomplete)?;
+    let camera_x: f64 = row.try_get_by_index(2).map_err(incomplete)?;
+    let camera_y: f64 = row.try_get_by_index(3).map_err(incomplete)?;
+    let camera_zoom: f64 = row.try_get_by_index(4).map_err(incomplete)?;
 
-    validate_document(row.0, row.1, row.2, row.3, row.4).map(FileState::Current)
+    validate_document(project_id, title, camera_x, camera_y, camera_zoom).map(FileState::Current)
 }
 
 /// Creates a v1 package in one transaction and returns its identity.
-pub fn create(conn: &Connection, title: &str) -> Result<ProjectInfo, String> {
+pub fn create<C: ConnectionTrait>(conn: &C, title: &str) -> Result<ProjectInfo, String> {
     if title.contains('\0') {
         return Err("the project title is invalid".to_owned());
     }
@@ -209,27 +193,49 @@ pub fn create(conn: &Connection, title: &str) -> Result<ProjectInfo, String> {
     }
 
     configure(conn)?;
-    let transaction = Transaction::new_unchecked(conn, TransactionBehavior::Immediate)
+    // BEGIN IMMEDIATE takes the write lock up front. The transaction is
+    // issued as SQL rather than through SeaORM's DatabaseTransaction, whose
+    // drop panics if an implicit ROLLBACK fails and would replace the create
+    // error. SQLite rolls back on the fatal errors where ROLLBACK cannot run.
+    conn.execute_unprepared("BEGIN IMMEDIATE")
         .map_err(|error| error.to_string())?;
-    let project = create_in_transaction(&transaction, title)?;
-    transaction.commit().map_err(|error| error.to_string())?;
-    Ok(project)
+    match create_in_transaction(conn, title) {
+        Ok(project) => {
+            if let Err(error) = conn.execute_unprepared("COMMIT") {
+                let _ = conn.execute_unprepared("ROLLBACK");
+                return Err(error.to_string());
+            }
+            Ok(project)
+        }
+        Err(error) => {
+            let _ = conn.execute_unprepared("ROLLBACK");
+            Err(error)
+        }
+    }
 }
 
-fn create_in_transaction(conn: &Connection, title: &str) -> Result<ProjectInfo, String> {
-    conn.execute_batch(MIGRATION_1)
+fn create_in_transaction<C: ConnectionTrait>(conn: &C, title: &str) -> Result<ProjectInfo, String> {
+    match inspect(conn)? {
+        FileState::New => {}
+        FileState::Current(_) => {
+            return Err("the database is already a Flow project".to_owned());
+        }
+    }
+    conn.execute_unprepared(MIGRATION_1)
         .map_err(|error| error.to_string())?;
-    let project_id: String = conn
-        .query_row("SELECT lower(hex(randomblob(16)))", [], |row| row.get(0))
-        .map_err(|error| error.to_string())?;
+    let project_id = scalar_string(conn, "SELECT lower(hex(randomblob(16)))", vec![])?;
     let now = crate::clock::now_ms();
-    conn.execute(
+    conn.execute_raw(statement_values(
         "INSERT INTO document (id, project_id, title, created_at, updated_at) \
          VALUES (1, ?1, ?2, ?3, ?3)",
-        params![project_id, title, now],
-    )
+        vec![
+            project_id.clone().into(),
+            title.to_owned().into(),
+            now.into(),
+        ],
+    ))
     .map_err(|error| error.to_string())?;
-    conn.execute_batch(&format!(
+    conn.execute_unprepared(&format!(
         "PRAGMA application_id = {APPLICATION_ID}; PRAGMA user_version = {USER_VERSION};"
     ))
     .map_err(|error| error.to_string())?;
@@ -239,23 +245,62 @@ fn create_in_transaction(conn: &Connection, title: &str) -> Result<ProjectInfo, 
     })
 }
 
-fn require_objects(conn: &Connection) -> Result<(), String> {
+fn require_objects<C: ConnectionTrait>(conn: &C) -> Result<(), String> {
     for (kind, name) in REQUIRED_OBJECTS {
         let present = conn
-            .query_row(
+            .query_one_raw(statement_values(
                 "SELECT 1 FROM sqlite_master WHERE type = ?1 AND name = ?2",
-                params![kind, name],
-                |_| Ok(()),
-            )
-            .optional()
-            .map_err(|error| error.to_string())?;
-        if present.is_none() {
+                vec![(*kind).into(), (*name).into()],
+            ))
+            .map_err(|error| error.to_string())?
+            .is_some();
+        if !present {
             return Err(format!(
                 "the Flow database is incomplete: missing {kind} {name}"
             ));
         }
     }
     Ok(())
+}
+
+fn pragma<C: ConnectionTrait>(conn: &C, name: &str) -> Result<i64, String> {
+    let row = conn
+        .query_one_raw(statement(format!("PRAGMA {name}")))
+        .map_err(|error| error.to_string())?
+        .ok_or_else(|| format!("PRAGMA {name} returned no row"))?;
+    row.try_get_by_index(0).map_err(|error| error.to_string())
+}
+
+fn scalar_i64<C: ConnectionTrait>(conn: &C, sql: &str, values: Vec<Value>) -> Result<i64, String> {
+    let row = conn
+        .query_one_raw(statement_values(sql, values))
+        .map_err(|error| error.to_string())?
+        .ok_or_else(|| "the query returned no row".to_owned())?;
+    row.try_get_by_index(0).map_err(|error| error.to_string())
+}
+
+fn scalar_string<C: ConnectionTrait>(
+    conn: &C,
+    sql: &str,
+    values: Vec<Value>,
+) -> Result<String, String> {
+    let row = conn
+        .query_one_raw(statement_values(sql, values))
+        .map_err(|error| error.to_string())?
+        .ok_or_else(|| "the query returned no row".to_owned())?;
+    row.try_get_by_index(0).map_err(|error| error.to_string())
+}
+
+fn statement(sql: impl Into<String>) -> Statement {
+    Statement::from_string(DbBackend::Sqlite, sql)
+}
+
+fn statement_values(sql: impl Into<String>, values: Vec<Value>) -> Statement {
+    Statement::from_sql_and_values(DbBackend::Sqlite, sql, values)
+}
+
+fn incomplete(error: impl std::fmt::Display) -> String {
+    format!("the Flow database is incomplete: {error}")
 }
 
 fn validate_document(
@@ -312,6 +357,9 @@ mod tests {
     use std::path::{Path, PathBuf};
     use std::sync::atomic::{AtomicU64, Ordering};
 
+    use sea_orm::{Database, DatabaseConnection, DbErr, QueryResult, Value};
+    use sha2::{Digest, Sha256};
+
     use super::*;
 
     static TEMP_COUNTER: AtomicU64 = AtomicU64::new(0);
@@ -331,8 +379,10 @@ mod tests {
             Self { path }
         }
 
-        fn open(&self) -> Connection {
-            let conn = Connection::open(&self.path).expect("open temp database");
+        fn connect(&self) -> DatabaseConnection {
+            let path = self.path.to_string_lossy();
+            let url = crate::db::sqlite_url(&path).expect("temp database URL");
+            let conn = Database::connect(url).expect("connect temp database");
             configure(&conn).expect("configure temp database");
             conn
         }
@@ -350,87 +400,125 @@ mod tests {
         PathBuf::from(format!("{}{suffix}", path.display()))
     }
 
-    fn memory() -> Connection {
-        let conn = Connection::open_in_memory().expect("open in-memory SQLite");
+    fn memory() -> DatabaseConnection {
+        let conn = Database::connect("sqlite::memory:").expect("open in-memory SQLite");
         configure(&conn).expect("configure in-memory SQLite");
         conn
     }
 
-    fn columns(conn: &Connection, table: &str) -> Vec<String> {
-        let mut statement = conn
-            .prepare(&format!("PRAGMA table_info({table})"))
-            .expect("prepare table_info");
-        let rows = statement
-            .query_map([], |row| row.get::<_, String>(1))
-            .expect("query table_info");
-        rows.map(Result::unwrap).collect()
+    fn exec(conn: &DatabaseConnection, sql: &str) {
+        conn.execute_unprepared(sql)
+            .unwrap_or_else(|error| panic!("execute {sql}: {error}"));
     }
 
-    fn table_definition(conn: &Connection, table: &str) -> Vec<String> {
-        let mut statement = conn
-            .prepare(&format!("PRAGMA table_info({table})"))
-            .expect("prepare table_info");
-        let rows = statement
-            .query_map([], |row| {
-                Ok((
-                    row.get::<_, String>(1)?,
-                    row.get::<_, String>(2)?,
-                    row.get::<_, i64>(3)?,
-                    row.get::<_, Option<String>>(4)?,
-                    row.get::<_, i64>(5)?,
-                ))
+    fn execute(conn: &DatabaseConnection, sql: &str, values: Vec<Value>) -> Result<(), DbErr> {
+        conn.execute_raw(statement_values(sql, values)).map(|_| ())
+    }
+
+    fn query_one(conn: &DatabaseConnection, sql: &str, values: Vec<Value>) -> Option<QueryResult> {
+        conn.query_one_raw(statement_values(sql, values))
+            .unwrap_or_else(|error| panic!("query {sql}: {error}"))
+    }
+
+    fn query_all(conn: &DatabaseConnection, sql: &str, values: Vec<Value>) -> Vec<QueryResult> {
+        conn.query_all_raw(statement_values(sql, values))
+            .unwrap_or_else(|error| panic!("query {sql}: {error}"))
+    }
+
+    fn pragma(conn: &DatabaseConnection, name: &str) -> i64 {
+        query_one(conn, &format!("PRAGMA {name}"), vec![])
+            .unwrap_or_else(|| panic!("PRAGMA {name} returned no row"))
+            .try_get_by_index(0)
+            .unwrap_or_else(|error| panic!("PRAGMA {name}: {error}"))
+    }
+
+    fn count(conn: &DatabaseConnection, sql: &str) -> i64 {
+        query_one(conn, sql, vec![])
+            .unwrap_or_else(|| panic!("count query returned no row: {sql}"))
+            .try_get_by_index(0)
+            .unwrap_or_else(|error| panic!("count query {sql}: {error}"))
+    }
+
+    fn columns(conn: &DatabaseConnection, table: &str) -> Vec<String> {
+        query_all(conn, &format!("PRAGMA table_info({table})"), vec![])
+            .into_iter()
+            .map(|row| row.try_get_by_index(1).expect("column name"))
+            .collect()
+    }
+
+    fn table_definition(conn: &DatabaseConnection, table: &str) -> Vec<String> {
+        query_all(conn, &format!("PRAGMA table_info({table})"), vec![])
+            .into_iter()
+            .map(|row| {
+                let name: String = row.try_get_by_index(1).expect("column name");
+                let kind: String = row.try_get_by_index(2).expect("column type");
+                let not_null: i64 = row.try_get_by_index(3).expect("not null");
+                let default: Option<String> = row.try_get_by_index(4).expect("column default");
+                let primary_key: i64 = row.try_get_by_index(5).expect("primary key");
+                format!(
+                    "{name}|{kind}|{not_null}|{}|{primary_key}",
+                    default.unwrap_or_default()
+                )
             })
-            .expect("query table_info");
-        rows.map(|row| {
-            let (name, kind, not_null, default, primary_key) = row.expect("read table_info row");
-            format!(
-                "{name}|{kind}|{not_null}|{}|{primary_key}",
-                default.unwrap_or_default()
-            )
-        })
+            .collect()
+    }
+
+    fn objects(conn: &DatabaseConnection, kind: &str) -> Vec<String> {
+        query_all(
+            conn,
+            "SELECT name FROM sqlite_master WHERE type = ?1 ORDER BY name",
+            vec![kind.to_owned().into()],
+        )
+        .into_iter()
+        .map(|row| row.try_get_by_index(0).expect("object name"))
         .collect()
-    }
-
-    fn objects(conn: &Connection, kind: &str) -> Vec<String> {
-        let mut statement = conn
-            .prepare("SELECT name FROM sqlite_master WHERE type = ?1 ORDER BY name")
-            .expect("prepare sqlite_master read");
-        let rows = statement
-            .query_map([kind], |row| row.get::<_, String>(0))
-            .expect("query sqlite_master");
-        rows.map(Result::unwrap).collect()
-    }
-
-    fn pragma(conn: &Connection, name: &str) -> i64 {
-        conn.pragma_query_value(None, name, |row| row.get(0))
-            .expect("read pragma")
     }
 
     fn normalize_sql(sql: &str) -> String {
         sql.split_whitespace().collect::<Vec<_>>().join(" ")
     }
 
-    fn insert_node(conn: &Connection, id: &str, title: &str) {
-        conn.execute(
+    fn insert_node(conn: &DatabaseConnection, id: &str, title: &str) {
+        execute(
+            conn,
             "INSERT INTO nodes (id, kind, title, x, y, width, height, z, created_at, updated_at) \
              VALUES (?1, 'text', ?2, 0, 0, 100, 50, 0, 0, 0)",
-            params![id, title],
+            vec![id.to_owned().into(), title.to_owned().into()],
         )
         .expect("insert node");
     }
 
-    fn insert_edge(conn: &Connection, id: &str, from: &str, to: &str) {
-        conn.execute(
+    fn insert_edge(conn: &DatabaseConnection, id: &str, from: &str, to: &str) {
+        execute(
+            conn,
             "INSERT INTO edges (id, from_id, to_id, from_port, to_port, port_kind, from_offset, to_offset) \
              VALUES (?1, ?2, ?3, 'out', 'in', 'text', 0, 0)",
-            params![id, from, to],
+            vec![id.to_owned().into(), from.to_owned().into(), to.to_owned().into()],
         )
         .expect("insert edge");
     }
 
-    fn count(conn: &Connection, sql: &str) -> i64 {
-        conn.query_row(sql, [], |row| row.get(0))
-            .expect("count rows")
+    fn ddl_objects() -> Vec<(&'static str, &'static str)> {
+        const PREFIXES: &[(&str, &str)] = &[
+            ("CREATE VIRTUAL TABLE ", "table"),
+            ("CREATE TABLE ", "table"),
+            ("CREATE VIEW ", "view"),
+            ("CREATE UNIQUE INDEX ", "index"),
+            ("CREATE INDEX ", "index"),
+            ("CREATE TRIGGER ", "trigger"),
+        ];
+        let mut objects = Vec::new();
+        for line in MIGRATION_1.lines() {
+            let line = line.trim_start();
+            for (prefix, kind) in PREFIXES {
+                if let Some(rest) = line.strip_prefix(prefix) {
+                    let name = rest.split_whitespace().next().unwrap_or("");
+                    objects.push((*kind, name));
+                    break;
+                }
+            }
+        }
+        objects
     }
 
     #[test]
@@ -444,30 +532,19 @@ mod tests {
         assert_eq!(pragma(&conn, "application_id"), APPLICATION_ID);
         assert_eq!(pragma(&conn, "user_version"), USER_VERSION);
 
-        let (title, camera_x, camera_y, camera_zoom, demo_seeded, clean_shutdown): (
-            String,
-            f64,
-            f64,
-            f64,
-            i64,
-            i64,
-        ) = conn
-            .query_row(
-                "SELECT title, camera_x, camera_y, camera_zoom, demo_seeded, clean_shutdown \
-                 FROM document WHERE id = 1",
-                [],
-                |row| {
-                    Ok((
-                        row.get(0)?,
-                        row.get(1)?,
-                        row.get(2)?,
-                        row.get(3)?,
-                        row.get(4)?,
-                        row.get(5)?,
-                    ))
-                },
-            )
-            .expect("read document");
+        let row = query_one(
+            &conn,
+            "SELECT title, camera_x, camera_y, camera_zoom, demo_seeded, clean_shutdown \
+             FROM document WHERE id = 1",
+            vec![],
+        )
+        .expect("read document");
+        let title: String = row.try_get_by_index(0).expect("title");
+        let camera_x: f64 = row.try_get_by_index(1).expect("camera_x");
+        let camera_y: f64 = row.try_get_by_index(2).expect("camera_y");
+        let camera_zoom: f64 = row.try_get_by_index(3).expect("camera_zoom");
+        let demo_seeded: i64 = row.try_get_by_index(4).expect("demo_seeded");
+        let clean_shutdown: i64 = row.try_get_by_index(5).expect("clean_shutdown");
         assert_eq!(title, "Test project");
         assert_eq!((camera_x, camera_y, camera_zoom), (0.0, 0.0, 1.0));
         assert_eq!((demo_seeded, clean_shutdown), (0, 0));
@@ -478,11 +555,11 @@ mod tests {
     fn create_persists_across_reopen() {
         let temp = TempDb::new("persist");
         let project = {
-            let conn = temp.open();
+            let conn = temp.connect();
             create(&conn, "Persisted").expect("create v1")
         };
 
-        let conn = temp.open();
+        let conn = temp.connect();
         assert_eq!(inspect(&conn), Ok(FileState::Current(project.clone())));
         assert_eq!(pragma(&conn, "application_id"), APPLICATION_ID);
         assert_eq!(pragma(&conn, "user_version"), USER_VERSION);
@@ -493,9 +570,8 @@ mod tests {
     #[test]
     fn create_rolls_back_on_a_failed_ddl() {
         let temp = TempDb::new("rollback");
-        let conn = temp.open();
-        conn.execute_batch("PRAGMA max_page_count = 8")
-            .expect("cap the database size");
+        let conn = temp.connect();
+        exec(&conn, "PRAGMA max_page_count = 8");
 
         let error = create(&conn, "No room").expect_err("DDL must fail without pages");
         assert!(
@@ -517,17 +593,36 @@ mod tests {
         let conn = memory();
         create(&conn, "Shape").expect("create v1");
 
+        let digest = {
+            let mut hasher = Sha256::new();
+            hasher.update(MIGRATION_1.as_bytes());
+            hasher
+                .finalize()
+                .iter()
+                .map(|byte| format!("{byte:02x}"))
+                .collect::<String>()
+        };
+        assert_eq!(
+            digest,
+            "bba8ca75beab3ced9e0a7079d452dbe5e836a595c0e71a2e32cd1aed7424463d"
+        );
+        let mut declared = ddl_objects();
+        declared.sort();
+        let mut required = REQUIRED_OBJECTS.to_vec();
+        required.sort();
+        assert_eq!(declared, required);
+
         let tables = objects(&conn, "table");
         for table in [
             "assets",
             "document",
             "edges",
+            "edges_rtree",
             "node_inputs",
             "nodes",
             "nodes_fts",
             "nodes_geometry_dirty",
             "nodes_rtree",
-            "edges_rtree",
             "result_batches",
             "result_items",
         ] {
@@ -681,25 +776,25 @@ mod tests {
         ] {
             assert!(indexes.iter().any(|name| name == index), "missing {index}");
         }
-        let edge_pair_sql: String = conn
-            .query_row(
-                "SELECT sql FROM sqlite_master WHERE type = 'index' AND name = 'edges_port_pair'",
-                [],
-                |row| row.get(0),
-            )
-            .expect("read edges_port_pair SQL");
+        let edge_pair_sql: String = query_one(
+            &conn,
+            "SELECT sql FROM sqlite_master WHERE type = 'index' AND name = 'edges_port_pair'",
+            vec![],
+        )
+        .expect("read edges_port_pair SQL")
+        .try_get_by_index(0)
+        .expect("edges_port_pair SQL");
         assert!(edge_pair_sql.to_uppercase().contains("UNIQUE"));
 
-        let mut named_indexes = conn
-            .prepare(
-                "SELECT name FROM sqlite_master \
-                 WHERE type = 'index' AND sql IS NOT NULL ORDER BY name",
-            )
-            .expect("prepare named index read")
-            .query_map([], |row| row.get::<_, String>(0))
-            .expect("query named indexes")
-            .map(Result::unwrap)
-            .collect::<Vec<_>>();
+        let mut named_indexes = query_all(
+            &conn,
+            "SELECT name FROM sqlite_master \
+             WHERE type = 'index' AND sql IS NOT NULL ORDER BY name",
+            vec![],
+        )
+        .into_iter()
+        .map(|row| row.try_get_by_index(0).expect("index name"))
+        .collect::<Vec<String>>();
         named_indexes.sort();
         assert_eq!(
             named_indexes,
@@ -726,14 +821,11 @@ mod tests {
         required_indexes.sort();
         assert_eq!(required_indexes, named_indexes);
 
-        let edge_auto_indexes: i64 = conn
-            .query_row(
-                "SELECT count(*) FROM sqlite_master \
-                 WHERE type = 'index' AND tbl_name = 'edges' AND sql IS NULL",
-                [],
-                |row| row.get(0),
-            )
-            .expect("count edge autoindexes");
+        let edge_auto_indexes: i64 = count(
+            &conn,
+            "SELECT count(*) FROM sqlite_master \
+             WHERE type = 'index' AND tbl_name = 'edges' AND sql IS NULL",
+        );
         assert_eq!(
             edge_auto_indexes, 1,
             "edges must have only the id autoindex"
@@ -749,14 +841,13 @@ mod tests {
             ("node_inputs", 2),
             ("nodes_geometry_dirty", 1),
         ] {
-            let auto_indexes: i64 = conn
-                .query_row(
+            let auto_indexes: i64 = count(
+                &conn,
+                &format!(
                     "SELECT count(*) FROM sqlite_master \
-                     WHERE type = 'index' AND tbl_name = ?1 AND sql IS NULL",
-                    [table],
-                    |row| row.get(0),
-                )
-                .expect("count table autoindexes");
+                     WHERE type = 'index' AND tbl_name = '{table}' AND sql IS NULL"
+                ),
+            );
             assert_eq!(auto_indexes, expected, "{table} autoindex count");
         }
 
@@ -888,13 +979,14 @@ mod tests {
             ["node_id|TEXT|1||1"]
         );
 
-        let running_sql: String = conn
-            .query_row(
-                "SELECT sql FROM sqlite_master WHERE type = 'index' AND name = 'nodes_running'",
-                [],
-                |row| row.get(0),
-            )
-            .expect("read nodes_running SQL");
+        let running_sql: String = query_one(
+            &conn,
+            "SELECT sql FROM sqlite_master WHERE type = 'index' AND name = 'nodes_running'",
+            vec![],
+        )
+        .expect("read nodes_running SQL")
+        .try_get_by_index(0)
+        .expect("nodes_running SQL");
         assert!(
             normalize_sql(&running_sql).contains("WHERE status = 'running'"),
             "{running_sql}"
@@ -920,13 +1012,14 @@ mod tests {
                 ][..],
             ),
         ] {
-            let sql: String = conn
-                .query_row(
-                    "SELECT sql FROM sqlite_master WHERE type = 'trigger' AND name = ?1",
-                    [object],
-                    |row| row.get(0),
-                )
-                .expect("read trigger SQL");
+            let sql: String = query_one(
+                &conn,
+                "SELECT sql FROM sqlite_master WHERE type = 'trigger' AND name = ?1",
+                vec![object.to_owned().into()],
+            )
+            .expect("read trigger SQL")
+            .try_get_by_index(0)
+            .expect("trigger SQL");
             let sql = normalize_sql(&sql);
             for fragment in fragments.iter().copied() {
                 assert!(sql.contains(fragment), "{object} missing {fragment}: {sql}");
@@ -999,25 +1092,27 @@ mod tests {
         required_triggers.sort();
         assert_eq!(required_triggers, actual_triggers);
 
-        let fts: String = conn
-            .query_row(
-                "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'nodes_fts'",
-                [],
-                |row| row.get(0),
-            )
-            .expect("read nodes_fts SQL");
+        let fts: String = query_one(
+            &conn,
+            "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'nodes_fts'",
+            vec![],
+        )
+        .expect("read nodes_fts SQL")
+        .try_get_by_index(0)
+        .expect("nodes_fts SQL");
         let fts = normalize_sql(&fts);
         assert!(fts.contains("content = 'nodes'"), "{fts}");
         assert!(fts.contains("content_rowid = 'seq'"), "{fts}");
         assert!(fts.contains("tokenize = 'trigram'"), "{fts}");
 
-        let view: String = conn
-            .query_row(
-                "SELECT sql FROM sqlite_master WHERE type = 'view' AND name = 'edge_boxes'",
-                [],
-                |row| row.get(0),
-            )
-            .expect("read edge_boxes SQL");
+        let view: String = query_one(
+            &conn,
+            "SELECT sql FROM sqlite_master WHERE type = 'view' AND name = 'edge_boxes'",
+            vec![],
+        )
+        .expect("read edge_boxes SQL")
+        .try_get_by_index(0)
+        .expect("edge_boxes SQL");
         let view = normalize_sql(&view);
         for fragment in [
             "f.x + f.width + 14.0",
@@ -1033,14 +1128,13 @@ mod tests {
             );
         }
 
-        let integrity: String = conn
-            .query_row("PRAGMA integrity_check", [], |row| row.get(0))
-            .expect("integrity_check");
+        let integrity: String = query_one(&conn, "PRAGMA integrity_check", vec![])
+            .expect("integrity_check")
+            .try_get_by_index(0)
+            .expect("integrity_check value");
         assert_eq!(integrity, "ok");
-        let mut statement = conn
-            .prepare("PRAGMA foreign_key_check")
-            .expect("prepare foreign_key_check");
-        assert_eq!(statement.query_map([], |_| Ok(())).unwrap().count(), 0);
+        let foreign_key_errors = query_all(&conn, "PRAGMA foreign_key_check", vec![]);
+        assert_eq!(foreign_key_errors.len(), 0);
     }
 
     #[test]
@@ -1064,8 +1158,7 @@ mod tests {
         assert_eq!(count(&conn, "SELECT count(*) FROM edges_rtree"), 1);
         assert_eq!(count(&conn, "SELECT count(*) FROM edge_boxes"), 1);
 
-        conn.execute("UPDATE nodes SET title = 'gamma' WHERE id = 'n1'", [])
-            .expect("update the node title");
+        exec(&conn, "UPDATE nodes SET title = 'gamma' WHERE id = 'n1'");
         assert_eq!(
             count(
                 &conn,
@@ -1081,25 +1174,26 @@ mod tests {
             1
         );
 
-        let node_box_before: (f64, f64) = conn
-            .query_row(
-                "SELECT min_x, max_x FROM nodes_rtree \
-                 WHERE id = (SELECT seq FROM nodes WHERE id = 'n1')",
-                [],
-                |row| Ok((row.get(0)?, row.get(1)?)),
-            )
-            .expect("read node box");
-        conn.execute("UPDATE nodes SET x = 50 WHERE id = 'n1'", [])
-            .expect("move the node");
-        let node_box_after: (f64, f64) = conn
-            .query_row(
-                "SELECT min_x, max_x FROM nodes_rtree \
-                 WHERE id = (SELECT seq FROM nodes WHERE id = 'n1')",
-                [],
-                |row| Ok((row.get(0)?, row.get(1)?)),
-            )
-            .expect("read the moved node box");
-        assert_ne!(node_box_before, node_box_after);
+        let node_box_before = query_one(
+            &conn,
+            "SELECT min_x, max_x FROM nodes_rtree \
+             WHERE id = (SELECT seq FROM nodes WHERE id = 'n1')",
+            vec![],
+        )
+        .expect("read node box");
+        let before_min_x: f64 = node_box_before.try_get_by_index(0).expect("min_x");
+        let before_max_x: f64 = node_box_before.try_get_by_index(1).expect("max_x");
+        exec(&conn, "UPDATE nodes SET x = 50 WHERE id = 'n1'");
+        let node_box_after = query_one(
+            &conn,
+            "SELECT min_x, max_x FROM nodes_rtree \
+             WHERE id = (SELECT seq FROM nodes WHERE id = 'n1')",
+            vec![],
+        )
+        .expect("read the moved node box");
+        let after_min_x: f64 = node_box_after.try_get_by_index(0).expect("min_x");
+        let after_max_x: f64 = node_box_after.try_get_by_index(1).expect("max_x");
+        assert_ne!((before_min_x, before_max_x), (after_min_x, after_max_x));
         assert_eq!(
             count(
                 &conn,
@@ -1108,28 +1202,28 @@ mod tests {
             1
         );
 
-        let edge_box_before: (f64, f64) = conn
-            .query_row(
-                "SELECT min_y, max_y FROM edges_rtree \
-                 WHERE id = (SELECT seq FROM edges WHERE id = 'e1')",
-                [],
-                |row| Ok((row.get(0)?, row.get(1)?)),
-            )
-            .expect("read edge box");
-        conn.execute("UPDATE edges SET from_offset = 10 WHERE id = 'e1'", [])
-            .expect("move the edge endpoint");
-        let edge_box_after: (f64, f64) = conn
-            .query_row(
-                "SELECT min_y, max_y FROM edges_rtree \
-                 WHERE id = (SELECT seq FROM edges WHERE id = 'e1')",
-                [],
-                |row| Ok((row.get(0)?, row.get(1)?)),
-            )
-            .expect("read the moved edge box");
-        assert_ne!(edge_box_before, edge_box_after);
+        let edge_box_before = query_one(
+            &conn,
+            "SELECT min_y, max_y FROM edges_rtree \
+             WHERE id = (SELECT seq FROM edges WHERE id = 'e1')",
+            vec![],
+        )
+        .expect("read edge box");
+        let before_min_y: f64 = edge_box_before.try_get_by_index(0).expect("min_y");
+        let before_max_y: f64 = edge_box_before.try_get_by_index(1).expect("max_y");
+        exec(&conn, "UPDATE edges SET from_offset = 10 WHERE id = 'e1'");
+        let edge_box_after = query_one(
+            &conn,
+            "SELECT min_y, max_y FROM edges_rtree \
+             WHERE id = (SELECT seq FROM edges WHERE id = 'e1')",
+            vec![],
+        )
+        .expect("read the moved edge box");
+        let after_min_y: f64 = edge_box_after.try_get_by_index(0).expect("min_y");
+        let after_max_y: f64 = edge_box_after.try_get_by_index(1).expect("max_y");
+        assert_ne!((before_min_y, before_max_y), (after_min_y, after_max_y));
 
-        conn.execute("DELETE FROM nodes WHERE id = 'n1'", [])
-            .expect("delete the source node");
+        exec(&conn, "DELETE FROM nodes WHERE id = 'n1'");
         assert_eq!(count(&conn, "SELECT node_count FROM document"), 1);
         assert_eq!(count(&conn, "SELECT edge_count FROM document"), 0);
         assert_eq!(count(&conn, "SELECT count(*) FROM nodes_rtree"), 1);
@@ -1163,16 +1257,13 @@ mod tests {
     #[test]
     fn inspect_refuses_a_foreign_database() {
         let table = memory();
-        table
-            .execute_batch("CREATE TABLE notes (body TEXT)")
-            .expect("create foreign table");
+        exec(&table, "CREATE TABLE notes (body TEXT)");
         let error = inspect(&table).expect_err("foreign database must be refused");
         assert!(error.contains("not a Flow database"), "{error}");
         assert!(objects(&table, "table").iter().any(|name| name == "notes"));
 
         let view = memory();
-        view.execute_batch("CREATE VIEW foreign_view AS SELECT 1")
-            .expect("create foreign view");
+        exec(&view, "CREATE VIEW foreign_view AS SELECT 1");
         let error = inspect(&view).expect_err("a view-only file must be refused");
         assert!(error.contains("not a Flow database"), "{error}");
     }
@@ -1180,8 +1271,10 @@ mod tests {
     #[test]
     fn inspect_refuses_a_mismatched_application_id() {
         let conn = memory();
-        conn.execute_batch("PRAGMA application_id = 123; PRAGMA user_version = 1;")
-            .expect("stamp a foreign identity");
+        exec(
+            &conn,
+            "PRAGMA application_id = 123; PRAGMA user_version = 1;",
+        );
         let error = inspect(&conn).expect_err("mismatched application_id must be refused");
         assert!(error.contains("not a Flow database"), "{error}");
     }
@@ -1190,8 +1283,7 @@ mod tests {
     fn inspect_refuses_a_newer_schema() {
         let conn = memory();
         create(&conn, "Newer").expect("create v1");
-        conn.execute_batch("PRAGMA user_version = 2")
-            .expect("bump version");
+        exec(&conn, "PRAGMA user_version = 2");
         let error = inspect(&conn).expect_err("newer schema must be refused");
         assert!(error.contains("newer"), "{error}");
     }
@@ -1200,8 +1292,7 @@ mod tests {
     fn inspect_refuses_an_older_schema() {
         let conn = memory();
         create(&conn, "Older").expect("create v1");
-        conn.execute_batch("PRAGMA user_version = 0")
-            .expect("drop version");
+        exec(&conn, "PRAGMA user_version = 0");
         let error = inspect(&conn).expect_err("older schema must be refused");
         assert!(error.contains("older"), "{error}");
     }
@@ -1209,46 +1300,68 @@ mod tests {
     #[test]
     fn inspect_refuses_an_incomplete_flow_database() {
         let conn = memory();
-        conn.execute_batch(MIGRATION_1).expect("apply DDL");
-        conn.execute_batch(&format!(
-            "PRAGMA application_id = {APPLICATION_ID}; PRAGMA user_version = {USER_VERSION};"
-        ))
-        .expect("stamp identity");
+        exec(&conn, MIGRATION_1);
+        exec(
+            &conn,
+            &format!(
+                "PRAGMA application_id = {APPLICATION_ID}; PRAGMA user_version = {USER_VERSION};"
+            ),
+        );
         let error = inspect(&conn).expect_err("missing document row must be refused");
         assert_eq!(error, "the Flow database has no document row");
 
         let conn = memory();
         create(&conn, "Missing object").expect("create v1");
-        conn.execute_batch("PRAGMA foreign_keys = OFF; DROP TABLE assets;")
-            .expect("drop a required table");
+        exec(&conn, "PRAGMA foreign_keys = OFF; DROP TABLE assets;");
         let error = inspect(&conn).expect_err("missing required object must be refused");
         assert!(error.contains("missing table assets"), "{error}");
 
         let conn = memory();
         create(&conn, "Missing index").expect("create v1");
-        conn.execute_batch("DROP INDEX edges_port_pair")
-            .expect("drop a required index");
+        exec(&conn, "DROP INDEX edges_port_pair");
         let error = inspect(&conn).expect_err("missing required index must be refused");
         assert!(error.contains("missing index edges_port_pair"), "{error}");
 
         let conn = memory();
         create(&conn, "Missing trigger").expect("create v1");
-        conn.execute_batch("DROP TRIGGER nodes_fts_ai")
-            .expect("drop a required trigger");
+        exec(&conn, "DROP TRIGGER nodes_fts_ai");
         let error = inspect(&conn).expect_err("missing required trigger must be refused");
         assert!(error.contains("missing trigger nodes_fts_ai"), "{error}");
+
+        let conn = memory();
+        create(&conn, "Missing column").expect("create v1");
+        exec(&conn, "PRAGMA writable_schema = ON");
+        exec(
+            &conn,
+            "UPDATE sqlite_master \
+             SET sql = replace(sql, 'camera_zoom', 'camera_zoom_removed') \
+             WHERE type = 'table' AND name = 'document'",
+        );
+        exec(
+            &conn,
+            "PRAGMA schema_version = 9999; PRAGMA writable_schema = OFF",
+        );
+        let error = inspect(&conn).expect_err("missing document column must be refused");
+        assert!(
+            error.starts_with("the Flow database is incomplete:"),
+            "{error}"
+        );
+        assert!(error.contains("camera_zoom"), "{error}");
     }
 
     #[test]
     fn create_refuses_a_foreign_database_without_dropping_it() {
         let conn = memory();
-        conn.execute_batch("CREATE TABLE notes (body TEXT); INSERT INTO notes VALUES ('keep')")
-            .expect("create foreign table");
+        exec(
+            &conn,
+            "CREATE TABLE notes (body TEXT); INSERT INTO notes VALUES ('keep')",
+        );
         let error = create(&conn, "Refused").expect_err("foreign database must be refused");
         assert!(error.contains("not a Flow database"), "{error}");
-        let kept: String = conn
-            .query_row("SELECT body FROM notes", [], |row| row.get(0))
-            .expect("foreign row survives");
+        let kept: String = query_one(&conn, "SELECT body FROM notes", vec![])
+            .expect("foreign row survives")
+            .try_get_by_index(0)
+            .expect("foreign body");
         assert_eq!(kept, "keep");
         assert!(objects(&conn, "table").iter().any(|name| name == "notes"));
         assert!(
@@ -1267,84 +1380,101 @@ mod tests {
         let error = create(&conn, "Twice").expect_err("a current package must be refused");
         assert!(error.contains("already a Flow project"), "{error}");
         assert_eq!(count(&conn, "SELECT count(*) FROM document"), 1);
-        let stored: String = conn
-            .query_row("SELECT project_id FROM document WHERE id = 1", [], |row| {
-                row.get(0)
-            })
-            .expect("read project_id");
+        let stored: String = query_one(
+            &conn,
+            "SELECT project_id FROM document WHERE id = 1",
+            vec![],
+        )
+        .expect("read project_id")
+        .try_get_by_index(0)
+        .expect("project_id");
         assert_eq!(stored, project.project_id);
     }
 
     #[test]
     fn schema_checks_are_enforced() {
         let conn = memory();
-        conn.execute_batch(MIGRATION_1).expect("apply DDL");
+        exec(&conn, MIGRATION_1);
         let now = crate::clock::now_ms();
-        let bad_id = conn.execute(
-            "INSERT INTO document (id, project_id, created_at, updated_at) VALUES (1, 'short', ?1, ?1)",
-            params![now],
+        let bad_id = execute(
+            &conn,
+            "INSERT INTO document (id, project_id, created_at, updated_at) \
+             VALUES (1, 'short', ?1, ?1)",
+            vec![now.into()],
         );
         assert!(bad_id.is_err(), "short project_id must fail");
 
-        let bad_title = conn.execute(
+        let bad_title = execute(
+            &conn,
             "INSERT INTO document (id, project_id, title, created_at, updated_at) \
              VALUES (1, '0123456789abcdef0123456789abcdef', '', ?1, ?1)",
-            params![now],
+            vec![now.into()],
         );
         assert!(bad_title.is_err(), "empty title must fail");
 
-        let tab_title = conn.execute(
+        let tab_title = execute(
+            &conn,
             "INSERT INTO document (id, project_id, title, created_at, updated_at) \
              VALUES (1, '0123456789abcdef0123456789abcdef', char(9), ?1, ?1)",
-            params![now],
+            vec![now.into()],
         );
         assert!(tab_title.is_err(), "whitespace-only title must fail");
 
-        let nul_title = conn.execute(
+        let nul_title = execute(
+            &conn,
             "INSERT INTO document (id, project_id, title, created_at, updated_at) \
              VALUES (1, '0123456789abcdef0123456789abcdef', char(0), ?1, ?1)",
-            params![now],
+            vec![now.into()],
         );
         assert!(nul_title.is_err(), "NUL title must fail");
 
-        let embedded_nul_title = conn.execute(
+        let embedded_nul_title = execute(
+            &conn,
             "INSERT INTO document (id, project_id, title, created_at, updated_at) \
              VALUES (1, '0123456789abcdef0123456789abcdef', 'a' || char(0) || 'b', ?1, ?1)",
-            params![now],
+            vec![now.into()],
         );
         assert!(embedded_nul_title.is_err(), "embedded NUL title must fail");
 
-        let bad_camera = conn.execute(
+        let bad_camera = execute(
+            &conn,
             "INSERT INTO document (id, project_id, camera_zoom, created_at, updated_at) \
              VALUES (1, '0123456789abcdef0123456789abcdef', 0, ?1, ?1)",
-            params![now],
+            vec![now.into()],
         );
         assert!(bad_camera.is_err(), "non-positive camera_zoom must fail");
 
-        let wide_camera = conn.execute(
+        let wide_camera = execute(
+            &conn,
             "INSERT INTO document (id, project_id, camera_x, created_at, updated_at) \
              VALUES (1, '0123456789abcdef0123456789abcdef', 1.5e308, ?1, ?1)",
-            params![now],
+            vec![now.into()],
         );
         assert!(
             wide_camera.is_err(),
             "camera_x outside the envelope must fail"
         );
 
-        let infinite_camera = conn.execute(
+        let infinite_camera = execute(
+            &conn,
             "INSERT INTO document (id, project_id, camera_zoom, created_at, updated_at) \
              VALUES (1, '0123456789abcdef0123456789abcdef', 9e999, ?1, ?1)",
-            params![now],
+            vec![now.into()],
         );
         assert!(infinite_camera.is_err(), "infinite camera_zoom must fail");
 
-        conn.execute(
+        execute(
+            &conn,
             "INSERT INTO document (id, project_id, created_at, updated_at) \
              VALUES (1, '0123456789abcdef0123456789abcdef', ?1, ?1)",
-            params![now],
+            vec![now.into()],
         )
         .expect("insert a valid document");
-        let bad_update = conn.execute("UPDATE document SET camera_zoom = 0 WHERE id = 1", []);
+        let bad_update = execute(
+            &conn,
+            "UPDATE document SET camera_zoom = 0 WHERE id = 1",
+            vec![],
+        );
         assert!(bad_update.is_err(), "camera_zoom update must fail");
     }
 
@@ -1353,58 +1483,44 @@ mod tests {
         let conn = memory();
         create(&conn, "Tamper").expect("create v1");
 
-        conn.execute_batch("PRAGMA ignore_check_constraints = ON")
-            .expect("ignore checks");
-        conn.execute("UPDATE document SET title = '' WHERE id = 1", [])
-            .expect("write an empty title past the CHECK");
-        conn.execute_batch("PRAGMA ignore_check_constraints = OFF")
-            .expect("restore checks");
+        exec(&conn, "PRAGMA ignore_check_constraints = ON");
+        exec(&conn, "UPDATE document SET title = '' WHERE id = 1");
+        exec(&conn, "PRAGMA ignore_check_constraints = OFF");
         let error = inspect(&conn).expect_err("empty title must be refused");
         assert_eq!(error, "the Flow database has an empty title");
 
-        conn.execute_batch("PRAGMA ignore_check_constraints = ON")
-            .expect("ignore checks");
-        conn.execute("UPDATE document SET title = char(9) WHERE id = 1", [])
-            .expect("write a tab-only title past the CHECK");
-        conn.execute_batch("PRAGMA ignore_check_constraints = OFF")
-            .expect("restore checks");
+        exec(&conn, "PRAGMA ignore_check_constraints = ON");
+        exec(&conn, "UPDATE document SET title = char(9) WHERE id = 1");
+        exec(&conn, "PRAGMA ignore_check_constraints = OFF");
         let error = inspect(&conn).expect_err("tab-only title must be refused");
         assert_eq!(error, "the Flow database has an empty title");
 
-        conn.execute_batch("PRAGMA ignore_check_constraints = ON")
-            .expect("ignore checks");
-        conn.execute("UPDATE document SET title = char(0) WHERE id = 1", [])
-            .expect("write a NUL title past the CHECK");
-        conn.execute_batch("PRAGMA ignore_check_constraints = OFF")
-            .expect("restore checks");
+        exec(&conn, "PRAGMA ignore_check_constraints = ON");
+        exec(&conn, "UPDATE document SET title = char(0) WHERE id = 1");
+        exec(&conn, "PRAGMA ignore_check_constraints = OFF");
         let error = inspect(&conn).expect_err("NUL title must be refused");
         assert_eq!(error, "the Flow database has an invalid title");
 
-        conn.execute("UPDATE document SET title = 'Restored' WHERE id = 1", [])
-            .expect("restore title");
-        conn.execute_batch("PRAGMA ignore_check_constraints = ON")
-            .expect("ignore checks");
-        conn.execute("UPDATE document SET camera_zoom = 9e999 WHERE id = 1", [])
-            .expect("write an infinite camera past the CHECK");
-        conn.execute_batch("PRAGMA ignore_check_constraints = OFF")
-            .expect("restore checks");
+        exec(&conn, "UPDATE document SET title = 'Restored' WHERE id = 1");
+        exec(&conn, "PRAGMA ignore_check_constraints = ON");
+        exec(
+            &conn,
+            "UPDATE document SET camera_zoom = 9e999 WHERE id = 1",
+        );
+        exec(&conn, "PRAGMA ignore_check_constraints = OFF");
         let error = inspect(&conn).expect_err("infinite camera must be refused");
         assert_eq!(error, "the Flow database has an invalid camera");
 
-        conn.execute_batch("PRAGMA ignore_check_constraints = ON")
-            .expect("ignore checks");
-        conn.execute("UPDATE document SET camera_x = 1.5e308 WHERE id = 1", [])
-            .expect("write a camera outside the envelope past the CHECK");
-        conn.execute_batch("PRAGMA ignore_check_constraints = OFF")
-            .expect("restore checks");
+        exec(&conn, "PRAGMA ignore_check_constraints = ON");
+        exec(&conn, "UPDATE document SET camera_x = 1.5e308 WHERE id = 1");
+        exec(&conn, "PRAGMA ignore_check_constraints = OFF");
         let error = inspect(&conn).expect_err("camera outside the envelope must be refused");
         assert_eq!(error, "the Flow database has an invalid camera");
 
-        conn.execute(
+        exec(
+            &conn,
             "UPDATE document SET camera_x = 0.0, camera_zoom = 1.0 WHERE id = 1",
-            [],
-        )
-        .expect("restore camera");
+        );
     }
 
     #[test]
@@ -1451,23 +1567,28 @@ mod tests {
     fn document_is_immutable_in_the_expected_ways() {
         let conn = memory();
         let project = create(&conn, "Immutable").expect("create v1");
-        let delete = conn.execute("DELETE FROM document", []);
+        let delete = execute(&conn, "DELETE FROM document", vec![]);
         assert!(delete.is_err(), "document delete must fail");
-        let replace = conn.execute(
+        let replace = execute(
+            &conn,
             "INSERT OR REPLACE INTO document (id, project_id, created_at, updated_at) \
              VALUES (1, 'ffffffffffffffffffffffffffffffff', 0, 0)",
-            [],
+            vec![],
         );
         assert!(replace.is_err(), "document REPLACE must fail");
-        let stored: String = conn
-            .query_row("SELECT project_id FROM document WHERE id = 1", [], |row| {
-                row.get(0)
-            })
-            .expect("read project_id");
+        let stored: String = query_one(
+            &conn,
+            "SELECT project_id FROM document WHERE id = 1",
+            vec![],
+        )
+        .expect("read project_id")
+        .try_get_by_index(0)
+        .expect("project_id");
         assert_eq!(stored, project.project_id);
-        let update = conn.execute(
+        let update = execute(
+            &conn,
             "UPDATE document SET project_id = 'ffffffffffffffffffffffffffffffff'",
-            [],
+            vec![],
         );
         assert!(update.is_err(), "project_id update must fail");
     }
@@ -1480,19 +1601,21 @@ mod tests {
         insert_node(&conn, "n2", "beta");
         insert_edge(&conn, "e1", "n1", "n2");
 
-        let node_by_id = conn.execute(
+        let node_by_id = execute(
+            &conn,
             "INSERT OR REPLACE INTO nodes (id, kind, x, y, width, height, z, created_at, updated_at) \
              VALUES ('n1', 'text', 0, 0, 100, 50, 0, 0, 0)",
-            [],
+            vec![],
         );
         assert!(node_by_id.is_err(), "REPLACE by node id must fail");
 
-        let node_by_seq = conn.execute(
+        let node_by_seq = execute(
+            &conn,
             "INSERT OR REPLACE INTO nodes \
              (seq, id, kind, title, x, y, width, height, z, created_at, updated_at) \
              SELECT seq, 'z', kind, 'zulu', x, y, width, height, z, created_at, updated_at \
              FROM nodes WHERE id = 'n1'",
-            [],
+            vec![],
         );
         assert!(node_by_seq.is_err(), "REPLACE by node seq must fail");
         assert_eq!(count(&conn, "SELECT node_count FROM document"), 2);
@@ -1504,82 +1627,103 @@ mod tests {
             1
         );
 
-        let edge_by_seq = conn.execute(
+        let edge_by_seq = execute(
+            &conn,
             "INSERT OR REPLACE INTO edges \
              (seq, id, from_id, to_id, from_port, to_port, port_kind, from_offset, to_offset) \
              SELECT seq, 'z', from_id, to_id, from_port, to_port, port_kind, from_offset, to_offset \
              FROM edges WHERE id = 'e1'",
-            [],
+            vec![],
         );
         assert!(edge_by_seq.is_err(), "REPLACE by edge seq must fail");
         assert_eq!(count(&conn, "SELECT edge_count FROM document"), 1);
 
-        let edge_by_pair = conn.execute(
+        let edge_by_pair = execute(
+            &conn,
             "INSERT OR REPLACE INTO edges \
              (id, from_id, to_id, from_port, to_port, port_kind, from_offset, to_offset) \
              VALUES ('e-replace', 'n1', 'n2', 'out', 'in', 'text', 0, 0)",
-            [],
+            vec![],
         );
         assert!(edge_by_pair.is_err(), "REPLACE by edge port pair must fail");
         assert_eq!(count(&conn, "SELECT edge_count FROM document"), 1);
         assert_eq!(count(&conn, "SELECT count(*) FROM edges_rtree"), 1);
 
-        let node_identity = conn.execute("UPDATE nodes SET id = 'renamed' WHERE id = 'n1'", []);
+        let node_identity = execute(
+            &conn,
+            "UPDATE nodes SET id = 'renamed' WHERE id = 'n1'",
+            vec![],
+        );
         assert!(node_identity.is_err(), "node id update must fail");
-        let node_seq_identity = conn.execute("UPDATE nodes SET seq = 999 WHERE id = 'n1'", []);
+        let node_seq_identity =
+            execute(&conn, "UPDATE nodes SET seq = 999 WHERE id = 'n1'", vec![]);
         assert!(node_seq_identity.is_err(), "node seq update must fail");
-        let edge_identity = conn.execute("UPDATE edges SET seq = 999 WHERE id = 'e1'", []);
+        let edge_identity = execute(&conn, "UPDATE edges SET seq = 999 WHERE id = 'e1'", vec![]);
         assert!(edge_identity.is_err(), "edge seq update must fail");
-        let edge_id_identity = conn.execute("UPDATE edges SET id = 'renamed' WHERE id = 'e1'", []);
+        let edge_id_identity = execute(
+            &conn,
+            "UPDATE edges SET id = 'renamed' WHERE id = 'e1'",
+            vec![],
+        );
         assert!(edge_id_identity.is_err(), "edge id update must fail");
 
         insert_node(&conn, "n3", "three");
         insert_node(&conn, "n4", "four");
         insert_edge(&conn, "e2", "n1", "n3");
         insert_edge(&conn, "e3", "n4", "n2");
-        conn.execute(
+        execute(
+            &conn,
             "INSERT INTO edges \
              (id, from_id, to_id, from_port, to_port, port_kind, from_offset, to_offset) \
              VALUES ('e4', 'n1', 'n2', 'out2', 'in', 'text', 0, 0)",
-            [],
+            vec![],
         )
         .expect("insert a distinct port pair");
-        conn.execute(
+        execute(
+            &conn,
             "INSERT INTO edges \
              (id, from_id, to_id, from_port, to_port, port_kind, from_offset, to_offset) \
              VALUES ('e5', 'n1', 'n2', 'out', 'in2', 'text', 0, 0)",
-            [],
+            vec![],
         )
         .expect("insert a distinct to-port pair");
-        let duplicate_update = conn.execute("UPDATE edges SET to_id = 'n2' WHERE id = 'e2'", []);
+        let duplicate_update = execute(
+            &conn,
+            "UPDATE edges SET to_id = 'n2' WHERE id = 'e2'",
+            vec![],
+        );
         assert!(duplicate_update.is_err(), "duplicate pair update must fail");
-        let replace_update = conn.execute(
+        let replace_update = execute(
+            &conn,
             "UPDATE OR REPLACE edges SET to_id = 'n2' WHERE id = 'e2'",
-            [],
+            vec![],
         );
         assert!(
             replace_update.is_err(),
             "UPDATE OR REPLACE duplicate must fail"
         );
-        let duplicate_from_id = conn.execute(
+        let duplicate_from_id = execute(
+            &conn,
             "UPDATE OR REPLACE edges SET from_id = 'n1' WHERE id = 'e3'",
-            [],
+            vec![],
         );
         assert!(
             duplicate_from_id.is_err(),
             "duplicate pair by from_id must fail"
         );
-        let duplicate_from_port = conn.execute(
+        let duplicate_from_port = execute(
+            &conn,
             "UPDATE OR REPLACE edges SET from_port = 'out' WHERE id = 'e4'",
-            [],
+            vec![],
         );
         assert!(
             duplicate_from_port.is_err(),
             "duplicate pair by from_port must fail"
         );
-        let duplicate_to_port = conn.execute(
+        let duplicate_to_port = execute(
+            &conn,
             "UPDATE OR REPLACE edges SET to_port = 'in' WHERE id = 'e5'",
-            [],
+            vec![],
         );
         assert!(
             duplicate_to_port.is_err(),
@@ -1594,161 +1738,184 @@ mod tests {
         create(&conn, "Inputs").expect("create v1");
         insert_node(&conn, "n1", "source");
         insert_node(&conn, "n2", "target");
-        let source_seq: i64 = conn
-            .query_row("SELECT seq FROM nodes WHERE id = 'n1'", [], |row| {
-                row.get(0)
-            })
-            .expect("read source seq");
-        conn.execute(
+        let source_seq: i64 = query_one(&conn, "SELECT seq FROM nodes WHERE id = 'n1'", vec![])
+            .expect("read source seq")
+            .try_get_by_index(0)
+            .expect("source seq");
+        execute(
+            &conn,
             "INSERT INTO result_batches (id, node_id, node_seq, trigger, status, created_at) \
              VALUES ('b1', 'n1', ?1, 'run', 'running', 0)",
-            params![source_seq],
+            vec![source_seq.into()],
         )
         .expect("insert a running batch");
-        conn.execute(
+        execute(
+            &conn,
             "INSERT INTO result_items (id, batch_id, position, port_id, kind, text) \
              VALUES ('i1', 'b1', 0, 'out', 'text', 'hello')",
-            [],
+            vec![],
         )
         .expect("insert an item");
-        conn.execute(
+        execute(
+            &conn,
             "INSERT INTO result_items (id, batch_id, position, port_id, kind, text) \
              VALUES ('i2', 'b1', 0, 'out2', 'text', 'other port')",
-            [],
+            vec![],
         )
         .expect("same position on another port");
-        let duplicate_item = conn.execute(
+        let duplicate_item = execute(
+            &conn,
             "INSERT INTO result_items (id, batch_id, position, port_id, kind, text) \
              VALUES ('i3', 'b1', 0, 'out', 'text', 'duplicate')",
-            [],
+            vec![],
         );
         assert!(duplicate_item.is_err(), "duplicate item position must fail");
-        let duplicate_other_port = conn.execute(
+        let duplicate_other_port = execute(
+            &conn,
             "INSERT INTO result_items (id, batch_id, position, port_id, kind, text) \
              VALUES ('i4', 'b1', 0, 'out2', 'text', 'duplicate')",
-            [],
+            vec![],
         );
         assert!(
             duplicate_other_port.is_err(),
             "duplicate position on another port must fail"
         );
-        conn.execute(
+        execute(
+            &conn,
             "INSERT INTO result_items (id, batch_id, position, port_id, kind, text) \
              VALUES ('i5', 'b1', 1, 'out', 'text', 'second position')",
-            [],
+            vec![],
         )
         .expect("next position on the same port");
-        let duplicate_second_position = conn.execute(
+        let duplicate_second_position = execute(
+            &conn,
             "INSERT INTO result_items (id, batch_id, position, port_id, kind, text) \
              VALUES ('i6', 'b1', 1, 'out', 'text', 'duplicate')",
-            [],
+            vec![],
         );
         assert!(
             duplicate_second_position.is_err(),
             "duplicate second position must fail"
         );
-        conn.execute(
+        execute(
+            &conn,
             "UPDATE result_batches SET status = 'done', finished_at = 0 WHERE id = 'b1'",
-            [],
+            vec![],
         )
         .expect("settle the batch");
-        let item_update = conn.execute(
+        let item_update = execute(
+            &conn,
             "UPDATE result_items SET text = 'changed' WHERE id = 'i1'",
-            [],
+            vec![],
         );
         assert!(item_update.is_err(), "result items are immutable");
-        let item_delete = conn.execute("DELETE FROM result_items WHERE id = 'i1'", []);
+        let item_delete = execute(&conn, "DELETE FROM result_items WHERE id = 'i1'", vec![]);
         assert!(item_delete.is_err(), "settled item delete must fail");
-        let terminal_update = conn.execute(
+        let terminal_update = execute(
+            &conn,
             "UPDATE result_batches SET status = 'failed' WHERE id = 'b1'",
-            [],
+            vec![],
         );
         assert!(terminal_update.is_err(), "terminal batch update must fail");
-        let wrong_count = conn.execute(
+        let wrong_count = execute(
+            &conn,
             "UPDATE result_batches SET item_count = 5 WHERE id = 'b1'",
-            [],
+            vec![],
         );
         assert!(wrong_count.is_err(), "item_count must stay derived");
 
         insert_edge(&conn, "e1", "n1", "n2");
-        conn.execute(
+        execute(
+            &conn,
             "INSERT INTO node_inputs \
              (id, node_id, port_id, position, kind, origin, edge_id, item_id, text, created_at) \
              VALUES ('in1', 'n2', 'in', 0, 'text', 'edge', 'e1', 'i1', 'hello', 0)",
-            [],
+            vec![],
         )
         .expect("insert a matching edge input");
-        conn.execute(
+        execute(
+            &conn,
             "INSERT INTO edges \
              (id, from_id, to_id, from_port, to_port, port_kind, from_offset, to_offset) \
              VALUES ('e2', 'n1', 'n2', 'out', 'in2', 'text', 0, 0)",
-            [],
+            vec![],
         )
         .expect("insert a second input port edge");
-        conn.execute(
+        execute(
+            &conn,
             "INSERT INTO node_inputs \
              (id, node_id, port_id, position, kind, origin, edge_id, item_id, text, created_at) \
              VALUES ('in2', 'n2', 'in2', 0, 'text', 'edge', 'e2', 'i1', 'hello', 0)",
-            [],
+            vec![],
         )
         .expect("same position on another port");
-        let duplicate_input = conn.execute(
+        let duplicate_input = execute(
+            &conn,
             "INSERT INTO node_inputs \
              (id, node_id, port_id, position, kind, origin, edge_id, item_id, text, created_at) \
              VALUES ('in-dup', 'n2', 'in', 0, 'text', 'edge', 'e1', 'i1', 'hello', 0)",
-            [],
+            vec![],
         );
         assert!(
             duplicate_input.is_err(),
             "duplicate input position must fail"
         );
-        let duplicate_other_port = conn.execute(
+        let duplicate_other_port = execute(
+            &conn,
             "INSERT INTO node_inputs \
              (id, node_id, port_id, position, kind, origin, edge_id, item_id, text, created_at) \
              VALUES ('in-dup2', 'n2', 'in2', 0, 'text', 'edge', 'e2', 'i1', 'hello', 0)",
-            [],
+            vec![],
         );
         assert!(
             duplicate_other_port.is_err(),
             "duplicate position on another port must fail"
         );
-        conn.execute(
+        execute(
+            &conn,
             "INSERT INTO node_inputs \
              (id, node_id, port_id, position, kind, origin, edge_id, item_id, text, created_at) \
              VALUES ('in3', 'n2', 'in', 1, 'text', 'edge', 'e1', 'i1', 'hello', 0)",
-            [],
+            vec![],
         )
         .expect("next position on the same port");
-        let duplicate_second_position = conn.execute(
+        let duplicate_second_position = execute(
+            &conn,
             "INSERT INTO node_inputs \
              (id, node_id, port_id, position, kind, origin, edge_id, item_id, text, created_at) \
              VALUES ('in-dup3', 'n2', 'in', 1, 'text', 'edge', 'e1', 'i1', 'hello', 0)",
-            [],
+            vec![],
         );
         assert!(
             duplicate_second_position.is_err(),
             "duplicate second input position must fail"
         );
-        let wrong_text = conn.execute(
+        let wrong_text = execute(
+            &conn,
             "INSERT INTO node_inputs \
              (id, node_id, port_id, position, kind, origin, edge_id, item_id, text, created_at) \
              VALUES ('in-bad-text', 'n2', 'in', 2, 'text', 'edge', 'e1', 'i1', 'wrong', 0)",
-            [],
+            vec![],
         );
         assert!(wrong_text.is_err(), "producer text mismatch must fail");
-        let wrong_port = conn.execute(
+        let wrong_port = execute(
+            &conn,
             "INSERT INTO node_inputs \
              (id, node_id, port_id, position, kind, origin, edge_id, item_id, text, created_at) \
              VALUES ('in4', 'n2', 'other', 1, 'text', 'edge', 'e1', 'i1', 'hello', 0)",
-            [],
+            vec![],
         );
         assert!(wrong_port.is_err(), "producer port mismatch must fail");
-        let wrong_update =
-            conn.execute("UPDATE node_inputs SET text = 'wrong' WHERE id = 'in1'", []);
+        let wrong_update = execute(
+            &conn,
+            "UPDATE node_inputs SET text = 'wrong' WHERE id = 'in1'",
+            vec![],
+        );
         assert!(wrong_update.is_err(), "producer update mismatch must fail");
-        let wrong_port_update = conn.execute(
+        let wrong_port_update = execute(
+            &conn,
             "UPDATE node_inputs SET port_id = 'other' WHERE id = 'in1'",
-            [],
+            vec![],
         );
         assert!(
             wrong_port_update.is_err(),
@@ -1763,10 +1930,11 @@ mod tests {
         insert_node(&conn, "n1", "one");
         insert_node(&conn, "n2", "two");
         insert_edge(&conn, "e1", "n1", "n2");
-        let duplicate = conn.execute(
+        let duplicate = execute(
+            &conn,
             "INSERT INTO edges (id, from_id, to_id, from_port, to_port, port_kind, from_offset, to_offset) \
              VALUES ('e2', 'n1', 'n2', 'out', 'in', 'text', 0, 0)",
-            [],
+            vec![],
         );
         assert!(duplicate.is_err(), "duplicate port pair must fail");
     }
@@ -1788,13 +1956,45 @@ mod tests {
 
     #[test]
     fn create_configures_a_bare_connection() {
-        let conn = Connection::open_in_memory().expect("open in-memory SQLite");
-        conn.execute_batch("PRAGMA foreign_keys = OFF; PRAGMA recursive_triggers = ON;")
-            .expect("set the wrong pragmas");
+        let conn = Database::connect("sqlite::memory:").expect("open in-memory SQLite");
+        exec(
+            &conn,
+            "PRAGMA foreign_keys = OFF; PRAGMA recursive_triggers = ON;",
+        );
         assert_eq!(pragma(&conn, "foreign_keys"), 0);
         assert_eq!(pragma(&conn, "recursive_triggers"), 1);
         create(&conn, "Bare").expect("create v1");
         assert_eq!(pragma(&conn, "foreign_keys"), 1);
         assert_eq!(pragma(&conn, "recursive_triggers"), 0);
+    }
+
+    #[test]
+    fn inspect_accepts_a_v1_database_created_through_sea_orm() {
+        let conn = memory();
+        let project = create(&conn, "SeaORM").expect("create v1");
+        assert_eq!(inspect(&conn), Ok(FileState::Current(project)));
+    }
+
+    #[test]
+    fn inspect_refuses_a_v5_application_id_zero_file_with_user_tables() {
+        let conn = memory();
+        exec(
+            &conn,
+            "CREATE TABLE documents (id TEXT PRIMARY KEY); CREATE TABLE nodes (id TEXT PRIMARY KEY);",
+        );
+        let error = inspect(&conn).expect_err("a v5-like file must be refused");
+        assert!(error.contains("not a Flow database"), "{error}");
+    }
+
+    #[test]
+    fn create_then_inspect_round_trips_project_id_and_title() {
+        let conn = memory();
+        let project = create(&conn, "Round trip").expect("create v1");
+        let state = inspect(&conn).expect("inspect v1");
+        let FileState::Current(inspected) = state else {
+            panic!("expected a current v1 state");
+        };
+        assert_eq!(inspected.project_id, project.project_id);
+        assert_eq!(inspected.title, "Round trip");
     }
 }
