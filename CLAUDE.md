@@ -44,9 +44,8 @@ SQLite/search benchmark.
   geometry and the scene in `src/flow/canvas/{geometry,model}`, gestures in
   `src/flow/canvas/interaction/`, and the views in
   `src/components/FlowCanvas.tsx` and its parts; extend those with tests
-  instead of adding a canvas library. The composer placement still lives in
-  `flow/overlay.ts` until its area moves; see the code map and plan
-  Appendix A.
+  instead of adding a canvas library. The composer's draft and placement live
+  in `flow/composer/`; see the code map and plan Appendix A.
 - **The document core is Rust's.** `src/native/` is the mixed NSH Rust crate;
   it owns SQLite, FTS5, RTree, undo history and asset metadata. TSX must not
   open SQLite or write SQL. The canvas stays in TSX/QuickJS and is never moved
