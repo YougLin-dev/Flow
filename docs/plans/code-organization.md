@@ -1,8 +1,8 @@
 # Code organization and architecture standard
 
-- **Status:** Accepted 2026-11-14; Phases 0–1b are implemented on stacked
+- **Status:** Accepted 2026-11-14; Phases 0–1c are implemented on stacked
   branches (standard and tooling, shared kernel and first reuse, composer
-  shell).
+  shell, AsyncDrain core).
 - **Scope:** `src/` (TSX app) and `src/native/` (Rust document core).
 - **Related:** [standards](../standards.md), [architecture](../architecture.md),
   [conventions](../conventions.md), [testing](../testing.md),
@@ -1726,6 +1726,12 @@ Phase 1b extracted the composer shell into `components/composer`
 `<If when={detail}>` mount boundary, `settingsOpen`, `settingsLabel`, every
 testID and the existing app tests are preserved, and `App.composer.test.tsx`
 pins the shared shell for both variants. `LEGACY_FLAT` is down to 76.
+
+Phase 1c extracted `flow/shared/async-drain.ts` (join/settle, one follow-up,
+racing starts) and migrated `PreviewLoader` onto it; `preview-loader.test.ts`
+stayed the oracle and passes unchanged. `ViewportController` and
+`MinimapLoader` keep their own drains until Phase 7, as their scheduling,
+revision fences and retry rules differ.
 
 ---
 
