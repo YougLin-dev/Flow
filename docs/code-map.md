@@ -116,9 +116,9 @@ the context menu into the area's `selection/`, `editing/`, `controls/`,
 (the attachment tile, model select and `detail-view.ts`; the sheet and
 variants landed in Phase 1b), `components/minimap` and `components/search`
 (including the one `search-filters.ts` type); the page imports both new
-facades. Phase 3 step 5 moved the three host-test probes out of the production
-views into `components/probes` behind a facade; `FlowCard` keeps only the
-optional `imageEvent` observation seam. The remaining flat modules are
+facades. Phase 3 step 5 moved the three test probes out of the production views
+(and the components root) into `components/probes` behind a facade; `FlowCard`
+keeps only the optional `imageEvent` observation seam. The remaining flat modules are
 `pages/FlowPage.tsx`, `flow/bindings.ts`, `flow/page-chrome.ts` and
 `flow/search-navigation.ts`, which move in Phase 4.
 The old → new map is in

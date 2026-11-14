@@ -37,11 +37,12 @@ after its job. The area map, allowed imports and owners are in
 [code-map](code-map.md); the decision is
 [ADR 0007](adr/0007-code-organization.md). The canvas is explicitly layered
 `geometry → model → interaction → views → page`, with `FlowScene` still the
-one state and batch owner. The shared kernel, the `flow/` areas and
-`components/app` use the area layout; the rest of the component tree is still
-the legacy flat layout during Phase 3. [The plan](plans/code-organization.md)
-holds the old → new map. New files follow the area rules; the structure
-report fails a new module at the `components/`, `flow/` or `pages/` root.
+one state and batch owner. The shared kernel, the `flow/` areas and every
+component area use the area layout; only the page and the `flow/` bindings,
+chrome and search-navigation helpers remain legacy flat until Phase 4.
+[The plan](plans/code-organization.md) holds the old → new map. New files
+follow the area rules; the structure report fails a new module at the
+`components/`, `flow/` or `pages/` root.
 
 The app deliberately has no `NavStack`: a single-window canvas has nowhere to
 navigate, so the shell mounts `FlowPage` directly. If a second page appears

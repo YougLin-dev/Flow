@@ -78,6 +78,8 @@ const areaTree = {
   "src/components/canvas/world/FlowCard.tsx": "",
   "src/components/search/index.ts": "",
   "src/components/search/SearchPalette.tsx": "",
+  "src/components/probes/index.ts": "",
+  "src/components/probes/ImageLoadProbe.tsx": "",
   "src/pages/flow/index.ts": "",
   "src/pages/flow/FlowPage.tsx": "",
   "src/App.tsx": "",
@@ -140,7 +142,7 @@ test("classifies files and bare directory imports", () => {
   expect(areaOf("src/flow/execution/index.ts")).toBe("flow/execution");
   expect(areaOf("src/flow/minimap/index.ts")).toBe("flow/minimap");
   expect(areaOf("src/components/canvas/world/Card.tsx")).toBe("components/canvas");
-  expect(areaOf("src/components/CanvasProbe.tsx")).toBeNull();
+  expect(areaOf("src/flow/bindings.ts")).toBeNull();
   expect(areaOf("src/pages/flow/FlowPage.tsx")).toBe("pages/flow");
   expect(areaOf("src/pages/FlowPage.tsx")).toBeNull();
   expect(areaOf("src/App.tsx")).toBe("shell");
@@ -241,6 +243,23 @@ test("reports an area pair missing from the matrix", () => {
         root,
       );
       expect(reports.map((report) => report.messageId)).toEqual(["forbidden"]);
+
+      expect(
+        reportsForRule(
+          forbiddenArea,
+          "src/components/probes/ImageLoadProbe.tsx",
+          "../../pages/flow",
+          root,
+        ).map((report) => report.messageId),
+      ).toEqual(["forbidden"]);
+      expect(
+        reportsForRule(
+          forbiddenArea,
+          "src/components/probes/ImageLoadProbe.tsx",
+          "../../flow/canvas",
+          root,
+        ),
+      ).toEqual([]);
     }),
   );
 });
