@@ -7,6 +7,7 @@
 import { type Accessor, computed } from "nsh";
 import { CARD_TITLE_BAND, CARD_TITLE_HEIGHT } from "./card-layout";
 import type { BoxGeometry, Point } from "./connection";
+import { samePoint } from "./shared";
 
 export interface CardSize {
   readonly width: number;
@@ -26,11 +27,6 @@ export function cardLocalLayout(size: CardSize): CardLayout {
     title: { x: 0, y: -CARD_TITLE_BAND, width: size.width, height: CARD_TITLE_HEIGHT },
     body: { x: 0, y: 0, width: size.width, height: size.height },
   };
-}
-
-function samePosition(a: Point | null, b: Point | null): boolean {
-  if (a === b) return true;
-  return a !== null && b !== null && a.x === b.x && a.y === b.y;
 }
 
 function sameSize(a: CardSize | null, b: CardSize | null): boolean {
@@ -53,7 +49,7 @@ export class CardGeometry {
         const value = rect();
         return value === null ? null : { x: value.x, y: value.y };
       },
-      { equals: samePosition },
+      { equals: samePoint },
     );
     this.size = computed(
       () => {
