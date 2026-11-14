@@ -1823,13 +1823,15 @@ imports within the canvas feature until step 3 moves them into
 `canvas/selection`/`canvas/feedback`. No module split or behavior change was
 made. `LEGACY_FLAT` is down to 23 modules.
 
-Phase 3 step 3 moved the selection surfaces (`SelectionFrame`,
-`SelectionOverlay`, `SelectionPorts`) to `canvas/selection`, the inline editor
-and upload button to `canvas/editing`, the node toolbar and zoom controls to
-`canvas/controls`, the port tooltip to `canvas/feedback` and the context menu
-to `canvas/context-menu`. The outline-and-wash classes the frame and the
-marquee shared became `selection/selection-visuals.ts`; `menu-items.ts` was
-not extracted because one view renders every item. The page imports the
+Phase 3 step 3 (the second half of plan item 2) moved the selection surfaces
+(`SelectionFrame`, `SelectionOverlay`, `SelectionPorts`) to `canvas/selection`,
+the inline editor and upload button to `canvas/editing`, the node toolbar and
+zoom controls to `canvas/controls`, the port tooltip to `canvas/feedback` and
+the context menu to `canvas/context-menu`. The outline-and-wash classes the
+frame and the marquee shared became `selection/selection-visuals.ts`; as with
+the existing `PANEL` constants, the class strings are no longer statically
+checked by the bundler, so the mounted app tests are the guard. `menu-items.ts`
+was not extracted because one view renders every item. The page imports the
 controls it mounts through the canvas facade. `LEGACY_FLAT` is down to 13
 modules.
 

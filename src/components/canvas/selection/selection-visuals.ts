@@ -5,7 +5,7 @@
  * multi-card frame from drifting apart.
  */
 
-/** The one-point selection outline, painted over the cards. */
+/** The one-screen-point selection outline, painted over the cards. */
 export const SELECTION_OUTLINE = "absolute border border-selection";
 
 /** The wash that marks the region a selection covers. */

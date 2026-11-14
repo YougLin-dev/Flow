@@ -107,12 +107,13 @@ replaced the controller's seed import. The structure walker now skips only
 started with `components/app` (title bar, brand card, frame rate). Phase 3
 step 2 moved the canvas view and its world parts (`FlowCanvas`, `FlowCard`,
 `FlowEdges`, `FlowPreviews`, `GridBackground`, `Port`) under
-`components/canvas`; the page imports the area facade. Phase 3 step 3 moved
-the selection surfaces, the inline editor and upload button, the toolbar and
-zoom controls, the port tooltip and the context menu into the area's
-`selection/`, `editing/`, `controls/`, `feedback/` and `context-menu/` parts
-(the frame and marquee share `selection/selection-visuals.ts`). The remaining
-flat component modules are still legacy.
+`components/canvas`; the page imports the area facade. The overlay half of the
+canvas move (plan Phase 3 item 2) put the selection surfaces, the inline
+editor and upload button, the toolbar and zoom controls, the port tooltip and
+the context menu into the area's `selection/`, `editing/`, `controls/`,
+`feedback/` and `context-menu/` parts (the frame and marquee share
+`selection/selection-visuals.ts`). The remaining flat component modules are
+still legacy.
 The old → new map is in
 [the plan's Appendix A](plans/code-organization.md#appendix-a--tsx-placement-map);
 `LEGACY_FLAT` in the manifest shrinks with every move and disappears in
