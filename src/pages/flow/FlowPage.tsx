@@ -7,11 +7,14 @@ import { MiniMap, MinimapDragOverlay } from "../../components/minimap";
 import { SEARCH_FILTERS, SearchButton, SearchPalette } from "../../components/search";
 import { CanvasProbe, ImageLoadProbe, imageProbeText, ZoomProbe } from "../../components/probes";
 import { wheelZoomFactor } from "../../flow/canvas";
-import { dismissContextMenuOnChange } from "../../flow/canvas/interaction/context-menu";
 import { selectedCount, setZoomPercent, zoomPercent } from "../../store";
 import { bindFlowKeys } from "./workspace/bindings";
 import { flowKeyActions } from "./workspace/flow-actions";
-import { syncComposerState, syncSelection } from "./workspace/flow-effects";
+import {
+  dismissContextMenuOnChange,
+  syncComposerState,
+  syncSelection,
+} from "./workspace/flow-effects";
 import { createFlowWorkspace } from "./workspace/flow-workspace";
 import { pageChromeHandlers } from "./workspace/page-chrome";
 
@@ -72,8 +75,8 @@ export function FlowPage() {
         camera={camera}
         controller={controller}
         stage={stage}
-        onSize={(size) => workspace.handleSize(size)}
-        onPan={workspace.panBy}
+        onSize={workspace.handleSize}
+        onPan={workspace.panViewport}
         onZoom={workspace.zoomCanvas}
         onWheelZoom={(notches, x, y) => workspace.zoomCanvas(wheelZoomFactor(notches), x, y)}
         onMenuPress={(at) => canvasMenu.press(at)}

@@ -1,55 +1,17 @@
 import { expect, test } from "nsh/test";
-import type { EdgeSummary, NodeSummary } from "@flow/native";
-import { CanvasCamera } from "../model/camera";
-import { CanvasController } from "./canvas-controller";
 import {
   CONTEXT_MENU_HEIGHT,
   CONTEXT_MENU_WIDTH,
-  CanvasMenuController,
   type ContextMenuPress,
   contextMenuPosition,
-  dismissContextMenuOnChange,
 } from "./context-menu";
 import { FlowScene } from "../model/scene/scene";
+import { edge, menuWith, node, sceneWithCard, sceneWithEdge } from "./test/menu-fixtures";
 
 const STAGE = { width: 900, height: 700 };
 
 function press(x: number, y: number): ContextMenuPress {
   return { x, y, worldX: 0, worldY: 0, nodeId: null, edgeId: null };
-}
-
-function node(id: string, x: number, y: number): NodeSummary {
-  return {
-    id,
-    kind: "text",
-    title: id,
-    body: id,
-    x,
-    y,
-    width: 200,
-    height: 84,
-    z: 0,
-    rev: 1,
-    dataJson: "{}",
-    settingsJson: "{}",
-    status: "idle",
-    outputBatchId: null,
-  };
-}
-
-function edge(id: string, fromId: string, toId: string): EdgeSummary {
-  return {
-    id,
-    fromId,
-    toId,
-    fromPort: "text",
-    toPort: "prompt",
-    portKind: "text",
-    fromOffset: 42,
-    toOffset: 28,
-    kind: "flow",
-    dataJson: "{}",
-  };
 }
 
 test("opens the menu at the press", () => {
@@ -63,42 +25,6 @@ test("keeps the menu inside the stage at every edge", () => {
   });
   expect(contextMenuPosition(press(-20, -20), STAGE)).toEqual({ left: 8, top: 8 });
 });
-
-function menuWith(scene = new FlowScene()): {
-  menu: CanvasMenuController;
-  controller: CanvasController;
-  camera: CanvasCamera;
-  actions: string[];
-} {
-  const camera = new CanvasCamera();
-  const actions: string[] = [];
-  const controller = new CanvasController({
-    scene: () => scene,
-    camera: () => camera,
-    panBy: () => undefined,
-    commitBounds: () => undefined,
-    selectEdge: () => undefined,
-    reconnectEdge: () => undefined,
-    connectNodes: () => undefined,
-    openInline: () => undefined,
-    onCardPress: () => undefined,
-  });
-  const menu = new CanvasMenuController({
-    camera: () => camera,
-    controller: () => controller,
-    scene: () => scene,
-    addNode: (kind) => actions.push(`add:${kind}`),
-    copyNode: (id) => actions.push(`copy:${id}`),
-    deleteNode: (id) => actions.push(`delete:${id}`),
-    editBody: (id) => actions.push(`edit:${id}`),
-    selectEdge: (id) => {
-      scene.selectEdge(id);
-      scene.select([]);
-    },
-    deleteEdge: (id) => actions.push(`delete-edge:${id}`),
-  });
-  return { menu, controller, camera, actions };
-}
 
 test("opens a secondary press's menu on its release, not on the press", () => {
   const { menu } = menuWith();
@@ -140,12 +66,6 @@ test("a secondary press on the open menu re-anchors it", () => {
   expect(menu.open()?.x).toBe(30);
   expect(menu.open()?.y).toBe(40);
 });
-
-function sceneWithCard(): FlowScene {
-  const scene = new FlowScene();
-  scene.apply({ rev: 1, nodes: [node("card", 40, 40)], edges: [] });
-  return scene;
-}
 
 test("a press on a card opens that card's own menu", () => {
   const { menu } = menuWith(sceneWithCard());
@@ -276,43 +196,6 @@ test("a secondary press on page chrome pans without opening a menu", () => {
   expect(menu.open()).toBe(null);
 });
 
-test("dismisses the card menu when its card moves", () => {
-  const scene = sceneWithCard();
-  const { menu, camera } = menuWith(scene);
-  dismissContextMenuOnChange(menu, camera, scene);
-  menu.press({ x: 60, y: 60 });
-  menu.release();
-  expect(menu.open()?.nodeId).toBe("card");
-
-  // Another command (an undo, say) moves the card out from under the menu.
-  scene.apply({ rev: 2, nodes: [node("card", 200, 200)], edges: [] });
-  expect(menu.open()).toBe(null);
-});
-
-test("dismisses the card menu when its card leaves the scene", () => {
-  const scene = sceneWithCard();
-  const { menu, camera } = menuWith(scene);
-  dismissContextMenuOnChange(menu, camera, scene);
-  menu.press({ x: 60, y: 60 });
-  menu.release();
-
-  // A command (undo, another delete) removes the selected card; a viewport
-  // snapshot would pin it instead.
-  scene.applyChangeSet({ changed: [], removed: ["card"], edgesChanged: [], edgesRemoved: [] });
-  expect(menu.open()).toBe(null);
-});
-
-test("dismisses the card menu when the camera moves", () => {
-  const scene = sceneWithCard();
-  const { menu, camera } = menuWith(scene);
-  dismissContextMenuOnChange(menu, camera, scene);
-  menu.press({ x: 60, y: 60 });
-  menu.release();
-
-  camera.panBy(40, 40);
-  expect(menu.open()).toBe(null);
-});
-
 test("copying from a card's menu copies that card", () => {
   const { menu, actions } = menuWith(sceneWithCard());
   menu.press({ x: 60, y: 60 });
@@ -336,17 +219,6 @@ test("deleting from a card's menu deletes that card", () => {
   expect(actions).toEqual(["delete:card"]);
   expect(menu.open()).toBe(null);
 });
-
-/** Two text cards joined by one connector; its curve passes (320, 75). */
-function sceneWithEdge(): FlowScene {
-  const scene = new FlowScene();
-  scene.apply({
-    rev: 1,
-    nodes: [node("source", 40, 40), node("target", 400, 40)],
-    edges: [edge("line", "source", "target")],
-  });
-  return scene;
-}
 
 test("a press on a connector opens its menu and selects it", () => {
   const scene = sceneWithEdge();
@@ -398,46 +270,5 @@ test("deleting from a connector's menu deletes that connector", () => {
 
   menu.deleteEdge(open);
   expect(actions).toEqual(["delete-edge:line"]);
-  expect(menu.open()).toBe(null);
-});
-
-test("dismisses a connector's menu when the connector leaves the scene", () => {
-  const scene = sceneWithEdge();
-  const { menu, camera } = menuWith(scene);
-  dismissContextMenuOnChange(menu, camera, scene);
-  menu.press({ x: 320, y: 75 });
-  menu.release();
-  expect(menu.open()?.edgeId).toBe("line");
-
-  scene.applyChangeSet({ changed: [], removed: [], edgesChanged: [], edgesRemoved: ["line"] });
-  expect(menu.open()).toBe(null);
-});
-
-test("dismisses a connector's menu when an endpoint card moves", () => {
-  const scene = sceneWithEdge();
-  const { menu, camera } = menuWith(scene);
-  dismissContextMenuOnChange(menu, camera, scene);
-  menu.press({ x: 320, y: 75 });
-  menu.release();
-  expect(menu.open()?.edgeId).toBe("line");
-
-  // Another command (an undo, say) moves the source; the curve no longer
-  // passes under the menu's anchor.
-  scene.apply({
-    rev: 2,
-    nodes: [node("source", 40, 200), node("target", 400, 40)],
-    edges: [edge("line", "source", "target")],
-  });
-  expect(menu.open()).toBe(null);
-});
-
-test("dismisses a connector's menu when the camera moves", () => {
-  const scene = sceneWithEdge();
-  const { menu, camera } = menuWith(scene);
-  dismissContextMenuOnChange(menu, camera, scene);
-  menu.press({ x: 320, y: 75 });
-  menu.release();
-
-  camera.panBy(40, 40);
   expect(menu.open()).toBe(null);
 });

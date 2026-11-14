@@ -400,9 +400,13 @@ easiest observable: it is `—` before the first fit and `<n>%` afterwards.
   clamping and saving settings/body.
 - `flow/canvas/geometry/grid.ts`: the tile count covers the stage at every wrapped camera
   offset, including a 4K width, and an invalid tile side falls back to one.
-- `pages/flow/FlowPage.tsx`: through `App.test.tsx` for interaction flows, not
-  through unit tests of its closures. Composer selection, runs, input removal,
-  body edits and switching nodes are app tests.
+- `pages/flow/FlowPage.tsx` and its `workspace/` modules: through
+  `App.test.tsx` for interaction flows; the page keeps the owner scope, so its
+  workspace/action/effect closures are not unit-tested directly. Composer
+  selection, runs, input removal, body edits and switching nodes are app
+  tests. The menu-dismissal effects are the exception and have their own unit
+  test (`workspace/flow-effects.test.ts`), because they are driven by scene
+  and camera changes rather than a pointer.
 - `components/composer/{ComposerSheet,ComposerAttachments,ComposerFooter,
   ImageComposer,TextComposer}.tsx`: through `App.test.tsx` and
   `App.composer.test.tsx`, where their controls must re-read session signals

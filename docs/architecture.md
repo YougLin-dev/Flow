@@ -15,7 +15,8 @@ together, while the repository root holds `package.json`, `vite.config.ts`,
 
 ```
 App.tsx                     app shell: title bar + page, nothing else
- ├─ pages/flow/FlowPage.tsx the workspace: document session, camera, overlays
+ ├─ pages/flow/FlowPage.tsx the page: workspace, effects and render
+ │   ├─ pages/flow/workspace/* the workspace object, actions and effects
  │   ├─ components/*        presentational views and the canvas surface
  │   ├─ flow/*              node kinds, execution, scene, camera, gestures
  │   └─ store.ts            shared state behind readers and actions
@@ -188,9 +189,10 @@ result batches and the assets.
 reader where the value is displayed; NSH tracks that read and updates only
 the binding. Nothing writes another page's local state.
 
-State that belongs to one mounted page stays there: `FlowPage` owns the
-`FlowScene`, the `CanvasCamera`, the `CanvasController`, the stage size and the
-document session, because they live and die with the workspace. Values the
+State that belongs to one mounted page stays there: the page's workspace
+object (`pages/flow/workspace/flow-workspace.ts`) owns the `FlowScene`, the
+`CanvasCamera`, the `CanvasController`, the stage size and the document
+session, because they live and die with the page. Values the
 chrome and overlays share (zoom label, selection count, window pin) move to
 the store. `App` binds the store's `isPinned`/`togglePinned` into
 `TitleBar`, so the component stays reusable.

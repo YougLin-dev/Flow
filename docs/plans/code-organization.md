@@ -1876,9 +1876,13 @@ disposes them in the original cleanup order; `flow-actions.ts` holds the key
 actions and Escape layer order; `flow-effects.ts` holds the selection and
 composer effect bodies. `FlowPage` still creates the workspace once,
 synchronously, in its body, keeps `bindFlowKeys`, `dismissContextMenuOnChange`
-and the hook registrations in its own owner, and drops from 568 to 207 lines
+and the hook registrations in its own owner, and drops from 568 to 205 lines
 (§14 target ~250). The `sized`/`opening` guards, lazy `applyChanges` capture
-and cleanup order are unchanged.
+and cleanup order are unchanged. The menu-dismissal effects moved from
+`flow/canvas/interaction/context-menu.ts` to `flow-effects.ts` (with their
+tests and a shared menu fixture), matching §4.5/§7.3. The canvas's two-finger
+`onPan` keeps its unguarded `panViewport`, while the keyboard pan keeps the
+search-open guard.
 
 ---
 

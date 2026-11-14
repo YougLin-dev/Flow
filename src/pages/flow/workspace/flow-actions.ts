@@ -17,7 +17,7 @@ export function flowKeyActions(workspace: FlowWorkspace): FlowKeyActions {
 }
 
 /** Escape closes the topmost layer: menu, search, editor, edge, composer, selection. */
-export function dismissTopLayer(workspace: FlowWorkspace): void {
+function dismissTopLayer(workspace: FlowWorkspace): void {
   if (workspace.canvasMenu.close()) return;
   if (workspace.searchOpen()) {
     workspace.searchOpen.set(false);

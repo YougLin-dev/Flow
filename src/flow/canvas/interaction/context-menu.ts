@@ -1,8 +1,8 @@
 /** The canvas context menu's anchor, target, stage placement and gestures. */
-import { effect, signal, untracked } from "nsh";
+import { signal } from "nsh";
 import type { CanvasCamera } from "../model/camera";
 import type { CanvasController } from "./canvas-controller";
-import { samePoint, sameRect, type BoxGeometry, type Point, type StageSize } from "../../shared";
+import type { StageSize } from "../../shared";
 import type { NodeKindId } from "../../nodes";
 import type { FlowScene } from "../model/scene/scene";
 import { portAt } from "../model/scene/scene-ports";
@@ -238,74 +238,6 @@ export class CanvasMenuController {
     if (this.host.scene().selectedEdge() === edgeId) return;
     this.host.selectEdge(edgeId);
   }
-}
-
-/**
- * Dismisses an open menu when the camera moves, or when the card it targets
- * leaves the scene or changes rectangle: its screen anchor and its items
- * would otherwise point at something the user is no longer looking at. Call
- * it during the page's render, in the page's owner.
- */
-export function dismissContextMenuOnChange(
-  menu: CanvasMenuController,
-  camera: CanvasCamera,
-  scene: FlowScene,
-): void {
-  effect(() => {
-    camera.view();
-    untracked(() => menu.close());
-  });
-
-  // The rectangle the menu opened over; a re-anchored or freshly opened menu
-  // starts a new baseline, and a change from it moves the card out from under
-  // the menu.
-  let anchor: { id: string; rect: BoxGeometry } | null = null;
-  effect(() => {
-    const id = menu.open()?.nodeId ?? null;
-    if (id === null) {
-      anchor = null;
-      return;
-    }
-    const rect = scene.cardRect(id);
-    if (rect === null) {
-      anchor = null;
-      untracked(() => menu.close());
-      return;
-    }
-    if (anchor === null || anchor.id !== id) {
-      anchor = { id, rect };
-      return;
-    }
-    if (sameRect(anchor.rect, rect)) return;
-    anchor = null;
-    untracked(() => menu.close());
-  });
-
-  // The connector's endpoints when the menu opened over it; a connector that
-  // left the scene, or a curve a card move pulled away, no longer sits under
-  // the menu's anchor.
-  let edgeAnchor: { id: string; from: Point; to: Point } | null = null;
-  effect(() => {
-    const id = menu.open()?.edgeId ?? null;
-    if (id === null) {
-      edgeAnchor = null;
-      return;
-    }
-    const edge = scene.edges().find((candidate) => candidate.id === id) ?? null;
-    const ports = edge === null ? null : scene.edgePorts(edge);
-    if (ports === null) {
-      edgeAnchor = null;
-      untracked(() => menu.close());
-      return;
-    }
-    if (edgeAnchor === null || edgeAnchor.id !== id) {
-      edgeAnchor = { id, from: ports.from, to: ports.to };
-      return;
-    }
-    if (samePoint(edgeAnchor.from, ports.from) && samePoint(edgeAnchor.to, ports.to)) return;
-    edgeAnchor = null;
-    untracked(() => menu.close());
-  });
 }
 
 function clamp(value: number, min: number, max: number): number {

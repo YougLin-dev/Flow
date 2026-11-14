@@ -5,7 +5,7 @@
  * workspace owns the mutable document lifetime and every cross-object action.
  */
 import { Picker, signal, type Signal } from "nsh";
-import type { ChangeSet, Document, NodeBounds, SearchHit } from "../../../flow/shared";
+import type { ChangeSet, Document, NodeBounds, SearchHit, StageSize } from "../../../flow/shared";
 import { CanvasCamera, FlowScene } from "../../../flow/canvas";
 import { CanvasController } from "../../../flow/canvas/interaction/canvas-controller";
 import { ComposerState, composerPlacement } from "../../../flow/composer";
@@ -24,12 +24,6 @@ import { MinimapController } from "../../../flow/minimap";
 import type { NodeKindId } from "../../../flow/nodes";
 import { revealSearchHit } from "./search-navigation";
 
-/** The page's stage size, in points. */
-export interface FlowWorkspaceSize {
-  readonly width: number;
-  readonly height: number;
-}
-
 export interface FlowWorkspaceDeps {
   /** Publishes the camera's scale to the store's zoom readout. */
   readonly publishZoom: (percent: number) => void;
@@ -38,7 +32,7 @@ export interface FlowWorkspaceDeps {
 export interface FlowWorkspace {
   readonly scene: FlowScene;
   readonly camera: CanvasCamera;
-  readonly stage: Signal<FlowWorkspaceSize>;
+  readonly stage: Signal<StageSize>;
   readonly searchOpen: Signal<boolean>;
   readonly minimapOpen: Signal<boolean>;
   readonly imageProbe: Signal<string>;
@@ -58,13 +52,15 @@ export interface FlowWorkspace {
   readonly deleteSelected: () => void;
   readonly undoRedo: (direction: "undo" | "redo") => Promise<void>;
   readonly panBy: (dx: number, dy: number) => void;
+  /** The unguarded pan the canvas's own gestures use. */
+  readonly panViewport: (dx: number, dy: number) => void;
   readonly zoomCanvas: (factor: number, x: number, y: number) => void;
   readonly setZoom: (factor: number) => void;
   readonly fit: () => void;
   readonly searchCards: (query: string, kind: string | null) => Promise<SearchHit[]>;
   readonly selectSearchHit: (hit: SearchHit) => void;
   /** Applies a new stage size; the first one fits and opens the document. */
-  readonly handleSize: (size: FlowWorkspaceSize) => void;
+  readonly handleSize: (size: StageSize) => void;
   /** Releases every object in the page's cleanup order, once. */
   readonly dispose: () => void;
 }
@@ -79,7 +75,7 @@ export function createFlowWorkspace(deps: FlowWorkspaceDeps): FlowWorkspace {
 
   const scene = new FlowScene();
   const camera = new CanvasCamera();
-  const stage = signal<FlowWorkspaceSize>({ width: 1, height: 1 });
+  const stage = signal<StageSize>({ width: 1, height: 1 });
   const sessionState = signal<NodeSession | null>(null);
   const searchOpen = signal(false);
   const minimapOpen = signal(true);
@@ -238,6 +234,8 @@ export function createFlowWorkspace(deps: FlowWorkspaceDeps): FlowWorkspace {
     deleteEdge: (edgeId) => void currentSession()?.deleteEdge(edgeId),
   });
 
+  const panViewport = (dx: number, dy: number): void => viewport.panBy(dx, dy);
+
   const panBy = (dx: number, dy: number): void => {
     if (searchOpen()) return;
     viewport.panBy(dx, dy);
@@ -349,7 +347,7 @@ export function createFlowWorkspace(deps: FlowWorkspaceDeps): FlowWorkspace {
 
   const composerOpen = (): boolean => (currentSession()?.composerId() ?? null) !== null;
 
-  const handleSize = (size: FlowWorkspaceSize): void => {
+  const handleSize = (size: StageSize): void => {
     stage.set(size);
     viewport.setSize(size.width, size.height);
     if (!sized) {
@@ -400,6 +398,7 @@ export function createFlowWorkspace(deps: FlowWorkspaceDeps): FlowWorkspace {
     deleteSelected,
     undoRedo,
     panBy,
+    panViewport,
     zoomCanvas,
     setZoom,
     fit,
