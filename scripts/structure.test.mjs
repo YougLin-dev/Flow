@@ -240,13 +240,13 @@ test("Phase 5 turns the area findings into failures", () => {
 });
 
 test("reports stale legacy allow-list entries so the list shrinks", () => {
-  const reports = checkLegacyAllowList(["src/flow/page-chrome.ts"]);
-  expect(reports).not.toContain("stale legacy allow-list entry: src/flow/page-chrome.ts");
-  // Any current entry outside the passed files is stale, so the fixture does
-  // not have to change with every move.
-  const stale = [...LEGACY_FLAT].find((file) => file !== "src/flow/page-chrome.ts");
-  expect(stale).toBeDefined();
-  expect(reports).toContain(`stale legacy allow-list entry: ${stale}`);
+  // Both the present and the absent entries come from the current list, so the
+  // fixture keeps covering both branches as modules move.
+  const [present, ...absent] = [...LEGACY_FLAT];
+  expect(absent.length).toBeGreaterThan(0);
+  expect(checkLegacyAllowList([present])).toEqual(
+    absent.map((file) => `stale legacy allow-list entry: ${file}`),
+  );
 });
 
 test("keeps the legacy allow-list and the Rust report non-failing", () => {

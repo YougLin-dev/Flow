@@ -112,12 +112,13 @@ canvas move (plan Phase 3 item 2) put the selection surfaces, the inline
 editor and upload button, the toolbar and zoom controls, the port tooltip and
 the context menu into the area's `selection/`, `editing/`, `controls/`,
 `feedback/` and `context-menu/` parts (the frame and marquee share
-`selection/selection-visuals.ts`). Phase 3 step 4 filled the composer area
-(the sheet, variants, attachment tile, model select and `detail-view.ts`),
-`components/minimap` and `components/search` (including the one
-`search-filters.ts` type); the page imports both new facades. The remaining
-flat modules are `CanvasProbe`, the page, its `flow/` bindings/chrome/search
-navigation and `FlowPage`, which move in Phase 3 step 6 and Phase 4.
+`selection/selection-visuals.ts`). Phase 3 step 4 completed the composer area
+(the attachment tile, model select and `detail-view.ts`; the sheet and
+variants landed in Phase 1b), `components/minimap` and `components/search`
+(including the one `search-filters.ts` type); the page imports both new
+facades. The remaining flat modules are `CanvasProbe`, `pages/FlowPage.tsx`,
+`flow/bindings.ts`, `flow/page-chrome.ts` and `flow/search-navigation.ts`; the
+probe moves next, and the page with its `flow/` helpers moves in Phase 4.
 The old → new map is in
 [the plan's Appendix A](plans/code-organization.md#appendix-a--tsx-placement-map);
 `LEGACY_FLAT` in the manifest shrinks with every move and disappears in

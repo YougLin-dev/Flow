@@ -1401,7 +1401,7 @@ Order (each step is one PR):
 8. `flow/document` lifecycle/session/commands/assets/viewport; move files
    as-is and keep the `NodeSession` class intact. Move the reload policy of
    `composer-detail.ts` to `session/composer-detail.ts`; `errorOf`/`inputUrl`
-   stay in the old module until Phase 3 step 5. The composer/inline/asset
+   stay in the old module until Phase 3 step 4. The composer/inline/asset
    session split is Phase 7, not this PR; the native tests override
    `protected nodeDetail`, so preserve it until the harness is updated.
 
@@ -1805,7 +1805,7 @@ bodies are copied unchanged and `NodeRunner` is the only external export.
 Phase 2 step 8 moved the document lifecycle, sessions, commands, assets,
 viewport and the native-test harness under `flow/document/`. The composer
 reload policy split into `session/composer-detail.ts` (`errorOf`/`inputUrl`
-stay in the root `composer-detail.ts` for Phase 3 step 5), `sameOverview`
+stay in the root `composer-detail.ts` for Phase 3 step 4), `sameOverview`
 moved with the minimap loader, and `ViewportHost.fallbackBounds` replaced the
 viewport controller's seed import. The structure walker now skips only
 `src/assets/`; skipping every `assets/` folder would have hidden the new
@@ -1838,7 +1838,7 @@ was not extracted because one view renders every item. The page imports the
 controls it mounts through the canvas facade. `LEGACY_FLAT` is down to 13
 modules.
 
-Phase 3 step 4 moved the remaining composer views (`ComposerInputTile`,
+Phase 3 step 4 (plan item 5) moved the remaining composer views (`ComposerInputTile`,
 `ComposerModelSelect`) and the `errorOf`/`inputUrl` view helpers (now
 `composer/detail-view.ts`, retiring the root `flow/composer-detail.ts`) into
 `components/composer`, the minimap into `components/minimap`, and the search

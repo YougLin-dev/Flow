@@ -410,9 +410,9 @@ easiest observable: it is `—` before the first fit and `<n>%` afterwards.
   the shared sheet (the same shell testIDs, the text-only counter, the
   image-only settings) as well as each control.
 - `components/search/SearchPalette.tsx`: through `App.test.tsx` — opening by shortcut
-  and button, typing, switching filters, choosing a result by click or Enter,
-  Escape and the selection that follows a hit. Kind filtering itself is
-  asserted through the Rust search tests; the palette's arrow bindings are
+  and button, typing, choosing a result by click or Enter, Escape and the
+  selection that follows a hit; the host search test presses a filter. Kind
+  filtering itself is asserted through the Rust search tests; the palette's arrow bindings are
   wired to the visible active row but are not asserted through the native view
   tree. The real-host 100k smoke exercises the camera reveal and records
   timestamped phases plus trace/fps evidence.
