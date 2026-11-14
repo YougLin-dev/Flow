@@ -125,7 +125,7 @@ The recommended design is the **single-document, frozen-v1, trigger-maintained**
 | ---------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------- |
 | `document`             | Singleton (`id=1`): stable `project_id`, title, camera, revision, maintained node/edge counts, conservative bounds envelope, demo/clean-shutdown flags | PK `id=1`; UNIQUE `project_id`; project_id immutable; rev monotonic trigger; counts/bounds triggers; no delete                               |
 | `nodes`                | Canvas card: geometry, kinds, searchable title/body/tags, opaque data/settings JSON, run status, current output pointer, row revision                  | PK `seq`; UNIQUE `id`; composite output FK; status/output CHECKs; geometry/JSON/tags CHECKs; rev monotonic                                   |
-| `edges`                | Directed output-port to input-port connection with persisted offsets                                                                                   | PK `seq`; UNIQUE `id`; FKs to both nodes; no self-edge; UNIQUE port pair; offset/JSON CHECKs                                                 |
+| `edges`                | Directed output-port to input-port connection with persisted offsets                                                                                   | PK `seq`; UNIQUE `id`; FKs to both nodes; no self-edge; UNIQUE port pair; immutable id/seq; no duplicate pair on update; offset/JSON CHECKs  |
 | `result_batches`       | One immutable run/manual/upload outcome; outlives its node                                                                                             | PK `seq`; UNIQUE `id`; `node_seq`; status/trigger CHECKs; owner trigger; insert-running; terminal immutability; derived item_count           |
 | `result_items`         | Ordered text/image items of a batch                                                                                                                    | PK `id`; FK batch CASCADE; FK asset RESTRICT; UNIQUE `(batch_id, port_id, position)`; image implies asset; immutable                         |
 | `node_inputs`          | Ordered per-port inputs: edge snapshots or local uploads                                                                                               | PK `id`; FK node CASCADE; FK edge CASCADE; FKs item/asset RESTRICT; UNIQUE `(node_id, port_id, position)`; origin shape; producer validation |
@@ -152,7 +152,8 @@ CREATE TABLE document (
   project_id     TEXT    NOT NULL UNIQUE
                  CHECK (length(project_id) = 32
                         AND project_id NOT GLOB '*[^0-9a-f]*'),
-  title          TEXT    NOT NULL DEFAULT 'Flow' CHECK (length(trim(title)) > 0),
+  title          TEXT    NOT NULL DEFAULT 'Flow'
+                 CHECK (length(trim(title, ' ' || char(9) || char(10) || char(13))) > 0),
   rev            INTEGER NOT NULL DEFAULT 0 CHECK (rev >= 0),
   node_count     INTEGER NOT NULL DEFAULT 0 CHECK (node_count >= 0),
   edge_count     INTEGER NOT NULL DEFAULT 0 CHECK (edge_count >= 0),
@@ -386,10 +387,40 @@ BEGIN
   SELECT RAISE(ABORT, 'nodes: use UPDATE, not REPLACE');
 END;
 
+CREATE TRIGGER nodes_identity_immutable BEFORE UPDATE OF id, seq ON nodes
+WHEN NEW.id <> OLD.id OR NEW.seq <> OLD.seq
+BEGIN
+  SELECT RAISE(ABORT, 'nodes identity is immutable');
+END;
+
 CREATE TRIGGER edges_no_replace BEFORE INSERT ON edges
-WHEN EXISTS (SELECT 1 FROM edges WHERE id = NEW.id OR seq = NEW.seq)
+WHEN EXISTS (
+  SELECT 1 FROM edges
+   WHERE id = NEW.id
+      OR seq = NEW.seq
+      OR (from_id = NEW.from_id AND from_port = NEW.from_port
+          AND to_id = NEW.to_id AND to_port = NEW.to_port)
+)
 BEGIN
   SELECT RAISE(ABORT, 'edges: use UPDATE, not REPLACE');
+END;
+
+CREATE TRIGGER edges_identity_immutable BEFORE UPDATE OF id, seq ON edges
+WHEN NEW.id <> OLD.id OR NEW.seq <> OLD.seq
+BEGIN
+  SELECT RAISE(ABORT, 'edges identity is immutable');
+END;
+
+CREATE TRIGGER edges_no_duplicate_update
+BEFORE UPDATE OF from_id, from_port, to_id, to_port ON edges
+WHEN EXISTS (
+  SELECT 1 FROM edges
+   WHERE seq <> OLD.seq
+     AND from_id = NEW.from_id AND from_port = NEW.from_port
+     AND to_id = NEW.to_id AND to_port = NEW.to_port
+)
+BEGIN
+  SELECT RAISE(ABORT, 'edges: duplicate port pair');
 END;
 
 CREATE TRIGGER nodes_rev_monotonic BEFORE UPDATE OF rev ON nodes
@@ -758,7 +789,7 @@ The crossing-edge read caps at 4,000 rows and drops the redundant SQL `ORDER BY`
 
 - `PRAGMA foreign_keys=ON` is set and asserted in `configure()`; the current reliance on the driver default (`db.rs:538-546`) is removed. `PRAGMA recursive_triggers=OFF` is explicit; the trigger chains were verified with it off.
 - Node deletion cascades edges and inputs; the edge AFTER DELETE triggers remove `edges_rtree` rows, the node AFTER DELETE triggers remove `nodes_rtree`/`nodes_fts` rows, and counts decrement. This was verified on the bundled 3.51.1 and 3.53.1.
-- `INSERT OR REPLACE` is banned by BEFORE INSERT triggers on `document` (by id or project_id), `nodes` and `edges` (by id or seq), because REPLACE skips AFTER DELETE triggers and would corrupt counts/FTS/RTree or the project identity. The app uses plain INSERT/UPDATE; tests assert the ban on every path.
+- `INSERT OR REPLACE` is banned by BEFORE INSERT triggers on `document` (by id or project_id), `nodes` (by id or seq) and `edges` (by id, seq or port pair), because REPLACE skips AFTER DELETE triggers and would corrupt counts/FTS/RTree or the project identity. Node and edge `id`/`seq` are immutable, and an edge update cannot create a duplicate port pair, so `UPDATE OR REPLACE` cannot use the same bypass. The app uses plain INSERT/UPDATE; tests assert the bans.
 - No trigger may be assumed to run in a particular order; tests assert rejection, not messages.
 - `verify()` runs `PRAGMA quick_check`, `PRAGMA foreign_key_check`, FTS `integrity-check`/`rebuild` if needed, `rtreecheck` for both RTrees, the dirty flush and the bounds compaction. It is a maintenance command/post-open job, not part of the 300 ms open path (quick_check measured 0.682 s on the 100k/74 MB fixture).
 
@@ -879,14 +910,14 @@ The project layer above the document core owns the managed projects root, the pr
 
 `PRAGMA application_id = 1179406167` (`0x464C4F57`, "FLOW") and `PRAGMA user_version = 1` are set inside the creation transaction. Open reads `PRAGMA application_id`, `PRAGMA user_version` and `sqlite_master` before any DDL:
 
-| State                                                                                        | Action                                                                                                          |
-| -------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------- |
-| `application_id=0`, `user_version=0`, no user tables or views                                | New package: create v1 in one transaction, insert the `document` row, set identity/version, commit              |
-| `application_id=0`, any user table or view                                                   | Refuse with "not a Flow database"; never DROP (this catches the existing v5 dev files and foreign SQLite files) |
-| matching `application_id`, `user_version` = 1                                                | Validate the document row and return `Current`                                                                  |
-| matching `application_id`, `user_version` < 1                                                | Refuse: no earlier Flow schema exists; reset the project                                                        |
-| matching `application_id`, `user_version` > 1                                                | Refuse as newer                                                                                                 |
-| matching id, missing/invalid `document` row, `project_id`, camera or required schema objects | Refuse; suggest `verify()` or a project reset/deletion                                                          |
+| State                                                                                                    | Action                                                                                                          |
+| -------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------- |
+| `application_id=0`, `user_version=0`, no user tables or views                                            | New package: create v1 in one transaction, insert the `document` row, set identity/version, commit              |
+| `application_id=0`, any user table or view                                                               | Refuse with "not a Flow database"; never DROP (this catches the existing v5 dev files and foreign SQLite files) |
+| matching `application_id`, `user_version` = 1                                                            | Validate the document row and return `Current`                                                                  |
+| matching `application_id`, `user_version` < 1                                                            | Refuse: no earlier Flow schema exists; reset the project                                                        |
+| matching `application_id`, `user_version` > 1                                                            | Refuse as newer                                                                                                 |
+| matching id, missing/invalid `document` row, `project_id`, camera, required tables/view/indexes/triggers | Refuse; suggest `verify()` or a project reset/deletion                                                          |
 
 `PRAGMA quick_check` is not on the open path. Open sets `document.clean_shutdown=0`; an explicit `close()` checkpoints WAL, sets it to 1 and closes. On the next open, a `0` schedules the post-open `verify()` job (quick_check, FTS/RTree checks, dirty flush, bounds compaction, GC). The 300 ms open budget is preserved; a normal clean open does no integrity scan.
 
@@ -1025,7 +1056,7 @@ run_command(f) = conn.transaction(|txn| {
 | Project package    | Create in a temp dir and rename into place; open; read project_id/title/camera; rename title; duplicate mints a new project_id; delete moves to trash; import refuses a foreign/newer file; a second open is locked; rebuild the catalog from directories; camera survives close/open |
 | Constraints        | Every CHECK/FK/trigger rejects its negative case: self-edge, duplicate port pair, bad status/origin/kind, non-JSON, negative size/position, image without asset, node without output for done, output from another node/incarnation, idle with output                                 |
 | Cascades           | Delete node -> edges, inputs, RTree/FTS rows, counts; delete edge -> inputs, edge box; delete batch -> items, item_count; delete asset with references fails; delete node with connected ports? no ports table                                                                        |
-| REPLACE ban        | `INSERT OR REPLACE` on document, nodes and edges aborts by id and by seq/project_id; counts/FTS/RTree/identity stay consistent                                                                                                                                                        |
+| REPLACE ban        | `INSERT OR REPLACE` on document, nodes and edges aborts by id, seq/project_id or edge port pair; identity updates and duplicate-pair updates abort; counts/FTS/RTree/identity stay consistent                                                                                         |
 | Batch/item machine | Insert done directly fails; item into settled batch fails; item update/delete blocked; batch cascade succeeds; running batch delete blocked; item_count consistency trigger rejects a wrong direct update                                                                             |
 | Positions          | Reorder p2/p0/p1, undo, redo; insert-restore at a stored position; upload append while another insert races; sync_inputs renumber; no UNIQUE failure                                                                                                                                  |
 | Geometry           | SQL `edge_boxes` vs Rust `connection_bounds` vs TSX `scene.edgePorts` for a matrix; port gap 14, reach 60/260, padding 4; ±10,000,000 and ±2^23; resize offset scaling; dirty flush after 1,000-node move                                                                             |

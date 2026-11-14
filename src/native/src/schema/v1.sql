@@ -7,7 +7,8 @@ CREATE TABLE document (
   project_id     TEXT    NOT NULL UNIQUE
                  CHECK (length(project_id) = 32
                         AND project_id NOT GLOB '*[^0-9a-f]*'),
-  title          TEXT    NOT NULL DEFAULT 'Flow' CHECK (length(trim(title)) > 0),
+  title          TEXT    NOT NULL DEFAULT 'Flow'
+                 CHECK (length(trim(title, ' ' || char(9) || char(10) || char(13))) > 0),
   rev            INTEGER NOT NULL DEFAULT 0 CHECK (rev >= 0),
   node_count     INTEGER NOT NULL DEFAULT 0 CHECK (node_count >= 0),
   edge_count     INTEGER NOT NULL DEFAULT 0 CHECK (edge_count >= 0),
@@ -241,10 +242,40 @@ BEGIN
   SELECT RAISE(ABORT, 'nodes: use UPDATE, not REPLACE');
 END;
 
+CREATE TRIGGER nodes_identity_immutable BEFORE UPDATE OF id, seq ON nodes
+WHEN NEW.id <> OLD.id OR NEW.seq <> OLD.seq
+BEGIN
+  SELECT RAISE(ABORT, 'nodes identity is immutable');
+END;
+
 CREATE TRIGGER edges_no_replace BEFORE INSERT ON edges
-WHEN EXISTS (SELECT 1 FROM edges WHERE id = NEW.id OR seq = NEW.seq)
+WHEN EXISTS (
+  SELECT 1 FROM edges
+   WHERE id = NEW.id
+      OR seq = NEW.seq
+      OR (from_id = NEW.from_id AND from_port = NEW.from_port
+          AND to_id = NEW.to_id AND to_port = NEW.to_port)
+)
 BEGIN
   SELECT RAISE(ABORT, 'edges: use UPDATE, not REPLACE');
+END;
+
+CREATE TRIGGER edges_identity_immutable BEFORE UPDATE OF id, seq ON edges
+WHEN NEW.id <> OLD.id OR NEW.seq <> OLD.seq
+BEGIN
+  SELECT RAISE(ABORT, 'edges identity is immutable');
+END;
+
+CREATE TRIGGER edges_no_duplicate_update
+BEFORE UPDATE OF from_id, from_port, to_id, to_port ON edges
+WHEN EXISTS (
+  SELECT 1 FROM edges
+   WHERE seq <> OLD.seq
+     AND from_id = NEW.from_id AND from_port = NEW.from_port
+     AND to_id = NEW.to_id AND to_port = NEW.to_port
+)
+BEGIN
+  SELECT RAISE(ABORT, 'edges: duplicate port pair');
 END;
 
 CREATE TRIGGER nodes_rev_monotonic BEFORE UPDATE OF rev ON nodes

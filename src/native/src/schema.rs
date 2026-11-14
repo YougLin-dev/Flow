@@ -2,10 +2,10 @@
 //!
 //! `v1` is the frozen release target: one literal DDL file and the open
 //! guard. The v5 SeaORM migration path below remains until step 2 switches
-//! the live open path; `schema` is crate-public until then so the tested v1
-//! API is reachable without a dead-code suppression. SQLite's FTS5 and RTree
-//! tables are virtual tables with no ORM schema support, so their DDL lives
-//! here, next to the migrations, and nowhere else.
+//! the live open path; `schema` stays public until then so the tested v1 API
+//! is reachable without a dead-code suppression, and step 2 narrows it.
+//! SQLite's FTS5 and RTree tables are virtual tables with no ORM schema
+//! support, so their DDL lives here, next to the migrations, and nowhere else.
 
 pub mod v1;
 

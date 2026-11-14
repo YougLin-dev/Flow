@@ -31,6 +31,59 @@ const REQUIRED_OBJECTS: &[(&str, &str)] = &[
     ("table", "edges_rtree"),
     ("table", "nodes_fts"),
     ("view", "edge_boxes"),
+    ("index", "nodes_sample"),
+    ("index", "nodes_running"),
+    ("index", "nodes_output"),
+    ("index", "edges_port_pair"),
+    ("index", "edges_to"),
+    ("index", "result_batches_node"),
+    ("index", "result_batches_latest"),
+    ("index", "result_batches_running"),
+    ("index", "result_items_asset"),
+    ("index", "node_inputs_edge"),
+    ("index", "node_inputs_item"),
+    ("index", "node_inputs_asset"),
+    ("trigger", "document_no_delete"),
+    ("trigger", "document_rev_monotonic"),
+    ("trigger", "document_project_id_immutable"),
+    ("trigger", "document_no_replace"),
+    ("trigger", "nodes_no_replace"),
+    ("trigger", "nodes_identity_immutable"),
+    ("trigger", "edges_no_replace"),
+    ("trigger", "edges_identity_immutable"),
+    ("trigger", "edges_no_duplicate_update"),
+    ("trigger", "nodes_rev_monotonic"),
+    ("trigger", "nodes_output_done_bi"),
+    ("trigger", "nodes_output_done_bu"),
+    ("trigger", "result_batches_owner_bi"),
+    ("trigger", "result_batches_insert_running"),
+    ("trigger", "result_batches_done_item"),
+    ("trigger", "result_batches_terminal_immutable"),
+    ("trigger", "result_batches_running_delete"),
+    ("trigger", "result_batches_item_count_consistent"),
+    ("trigger", "result_items_running_only"),
+    ("trigger", "result_items_no_update"),
+    ("trigger", "result_items_delete_guard"),
+    ("trigger", "result_items_count_ai"),
+    ("trigger", "result_items_count_ad"),
+    ("trigger", "node_inputs_edge_shape_bi"),
+    ("trigger", "node_inputs_edge_shape_bu"),
+    ("trigger", "nodes_count_bounds_ai"),
+    ("trigger", "nodes_count_bounds_ad"),
+    ("trigger", "nodes_bounds_au"),
+    ("trigger", "edges_count_ai"),
+    ("trigger", "edges_count_ad"),
+    ("trigger", "nodes_rtree_ai"),
+    ("trigger", "nodes_rtree_au"),
+    ("trigger", "nodes_rtree_ad"),
+    ("trigger", "nodes_geometry_dirty_au"),
+    ("trigger", "nodes_geometry_dirty_ad"),
+    ("trigger", "edges_rtree_ai"),
+    ("trigger", "edges_rtree_au"),
+    ("trigger", "edges_rtree_ad"),
+    ("trigger", "nodes_fts_ai"),
+    ("trigger", "nodes_fts_ad"),
+    ("trigger", "nodes_fts_au"),
 ];
 
 /// The identity carried by the singleton `document` row.
@@ -75,7 +128,8 @@ pub fn configure(conn: &Connection) -> Result<(), String> {
 /// A new empty file returns [`FileState::New`]. Anything that is not a v1
 /// Flow package is an error: a foreign file, a newer or older schema, a
 /// missing schema object, or an invalid document row. The caller adds the
-/// package path to the message; this function sees only the connection.
+/// package path and the recovery suggestion (`verify()` or a reset/deletion);
+/// this function sees only the connection.
 pub fn inspect(conn: &Connection) -> Result<FileState, String> {
     let application_id: i64 = conn
         .pragma_query_value(None, "application_id", |row| row.get(0))
@@ -141,7 +195,7 @@ pub fn inspect(conn: &Connection) -> Result<FileState, String> {
 
 /// Creates a v1 package in one transaction and returns its identity.
 pub fn create(conn: &Connection, title: &str) -> Result<ProjectInfo, String> {
-    if title.trim().is_empty() {
+    if is_blank_title(title) {
         return Err("the project title is empty".to_owned());
     }
     match inspect(conn)? {
@@ -213,17 +267,31 @@ fn validate_document(
     if !is_project_id(&project_id) {
         return Err("the Flow database has an invalid project_id".to_owned());
     }
-    if title.trim().is_empty() {
+    if is_blank_title(&title) {
         return Err("the Flow database has an empty title".to_owned());
     }
-    if !camera_x.is_finite()
-        || !camera_y.is_finite()
-        || !camera_zoom.is_finite()
-        || camera_zoom <= 0.0
-    {
+    if !is_valid_camera(camera_x, camera_y, camera_zoom) {
         return Err("the Flow database has an invalid camera".to_owned());
     }
     Ok(ProjectInfo { project_id, title })
+}
+
+/// Mirrors the DDL's `trim(title, ' ' || char(9) || char(10) || char(13))`.
+fn is_blank_title(title: &str) -> bool {
+    title
+        .trim_matches(|character: char| matches!(character, ' ' | '\t' | '\n' | '\r'))
+        .is_empty()
+}
+
+/// Mirrors the DDL's camera CHECKs: finite and inside the frozen envelope.
+fn is_valid_camera(x: f64, y: f64, zoom: f64) -> bool {
+    x.is_finite()
+        && (-1.0e308..=1.0e308).contains(&x)
+        && y.is_finite()
+        && (-1.0e308..=1.0e308).contains(&y)
+        && zoom.is_finite()
+        && zoom > 0.0
+        && zoom < 1.0e308
 }
 
 fn is_project_id(value: &str) -> bool {
@@ -290,6 +358,29 @@ mod tests {
             .query_map([], |row| row.get::<_, String>(1))
             .expect("query table_info");
         rows.map(Result::unwrap).collect()
+    }
+
+    fn column_definition(conn: &Connection, table: &str, column: &str) -> (String, i64, i64) {
+        let mut statement = conn
+            .prepare(&format!("PRAGMA table_info({table})"))
+            .expect("prepare table_info");
+        let rows = statement
+            .query_map([], |row| {
+                Ok((
+                    row.get::<_, String>(1)?,
+                    row.get::<_, String>(2)?,
+                    row.get::<_, i64>(3)?,
+                    row.get::<_, i64>(5)?,
+                ))
+            })
+            .expect("query table_info");
+        for row in rows {
+            let (name, kind, not_null, primary_key) = row.expect("read table_info row");
+            if name == column {
+                return (kind, not_null, primary_key);
+            }
+        }
+        panic!("missing column {table}.{column}");
     }
 
     fn objects(conn: &Connection, kind: &str) -> Vec<String> {
@@ -399,7 +490,10 @@ mod tests {
             .expect("cap the database size");
 
         let error = create(&conn, "No room").expect_err("DDL must fail without pages");
-        assert!(!error.is_empty(), "{error}");
+        assert!(
+            error.contains("full") || error.contains("disk"),
+            "expected a page-limit error, got {error}"
+        );
         assert_eq!(pragma(&conn, "application_id"), 0);
         assert_eq!(pragma(&conn, "user_version"), 0);
         assert!(
@@ -588,14 +682,113 @@ mod tests {
             .expect("read edges_port_pair SQL");
         assert!(edge_pair_sql.to_uppercase().contains("UNIQUE"));
 
+        let mut named_indexes = conn
+            .prepare(
+                "SELECT name FROM sqlite_master \
+                 WHERE type = 'index' AND sql IS NOT NULL ORDER BY name",
+            )
+            .expect("prepare named index read")
+            .query_map([], |row| row.get::<_, String>(0))
+            .expect("query named indexes")
+            .map(Result::unwrap)
+            .collect::<Vec<_>>();
+        named_indexes.sort();
+        assert_eq!(
+            named_indexes,
+            [
+                "edges_port_pair",
+                "edges_to",
+                "node_inputs_asset",
+                "node_inputs_edge",
+                "node_inputs_item",
+                "nodes_output",
+                "nodes_running",
+                "nodes_sample",
+                "result_batches_latest",
+                "result_batches_node",
+                "result_batches_running",
+                "result_items_asset",
+            ]
+        );
+
+        let edge_auto_indexes: i64 = conn
+            .query_row(
+                "SELECT count(*) FROM sqlite_master \
+                 WHERE type = 'index' AND tbl_name = 'edges' AND sql IS NULL",
+                [],
+                |row| row.get(0),
+            )
+            .expect("count edge autoindexes");
+        assert_eq!(
+            edge_auto_indexes, 1,
+            "edges must have only the id autoindex"
+        );
+
+        assert_eq!(
+            column_definition(&conn, "nodes", "x"),
+            ("REAL".to_owned(), 1, 0)
+        );
+        assert_eq!(
+            column_definition(&conn, "nodes", "width"),
+            ("REAL".to_owned(), 1, 0)
+        );
+        assert_eq!(
+            column_definition(&conn, "document", "project_id"),
+            ("TEXT".to_owned(), 1, 0)
+        );
+        assert_eq!(
+            column_definition(&conn, "document", "title"),
+            ("TEXT".to_owned(), 1, 0)
+        );
+        assert_eq!(
+            column_definition(&conn, "edges", "from_port"),
+            ("TEXT".to_owned(), 1, 0)
+        );
+
+        let running_sql: String = conn
+            .query_row(
+                "SELECT sql FROM sqlite_master WHERE type = 'index' AND name = 'nodes_running'",
+                [],
+                |row| row.get(0),
+            )
+            .expect("read nodes_running SQL");
+        assert!(
+            normalize_sql(&running_sql).contains("WHERE status = 'running'"),
+            "{running_sql}"
+        );
+        for (object, fragments) in [
+            (
+                "nodes_rtree_ai",
+                &["NEW.x - 2.0", "NEW.x + NEW.width + 2.0"][..],
+            ),
+            ("nodes_rtree_au", &["UPDATE OF x, y, width, height"][..]),
+            ("nodes_fts_au", &["UPDATE OF title, body, tags"][..]),
+            ("nodes_bounds_au", &["bounds_exact"][..]),
+        ] {
+            let sql: String = conn
+                .query_row(
+                    "SELECT sql FROM sqlite_master WHERE type = 'trigger' AND name = ?1",
+                    [object],
+                    |row| row.get(0),
+                )
+                .expect("read trigger SQL");
+            let sql = normalize_sql(&sql);
+            for fragment in fragments.iter().copied() {
+                assert!(sql.contains(fragment), "{object} missing {fragment}: {sql}");
+            }
+        }
+
         let triggers = objects(&conn, "trigger");
-        for trigger in [
+        let expected_triggers = [
             "document_no_delete",
             "document_rev_monotonic",
             "document_project_id_immutable",
             "document_no_replace",
             "nodes_no_replace",
+            "nodes_identity_immutable",
             "edges_no_replace",
+            "edges_identity_immutable",
+            "edges_no_duplicate_update",
             "nodes_rev_monotonic",
             "nodes_output_done_bi",
             "nodes_output_done_bu",
@@ -628,12 +821,21 @@ mod tests {
             "nodes_fts_ai",
             "nodes_fts_ad",
             "nodes_fts_au",
-        ] {
+        ];
+        for trigger in expected_triggers {
             assert!(
                 triggers.iter().any(|name| name == trigger),
                 "missing {trigger}"
             );
         }
+        let mut actual_triggers = triggers;
+        actual_triggers.sort();
+        let mut expected_triggers: Vec<String> = expected_triggers
+            .iter()
+            .map(|name| (*name).to_owned())
+            .collect();
+        expected_triggers.sort();
+        assert_eq!(actual_triggers, expected_triggers);
 
         let fts: String = conn
             .query_row(
@@ -699,6 +901,70 @@ mod tests {
         assert_eq!(count(&conn, "SELECT edge_count FROM document"), 1);
         assert_eq!(count(&conn, "SELECT count(*) FROM edges_rtree"), 1);
         assert_eq!(count(&conn, "SELECT count(*) FROM edge_boxes"), 1);
+
+        conn.execute("UPDATE nodes SET title = 'gamma' WHERE id = 'n1'", [])
+            .expect("update the node title");
+        assert_eq!(
+            count(
+                &conn,
+                "SELECT count(*) FROM nodes_fts WHERE nodes_fts MATCH 'alpha'"
+            ),
+            0
+        );
+        assert_eq!(
+            count(
+                &conn,
+                "SELECT count(*) FROM nodes_fts WHERE nodes_fts MATCH 'gamma'"
+            ),
+            1
+        );
+
+        let node_box_before: (f64, f64) = conn
+            .query_row(
+                "SELECT min_x, max_x FROM nodes_rtree \
+                 WHERE id = (SELECT seq FROM nodes WHERE id = 'n1')",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .expect("read node box");
+        conn.execute("UPDATE nodes SET x = 50 WHERE id = 'n1'", [])
+            .expect("move the node");
+        let node_box_after: (f64, f64) = conn
+            .query_row(
+                "SELECT min_x, max_x FROM nodes_rtree \
+                 WHERE id = (SELECT seq FROM nodes WHERE id = 'n1')",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .expect("read the moved node box");
+        assert_ne!(node_box_before, node_box_after);
+        assert_eq!(
+            count(
+                &conn,
+                "SELECT count(*) FROM nodes_geometry_dirty WHERE node_id = 'n1'"
+            ),
+            1
+        );
+
+        let edge_box_before: (f64, f64) = conn
+            .query_row(
+                "SELECT min_y, max_y FROM edges_rtree \
+                 WHERE id = (SELECT seq FROM edges WHERE id = 'e1')",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .expect("read edge box");
+        conn.execute("UPDATE edges SET from_offset = 10 WHERE id = 'e1'", [])
+            .expect("move the edge endpoint");
+        let edge_box_after: (f64, f64) = conn
+            .query_row(
+                "SELECT min_y, max_y FROM edges_rtree \
+                 WHERE id = (SELECT seq FROM edges WHERE id = 'e1')",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .expect("read the moved edge box");
+        assert_ne!(edge_box_before, edge_box_after);
 
         conn.execute("DELETE FROM nodes WHERE id = 'n1'", [])
             .expect("delete the source node");
@@ -795,6 +1061,20 @@ mod tests {
             .expect("drop a required table");
         let error = inspect(&conn).expect_err("missing required object must be refused");
         assert!(error.contains("missing table assets"), "{error}");
+
+        let conn = memory();
+        create(&conn, "Missing index").expect("create v1");
+        conn.execute_batch("DROP INDEX edges_port_pair")
+            .expect("drop a required index");
+        let error = inspect(&conn).expect_err("missing required index must be refused");
+        assert!(error.contains("missing index edges_port_pair"), "{error}");
+
+        let conn = memory();
+        create(&conn, "Missing trigger").expect("create v1");
+        conn.execute_batch("DROP TRIGGER nodes_fts_ai")
+            .expect("drop a required trigger");
+        let error = inspect(&conn).expect_err("missing required trigger must be refused");
+        assert!(error.contains("missing trigger nodes_fts_ai"), "{error}");
     }
 
     #[test]
@@ -851,12 +1131,29 @@ mod tests {
         );
         assert!(bad_title.is_err(), "empty title must fail");
 
+        let tab_title = conn.execute(
+            "INSERT INTO document (id, project_id, title, created_at, updated_at) \
+             VALUES (1, '0123456789abcdef0123456789abcdef', char(9), ?1, ?1)",
+            params![now],
+        );
+        assert!(tab_title.is_err(), "whitespace-only title must fail");
+
         let bad_camera = conn.execute(
             "INSERT INTO document (id, project_id, camera_zoom, created_at, updated_at) \
              VALUES (1, '0123456789abcdef0123456789abcdef', 0, ?1, ?1)",
             params![now],
         );
         assert!(bad_camera.is_err(), "non-positive camera_zoom must fail");
+
+        let wide_camera = conn.execute(
+            "INSERT INTO document (id, project_id, camera_x, created_at, updated_at) \
+             VALUES (1, '0123456789abcdef0123456789abcdef', 1.5e308, ?1, ?1)",
+            params![now],
+        );
+        assert!(
+            wide_camera.is_err(),
+            "camera_x outside the envelope must fail"
+        );
 
         let infinite_camera = conn.execute(
             "INSERT INTO document (id, project_id, camera_zoom, created_at, updated_at) \
@@ -889,6 +1186,15 @@ mod tests {
         let error = inspect(&conn).expect_err("empty title must be refused");
         assert_eq!(error, "the Flow database has an empty title");
 
+        conn.execute_batch("PRAGMA ignore_check_constraints = ON")
+            .expect("ignore checks");
+        conn.execute("UPDATE document SET title = char(9) WHERE id = 1", [])
+            .expect("write a tab-only title past the CHECK");
+        conn.execute_batch("PRAGMA ignore_check_constraints = OFF")
+            .expect("restore checks");
+        let error = inspect(&conn).expect_err("tab-only title must be refused");
+        assert_eq!(error, "the Flow database has an empty title");
+
         conn.execute("UPDATE document SET title = 'Restored' WHERE id = 1", [])
             .expect("restore title");
         conn.execute_batch("PRAGMA ignore_check_constraints = ON")
@@ -900,21 +1206,55 @@ mod tests {
         let error = inspect(&conn).expect_err("infinite camera must be refused");
         assert_eq!(error, "the Flow database has an invalid camera");
 
-        conn.execute("UPDATE document SET camera_zoom = 1.0 WHERE id = 1", [])
-            .expect("restore camera");
-        conn.execute_batch("DROP TRIGGER document_project_id_immutable")
-            .expect("drop the immutability trigger");
         conn.execute_batch("PRAGMA ignore_check_constraints = ON")
             .expect("ignore checks");
-        conn.execute(
-            "UPDATE document SET project_id = 'ABCDEF0123456789ABCDEF0123456789' WHERE id = 1",
-            [],
-        )
-        .expect("write an uppercase project_id past the CHECK");
+        conn.execute("UPDATE document SET camera_x = 1.5e308 WHERE id = 1", [])
+            .expect("write a camera outside the envelope past the CHECK");
         conn.execute_batch("PRAGMA ignore_check_constraints = OFF")
             .expect("restore checks");
-        let error = inspect(&conn).expect_err("invalid project_id must be refused");
-        assert_eq!(error, "the Flow database has an invalid project_id");
+        let error = inspect(&conn).expect_err("camera outside the envelope must be refused");
+        assert_eq!(error, "the Flow database has an invalid camera");
+
+        conn.execute(
+            "UPDATE document SET camera_x = 0.0, camera_zoom = 1.0 WHERE id = 1",
+            [],
+        )
+        .expect("restore camera");
+    }
+
+    #[test]
+    fn validate_document_rejects_invalid_identity_title_and_camera() {
+        let valid_id = "0123456789abcdef0123456789abcdef".to_owned();
+        let valid = || validate_document(valid_id.clone(), "Title".to_owned(), 0.0, 0.0, 1.0);
+        assert!(valid().is_ok());
+
+        for project_id in [
+            "short".to_owned(),
+            "ABCDEF0123456789ABCDEF0123456789".to_owned(),
+            "0123456789abcdef0123456789abcde-".to_owned(),
+        ] {
+            let error = validate_document(project_id, "Title".to_owned(), 0.0, 0.0, 1.0)
+                .expect_err("invalid project_id must be refused");
+            assert_eq!(error, "the Flow database has an invalid project_id");
+        }
+
+        for title in ["", " ", "\t\n", "\r"] {
+            let error = validate_document(valid_id.clone(), title.to_owned(), 0.0, 0.0, 1.0)
+                .expect_err("blank title must be refused");
+            assert_eq!(error, "the Flow database has an empty title");
+        }
+
+        for (x, y, zoom) in [
+            (1.5e308, 0.0, 1.0),
+            (0.0, -1.5e308, 1.0),
+            (0.0, 0.0, 0.0),
+            (0.0, 0.0, f64::INFINITY),
+            (f64::INFINITY, 0.0, 1.0),
+        ] {
+            let error = validate_document(valid_id.clone(), "Title".to_owned(), x, y, zoom)
+                .expect_err("invalid camera must be refused");
+            assert_eq!(error, "the Flow database has an invalid camera");
+        }
     }
 
     #[test]
@@ -983,6 +1323,35 @@ mod tests {
         );
         assert!(edge_by_seq.is_err(), "REPLACE by edge seq must fail");
         assert_eq!(count(&conn, "SELECT edge_count FROM document"), 1);
+
+        let edge_by_pair = conn.execute(
+            "INSERT OR REPLACE INTO edges \
+             (id, from_id, to_id, from_port, to_port, port_kind, from_offset, to_offset) \
+             VALUES ('e-replace', 'n1', 'n2', 'out', 'in', 'text', 0, 0)",
+            [],
+        );
+        assert!(edge_by_pair.is_err(), "REPLACE by edge port pair must fail");
+        assert_eq!(count(&conn, "SELECT edge_count FROM document"), 1);
+        assert_eq!(count(&conn, "SELECT count(*) FROM edges_rtree"), 1);
+
+        let node_identity = conn.execute("UPDATE nodes SET id = 'renamed' WHERE id = 'n1'", []);
+        assert!(node_identity.is_err(), "node id update must fail");
+        let edge_identity = conn.execute("UPDATE edges SET seq = 999 WHERE id = 'e1'", []);
+        assert!(edge_identity.is_err(), "edge seq update must fail");
+
+        insert_node(&conn, "n3", "three");
+        insert_edge(&conn, "e2", "n1", "n3");
+        let duplicate_update = conn.execute("UPDATE edges SET to_id = 'n2' WHERE id = 'e2'", []);
+        assert!(duplicate_update.is_err(), "duplicate pair update must fail");
+        let replace_update = conn.execute(
+            "UPDATE OR REPLACE edges SET to_id = 'n2' WHERE id = 'e2'",
+            [],
+        );
+        assert!(
+            replace_update.is_err(),
+            "UPDATE OR REPLACE duplicate must fail"
+        );
+        assert_eq!(count(&conn, "SELECT edge_count FROM document"), 2);
     }
 
     #[test]
@@ -1003,8 +1372,22 @@ mod tests {
     #[test]
     fn create_requires_a_non_empty_title() {
         let conn = memory();
-        let error = create(&conn, "   ").expect_err("empty title must be refused");
-        assert!(error.contains("title"), "{error}");
-        assert_eq!(inspect(&conn), Ok(FileState::New));
+        for title in ["   ", "\t\n", "\r"] {
+            let error = create(&conn, title).expect_err("blank title must be refused");
+            assert!(error.contains("title"), "{error}");
+            assert_eq!(inspect(&conn), Ok(FileState::New));
+        }
+    }
+
+    #[test]
+    fn create_configures_a_bare_connection() {
+        let conn = Connection::open_in_memory().expect("open in-memory SQLite");
+        conn.execute_batch("PRAGMA foreign_keys = OFF; PRAGMA recursive_triggers = ON;")
+            .expect("set the wrong pragmas");
+        assert_eq!(pragma(&conn, "foreign_keys"), 0);
+        assert_eq!(pragma(&conn, "recursive_triggers"), 1);
+        create(&conn, "Bare").expect("create v1");
+        assert_eq!(pragma(&conn, "foreign_keys"), 1);
+        assert_eq!(pragma(&conn, "recursive_triggers"), 0);
     }
 }
