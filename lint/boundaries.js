@@ -1,5 +1,5 @@
 /**
- * Project boundary rule: dependencies flow down.
+ * Project boundary rules: dependencies flow down, and areas stay cohesive.
  *
  *   shell (src/App.tsx)  may use everything
  *   page                 may use pages, components, the store and foundations
@@ -7,63 +7,103 @@
  *   store                may use shared types and foundations
  *   foundation           may use foundations only (flow/, lib/, tool.ts)
  *
- * A component or foundation importing a page, or anything below a page
- * importing the store, is reported. Tests are skipped: they may reach into
- * any layer on purpose. `import/no-cycle` covers cycles; this covers
- * direction.
+ * The layer rule is always on. The area rules (`deep-cross-feature`,
+ * `forbidden-area`, `segment-direction`, `native-outside-seam`,
+ * `unclassified-source`) are defined now but report only after Phase 5 flips
+ * `ENFORCEMENT` in `structure-map.js`; `test-support-in-production` is live
+ * from Phase 0 so the test seam never becomes a hole.
  *
- * Loaded by `vite.config.ts` (`lint.jsPlugins`) as `boundaries/no-upward-import`.
+ * Loaded by `vite.config.ts` (`lint.jsPlugins`).
  */
-import { dirname, relative, resolve, sep } from "node:path";
+import { existsSync, statSync } from "node:fs";
+import { dirname, join, relative, resolve, sep } from "node:path";
 import { definePlugin, defineRule } from "vite-plus/lint/plugins";
+import {
+  AREAS,
+  ENFORCEMENT,
+  LEGACY_FLAT,
+  areaOf,
+  canImport,
+  canImportArea,
+  isFacadeOf,
+  isProductionFile,
+  isSameFeatureDeep,
+  isTestFile,
+  layerOf,
+  segmentOf,
+} from "./structure-map.js";
 
-const LAYERS = {
-  shell: new Set(["shell", "page", "component", "store", "type", "foundation", "asset"]),
-  page: new Set(["page", "component", "store", "type", "foundation", "asset"]),
-  component: new Set(["component", "type", "foundation", "asset"]),
-  store: new Set(["store", "type", "foundation", "asset"]),
-  foundation: new Set(["foundation", "type", "asset"]),
-  type: new Set(["type"]),
-  asset: new Set(),
-};
-
-/** The layer of a project file, from its path relative to the repository. */
-export function layerOf(file) {
-  // The app's root is src/; its modules are classified below it.
-  const path = (file.startsWith("src/") ? file.slice("src/".length) : file).replace(/\/+$/, "");
-  // Import specifiers omit the extension and may name a directory; files
-  // passed by the linter have an extension. Normalize both spellings.
-  const stem = path.replace(/\.(?:tsx?|jsx?|mjs)$/, "");
-  if (stem === "App") return "shell";
-  if (stem === "store") return "store";
-  if (stem === "tool") return "type";
-  if (stem === "pages" || stem.startsWith("pages/")) return "page";
-  if (stem === "components" || stem.startsWith("components/")) return "component";
-  if (
-    stem === "flow" ||
-    stem.startsWith("flow/") ||
-    stem === "lib" ||
-    stem.startsWith("lib/") ||
-    stem === "native" ||
-    stem.startsWith("native/")
-  ) {
-    return "foundation";
-  }
-  if (stem === "assets" || stem.startsWith("assets/")) return "asset";
-  return "other";
-}
+export { canImport, layerOf } from "./structure-map.js";
 
 function toProjectPath(cwd, filename) {
   return relative(cwd, filename).split(sep).join("/");
 }
 
-/** Whether a module in `section` may import a module in `targetLayer`. */
-export function canImport(section, targetLayer) {
-  const allowed = LAYERS[section];
-  return Boolean(allowed && allowed.has(targetLayer));
+/**
+ * Resolve a relative import to an existing project file. The linter sees a
+ * specifier, not a resolved target, so try the spellings NSH accepts:
+ * the exact file, `.ts`, `.tsx`, then a directory `index.ts`/`index.tsx`.
+ */
+export function resolveProjectImport(cwd, filename, specifier) {
+  if (!specifier.startsWith(".")) return null;
+  const base = resolve(dirname(filename), specifier);
+  const candidates = [
+    base,
+    `${base}.ts`,
+    `${base}.tsx`,
+    `${base}.js`,
+    `${base}.jsx`,
+    join(base, "index.ts"),
+    join(base, "index.tsx"),
+  ];
+  for (const candidate of candidates) {
+    if (existsSync(candidate) && statSync(candidate).isFile()) {
+      return toProjectPath(cwd, candidate);
+    }
+  }
+  return null;
 }
 
-export const noUpwardImport = defineRule({
+/** The literal source of an import/export node, or null. */
+function sourceOf(node) {
+  const source = node.source;
+  if (!source || source.type !== "Literal" || typeof source.value !== "string") return null;
+  return source.value;
+}
+
+/**
+ * Visit each relative import/export with its resolved target. A target that
+ * does not exist is passed through as null so the caller can still fail
+ * closed on an unclassified source.
+ */
+export function forEachImport(context, visit) {
+  const file = toProjectPath(context.cwd, context.filename);
+  if (!file.startsWith("src/")) return {};
+  const handler = (node) => {
+    const specifier = sourceOf(node);
+    if (specifier === null || !specifier.startsWith(".")) return;
+    const target = resolveProjectImport(context.cwd, context.filename, specifier);
+    visit({ node, specifier, target, file });
+  };
+  return {
+    ImportDeclaration: handler,
+    ExportNamedDeclaration: handler,
+    ExportAllDeclaration: handler,
+    ImportExpression: handler,
+  };
+}
+
+/** A report helper shared by the rules. */
+function report(context, node, messageId, data) {
+  context.report({ node, messageId, data });
+}
+
+/** The area rules skip test files; tests may reach across areas on purpose. */
+function isAreaChecked(file) {
+  return isProductionFile(file);
+}
+
+const noUpwardImport = defineRule({
   meta: {
     type: "problem",
     docs: {
@@ -80,50 +120,31 @@ export const noUpwardImport = defineRule({
   },
   create(context) {
     const file = toProjectPath(context.cwd, context.filename);
-    if (file.endsWith(".test.ts") || file.endsWith(".test.tsx")) return {};
-
-    // Only the app's own modules participate in the layer map; tooling files
-    // outside src/ (vite.config.ts, scripts, lint) do not.
+    if (isTestFile(file)) return {};
     if (!file.startsWith("src/")) return {};
 
     const section = layerOf(file);
-    const allowed = LAYERS[section];
 
-    /** Reports a relative import that points at a disallowed layer. */
     const check = (node) => {
-      const source = node.source;
-      if (!source || source.type !== "Literal" || typeof source.value !== "string") return;
-      const specifier = source.value;
-      if (!specifier.startsWith(".")) return;
-
+      const specifier = sourceOf(node);
+      if (specifier === null || !specifier.startsWith(".")) return;
       const target = toProjectPath(context.cwd, resolve(dirname(context.filename), specifier));
       const targetLayer = layerOf(target);
       if (targetLayer === "other") {
-        // Fail closed: an unclassified target could otherwise bypass the
-        // direction check entirely.
-        context.report({
-          node: source,
-          messageId: "unknown",
-          data: { source: specifier },
-        });
+        report(context, node.source, "unknown", { source: specifier });
         return;
       }
       // A source module missing from LAYERS may import nothing; otherwise it
       // would be an unchecked hole in the direction rule.
-      if (!allowed) {
-        context.report({
-          node: source,
-          messageId: "unclassified",
-          data: { source: specifier },
-        });
+      if (section === "other") {
+        report(context, node.source, "unclassified", { source: specifier });
         return;
       }
       if (canImport(section, targetLayer)) return;
-
-      context.report({
-        node: source,
-        messageId: "upward",
-        data: { section, target: targetLayer, source: specifier },
+      report(context, node.source, "upward", {
+        section,
+        target: targetLayer,
+        source: specifier,
       });
     };
 
@@ -136,7 +157,202 @@ export const noUpwardImport = defineRule({
   },
 });
 
+const deepCrossFeature = defineRule({
+  meta: {
+    type: "problem",
+    docs: { description: "Cross-area imports use the target area's facade." },
+    messages: {
+      deep: "{{source}} must import {{target}} through its index.ts, not {{specifier}}.",
+    },
+  },
+  create(context) {
+    if (!ENFORCEMENT.areas) return {};
+    return forEachImport(context, ({ node, specifier, target, file }) => {
+      if (!isAreaChecked(file)) return;
+      const sourceArea = areaOf(file);
+      const targetArea = target ? areaOf(target) : null;
+      if (!sourceArea || !targetArea || sourceArea === targetArea) return;
+      if (AREAS[sourceArea]?.compositionRoot) return;
+      if (!canImportArea(sourceArea, targetArea)) return;
+      if (isSameFeatureDeep(sourceArea, targetArea)) return;
+      if (isFacadeOf(targetArea, target)) return;
+      report(context, node.source, "deep", { source: sourceArea, target: targetArea, specifier });
+    });
+  },
+});
+
+const forbiddenArea = defineRule({
+  meta: {
+    type: "problem",
+    docs: { description: "An area may import only the areas its matrix row allows." },
+    messages: {
+      forbidden: "{{source}} may not import {{target}} ({{specifier}}).",
+    },
+  },
+  create(context) {
+    if (!ENFORCEMENT.areas) return {};
+    return forEachImport(context, ({ node, specifier, target, file }) => {
+      if (!isAreaChecked(file)) return;
+      const sourceArea = areaOf(file);
+      const targetArea = target ? areaOf(target) : null;
+      if (!sourceArea || !targetArea || sourceArea === targetArea) return;
+      if (canImportArea(sourceArea, targetArea)) return;
+      report(context, node.source, "forbidden", {
+        source: sourceArea,
+        target: targetArea,
+        specifier,
+      });
+    });
+  },
+});
+
+const segmentDirection = defineRule({
+  meta: {
+    type: "problem",
+    docs: {
+      description: "geometry stays pure, model stays view-free, interaction stays view-free.",
+    },
+    messages: {
+      segment:
+        "{{source}} ({{sourceSegment}}) may not import {{target}} ({{targetSegment}}/{{targetLayer}}).",
+    },
+  },
+  create(context) {
+    if (!ENFORCEMENT.areas) return {};
+    return forEachImport(context, ({ node, target, file }) => {
+      if (!isAreaChecked(file)) return;
+      const sourceArea = areaOf(file);
+      if (!sourceArea || !sourceArea.startsWith("flow/")) return;
+      const sourceSegment = segmentOf(file);
+      if (sourceSegment === null) return;
+      const targetArea = target ? areaOf(target) : null;
+      const targetSegment = target ? segmentOf(target) : null;
+      const targetLayer = target ? layerOf(target) : "other";
+
+      let violation = false;
+      if (sourceSegment === "geometry") {
+        // Geometry is pure math: same-area geometry or the shared kernel.
+        violation =
+          targetArea === sourceArea && targetSegment !== null && targetSegment !== "geometry";
+      } else if (sourceSegment === "model") {
+        violation =
+          (targetArea === sourceArea && targetSegment === "interaction") ||
+          targetLayer === "component";
+      } else if (sourceSegment === "interaction") {
+        violation = targetLayer === "component" || targetArea === "flow/document";
+      }
+
+      if (violation) {
+        report(context, node.source, "segment", {
+          source: sourceArea,
+          sourceSegment,
+          target: targetArea ?? target ?? "unresolved",
+          targetSegment: targetSegment ?? "none",
+          targetLayer,
+        });
+      }
+    });
+  },
+});
+
+const testSupportInProduction = defineRule({
+  meta: {
+    type: "problem",
+    docs: { description: "Production code never imports test helpers or test files." },
+    messages: {
+      testSupport: "Production code may not import test support ({{specifier}}).",
+    },
+  },
+  create(context) {
+    return forEachImport(context, ({ node, specifier, target, file }) => {
+      if (!isProductionFile(file)) return;
+      const targetIsTest =
+        (target !== null &&
+          (isTestFile(target) ||
+            target.includes("/test/") ||
+            target.startsWith("src/test-support/"))) ||
+        /(?:^|\/)test-support(?:\/|$)/.test(specifier) ||
+        /(?:^|\/)test(?:\/|$)/.test(specifier);
+      if (!targetIsTest) return;
+      report(context, node.source, "testSupport", { specifier });
+    });
+  },
+});
+
+const nativeOutsideSeam = defineRule({
+  meta: {
+    type: "problem",
+    docs: {
+      description: "The native module is called only by flow/document; types use the seam.",
+    },
+    messages: {
+      native:
+        "`@flow/native` is document-only at runtime; import types from flow/shared/native-types.",
+    },
+  },
+  create(context) {
+    if (!ENFORCEMENT.nativeSeam) return {};
+    return {
+      ImportDeclaration(node) {
+        const specifier = sourceOf(node);
+        if (specifier !== "@flow/native") return;
+        const file = toProjectPath(context.cwd, context.filename);
+        if (!isProductionFile(file)) return;
+        if (file === "src/flow/shared/native-types.ts" || file.startsWith("src/flow/document/")) {
+          return;
+        }
+        report(context, node.source, "native", {});
+      },
+    };
+  },
+});
+
+const unclassifiedSource = defineRule({
+  meta: {
+    type: "problem",
+    docs: {
+      description: "Every app module is classified as an area or an allow-listed legacy file.",
+    },
+    messages: {
+      unclassified:
+        "{{file}} is not an area or an allow-listed legacy flat module; move it into an area.",
+    },
+  },
+  create(context) {
+    if (!ENFORCEMENT.unclassified) return {};
+    const file = toProjectPath(context.cwd, context.filename);
+    if (!file.startsWith("src/") || !isAreaChecked(file)) return {};
+    if (areaOf(file) !== null) return {};
+    if (LEGACY_FLAT.has(file)) return {};
+    if (layerOf(file) === "asset" || layerOf(file) === "type") return {};
+    if (file === "src/App.tsx" || file === "src/store.ts") return {};
+    return {
+      Program(node) {
+        report(context, node, "unclassified", { file });
+      },
+    };
+  },
+});
+
+export {
+  deepCrossFeature,
+  forbiddenArea,
+  nativeOutsideSeam,
+  noUpwardImport,
+  segmentDirection,
+  testSupportInProduction,
+  unclassifiedSource,
+};
+
 export default definePlugin({
   meta: { name: "boundaries" },
-  rules: { "no-upward-import": noUpwardImport },
+  rules: {
+    "no-upward-import": noUpwardImport,
+    "deep-cross-feature": deepCrossFeature,
+    "forbidden-area": forbiddenArea,
+    "segment-direction": segmentDirection,
+    "test-support-in-production": testSupportInProduction,
+    "native-outside-seam": nativeOutsideSeam,
+    "unclassified-source": unclassifiedSource,
+  },
 });

@@ -80,26 +80,35 @@ root `.nsh/out` MUST NOT be edited or committed. Asset and theme paths in
 `boundaries/no-upward-import` in `lint/boundaries.js` enforces this table for
 relative imports. Tests are exempt because they may reach into any layer.
 
-| Layer        | Path                                   | MAY import                                           |
-| ------------ | -------------------------------------- | ---------------------------------------------------- |
-| Shell        | `src/App.tsx`                          | every layer                                          |
-| Page         | `src/pages/**`                         | pages, components, store, types, foundations, assets |
-| Component    | `src/components/**`                    | components, types, foundations, assets               |
-| Store        | `src/store.ts`                         | store, types, foundations, assets                    |
-| Types        | `src/tool.ts`                          | types only                                           |
-| Foundation   | `src/flow/`, `src/lib/`, `src/native/` | foundations, types, assets                           |
-| Asset        | `src/assets/**`                        | nothing                                              |
-| Unclassified | any other `src/` module                | nothing until classified                             |
+| Layer        | Path                            | MAY import                                          |
+| ------------ | ------------------------------- | --------------------------------------------------- |
+| Shell        | `src/App.tsx`                   | every layer                                         |
+| Page         | `src/pages/**`                  | pages, components, store, foundations, test, assets |
+| Component    | `src/components/**`             | components, foundations, assets                     |
+| Store        | `src/store.ts`                  | store, foundations, assets                          |
+| Foundation   | `src/flow/`, `src/native/`      | foundations, assets                                 |
+| Test         | `src/test-support/`, `**/test/` | every layer; production MUST NOT import it          |
+| Asset        | `src/assets/**`                 | nothing                                             |
+| Unclassified | any other `src/` module         | nothing until classified                            |
 
 Components, the store and foundations MUST NOT import a page or `src/App.tsx`.
 Foundations MUST NOT import the store. Cycles are forbidden. A page MAY import
 another page's public module, but MUST NOT reach into another page's private
 state or internals; mutable state shared across pages goes through
-`src/store.ts`. A new directory or facade MUST be classified in `LAYERS` and
-`layerOf`, and MUST extend `lint/boundaries.test.js` with both a file and a
-bare-directory spelling plus an allowed and a disallowed direction; an
-unexplained `other` classification is a review failure. (Lint, Lint test,
-Review)
+`src/store.ts`.
+
+Inside each layer, code is grouped into **areas** with one facade
+(`flow/canvas`, `flow/document`, `components/canvas`,
+`components/composer`); an area is split into the reserved segments
+`geometry/`, `model/`, `interaction/` and `test/`, or into part folders
+named after what they draw or do. Every area MUST appear in
+[`lint/structure-map.js`](../lint/structure-map.js) and
+[`docs/code-map.md`](code-map.md); cross-area imports MUST use the facade,
+except the same-feature deep import (`components/canvas` ↔ `flow/canvas`)
+and the `pages/flow` composition root. A new directory or facade MUST extend
+`lint/boundaries.test.js` with both a file and a bare-directory spelling
+plus an allowed and a disallowed direction; an unexplained `other`
+classification is a review failure. (Lint, Lint test, Review)
 
 `src/native/` is a Rust foundation, not a second app layer. TSX imports only
 its generated `@flow/native` surface; Rust code owns SQLite, FTS5, RTree, undo
@@ -115,12 +124,13 @@ ORM. (Review)
 
 ### 3.3 Facades and internals
 
-A directory that grows internal modules with a stable public surface SHOULD
-keep one facade module beside it; consumers import the facade, while the
-internal modules import each other directly. The rule exists to keep a
-replaceable seam and an acyclic graph, not to add indirection everywhere: a
-small directory such as `flow/` or `components/` is imported module by module.
-(Review; no lint rule bans deep imports today.)
+Every **area** keeps one `index.ts` facade; consumers in another area import
+the facade, while the internal modules import each other directly. The rule
+keeps a replaceable seam and an acyclic graph. It is not a licence to flatten
+the layer: `flow/` and `components/` are namespaces of areas, not one
+directory of modules. Deep imports from another area, and new modules at
+those roots, are structure violations once Phase 5 enforces the area rules.
+(Review; `boundaries/deep-cross-feature`, `scripts/structure.mjs`.)
 
 ### 3.4 Import safety and ownership
 
@@ -130,6 +140,15 @@ pure functions only. The only permitted import-time effect is `mount(App)` in
 be created by the component, page or store action that owns them. (Review)
 
 ## 4. Module and public-API design
+
+**Placement.** Every app module belongs to one layer and one area; the area
+map and allowed imports are in [`docs/code-map.md`](code-map.md). New modules
+MUST NOT sit at the `components/`, `flow/` or `pages/` root; within an area
+use the reserved segments (`geometry/`, `model/`, `interaction/`, `test/`) or
+a part folder named after its job. A component becomes a folder when it has
+two independently useful parts or grows past about 300 code lines. `utils/`,
+`helpers/`, `common/`, `misc/`, `data/` and `types/` are forbidden.
+(`scripts/structure.mjs`, review.)
 
 - One job per module, named after it. Components are PascalCase `.tsx`, one
   component per file, named after the export. Modules and directories are
@@ -287,6 +306,11 @@ host screen-reader pass; `App.test.tsx` uses `id:` and `label:` selectors.)
 
 ## 7. The native canvas
 
+Paths in this section are the current flat homes. The Phase 2–3 move keeps
+these rules and relocates the same modules to
+`flow/canvas/{geometry,model,interaction}` and `components/canvas/`; the
+target is in [code-map](code-map.md) and plan Appendix A.
+
 ### 7.1 Scene, views and camera
 
 `src/flow/scene.ts` is the only scene model. It holds the nodes and edges of
@@ -439,8 +463,9 @@ signed/notarized and checksummed before public distribution, as described in
 
 No `console.log`, `debugger`, scratch file, probe test, commented-out code or
 unreviewed suppression may remain in `src/`. `console.error` is allowed for a
-failure that is surfaced to the user; `scripts/**` may log progress. (Lint,
-Review)
+failure that is surfaced to the user; `scripts/**` may log progress. Declared
+probes are the one exception: they live only in `components/probes/`, are
+mounted behind `host.params`, and carry no production logic. (Lint, Review)
 
 ## 9. Testing and verification
 
@@ -577,25 +602,26 @@ formatting owned by Oxfmt is not a review topic. (Review)
 
 ## 12. Enforcement matrix and exception process
 
-| Area                                                          | Enforced by                                                                                                  | A finding is                                                                         |
-| ------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------ |
-| App root and commands                                         | Scripts pass `src`; `nsh check src`; Review                                                                  | A command without `src`, a moved config or an edited `.nsh/`                         |
-| Formatting                                                    | `bun run check` (`vp check --deny-warnings`)                                                                 | Any diff or warning                                                                  |
-| Types and strict flags                                        | `nsh check src`, `vp` typeCheck                                                                              | Type error, weakened flag, unexplained suppression                                   |
-| `any`, unsafe values, assertions, promises, exhaustive unions | Oxlint in `vite.config.ts`                                                                                   | A lint error                                                                         |
-| Names, default exports, 500-line cap                          | `unicorn/filename-case`, `import/no-default-export`, `max-lines`                                             | A lint error                                                                         |
-| Layer direction and cycles                                    | `boundaries/no-upward-import`, `import/no-cycle`, `lint/boundaries.test.js`                                  | A lint error, including bare directory and unclassified imports; a failing rule test |
-| Store privacy, derivation, props, resources                   | Review; `store.test.ts`, `App.test.tsx`                                                                      | A review finding; no lint rule sees these                                            |
-| Tokens, contrast                                              | Review; Manual light/dark                                                                                    | A raw color, a new token without both schemes, a failing pair                        |
-| Accessibility                                                 | Review; App tests using `label:`/`text:`; Manual host pass                                                   | An unnamed control, color-only state, missing keyboard path                          |
-| Canvas scene and interaction                                  | `scene.test.ts`, `canvas-controller.test.ts`, `selection.test.ts`, `overlay.test.ts`, `App.test.tsx`; Review | A new gesture with no unit or app test; geometry outside `flow/`                     |
-| Input and lifecycle                                           | `canvas-controller.test.ts`, `App.test.tsx`; Host (manual/local); Review                                     | A missing cleanup, a second press path or a forgotten override clear                 |
-| Performance                                                   | Review; Manual profiling                                                                                     | A second render loop, per-frame scene rebuild or per-pointer-move document write     |
-| Sandbox                                                       | NSH build/package when run; Review                                                                           | A missing `capabilities` key or an unjustified host                                  |
-| Dependencies                                                  | `bun install --frozen-lockfile`; Review; ADR                                                                 | A range, missing lockfile change, unreviewed install script                          |
-| Tests                                                         | `bun run test`, `test:host`, `test:bench`                                                                    | A failing or missing test                                                            |
-| Release                                                       | `.github/workflows/release.yml` (check, test, tag/version); Review                                           | A tag/version mismatch (CI); an unsigned installer or missing smoke test (Review)    |
-| Docs, ADR, changelog                                          | Review                                                                                                       | A missing update                                                                     |
+| Area                                                          | Enforced by                                                                                                                                                  | A finding is                                                                                              |
+| ------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------ | --------------------------------------------------------------------------------------------------------- |
+| App root and commands                                         | Scripts pass `src`; `nsh check src`; Review                                                                                                                  | A command without `src`, a moved config or an edited `.nsh/`                                              |
+| Formatting                                                    | `bun run check` (`vp check --deny-warnings`)                                                                                                                 | Any diff or warning                                                                                       |
+| Types and strict flags                                        | `nsh check src`, `vp` typeCheck                                                                                                                              | Type error, weakened flag, unexplained suppression                                                        |
+| `any`, unsafe values, assertions, promises, exhaustive unions | Oxlint in `vite.config.ts`                                                                                                                                   | A lint error                                                                                              |
+| Names, default exports, 500-line cap                          | `unicorn/filename-case`, `import/no-default-export`, `max-lines`                                                                                             | A lint error                                                                                              |
+| Layer direction and cycles                                    | `boundaries/no-upward-import`, `import/no-cycle`, `lint/boundaries.test.js`                                                                                  | A lint error, including bare directory and unclassified imports; a failing rule test                      |
+| Area structure, facades and segments                          | `boundaries/{deep-cross-feature,forbidden-area,segment-direction,native-outside-seam,unclassified-source}`, `scripts/structure.mjs`, `lint/structure-map.js` | A lint/structure finding; a root module, a deep cross-area import, a missing facade or a forbidden folder |
+| Store privacy, derivation, props, resources                   | Review; `store.test.ts`, `App.test.tsx`                                                                                                                      | A review finding; no lint rule sees these                                                                 |
+| Tokens, contrast                                              | Review; Manual light/dark                                                                                                                                    | A raw color, a new token without both schemes, a failing pair                                             |
+| Accessibility                                                 | Review; App tests using `label:`/`text:`; Manual host pass                                                                                                   | An unnamed control, color-only state, missing keyboard path                                               |
+| Canvas scene and interaction                                  | `scene.test.ts`, `canvas-controller.test.ts`, `selection.test.ts`, `overlay.test.ts`, `App.test.tsx`; Review                                                 | A new gesture with no unit or app test; geometry outside `flow/`                                          |
+| Input and lifecycle                                           | `canvas-controller.test.ts`, `App.test.tsx`; Host (manual/local); Review                                                                                     | A missing cleanup, a second press path or a forgotten override clear                                      |
+| Performance                                                   | Review; Manual profiling                                                                                                                                     | A second render loop, per-frame scene rebuild or per-pointer-move document write                          |
+| Sandbox                                                       | NSH build/package when run; Review                                                                                                                           | A missing `capabilities` key or an unjustified host                                                       |
+| Dependencies                                                  | `bun install --frozen-lockfile`; Review; ADR                                                                                                                 | A range, missing lockfile change, unreviewed install script                                               |
+| Tests                                                         | `bun run test`, `test:host`, `test:bench`                                                                                                                    | A failing or missing test                                                                                 |
+| Release                                                       | `.github/workflows/release.yml` (check, test, tag/version); Review                                                                                           | A tag/version mismatch (CI); an unsigned installer or missing smoke test (Review)                         |
+| Docs, ADR, changelog                                          | Review                                                                                                                                                       | A missing update                                                                                          |
 
 **Exceptions.** A rule MAY be broken only through a written exception. Prefer
 a scoped override in `vite.config.ts` with a comment naming the rule, reason,
@@ -648,6 +674,14 @@ Do not import the store, a page or `App.tsx`; the page binds readers and
 actions. Use tokens, a stable `testID`, an accessible name and the documented
 states. Test it through the page; unit-test only pure helpers. (Review, Test)
 
+**New area.** Name the capability with a domain noun; add it to
+`lint/structure-map.js` and `docs/code-map.md`; create its `index.ts` with a
+doc comment stating purpose, invariants and allowed imports; add reserved
+segments or part folders only as needed; add lint tests for one allowed and
+one disallowed direction. If it has app-wide state, decide explicitly between
+`store.ts` (App/chrome) and `flow/<area>/model` (feature-local). A new
+top-level layer, not an area, requires an ADR. (Review, Lint test.)
+
 **New canvas feature.** Keep pure geometry in `src/flow/selection.ts`,
 `src/flow/connection.ts` or `src/flow/overlay.ts`; the model in
 `src/flow/scene.ts`; gestures in `src/flow/canvas-controller.ts`; camera math
@@ -674,7 +708,10 @@ test. (Review, Test, Manual)
 
 - **Architecture:** a component importing the store; a foundation importing a
   page; a page importing another page's internals; a second `mount()`; a new
-  `src/` directory without a boundary classification.
+  `src/` directory without a boundary classification; a new module at the
+  `components/`, `flow/` or `pages/` root; a deep import into another area
+  instead of its facade; a `utils/`, `helpers/`, `common/`, `misc/`, `data/`
+  or `types/` grab bag.
 - **State and reactivity:** exporting a signal or setter; a page-local copy of
   store state; mirroring zoom or selection into a second signal; destructuring
   props in a component body; an effect that writes the signal it reads; a

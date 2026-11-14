@@ -1306,6 +1306,24 @@ There are no data or schema changes in Phases 0–5; the optional `assets_fts`
 migration in Phase 6 is the one exception and is reversible by keeping the
 table.
 
+| Phase | Scope                                | Owner          | Effort |
+| ----- | ------------------------------------ | -------------- | ------ |
+| 0     | Docs, ownership, report-only tooling | `@YougLin-dev` | S      |
+| 1a    | Shared kernel and first reuse        | `@YougLin-dev` | M      |
+| 1b    | Composer shell                       | `@YougLin-dev` | M      |
+| 1c    | AsyncDrain core + PreviewLoader      | `@YougLin-dev` | S      |
+| 1d    | Connector layer and primitives       | `@YougLin-dev` | M      |
+| 2     | `flow/` areas (8 PRs)                | `@YougLin-dev` | L      |
+| 3     | `components/` areas                  | `@YougLin-dev` | L      |
+| 4     | Page decomposition                   | `@YougLin-dev` | M      |
+| 5     | Enforce the matrix                   | `@YougLin-dev` | S      |
+| 6     | Rust core split (parallel)           | `@YougLin-dev` | L      |
+| 7     | Internal splits (optional)           | `@YougLin-dev` | L      |
+
+The repository has one maintainer today, so every phase names that owner.
+Split the rows when a second owner joins; the phase does not start without an
+owner and an effort estimate.
+
 ### Phase 0 — Decide and document (no code moves)
 
 - Write ADR 0007, update standards/architecture/conventions/CLAUDE.md with

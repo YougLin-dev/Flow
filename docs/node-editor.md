@@ -4,6 +4,9 @@ Flow's first executable node layer: kinds declare named, typed input and
 output ports, connections bind one output port to one input port, and types
 carry text or image items. This document records the M1 contract; the
 long-term direction is still [the Rust document core plan](plans/rust-core.md).
+Paths below are the current flat homes; the Phase 2–3 move keeps this
+contract and relocates the modules per [the code map](code-map.md) and plan
+Appendix A.
 
 ## Data model
 

@@ -45,6 +45,14 @@ export default defineConfig({
       // store; neither may import a page. Cycles are never allowed. The
       // project-specific direction check is a JS plugin (lint/boundaries.js).
       "boundaries/no-upward-import": "error",
+      // Area rules are defined in Phase 0 and enforced after Phase 5; the
+      // plugin no-ops until `ENFORCEMENT` in lint/structure-map.js is flipped.
+      "boundaries/deep-cross-feature": "error",
+      "boundaries/forbidden-area": "error",
+      "boundaries/segment-direction": "error",
+      "boundaries/test-support-in-production": "error",
+      "boundaries/native-outside-seam": "error",
+      "boundaries/unclassified-source": "error",
       "import/no-cycle": "error",
       "import/no-duplicates": "error",
       "import/no-self-import": "error",

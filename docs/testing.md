@@ -3,8 +3,9 @@
 Tests under `src/` are `*.test.ts` / `*.test.tsx` files beside the code they
 test, run with `nsh test src` (the app root is `src/`). NSH opens each app on an
 engine of its own, headless by default, and `await`s the test callback, so tests
-can be `async`. The local dependency-boundary rule has its own Bun test,
-`lint/boundaries.test.js`; it runs without NSH and proves the rule's reports.
+can be `async`. The local structure rules have their own Bun tests,
+`lint/boundaries.test.js` and `scripts/structure.test.mjs`; they run without
+NSH and prove the rule's reports.
 
 ```sh
 bun run test                       # every app test, headless
@@ -12,7 +13,8 @@ bun run test -- --filter camera    # tests whose name contains "camera"
 nsh test src/flow/camera.test.ts   # one file
 bun run test:host                  # the *.host.test.tsx platform tests on this machine's host
 bun run test:host -- --filter zoom # one host behaviour (extra args go to nsh test)
-bun run test:lint                  # the boundary rule's tests (also part of check)
+bun run test:lint                  # boundary and structure rule tests (part of check)
+bun run check:structure            # area/facade/root report; Phase 5 makes it a gate
 bun run test:bench                 # the ignored 100k SQLite/FTS5/RTree benchmark
 bun run test:100k                  # seeds 100k nodes, then drives the real host UI
 bun run test:junit                 # also write src/.nsh/junit.xml for CI
@@ -318,6 +320,8 @@ easiest observable: it is `—` before the first fit and `<n>%` afterwards.
 - A bug fix comes with a test that fails before it and passes after.
 - Do not add `any` to make a test compile; build a typed stand-in and cast
   through `unknown` where a full platform object cannot exist.
+- Test-only helpers live in `src/test-support/` or an area's `test/` folder;
+  `test-support-in-production` fails if production code imports them.
 
 ## Coverage expectations
 

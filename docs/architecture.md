@@ -29,6 +29,20 @@ crosses pages through `store.ts` — currently there is one page, but the rule
 keeps the door open for more without rewiring. The `boundaries/no-upward-import`
 Oxlint plugin (`lint/boundaries.js`) reports a violation while linting.
 
+Inside those layers, code is grouped into **areas** with one `index.ts`
+facade (`flow/canvas`, `flow/document`, `components/canvas`,
+`components/composer`), and each area uses the reserved segments
+`geometry/`, `model/`, `interaction/` and `test/` or a part folder named
+after its job. The area map, allowed imports and owners are in
+[code-map](code-map.md); the decision is
+[ADR 0007](adr/0007-code-organization.md). The canvas is explicitly layered
+`geometry → model → interaction → views → page`, with `FlowScene` still the
+one state and batch owner. The current tree is still the legacy flat layout:
+[the plan](plans/code-organization.md) holds the old → new map, and the
+first code move is Phase 1a. New files follow the area rules from Phase 0;
+the structure report fails a new module at the `components/`, `flow/` or
+`pages/` root.
+
 The app deliberately has no `NavStack`: a single-window canvas has nowhere to
 navigate, so the shell mounts `FlowPage` directly. If a second page appears
 (settings, a project list), wrap the pages in `createNavStack<Route>()` and
@@ -456,19 +470,26 @@ keep it in place.
 
 ## Extending
 
-- **A new page** — one file in `pages/`, mounted by `App.tsx` (or a nav stack);
-  share state through `store.ts`, never through another page.
-- **A new node kind** — add it to `flow/node-kinds.ts` (appearance, settings
-  parsing, ports through its resolver), give it a provider in
-  `flow/execution.ts` if it runs, and extend `components/FlowCard.tsx` if the
-  generic text/image body is not enough. Rust needs no schema change: `kind`
-  and `settings_json` are opaque. A source kind that writes local output needs
-  a command like `Document.setManualUpload`, which stores its batch, derived
-  settings and body in one undoable transaction.
-- **A new control** — a component in `components/` that takes values and
-  callbacks as props; the page binds them to the store.
-- **A new canvas feature** — keep pure geometry in `flow/selection.ts` or
-  `flow/overlay.ts`, the model in `flow/scene.ts`, gestures in
-  `flow/canvas-controller.ts`, and the view in the matching component. Add a
+Paths below are the post-migration homes. Until a move lands, Appendix A of
+[the plan](plans/code-organization.md) maps the current file.
+
+- **A new page** — `pages/<name>/` with its `index.ts` facade, mounted by
+  `App.tsx` (or a nav stack); share state through `store.ts`, never through
+  another page. Until a second page exists, the one page stays
+  `pages/FlowPage.tsx`.
+- **A new node kind** — add it to `flow/nodes/node-kinds.ts` (appearance,
+  settings parsing, ports through its resolver), give it a provider in
+  `flow/execution/providers.ts` if it runs, and extend
+  `components/canvas/world/FlowCard.tsx` if the generic text/image body is
+  not enough. Rust needs no schema change: `kind` and `settings_json` are
+  opaque. A source kind that writes local output needs a command like
+  `Document.setManualUpload`, which stores its batch, derived settings and
+  body in one undoable transaction.
+- **A new control** — a component in the owning area under
+  `components/<area>/`; it takes values and callbacks as props, and the page
+  binds them to the store.
+- **A new canvas feature** — pure geometry in `flow/canvas/geometry/`, the
+  model in `flow/canvas/model/`, gestures in
+  `flow/canvas/interaction/`, and the view in `components/canvas/`. Add a
   unit test for the geometry or controller path and an app test flow when the
   user can reach it (a platform-sensitive one goes in `App.host.test.tsx`).

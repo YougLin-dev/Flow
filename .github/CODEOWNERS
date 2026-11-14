@@ -1,0 +1,29 @@
+# The owner of an area is its first reviewer. A cross-area change needs the
+# lower area's owner too. See docs/code-map.md and the plan §10.6.
+
+* @YougLin-dev
+
+/src/flow/shared/ @YougLin-dev
+/src/flow/nodes/ @YougLin-dev
+/src/flow/minimap/ @YougLin-dev
+/src/flow/canvas/ @YougLin-dev
+/src/flow/execution/ @YougLin-dev
+/src/flow/composer/ @YougLin-dev
+/src/flow/document/ @YougLin-dev
+
+/src/components/primitives/ @YougLin-dev
+/src/components/app/ @YougLin-dev
+/src/components/probes/ @YougLin-dev
+/src/components/canvas/ @YougLin-dev
+/src/components/composer/ @YougLin-dev
+/src/components/minimap/ @YougLin-dev
+/src/components/search/ @YougLin-dev
+
+/src/pages/flow/ @YougLin-dev
+/src/store.ts @YougLin-dev
+/src/App.tsx @YougLin-dev
+
+/lint/ @YougLin-dev
+/scripts/structure.mjs @YougLin-dev
+/docs/code-map.md @YougLin-dev
+/docs/plans/code-organization.md @YougLin-dev

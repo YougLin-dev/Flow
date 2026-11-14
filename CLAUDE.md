@@ -2,15 +2,19 @@
 
 Flow is a TSX app for Native Shell (NSH) with a Rust document core and a
 native-view canvas. Read [the engineering standard](docs/standards.md),
-[architecture](docs/architecture.md), [conventions](docs/conventions.md) and
-[testing](docs/testing.md) before changing code; this file is the short list.
+[architecture](docs/architecture.md), [conventions](docs/conventions.md),
+[the code map](docs/code-map.md) and [testing](docs/testing.md) before
+changing code; this file is the short list. The structure decision is
+[ADR 0007](docs/adr/0007-code-organization.md).
 
 ## Gate
 
 Run `bun run check` (format + lint + type check + Rust format/clippy +
 boundary-rule tests; file names and dependency direction are lint rules) and
 `bun run test` (Rust unit tests plus TSX tests) before you finish.
-`bun run check:fix` applies safe fixes. `bun run test:host` repeats the
+`bun run check:fix` applies safe fixes. `bun run check:structure` reports the
+area shape and fails a new module at the `components/`, `flow/` or `pages/`
+root; Phase 5 wires it into `check`. `bun run test:host` repeats the
 platform tests (`*.host.test.tsx`) on this OS's real desktop host. `bun run test:bench` runs the ignored 100k
 SQLite/search benchmark.
 
@@ -20,9 +24,14 @@ SQLite/search benchmark.
   are the NSH app root; the repository root is tooling only.
 - **No `any`.** Narrow `unknown` with type guards.
 - **Dependencies flow down.** `src/App.tsx → pages → components/store`.
-  `components/` and foundations never import a page; foundations
-  (`flow/`, `lib/`, `tool.ts`) never import the store. The
-  `boundaries/no-upward-import` rule (`lint/boundaries.js`) enforces it.
+  `components/` and foundations never import a page; foundations (`flow/`)
+  never import the store. Inside each layer, code lives in areas with one
+  `index.ts` facade; cross-area imports use it, except the same-feature deep
+  import (`components/canvas` ↔ `flow/canvas`) and `pages/flow`. No new
+  module at the `components/`, `flow/` or `pages/` root. The
+  `boundaries/no-upward-import` rule (`lint/boundaries.js`) enforces the
+  layer graph; `lint/structure-map.js` and `scripts/structure.mjs` hold the
+  area matrix. See [docs/code-map.md](docs/code-map.md).
 - **Database access is ORM-first.** Use the SeaORM entities and SeaQuery in
   `src/native/`; handwritten SQL is limited to the FTS5/RTree virtual-table
   adapter and migrations. Never interpolate values into a query.
@@ -34,7 +43,9 @@ SQLite/search benchmark.
   geometry in `src/flow/` (scene, camera, selection, overlay), gestures in
   `src/flow/canvas-controller.ts`, and the views in
   `src/components/FlowCanvas.tsx` and its parts; extend those with tests
-  instead of adding a canvas library.
+  instead of adding a canvas library. After Phase 2–3 the same code lives in
+  `flow/canvas/{geometry,model,interaction}` and `components/canvas/`; see
+  the code map and plan Appendix A.
 - **The document core is Rust's.** `src/native/` is the mixed NSH Rust crate;
   it owns SQLite, FTS5, RTree, undo history and asset metadata. TSX must not
   open SQLite or write SQL. The canvas stays in TSX/QuickJS and is never moved
