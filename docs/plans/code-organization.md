@@ -1666,10 +1666,20 @@ findings below were closed in the follow-up commit before Phase 1a.
 | Tests/reuse   | `test-support-in-production` missed `TEST_SUPPORT_FILES`; `check:structure` was not in `check`; tests did not prove the exact failure set, budget exception or export/dynamic forms; geometry under-enforced; resolver logic duplicated and partly untested; `readImports` regex read comments; `isFacade` store; missing allowed-direction fixtures; duplicate `withTree`                                                                                                                                                                      | Fixed: one `isTestSupportTarget` predicate in both detectors; `check:structure` is part of `check`; exact failure-set, 13/21-entry budget and owner+expiry exception tests; geometry allowed/disallowed fixtures; shared `lint/import-resolver.js` with `.ts/.tsx/.js/.jsx/index` tests; `Bun.Transpiler.scanImports` replaces the regex; shell/area allowed-direction tests; `lint/test-tree.js` shared helper                                         |
 | Risk/rollback | `check` omitted the structure guard; standards §13 contradicted the placement rule; code-map Type layer; `isFacade` store; native rule export forms; stale `LEGACY_FLAT` entries undetected; plan status stale; conventions described the end state as current                                                                                                                                                                                                                                                                                  | Fixed: guard wired into `check`/`check:fix`; recipes rewritten; code-map mirror corrected; `isFacade` fixed; native rule covers import/export/dynamic; `checkLegacyAllowList` reports stale entries and fails in Phase 5; plan status and conventions wording updated                                                                                                                                                                                   |
 
+A verification pass re-checked the fixes. It found two remaining test-coverage
+gaps (the import fixture did not distinguish static/re-export/dynamic forms;
+forbidden/segment/Phase 5 gating had no fixture) and two report/rule issues
+(`Bun.Transpiler.scanImports` erases type-only imports; the model/document
+segment clause fired on same-area `flow/document` imports). They were closed
+in `test: strengthen the Phase 0 structure fixtures` and
+`fix: preserve type-only imports in the structure report`.
+
 After the fixes: `bun run check` (including `check:structure`), `bun run test`
 (520 tests, 518 passed, 2 skipped) and `bun run check:structure` are green.
-No source file moved; `LEGACY_FLAT` still matches the 81 flat modules exactly.
-Phase 0 is complete; Phase 1a is the next PR.
+`check:structure` reports the native seam debt (32 type-only/value imports
+outside `flow/document`) as the Phase 1a worklist. No source file moved;
+`LEGACY_FLAT` still matches the 81 flat modules exactly. Phase 0 is complete;
+Phase 1a is the next PR.
 
 ---
 
