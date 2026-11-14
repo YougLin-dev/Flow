@@ -268,7 +268,7 @@ export class NodeRunner {
     try {
       this.apply(
         await this.document.saveRun(
-          {
+          resultBatch({
             id: batchId,
             nodeId,
             trigger: "run",
@@ -277,7 +277,7 @@ export class NodeRunner {
             paramsJson: JSON.stringify({ prompt: settings.prompt }),
             status,
             error,
-          },
+          }),
           [],
         ),
       );

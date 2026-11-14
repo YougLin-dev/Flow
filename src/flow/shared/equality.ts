@@ -1,11 +1,11 @@
 /**
  * Value comparisons shared by the canvas and its views. The names state the
- * precision: `sameTolerantRect` allows a small world-space drift, every other
+ * precision: `sameRectWithin` allows a small world-space drift, every other
  * comparator is exact per field.
  */
 import type { Point, Rect } from "./geometry";
 
-/** The world-unit tolerance `sameTolerantRect` defaults to. */
+/** The world-unit tolerance `sameRectWithin` defaults to. */
 export const RECT_EPSILON = 0.01;
 
 /** Whether two nullable rectangles are exactly equal by value. */

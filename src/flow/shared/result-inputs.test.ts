@@ -96,6 +96,7 @@ test("an item writes asset keys only when the writer supplies them", () => {
     metaJson: '{"width":10}',
   });
   expect(copied.assetId).toBeNull();
+  expect(copied.metaJson).toBe('{"width":10}');
 });
 
 test("a manual text write yields the batch and its single text item", () => {

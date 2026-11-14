@@ -280,8 +280,14 @@ For behaviour below the pointer, test the pieces directly:
   only the cards whose own flags changed.
 - `CanvasCamera` in `flow/camera.test.ts`: pan, zoom-around, fit and centering
   invariants.
-- `minimapLayout`/`minimapRect`/`minimapViewport`/`unionBounds`/`sameBounds`
-  and `minimapDragCenter` in `flow/minimap.test.ts`: uniform fitting, the
+- `flow/shared/{equality,shortcuts,result-inputs}.test.ts`: the exact and
+  tolerant comparisons (null handling and the 0.01 world-unit epsilon), the
+  shortcut key names, and the result DTO factories (shared defaults,
+  caller-supplied batch ids, optional asset keys). `keepsWheel` has no unit
+  test because it is a deliberate no-op; the four views that pass it as
+  `onWheel` are its only wiring.
+- `minimapLayout`/`minimapRect`/`minimapViewport`/`unionBounds` and
+  `minimapDragCenter` in `flow/minimap.test.ts`: uniform fitting, the
   content-plus-viewport union (a pulled-away view shrinks the silhouettes),
   the minimum silhouette size, the viewport rectangle clamped into the panel,
   the press-scale drag mapping and a finite empty-document layout.
