@@ -1,415 +1,62 @@
-import { cleanup, effect, host, keymap, Picker, platform, signal, untracked, View } from "nsh";
+import { cleanup, effect, host, keymap, platform, View } from "nsh";
 import { isAvailable } from "nsh/desktop";
-import type { ChangeSet, Document, NodeBounds, SearchHit } from "../../flow/shared";
 import { BrandCard, FrameRate } from "../../components/app";
 import { ImageComposer, TextComposer } from "../../components/composer";
 import { CanvasMenuLayer, FlowCanvas, NodeToolbar, ZoomControls } from "../../components/canvas";
 import { MiniMap, MinimapDragOverlay } from "../../components/minimap";
 import { SEARCH_FILTERS, SearchButton, SearchPalette } from "../../components/search";
 import { CanvasProbe, ImageLoadProbe, imageProbeText, ZoomProbe } from "../../components/probes";
+import { wheelZoomFactor } from "../../flow/canvas";
+import { dismissContextMenuOnChange } from "../../flow/canvas/interaction/context-menu";
+import { selectedCount, setZoomPercent, zoomPercent } from "../../store";
 import { bindFlowKeys } from "./workspace/bindings";
-import { CanvasCamera, FlowScene, wheelZoomFactor } from "../../flow/canvas";
-import { CanvasController } from "../../flow/canvas/interaction/canvas-controller";
-import { ComposerState, composerPlacement } from "../../flow/composer";
-import {
-  CanvasMenuController,
-  dismissContextMenuOnChange,
-} from "../../flow/canvas/interaction/context-menu";
-import {
-  AssetUrls,
-  CONTENT,
-  MinimapLoader,
-  NodeSession,
-  openFlowDocument,
-  PreviewLoader,
-  ViewportController,
-} from "../../flow/document";
-import { NodeRunner } from "../../flow/execution";
-import { MinimapController } from "../../flow/minimap";
-import type { NodeKindId } from "../../flow/nodes";
+import { flowKeyActions } from "./workspace/flow-actions";
+import { syncComposerState, syncSelection } from "./workspace/flow-effects";
+import { createFlowWorkspace } from "./workspace/flow-workspace";
 import { pageChromeHandlers } from "./workspace/page-chrome";
-import { revealSearchHit } from "./workspace/search-navigation";
-import { selectedCount, setSelectedCount, setZoomPercent, zoomPercent } from "../../store";
 
 /**
  * The flow workspace: a native canvas of cards and connectors, the page's
  * document session, and the native composer attached to the selected card.
  */
 export function FlowPage() {
-  let document: Document | null = null;
-  let assets: AssetUrls | null = null;
-  let runner: NodeRunner | null = null;
-  let disposed = false;
-  let opening = false;
-  let sized = false;
-
-  const scene = new FlowScene();
-  const camera = new CanvasCamera();
-  const stage = signal({ width: 1, height: 1 });
-  const sessionState = signal<NodeSession | null>(null);
-  const searchOpen = signal(false);
-  const minimapOpen = signal(true);
-  const imageProbe = signal("");
-  const composerState = new ComposerState();
-
-  const currentSession = (): NodeSession | null => sessionState();
-
-  const previews = new PreviewLoader({
-    document: () => document,
-    assets: () => assets,
-    scene: () => scene,
-    isDisposed: () => disposed,
-  });
-  const schedulePreviews = (): void => previews.schedule();
-
-  const minimap = new MinimapLoader({
-    document: () => document,
-    isDisposed: () => disposed,
-  });
-
-  const applyChanges = (changes: ChangeSet): void => {
-    viewport.noteRev(changes.rev);
-    minimap.noteChanges(changes);
-    // Close a composer whose node the change set removed before the scene
-    // publishes its new selection: the selection effect saves drafts, and a
-    // deleted row cannot take one.
-    currentSession()?.onChanges(changes);
-    scene.applyChangeSet(changes);
-    schedulePreviews();
-    // A command can add cards the viewport has never read; without a read
-    // they would stay mounted off screen until the next pan or zoom.
-    viewport.schedule();
-  };
-
-  const viewport = new ViewportController({
-    camera: () => camera,
-    scene: () => scene,
-    document: () => document,
-    fallbackBounds: () => CONTENT,
-    applyChanges,
-    schedulePreviews,
-    publishZoom: (percent) => setZoomPercent(percent),
-    isDisposed: () => disposed,
-  });
-
-  const minimapDrag = new MinimapController((x, y) => viewport.centerOn(x, y));
-
-  const commitBounds = (bounds: readonly NodeBounds[]): void => {
-    const doc = document;
-    if (!doc || disposed || bounds.length === 0) return;
-    void (async () => {
-      try {
-        const changes = await doc.setNodeBounds([...bounds]);
-        if (!disposed) applyChanges(changes);
-      } catch (error) {
-        console.error("Flow could not persist the gesture", error);
-        scene.clearOverrides();
-      }
-    })();
-  };
-
-  const selectEdge = (id: string | null): void => {
-    scene.selectEdge(id);
-    if (id === null) return;
-    scene.select([]);
-  };
-
-  const closeComposer = (): void => {
-    const session = currentSession();
-    composerState.save(session, session?.detail() ?? null);
-    composerState.reset();
-    session?.closeComposer();
-  };
-
-  /** Writes the inline editor's draft and closes it. */
-  const closeInlineDraft = (): void => {
-    void currentSession()?.commitInline();
-  };
-
-  const openComposer = (id: string): void => {
-    const session = currentSession();
-    if (!session) return;
-    // An upload card is its own control: selecting it closes an editor left
-    // open elsewhere, but shows the card's own button instead of a composer.
-    if (scene.node(id)?.kind === "upload") {
-      if (session.inlineId() !== null) closeInlineDraft();
-      if (session.composerId() !== null) closeComposer();
-      return;
-    }
-    const previous = session.composerId();
-    if (previous === id) return;
-    // Switching cards directly (a click or a search result) must keep the
-    // open composer's drafts; only the close paths saved them before.
-    if (previous !== null) {
-      composerState.save(session, session.detail());
-      composerState.reset();
-    }
-    if (session.inlineId() !== null && session.inlineId() !== id) closeInlineDraft();
-    if (session.inlineId() === id) return;
-    session.openComposer(id);
-  };
-
-  const controller = new CanvasController({
-    scene: () => scene,
-    camera: () => camera,
-    panBy: (dx, dy) => viewport.panBy(dx, dy),
-    commitBounds,
-    selectEdge,
-    reconnectEdge: (edgeId, pair) => void currentSession()?.reconnectEdge(edgeId, pair),
-    connectNodes: (pairs) => void currentSession()?.connectNodes(pairs),
-    openInline: (nodeId) => {
-      const session = currentSession();
-      if (!session || session.inlineId() === nodeId) return;
-      // The inline editor takes the composer's place; writing its drafts
-      // first keeps an edit made in the composer from vanishing.
-      if (session.inlineId() !== null) closeInlineDraft();
-      if ((session.composerId() ?? null) !== null) closeComposer();
-      void session.openInline(nodeId);
-    },
-    // A multi-card selection has no composer; the effect below closes one
-    // that was open, so do not start loading a new one here.
-    onCardPress: (id) => {
-      if (scene.selection().length === 1) openComposer(id);
-    },
-  });
-
-  const composerPosition = () =>
-    composerPlacement(
-      currentSession()?.composerId() ?? null,
-      // A click on the selected card stays a click: only real movement (a
-      // drag, a resize or a pulled connector) hides the composer, so its
-      // native input keeps its draft and caret while the press is held.
-      controller.gestureMoved(),
-      (id) => scene.cardRect(id),
-      camera,
-      stage(),
-    );
-
-  /** Copies the card as the user sees it, including an open editor's drafts. */
-  const copyNode = (nodeId: string): void => {
-    const session = currentSession();
-    if (session) void session.copyNodeWithDrafts(nodeId, composerState.settings());
-  };
-
-  const canvasMenu = new CanvasMenuController({
-    camera: () => camera,
-    controller: () => controller,
-    scene: () => scene,
-    addNode: (kind, x, y) => void currentSession()?.addNode(kind, x, y),
-    copyNode,
-    deleteNode: (nodeId) =>
-      void currentSession()?.deleteNodeWithDrafts(nodeId, composerState.settings()),
-    editBody: (nodeId) => void currentSession()?.openInline(nodeId),
-    selectEdge,
-    deleteEdge: (edgeId) => void currentSession()?.deleteEdge(edgeId),
-  });
+  const workspace = createFlowWorkspace({ publishZoom: setZoomPercent });
+  const {
+    camera,
+    canvasMenu,
+    composerPosition,
+    composerState,
+    controller,
+    imageProbe,
+    minimap,
+    minimapDrag,
+    minimapOpen,
+    scene,
+    searchOpen,
+    session,
+    stage,
+  } = workspace;
 
   dismissContextMenuOnChange(canvasMenu, camera, scene);
-
-  const panBy = (dx: number, dy: number): void => {
-    if (searchOpen()) return;
-    viewport.panBy(dx, dy);
-  };
-
-  // Zooming mid-gesture would re-map the press point under a moved camera and
-  // jump the dragged cards; the gesture owns the pointer until release.
-  const zoomCanvas = (factor: number, x: number, y: number): void => {
-    if (controller.gesturing()) return;
-    viewport.zoomAround(factor, x, y);
-  };
-
-  const setZoom = (factor: number): void => {
-    const size = stage();
-    zoomCanvas(factor, size.width / 2, size.height / 2);
-  };
-
-  const fit = (): void => void viewport.fitToDocument();
-
-  const searchCards = async (query: string, kind: string | null): Promise<SearchHit[]> =>
-    document?.search(query, { kind }, 20) ?? [];
-
-  const revealNode = (id: string): Promise<void> =>
-    revealSearchHit({ document, viewport, scene, isDisposed: () => disposed, openComposer }, id);
-
-  const selectSearchHit = (hit: SearchHit): void => {
-    searchOpen.set(false);
-    void revealNode(hit.id);
-  };
-
-  const openFlow = async (): Promise<void> => {
-    if (document || opening || disposed) return;
-    opening = true;
-    try {
-      const opened = await openFlowDocument();
-      if (disposed) {
-        opened.dispose();
-        return;
-      }
-      document = opened;
-      assets = new AssetUrls(opened);
-      runner = new NodeRunner(opened, {
-        onChange: (changes) => {
-          if (!disposed) applyChanges(changes);
-        },
-        onSettled: (nodeId) => {
-          if (!disposed) currentSession()?.onSettled(nodeId);
-        },
-      });
-      sessionState.set(
-        new NodeSession({
-          document: () => document,
-          scene: () => scene,
-          assets: () => assets,
-          runner: () => runner,
-          pickImages: (options) => Picker.pickImages(options),
-          applyChanges,
-          schedulePreviews,
-          activateNode: (nodeId) => scene.select([nodeId]),
-          isDisposed: () => disposed,
-        }),
-      );
-      minimap.schedule();
-      await viewport.fitToDocument(false, false);
-      await viewport.refresh();
-      if (!disposed) viewport.announceZoom(camera.scale);
-    } catch (error) {
-      console.error("Flow could not open its document", error);
-      if (!disposed) camera.fit(CONTENT, stage());
-    } finally {
-      opening = false;
-    }
-  };
-
-  const addNode = (kind: NodeKindId): void => {
-    const active = currentSession();
-    const size = stage();
-    const center = camera.toWorld(size.width / 2, size.height / 2);
-    void active?.addNode(kind, center.x, center.y);
-  };
-
-  const deleteSelected = (): void => {
-    const doc = document;
-    if (!doc || disposed || (currentSession()?.composerId() ?? null) !== null) return;
-    const edge = scene.selectedEdge();
-    if (edge !== null) {
-      selectEdge(null);
-      void currentSession()?.deleteEdge(edge);
-      return;
-    }
-    const ids = [...scene.selection()];
-    if (ids.length === 0) return;
-    scene.select([]);
-    if (!disposed) void currentSession()?.deleteNodes(ids);
-  };
-
-  const undoRedo = async (direction: "undo" | "redo"): Promise<void> => {
-    const doc = document;
-    if (!doc || disposed) return;
-    try {
-      const changes = direction === "undo" ? await doc.undo() : await doc.redo();
-      if (disposed) return;
-      applyChanges(changes);
-      viewport.schedule();
-    } catch (error) {
-      console.error(`Flow could not ${direction}`, error);
-    }
-  };
-
-  bindFlowKeys({
-    setZoom,
-    fit,
-    deleteSelected,
-    undo: () => void undoRedo("undo"),
-    redo: () => void undoRedo("redo"),
-    panBy,
-    toggleSearch: () => searchOpen.update((open) => !open),
-    dismiss: () => {
-      if (canvasMenu.close()) return;
-      if (searchOpen()) {
-        searchOpen.set(false);
-        return;
-      }
-      const active = currentSession();
-      if (active?.inlineId()) {
-        active.closeInline();
-        return;
-      }
-      if (scene.selectedEdge() !== null) {
-        selectEdge(null);
-        return;
-      }
-      if ((active?.composerId() ?? null) !== null) {
-        closeComposer();
-        return;
-      }
-      scene.select([]);
-    },
-  });
+  bindFlowKeys(flowKeyActions(workspace));
 
   // The body editor's keyboard path: double-clicking a text card opens it,
   // and every edit that gesture reaches also has this one.
   keymap.bind(
     "mod+enter",
     () => {
-      const session = currentSession();
-      if (searchOpen() || session === null || session.inlineId() !== null) return;
+      const current = session();
+      if (searchOpen() || current === null || current.inlineId() !== null) return;
       const ids = scene.selection();
       if (ids.length !== 1) return;
-      if (scene.kindOf(ids[0]) === "text") void session.openInline(ids[0]);
+      if (scene.kindOf(ids[0]) === "text") void current.openInline(ids[0]);
     },
     { when: "notEditing" },
   );
 
-  effect(() => {
-    const ids = scene.selection();
-    const session = currentSession();
-    setSelectedCount(ids.length);
-    // Opening or closing a composer must not re-arm this effect: only a
-    // selection change (or the session appearing) re-runs it.
-    untracked(() => {
-      if (ids.length === 1) {
-        const id = ids[0];
-        if (id === undefined) return;
-        // A card selected by its own context menu shows the menu, not the
-        // composer; an editor left from the previous selection still closes
-        // and saves.
-        if (canvasMenu.open()?.nodeId === id) {
-          if (session !== null && session.inlineId() !== null) closeInlineDraft();
-          if ((session?.composerId() ?? null) !== null) closeComposer();
-          return;
-        }
-        openComposer(id);
-        return;
-      }
-      if (session !== null && session.composerId() !== null) {
-        composerState.save(session, session.detail());
-        composerState.reset();
-        session.closeComposer();
-      }
-    });
-  });
-
-  effect(() => {
-    composerState.sync(currentSession()?.detail() ?? null);
-  });
-
-  cleanup(() => {
-    canvasMenu.close();
-    disposed = true;
-    previews.dispose();
-    minimap.dispose();
-    minimapDrag.dispose();
-    viewport.dispose();
-    runner?.dispose();
-    assets?.dispose();
-    document?.dispose();
-    document = null;
-    assets = null;
-    runner = null;
-    sessionState.set(null);
-  });
-
-  const composerOpen = (): boolean => (currentSession()?.composerId() ?? null) !== null;
+  effect(() => syncSelection(workspace));
+  effect(() => syncComposerState(workspace));
+  cleanup(() => workspace.dispose());
 
   return (
     <View
@@ -418,38 +65,28 @@ export function FlowPage() {
       // Secondary presses and the wheel over the composer, its dock and the
       // other page views never reach the canvas overlay, so the page
       // forwards them itself.
-      {...pageChromeHandlers(canvasMenu, zoomCanvas)}
+      {...pageChromeHandlers(canvasMenu, workspace.zoomCanvas)}
     >
       <FlowCanvas
         scene={scene}
         camera={camera}
         controller={controller}
         stage={stage}
-        onSize={(size) => {
-          stage.set(size);
-          viewport.setSize(size.width, size.height);
-          if (!sized) {
-            sized = true;
-            camera.fit(CONTENT, size);
-            void openFlow();
-            return;
-          }
-          viewport.onResize(size.width, size.height);
-        }}
-        onPan={(dx, dy) => viewport.panBy(dx, dy)}
-        onZoom={(factor, x, y) => zoomCanvas(factor, x, y)}
-        onWheelZoom={(notches, x, y) => zoomCanvas(wheelZoomFactor(notches), x, y)}
+        onSize={(size) => workspace.handleSize(size)}
+        onPan={workspace.panBy}
+        onZoom={workspace.zoomCanvas}
+        onWheelZoom={(notches, x, y) => workspace.zoomCanvas(wheelZoomFactor(notches), x, y)}
         onMenuPress={(at) => canvasMenu.press(at)}
         onMenuRelease={() => canvasMenu.release()}
         onMenuCancel={() => {
           canvasMenu.close();
         }}
-        uploadingNode={() => currentSession()?.uploadingNode() ?? null}
-        onUploadNode={(nodeId) => void currentSession()?.uploadSource(nodeId)}
-        inlineId={() => currentSession()?.inlineId() ?? null}
-        inlineText={() => currentSession()?.inlineText() ?? ""}
-        onInlineChange={(text) => currentSession()?.setInlineText(text)}
-        onInlineCommit={() => void currentSession()?.commitInline()}
+        uploadingNode={() => session()?.uploadingNode() ?? null}
+        onUploadNode={(nodeId) => void session()?.uploadSource(nodeId)}
+        inlineId={() => session()?.inlineId() ?? null}
+        inlineText={() => session()?.inlineText() ?? ""}
+        onInlineChange={(text) => session()?.setInlineText(text)}
+        onInlineCommit={() => void session()?.commitInline()}
         imageEvent={(event) => imageProbe.set(imageProbeText(event))}
       />
 
@@ -458,20 +95,20 @@ export function FlowPage() {
       {host.params.flowZoomProbe === 1 ? <ZoomProbe value={zoomPercent()} /> : null}
 
       {host.params.flowSelectionProbe === 1 ? (
-        <CanvasProbe selected={selectedCount()} composing={composerOpen()} />
+        <CanvasProbe selected={selectedCount()} composing={workspace.composerOpen()} />
       ) : null}
 
-      {composerOpen() ? null : <NodeToolbar onAdd={addNode} />}
+      {workspace.composerOpen() ? null : <NodeToolbar onAdd={workspace.addNode} />}
 
-      {composerOpen() ? null : (
+      {workspace.composerOpen() ? null : (
         <SearchButton shortcut={keymap.label("mod+k")} onPress={() => searchOpen.set(true)} />
       )}
 
-      {!isAvailable && !composerOpen() ? <BrandCard /> : null}
+      {!isAvailable && !workspace.composerOpen() ? <BrandCard /> : null}
 
       {process.env.FLOW_FPS ? <FrameRate /> : null}
 
-      <If when={currentSession()?.detail()}>
+      <If when={session()?.detail()}>
         {(detail) => (
           <If when={composerPosition()}>
             {(position) => (
@@ -484,16 +121,16 @@ export function FlowPage() {
                     left={position().left}
                     top={position().top}
                     width={position().width}
-                    assetUrls={() => currentSession()?.assetUrls() ?? {}}
-                    running={() => currentSession()?.running() ?? false}
-                    onClose={closeComposer}
+                    assetUrls={() => session()?.assetUrls() ?? {}}
+                    running={() => session()?.running() ?? false}
+                    onClose={workspace.closeComposer}
                     onRun={() => {
                       const settings = composerState.settings();
-                      if (settings !== null) void currentSession()?.run(settings);
+                      if (settings !== null) void session()?.run(settings);
                     }}
-                    onCancel={() => currentSession()?.cancel()}
-                    onRemoveInput={(id) => void currentSession()?.removeInput(id)}
-                    onUpload={() => void currentSession()?.upload()}
+                    onCancel={() => session()?.cancel()}
+                    onRemoveInput={(id) => void session()?.removeInput(id)}
+                    onUpload={() => void session()?.upload()}
                   />
                 }
               >
@@ -503,16 +140,16 @@ export function FlowPage() {
                   left={position().left}
                   top={position().top}
                   width={position().width}
-                  assetUrls={() => currentSession()?.assetUrls() ?? {}}
-                  running={() => currentSession()?.running() ?? false}
-                  onClose={closeComposer}
+                  assetUrls={() => session()?.assetUrls() ?? {}}
+                  running={() => session()?.running() ?? false}
+                  onClose={workspace.closeComposer}
                   onRun={() => {
                     const settings = composerState.settings();
-                    if (settings !== null) void currentSession()?.run(settings);
+                    if (settings !== null) void session()?.run(settings);
                   }}
-                  onCancel={() => currentSession()?.cancel()}
-                  onRemoveInput={(id) => void currentSession()?.removeInput(id)}
-                  onUpload={() => void currentSession()?.upload()}
+                  onCancel={() => session()?.cancel()}
+                  onRemoveInput={(id) => void session()?.removeInput(id)}
+                  onUpload={() => void session()?.upload()}
                 />
               </If>
             )}
@@ -526,9 +163,9 @@ export function FlowPage() {
           the context menu and the map's drag overlay stay above all. */}
       <View class="absolute left-4 bottom-4 z-30 flex-row items-end gap-2">
         <ZoomControls
-          onZoomIn={() => setZoom(1.2)}
-          onZoomOut={() => setZoom(1 / 1.2)}
-          onFit={fit}
+          onZoomIn={() => workspace.setZoom(1.2)}
+          onZoomOut={() => workspace.setZoom(1 / 1.2)}
+          onFit={workspace.fit}
           minimapOpen={minimapOpen()}
           onToggleMinimap={platform.desktop ? () => minimapOpen.set(!minimapOpen()) : undefined}
         />
@@ -539,7 +176,7 @@ export function FlowPage() {
             stage={stage}
             drag={minimapDrag}
             selected={(id) => scene.isSelected(id)}
-            onZoom={(notches) => setZoom(wheelZoomFactor(notches))}
+            onZoom={(notches) => workspace.setZoom(wheelZoomFactor(notches))}
           />
         ) : null}
       </View>
@@ -548,9 +185,9 @@ export function FlowPage() {
         {() => (
           <SearchPalette
             filters={SEARCH_FILTERS}
-            search={searchCards}
+            search={workspace.searchCards}
             onClose={() => searchOpen.set(false)}
-            onSelect={selectSearchHit}
+            onSelect={workspace.selectSearchHit}
           />
         )}
       </If>
@@ -560,7 +197,7 @@ export function FlowPage() {
       {minimapDrag.dragging() ? (
         <MinimapDragOverlay
           controller={minimapDrag}
-          onZoom={(notches) => setZoom(wheelZoomFactor(notches))}
+          onZoom={(notches) => workspace.setZoom(wheelZoomFactor(notches))}
         />
       ) : null}
     </View>
