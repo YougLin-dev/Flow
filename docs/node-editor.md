@@ -194,19 +194,21 @@ new provider and, if it needs network access, a deliberate host entry in
 
 ## UI split
 
-The canvas is a native NSH view tree. `components/FlowCanvas.tsx` holds the
-world-space cards and edges, the screen-space selection frame and marquee
+The canvas is a native NSH view tree. `components/canvas/FlowCanvas.tsx` holds
+the world-space cards and edges, the screen-space selection frame and marquee
 overlay, the interaction surface and the selected upload card's world-point
-controls layer; `components/FlowCard.tsx` renders one
-card with its typed ports (`components/Port.tsx`), `components/FlowEdges.tsx`
-strokes the viewport's connectors in one native canvas and
-`components/FlowPreviews.tsx` the pulled connection previews.
+controls layer; `components/canvas/world/FlowCard.tsx` renders one
+card with its typed ports (`components/canvas/world/Port.tsx`),
+`components/canvas/world/FlowEdges.tsx` strokes the viewport's connectors in
+one native canvas and `components/canvas/world/FlowPreviews.tsx` the pulled
+connection previews.
 `components/SelectionPorts.tsx` renders the multi-card frame's group ports
 from `flow/canvas/model/scene/group-ports.ts`. `flow/canvas/model/scene/scene.ts` is the headless model,
 `flow/canvas/model/scene/scene-ports.ts` answers typed-port hits and capacity queries, and
 `flow/canvas/interaction/canvas-controller.ts` turns pointer events into selection, drag,
 resize, marquee, pan and connector gestures.
-`components/GridBackground.tsx` draws the dot grid in screen space.
+`components/canvas/world/GridBackground.tsx` draws the dot grid in screen
+space.
 `components/CanvasContextMenu.tsx` is the right-click menu: on empty canvas,
 Add text node, Add image node and Add upload node place the card at the
 pressed point; on a card, Edit text opens a text card's body in place,

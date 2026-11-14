@@ -94,19 +94,21 @@ src/                   the NSH app: its root, entry, config and assets
       TitleBar.tsx     custom title bar (pin, drag, native window controls)
       BrandCard.tsx    branding where the desktop shell is absent
       FrameRate.tsx    the frame-rate readout
-    FlowCanvas.tsx     the canvas: world-space cards and edges, gestures
-    FlowCard.tsx       one card: title, status, body, ports
     primitives/
       Icon.tsx         one Lucide icon, drawn as a native canvas path
       icon-shape.ts    Lucide icon nodes as one SVG path
       panel.ts         the floating-panel chrome recipes
     canvas/
+      FlowCanvas.tsx   the canvas: world-space cards and edges, gestures
       port-visuals.ts  the icon and theme token a port type uses everywhere
       world/
+        FlowCard.tsx     one card: title, status, body, ports
+        FlowEdges.tsx    every connector, stroked as one native-canvas layer
+        FlowPreviews.tsx the pulled connection previews
+        GridBackground.tsx the dot-grid backdrop
+        Port.tsx         one typed port, drawn as a native view
         ConnectorCanvas.tsx  the native canvas both connector layers share
         connector-layer.ts   its position/size/origin mapping
-    FlowEdges.tsx      every connector, stroked as one native-canvas layer
-    GridBackground.tsx the dot-grid backdrop
     SelectionOverlay.tsx selection borders, resize handles and the marquee
     composer/
       ComposerSheet.tsx  the shared prompt sheet both node kinds mount

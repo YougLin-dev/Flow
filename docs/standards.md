@@ -322,7 +322,7 @@ reconcile only what `scene(rect, margin)` returns, keep the card budget,
 throttled reads, hash sampling and selected-card pinning, and MUST NOT
 instantiate the whole document. (Test, Review)
 
-`components/FlowCanvas.tsx` renders one world view whose transform is the
+`components/canvas/FlowCanvas.tsx` renders one world view whose transform is the
 camera's `translate(x, y) scale(s)` with origin `0 0`; cards and connectors
 position themselves in world coordinates inside it. The dot grid and the
 selection overlay are screen-space siblings. Do not cache a card's screen
@@ -744,7 +744,7 @@ test. (Review, Test, Manual)
 
 Local, enforced truth: `package.json`, `vite.config.ts`, `src/tsconfig.json`,
 the root `tsconfig.json`, `lint/boundaries.js`, `src/nsh.json`, `src/store.ts`,
-`src/flow/**`, `src/components/FlowCanvas.tsx`,
+`src/flow/**`, `src/components/canvas/**`,
 [architecture](architecture.md), [conventions](conventions.md),
 [testing](testing.md) and [packaging](packaging.md).
 

@@ -43,7 +43,7 @@ SQLite/search benchmark.
   (never a retained scene), and hit testing stays in the scene model. Keep
   geometry and the scene in `src/flow/canvas/{geometry,model}`, gestures in
   `src/flow/canvas/interaction/`, and the views in
-  `src/components/FlowCanvas.tsx` and its parts; extend those with tests
+  `src/components/canvas/FlowCanvas.tsx` and its parts; extend those with tests
   instead of adding a canvas library. The composer's draft and placement live
   in `flow/composer/`; see the code map and plan Appendix A.
 - **The document core is Rust's.** `src/native/` is the mixed NSH Rust crate;

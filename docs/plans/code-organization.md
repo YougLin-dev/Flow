@@ -3,7 +3,7 @@
 - **Status:** Accepted 2026-11-14; Phases 0–2 are implemented and Phase 3 is
   in progress on stacked branches (standard and tooling, shared kernel and
   first reuse, composer shell, AsyncDrain core, connector layer, the eight
-  `flow/` area moves, `components/app`).
+  `flow/` area moves, `components/app`, the canvas world).
 - **Scope:** `src/` (TSX app) and `src/native/` (Rust document core).
 - **Related:** [standards](../standards.md), [architecture](../architecture.md),
   [conventions](../conventions.md), [testing](../testing.md),
@@ -1814,6 +1814,13 @@ report is clear (the runtime import lives inside `flow/document`).
 Phase 3 step 1 moved `TitleBar`, `BrandCard` and `FrameRate` to
 `components/app` behind the area facade; `App.tsx` and `FlowPage` import the
 facade. `LEGACY_FLAT` is down to 29 modules.
+
+Phase 3 step 2 moved `FlowCanvas` to `components/canvas` and its world views
+(`FlowCard`, `FlowEdges`, `FlowPreviews`, `GridBackground`, `Port`) to
+`components/canvas/world`; the page imports the canvas facade, and
+`SelectionPorts` reaches `Port` through the same-feature deep import until
+step 3 moves it into `canvas/selection`. No module split or behavior change
+was made. `LEGACY_FLAT` is down to 23 modules.
 
 ---
 
