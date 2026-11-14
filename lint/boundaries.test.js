@@ -86,7 +86,7 @@ test("classifies layers, including test support", () => {
   expect(layerOf("src/App.tsx")).toBe("shell");
   expect(layerOf("src/pages/FlowPage.tsx")).toBe("page");
   expect(layerOf("src/pages")).toBe("page");
-  expect(layerOf("src/components/TitleBar.tsx")).toBe("component");
+  expect(layerOf("src/components/FlowCanvas.tsx")).toBe("component");
   expect(layerOf("src/store.ts")).toBe("store");
   expect(layerOf("src/flow/page-chrome.ts")).toBe("foundation");
   expect(layerOf("src/native/src/db.rs")).toBe("foundation");
@@ -183,10 +183,10 @@ test("reports upward, unknown and unclassified imports", () => {
   expect(reportsFor("src/pages/FlowPage.tsx", "../unclassified/module")[0].messageId).toBe(
     "unknown",
   );
-  expect(reportsFor("src/unclassified/module.ts", "../components/TitleBar")[0].messageId).toBe(
+  expect(reportsFor("src/unclassified/module.ts", "../components/FlowCanvas")[0].messageId).toBe(
     "unclassified",
   );
-  expect(reportsFor("src/pages/FlowPage.tsx", "../components/TitleBar")).toEqual([]);
+  expect(reportsFor("src/pages/FlowPage.tsx", "../components/FlowCanvas")).toEqual([]);
   expect(reportsFor("src/components/FlowCanvas.tsx", "../flow/canvas/geometry/selection")).toEqual(
     [],
   );

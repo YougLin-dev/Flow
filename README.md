@@ -87,7 +87,6 @@ src/                   the NSH app: its root, entry, config and assets
   theme.json           design tokens (light and dark)
   tsconfig.json        NSH's TypeScript settings
   store.ts             app state: private signals behind readers and actions
-  tool.ts              the Tool union shared by the store and the controls
   pages/
     FlowPage.tsx       the workspace: document session, camera, overlays
   components/
@@ -107,7 +106,6 @@ src/                   the NSH app: its root, entry, config and assets
         ConnectorCanvas.tsx  the native canvas both connector layers share
         connector-layer.ts   its position/size/origin mapping
     FlowEdges.tsx      every connector, stroked as one native-canvas layer
-    FlowEdge.tsx       the connection preview, one canvas stroke
     GridBackground.tsx the dot-grid backdrop
     SelectionOverlay.tsx selection borders, resize handles and the marquee
     composer/
@@ -119,7 +117,6 @@ src/                   the NSH app: its root, entry, config and assets
     ZoomControls.tsx   zoom in / out / fit
     SearchButton.tsx   floating search entry point
     SearchPalette.tsx  debounced full-text search, filters and result navigation
-    SelectionBadge.tsx selection count
   flow/
     document/
       index.ts         the area facade: lifecycle, sessions and loaders

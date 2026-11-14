@@ -104,8 +104,8 @@ viewport,test}`; the composer reload policy split from `composer-detail.ts`,
 `sameOverview` moved with the minimap loader, and `ViewportHost.fallbackBounds`
 replaced the controller's seed import. The structure walker now skips only
 `src/assets/`, so area-owned `assets/` part folders are classified. Phase 3
-started with `components/app` (title bar, brand card, frame rate); the rest of
-the component tree is still the legacy flat layout.
+started with `components/app` (title bar, brand card, frame rate); the
+remaining flat component modules are still legacy.
 The old → new map is in
 [the plan's Appendix A](plans/code-organization.md#appendix-a--tsx-placement-map);
 `LEGACY_FLAT` in the manifest shrinks with every move and disappears in
