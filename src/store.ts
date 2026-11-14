@@ -1,6 +1,5 @@
 import { platform, signal } from "nsh";
 import { isAvailable } from "nsh/desktop";
-import { mainWindow } from "./lib/window-chrome";
 
 // The app's workspace state stays private: pages read it through the
 // functions below and change it through their actions.
@@ -29,9 +28,8 @@ export function setSelectedCount(value: number): void {
 
 /** Keeps the window above normal windows, or lets it back down. */
 export function togglePinned(): void {
-  // NSH sets a window level on macOS and Windows only.
+  // NSH sets a window level on macOS and Windows only; the title bar applies
+  // the new level while it renders.
   if (!isAvailable || platform.os === "linux") return;
-  const next = !pinned();
-  pinned.set(next);
-  mainWindow()?.set({ level: next ? "floating" : "normal" });
+  pinned.set(!pinned());
 }

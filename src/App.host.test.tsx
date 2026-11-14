@@ -11,7 +11,12 @@ const selectSeed = async (app: App, query: string, testId: string): Promise<void
   await app.waitUntil(() => app.shows("id:search-input"));
   await app.type("id:search-input", query);
   await app.waitUntil(() => app.shows(testId));
-  await app.press(testId);
+  // Enter opens the active result, as the palette's footer says. On the
+  // test host the first synthetic pointer press is lost once the window is
+  // taller than the display (NSH 966752c's background test host), and the
+  // palette's pointer path is covered by "searches cards and reveals the
+  // chosen one"; these tests are about the composer.
+  await app.submit("id:search-input");
 };
 
 /** Opens the app with the probe a test reads the camera scale from. */
@@ -178,6 +183,23 @@ test("shows the desktop title bar instead of the brand card", async () => {
   } else {
     expect(app.shows("id:brand-card")).toBe(true);
   }
+});
+
+test("hides the system title bar under the app's own", async () => {
+  const app = await openApp({ platform: "windows" });
+  await app.waitUntil(() => percentOf(app) > 0);
+
+  // Headless and phone hosts draw no system window chrome.
+  if (!app.shows("id:title-bar")) return;
+
+  // A hidden title bar leaves only the window's resize border between its
+  // frame and its content; a system title bar left showing (a denied
+  // `titleBar` set, say) adds its caption height. Both are reported in
+  // points, so the gap does not depend on the display's scale.
+  await app.waitUntil(() => {
+    const state = app.window("main").state();
+    return state !== null && state.bounds.size.height - state.contentBounds.size.height < 15;
+  });
 });
 
 test("pins and unpins the desktop window", async () => {

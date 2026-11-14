@@ -298,6 +298,18 @@ All notable changes to Flow are recorded here. The format follows
 
 ### Fixed
 
+- The app draws one title bar again, at 32 points instead of 40, close to
+  the system caption's height. The NSH pin at `966752c` added the
+  `application` capability gate (#1499), which refuses every main-window
+  desktop command when the app declares `capabilities` without
+  `"application": true`; the render-time `currentWindow().set()` for the
+  hidden title bar was dropped, so the system bar stayed above the app's
+  own. The hidden title bar is declared in `src/nsh.json`'s
+  `window.titleBar` now, so the platform applies it before the first frame,
+  and `capabilities.application` is granted for the pin's window `level`,
+  which the same gate had silently refused. The title bar applies that level
+  from the `pinned` prop where the window API answers, while it renders; the
+  store keeps the state alone.
 - Clicking an already selected card no longer unmounts its composer: the
   panel hides only once the gesture actually moves, so a typed draft and the
   native input's caret no longer blink away on every click.

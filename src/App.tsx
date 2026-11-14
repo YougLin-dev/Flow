@@ -1,7 +1,6 @@
 import { isAvailable } from "nsh/desktop";
 import { mount, View } from "nsh";
 import { TitleBar } from "./components/TitleBar";
-import { installWindowChrome } from "./lib/window-chrome";
 import { FlowPage } from "./pages/FlowPage";
 import { isPinned, togglePinned } from "./store";
 
@@ -13,8 +12,6 @@ import { isPinned, togglePinned } from "./store";
  * `store.ts`.
  */
 function App() {
-  // `currentWindow()` only answers while the app renders.
-  installWindowChrome();
   return (
     <View class="flex-1 bg-background">
       {isAvailable && <TitleBar pinned={isPinned()} onTogglePinned={togglePinned} />}

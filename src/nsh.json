@@ -7,9 +7,14 @@
   "theme": "theme.json",
   "rust": "native",
   "window": {
-    "defaultPosition": "center"
+    "defaultPosition": "center",
+    "titleBar": {
+      "style": "hidden",
+      "height": 32
+    }
   },
   "capabilities": {
+    "application": true,
     "network": {
       "hosts": []
     },

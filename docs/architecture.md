@@ -418,13 +418,15 @@ double-clicking a text card opens its inline editor.
 
 ## Window chrome
 
-`lib/window-chrome.ts` hides the native title bar once, while `App` renders
-(`currentWindow()` only answers there), and keeps the window ref for actions
-outside a render. `TitleBar` draws the app name and pin button and reports the
-space the system controls occupy through `titleBar()`, so the drag region and
-buttons never sit under the traffic lights or caption buttons. The pin button
-calls the store, which sets the window's `level` to `"floating"` or
-`"normal"` through that ref.
+`src/nsh.json`'s `window.titleBar` hides the native title bar before the
+first frame (32 points, close to the system caption's height), so the
+platform applies the app's own bar; the system keeps its window controls.
+`TitleBar` draws the app name and pin button and reports the space the system
+controls occupy through `titleBar()`, so the drag region and buttons never
+sit under the traffic lights or caption buttons. While it renders — the only
+time the window API answers — it sets the window's `level` from the `pinned`
+prop to `"floating"` or `"normal"`; the pin button calls the store, which
+flips that state.
 
 Where `nsh/desktop` is unavailable (tests and non-desktop hosts), the title
 bar is not mounted and `FlowPage` shows `BrandCard` instead, so the same app
@@ -434,13 +436,18 @@ code runs in the headless test engine.
 
 `src/nsh.json` declares `capabilities.network.hosts: []`: the app reads its
 own bundled assets (`asset:` is always allowed) but may reach no remote host.
-Its `capabilities.process.env` allow-list contains only `FLOW_DB_PATH`, the
-development and smoke-test database override; `capabilities.windows.levels`
-grants the `floating` level the pin sets on the main window, and
-`capabilities.picker` is granted for local image uploads. NSH denies every capability not listed, so a
-new integration that fetches or loads a remote image must add that host
-deliberately. Adding the `capabilities` key is what changes the app from
-unrestricted to allow-list; keep it in place.
+`capabilities.application` is granted because the app acts on its own main
+window: the pin changes the window's `level`, and NSH gates every main-window
+desktop command behind that capability (the hidden title bar itself is
+declared in `window.titleBar`, which the platform applies at launch). Its
+`capabilities.process.env` allow-list contains only
+`FLOW_DB_PATH`, the development and smoke-test database override;
+`capabilities.windows.levels` grants the `floating` level the pin sets on the
+main window, and `capabilities.picker` is granted for local image uploads.
+NSH denies every capability not listed, so a new integration that fetches or
+loads a remote image must add that host deliberately. Adding the
+`capabilities` key is what changes the app from unrestricted to allow-list;
+keep it in place.
 
 ## Extending
 

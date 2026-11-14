@@ -125,10 +125,9 @@ small directory such as `flow/` or `components/` is imported module by module.
 ### 3.4 Import safety and ownership
 
 A module MUST be import-safe: top-level code may declare types, constants and
-pure functions only. The only permitted import-time effects are `mount(App)` in
-`src/App.tsx` and `installWindowChrome()` called exactly once by `src/App.tsx`.
-Timers, frames, listeners, key bindings and subscriptions MUST be created by
-the component, page or store action that owns them. (Review)
+pure functions only. The only permitted import-time effect is `mount(App)` in
+`src/App.tsx`. Timers, frames, listeners, key bindings and subscriptions MUST
+be created by the component, page or store action that owns them. (Review)
 
 ## 4. Module and public-API design
 
