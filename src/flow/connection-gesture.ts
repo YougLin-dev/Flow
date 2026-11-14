@@ -5,8 +5,7 @@
  */
 import type { EdgeSummary, Point } from "./shared";
 import type { CanvasCamera } from "./camera";
-import type { PortSide } from "./canvas/geometry/connection";
-import { magnetEndPoint, PORT_MAGNET_RADIUS } from "./canvas/geometry/connection";
+import { magnetEndPoint, PORT_MAGNET_RADIUS, type PortSide } from "./canvas/geometry/connection";
 import type { PortKind } from "./nodes";
 import type { FlowScene } from "./scene";
 import { capacityOf, nearestPort, portAt, type PortHit } from "./scene-ports";

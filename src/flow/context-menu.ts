@@ -2,12 +2,11 @@
 import { effect, signal, untracked } from "nsh";
 import type { CanvasCamera } from "./camera";
 import type { CanvasController } from "./canvas-controller";
-import type { BoxGeometry, Point } from "./shared";
+import { samePoint, sameRect, type BoxGeometry, type Point } from "./shared";
 import type { NodeKindId } from "./nodes";
 import type { StageSize } from "./overlay";
 import type { FlowScene } from "./scene";
 import { portAt } from "./scene-ports";
-import { samePoint, sameRect } from "./shared";
 
 /** A secondary-button press in the canvas's screen points. */
 export interface ContextMenuPoint {
