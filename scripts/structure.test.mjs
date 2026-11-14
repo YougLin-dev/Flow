@@ -30,11 +30,11 @@ const tree = {
   "src/flow/index.ts": "",
   "src/components/index.tsx": "",
   "src/pages/index.ts": "",
-  "src/flow/page-chrome.ts": 'import "./canvas";',
+  "src/flow/execution.ts": 'import "./canvas";',
   "src/flow/utils/thing.ts": "",
   "src/flow/canvas/index.ts": "",
   "src/flow/canvas/model/camera.ts": "",
-  "src/flow/canvas/geometry/point.ts": 'import "../model/camera";\nimport "../../execution";',
+  "src/flow/canvas/geometry/point.ts": 'import "../model/camera";\nimport "../../execution/index";',
   "src/flow/execution/index.ts": "",
   "src/components/search/SearchPalette.tsx": 'import "../../flow/canvas";',
   "src/flow/document/session/session.ts": 'import "../test/helper";',
@@ -112,7 +112,7 @@ test("reports a new flat module, a missing facade and a forbidden folder", () =>
       "src/flow/canvas/geometry/point.ts (geometry) may not import src/flow/canvas/model/camera.ts",
     );
     expect(result.reports).toContain(
-      "src/flow/canvas/geometry/point.ts may not import flow/execution (../../execution)",
+      "src/flow/canvas/geometry/point.ts may not import flow/execution (../../execution/index)",
     );
     expect(result.reports).not.toContain(
       "src/flow/canvas/geometry/point.ts (geometry) may not import src/flow/execution/index.ts",
@@ -130,7 +130,7 @@ test("reports a new flat module, a missing facade and a forbidden folder", () =>
       "src/flow/document/interaction/controller.ts (interaction) may not import src/flow/document/session/y.ts",
     );
     expect(result.reports).not.toContain(
-      "src/flow/page-chrome.ts may not import flow/canvas (./canvas)",
+      "src/flow/execution.ts may not import flow/canvas (./canvas)",
     );
   });
 });
@@ -210,7 +210,7 @@ test("Phase 5 turns the area findings into failures", () => {
         "src/flow/document/interaction/controller.ts (interaction) may not import src/flow/document/session/y.ts",
       );
       expect(result.failures).not.toContain(
-        "src/flow/page-chrome.ts may not import flow/canvas (./canvas)",
+        "src/flow/execution.ts may not import flow/canvas (./canvas)",
       );
       expect(result.failures).toContain(
         "src/flow/document/session/deep.ts deep-imports flow/canvas (../../canvas/model/camera)",

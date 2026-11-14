@@ -93,7 +93,8 @@ moved the interaction modules to `flow/canvas/interaction` and added the
 document-facing `ConnectionPair` type to the facade; `canvas-input.ts` was not
 extracted because §11 marks it optional and the touch state must stay on the
 mounted view. Step 5 moved the minimap mapping and drag controller to
-`flow/minimap`; `minimap-loader.ts` stays a document-asset module until step 8.
+`flow/minimap`; `minimap-loader.ts` stays at the flow root until step 8 moves
+it to the document assets.
 The rest of the source tree is still the legacy flat layout.
 The old → new map is in
 [the plan's Appendix A](plans/code-organization.md#appendix-a--tsx-placement-map);
