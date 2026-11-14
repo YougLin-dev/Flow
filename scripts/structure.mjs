@@ -207,6 +207,8 @@ export function checkRustLayout(root) {
     "history.rs",
     "asset.rs",
     "schema.rs",
+    // The frozen v1 schema submodule; the Phase 6 split moves it under store/.
+    "schema",
     "edge_index.rs",
     "search.rs",
     "scene.rs",

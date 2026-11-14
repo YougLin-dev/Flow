@@ -16,7 +16,7 @@ mod entity;
 mod history;
 mod mutation;
 mod scene;
-mod schema;
+pub mod schema;
 mod search;
 mod types;
 mod viewport;

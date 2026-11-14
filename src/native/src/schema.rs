@@ -4,6 +4,8 @@
 //! tables are virtual tables with no ORM schema support, so their DDL lives
 //! here, next to the migrations, and nowhere else.
 
+pub mod v1;
+
 use sea_orm::sea_query::Index;
 use sea_orm::{ConnectionTrait, DatabaseConnection, DbErr, EntityTrait, Schema, Set, Statement};
 
