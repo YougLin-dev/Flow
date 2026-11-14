@@ -355,8 +355,8 @@ interaction belongs in the controller and its pure geometry modules in
 consumed before card selection. (Test, Review)
 
 The minimap panel is a control overlay, not the canvas surface: its drag is
-routed by `flow/minimap-controller.ts` with its pure mapping in
-`flow/minimap.ts`, and it never starts a canvas gesture or writes the
+routed by `flow/minimap/minimap-controller.ts` with its pure mapping in
+`flow/minimap/minimap.ts`, and it never starts a canvas gesture or writes the
 document.
 
 Direct manipulation is the documented pointer exception: selecting, moving

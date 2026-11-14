@@ -1785,6 +1785,11 @@ views. Execution decision: `canvas-input.ts` is not extracted — §11 marks it
 optional and the touch responder state must stay on the always-mounted view,
 so no behavior change was made. `LEGACY_FLAT` is down to 50 modules.
 
+Phase 2 step 5 moved the minimap mapping and drag state to `flow/minimap`
+behind the area facade. `minimap-loader.ts` stays at the flow root until the
+document step moves it to `flow/document/assets` (§6.4 keeps the loader in
+the document feature). `LEGACY_FLAT` is down to 48 modules.
+
 ---
 
 ## Appendix A — TSX placement map (non-test)

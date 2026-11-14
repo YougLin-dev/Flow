@@ -123,6 +123,9 @@ src/                   the NSH app: its root, entry, config and assets
     database-path.ts   resolves the document path from host/env/data-dir
     overlay.ts         composer placement
     composer-state.ts  the composer's drafts
+    minimap/
+      minimap.ts       the panel's world-to-panel mapping
+      minimap-controller.ts the minimap drag state
     nodes/
       node-kinds.ts    the node kinds: ports, settings and model catalogs
     canvas/
