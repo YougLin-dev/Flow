@@ -106,7 +106,7 @@ canvas stays in TSX and owns only the scene model and its views.
   connector index
   (`edge_index.rs`) is maintained in the same transaction as every edge
   write and every node move, resize or undo, and mirrors the UI's
-  `connectionBounds` in `flow/connection.ts`. Nodes inside `rect` sort
+  `connectionBounds` in `flow/canvas/geometry/connection.ts`. Nodes inside `rect` sort
   before margin-only nodes so prefetching cannot consume the budget, and a
   deterministic hash of the internal sequence spreads a capped low-zoom
   sample across the rectangle instead of one insertion strip. `bounds()`
@@ -304,14 +304,14 @@ border; when hovered it springs toward the pointer within a small reach in
 both axes, and it springs back when the pointer leaves, while its connector
 anchor — the icon's centre — stays fixed. A compatible port under a dragged
 connector end leans out the same way inside its magnet field, and the
-preview eases onto the leaned icon (`flow/connection.ts`). `FlowEdges`
-strokes every connector's cubic from `flow/connection.ts` in one
+preview eases onto the leaned icon (`flow/canvas/geometry/connection.ts`). `FlowEdges`
+strokes every connector's cubic from `flow/canvas/geometry/connection.ts` in one
 native-canvas layer with round caps;
 the canvas rasterizer draws at the transformed resolution, so the lines stay
 smooth and sharp at every camera scale instead of showing sampled joints, and
 there is no arrowhead. The canvas covers only the connector box clipped to the
 camera's view plus a margin, and a connector that crosses the view is stroked
-as the visible runs of its cubic (`flow/edge-clip.ts`), sampled against the
+as the visible runs of its cubic (`flow/canvas/geometry/edge-clip.ts`), sampled against the
 view's width: at 250% the stroked geometry stays about one screen long instead
 of tessellating document-long curves that the clip would discard. A connector
 rests faint, at a third of its port type's color; the clicked edge and every

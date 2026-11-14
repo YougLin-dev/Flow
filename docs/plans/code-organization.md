@@ -1756,6 +1756,14 @@ in `flow/shared/keyed-flags.ts` behind the shared kernel's facade. Every
 cross-area importer names the facade, and the moved tests stayed beside their
 subjects. `LEGACY_FLAT` is down to 74 modules.
 
+Phase 2 step 2 moved the pure-math modules to `flow/canvas/geometry`
+(`connection`, `edge-clip`, `grid`, `preview-grid`, `selection`, `tooltip`,
+`view-culling`) behind a curated `flow/canvas` facade. `BoxGeometry`,
+`overlaps`, `mergeBounds` and `containsPoint` now live in
+`flow/shared/geometry.ts` (the §6.4 home), so the geometry segment imports no
+model: `tooltip`/`view-culling` take shared `Size`/`BoxGeometry` instead of
+camera types. `LEGACY_FLAT` is down to 67 modules.
+
 ---
 
 ## Appendix A — TSX placement map (non-test)

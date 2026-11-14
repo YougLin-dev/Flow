@@ -123,13 +123,15 @@ src/                   the NSH app: its root, entry, config and assets
     database-path.ts   resolves the document path from host/env/data-dir
     scene.ts           headless scene model: cards, edges, selection, previews
     camera.ts          infinite-canvas camera (pan, zoom, fit)
-    grid.ts            the dot grid's screen-space tile layout
     canvas-controller.ts pointer gestures: select, drag, resize, marquee, connect
-    selection.ts       selection handles, resize and marquee geometry
     overlay.ts         composer and inline-editor placement
     composer-state.ts  the composer's drafts
     nodes/
       node-kinds.ts    the node kinds: ports, settings and model catalogs
+    canvas/
+      index.ts         the area facade: the geometry views and features use
+      geometry/        connection curves, edge clipping, grid and preview cells,
+                       selection handles, tooltip and culling math
     shared/            the shared kernel: geometry, equality, DTO factories
   native/              mixed NSH Rust crate (SQLite/FTS5/RTree document core)
     Cargo.toml
