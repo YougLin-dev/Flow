@@ -17,7 +17,7 @@ updates the owner.
 | Foundation | `src/flow/`                                                                       | foundations, assets                           |
 | Test       | `src/test-support/`, `**/test/`, `src/flow/document/test/node-session-harness.ts` | every layer; never imported by production     |
 | Asset      | `src/assets/`                                                                     | nothing                                       |
-| Other      | any other `src/` module                                                           | nothing until classified or allow-listed      |
+| Other      | any other `src/` module                                                           | nothing; classified at all is a gate failure  |
 
 `boundaries/no-upward-import` enforces this table. Tests are exempt because
 they may reach into any layer on purpose.
@@ -121,14 +121,15 @@ facades. Phase 3 step 5 moved the three test probes out of the production views
 keeps only the optional `imageEvent` observation seam. Phase 4 started with the page
 move: `FlowPage` now lives at `pages/flow/FlowPage.tsx` behind the page area
 facade, and `bindings`, `page-chrome` and `search-navigation` (with their
-tests) live in `pages/flow/workspace`. `LEGACY_FLAT` is empty and the structure
-report lists no root modules. Phase 4 then split the page: `flow-workspace.ts`
-owns construction and disposal, `flow-actions.ts` the key actions and Escape
-order, and `flow-effects.ts` the selection/composer effects; `FlowPage.tsx`
-keeps one synchronous construction call, the hook registrations and render,
-and is 208 lines (target ~250).
-The old → new map is in
-[the plan's Appendix A](plans/code-organization.md#appendix-a--tsx-placement-map);
-`LEGACY_FLAT` in the manifest shrinks with every move and disappears in
-Phase 5. Do not add a new file at the `components/`, `flow/` or `pages/`
-root: `scripts/structure.mjs` fails it.
+tests) live in `pages/flow/workspace`. Phase 4 then split the page:
+`flow-workspace.ts` owns construction and disposal, `flow-actions.ts` the key
+actions and Escape order, and `flow-effects.ts` the selection, composer and
+menu-dismissal effects; `FlowPage.tsx` keeps one synchronous construction
+call, the hook registrations and render, and is 208 lines (target ~250).
+Phase 5 turned every rule on: the legacy allow-list is gone, the area matrix,
+facade, forbidden-folder, segment, native-seam and unclassified rules fail
+`bun run check`, and the budget still reports at 12 direct entries and fails
+at 20. The old → new map is in
+[the plan's Appendix A](plans/code-organization.md#appendix-a--tsx-placement-map).
+Do not add a new file at the `components/`, `flow/` or `pages/` root:
+`scripts/structure.mjs` fails it.

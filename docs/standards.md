@@ -131,7 +131,7 @@ the facade, while the internal modules import each other directly. The rule
 keeps a replaceable seam and an acyclic graph. It is not a licence to flatten
 the layer: `flow/` and `components/` are namespaces of areas, not one
 directory of modules. Deep imports from another area, and new modules at
-those roots, are structure violations once Phase 5 enforces the area rules.
+those roots, are structure violations the gate rejects.
 (Review; `boundaries/deep-cross-feature`, `scripts/structure.mjs`.)
 
 ### 3.4 Import safety and ownership
@@ -370,7 +370,8 @@ ignored. Hover MUST NOT change the selection. (Test, Host for real pointers)
 ### 7.3 Resources and lifecycle
 
 Every disposable object the page creates — the viewport refresh (which also
-disposes the camera), preview loader, minimap, runner, assets and document —
+disposes the camera), preview loader, minimap loader and drag controller,
+runner, assets and document —
 MUST be disposed by the page's `cleanup` (through the workspace's `dispose`),
 exactly once, in dependency order. The scene and controller hold no long-lived
 resource. Key bindings MUST be

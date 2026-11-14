@@ -13,11 +13,12 @@ Run `bun run check` (format + lint + type check + Rust format/clippy +
 boundary-rule tests; file names and dependency direction are lint rules) and
 `bun run test` (Rust unit tests plus TSX tests) before you finish.
 `bun run check:fix` applies safe fixes. `bun run check:structure` (part of
-`check`) reports the area shape and fails a new module at the `components/`,
-`flow/` or `pages/` root or a production import of test support; Phase 5
-turns on the rest of the area rules. `bun run test:host` repeats the
-platform tests (`*.host.test.tsx`) on this OS's real desktop host. `bun run test:bench` runs the ignored 100k
-SQLite/search benchmark.
+`check`) enforces the area shape: it fails a new module at the `components/`,
+`flow/` or `pages/` root, a missing area facade, an unclassified module, a
+forbidden folder, a cross-area import that skips a facade, a native import
+outside the seam or a production import of test support. `bun run test:host`
+repeats the platform tests (`*.host.test.tsx`) on this OS's real desktop host.
+`bun run test:bench` runs the ignored 100k SQLite/search benchmark.
 
 ## Invariants
 

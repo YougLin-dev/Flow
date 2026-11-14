@@ -1,10 +1,11 @@
 # Code organization and architecture standard
 
-- **Status:** Accepted 2026-11-14; Phases 0–4 are implemented on stacked
+- **Status:** Accepted 2026-11-14; Phases 0–5 are implemented on stacked
   branches (standard and tooling, shared kernel and first reuse, composer
   shell, AsyncDrain core, connector layer, the eight `flow/` area moves,
   `components/app`, the canvas world and its overlays, the composer, minimap
-  and search areas, the probes, the page area and workspace split).
+  and search areas, the probes, the page area and workspace split, and full
+  structure enforcement).
 - **Scope:** `src/` (TSX app) and `src/native/` (Rust document core).
 - **Related:** [standards](../standards.md), [architecture](../architecture.md),
   [conventions](../conventions.md), [testing](../testing.md),
@@ -902,7 +903,8 @@ outside `components/probes`/`test/`."
 2. **One owner per lifecycle.** `pages/flow/workspace/flow-workspace.ts`
    constructs and disposes the document, assets, runner, scene, camera,
    controller, session, viewport reader, preview loader and minimap loader.
-   Disposal is reverse creation order and idempotent. A lazy `applyChanges`
+   Disposal runs once in dependency order (consumers first, the document
+   last). A lazy `applyChanges`
    closure may reference `viewport` before it is assigned; keep that pattern
    explicit.
 3. **Effects and keys belong to the page or a mounted dialog.** No foundation
@@ -1892,6 +1894,14 @@ in the page area; creation order, the lazy `applyChanges` capture, the
 208 lines (§14 target ~250). `LEGACY_FLAT` is empty and no module remains at
 the `components/`, `flow/` or `pages/` root; the manifest keeps the empty set
 only until Phase 5 removes it. `bun run test:host` passes 14/14.
+
+Phase 5 removed the report-only mode and the legacy allow-list: every
+boundary rule and every structure check now fails `bun run check`, the
+`structure-map.js` manifest no longer exports `ENFORCEMENT` or `LEGACY_FLAT`,
+and the tooling tests assert the failures by default. The budget keeps its
+advisory report at 12 direct entries and its failure at 20; the Rust layout
+stays advisory until Phase 6. The gate on the final tree is green and the
+structure report prints `183 source files, 17 areas`.
 
 ---
 
