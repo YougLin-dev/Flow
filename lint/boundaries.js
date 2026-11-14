@@ -218,7 +218,7 @@ const segmentDirection = defineRule({
       } else if (sourceSegment === "model") {
         violation =
           (targetArea === sourceArea && targetSegment === "interaction") ||
-          targetArea === "flow/document" ||
+          (targetArea !== sourceArea && targetArea === "flow/document") ||
           targetLayer === "component";
       } else if (sourceSegment === "interaction") {
         violation = targetLayer === "component" || targetArea === "flow/document";

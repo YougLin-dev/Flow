@@ -55,11 +55,25 @@ export function collectSourceFiles(root) {
   return files.toSorted((first, second) => first.localeCompare(second));
 }
 
-/** The specifiers an app file imports or re-exports, parsed by Bun. */
+/** Strip comments before the type-only fallback; `://` in a URL survives. */
+function stripComments(text) {
+  return text.replace(/\/\*[\s\S]*?\*\//g, "").replace(/(^|[^:])\/\/[^\n]*/g, "$1");
+}
+
+/**
+ * The specifiers an app file imports or re-exports. Bun's scanner is exact
+ * for value imports but erases type-only ones, so a comment-stripped fallback
+ * adds `import type`/`export type ... from` specifiers.
+ */
 export function readImports(root, file) {
   const text = readFileSync(join(root, file), "utf8");
   const loader = file.endsWith(".tsx") ? "tsx" : "ts";
-  return new Bun.Transpiler({ loader }).scanImports(text).map((entry) => entry.path);
+  const specifiers = new Set(
+    new Bun.Transpiler({ loader }).scanImports(text).map((entry) => entry.path),
+  );
+  const typeOnly = /\b(?:import|export)\s+type\s+[^"'`]*?\bfrom\s+["']([^"']+)["']/g;
+  for (const match of stripComments(text).matchAll(typeOnly)) specifiers.add(match[1]);
+  return [...specifiers];
 }
 
 /** Resolve a relative import the way NSH's bundler does. */
@@ -269,7 +283,7 @@ export function checkAreaImports(root, files) {
       } else if (sourceSegment === "model") {
         violation =
           (targetArea === sourceArea && targetSegment === "interaction") ||
-          targetArea === "flow/document" ||
+          (targetArea !== sourceArea && targetArea === "flow/document") ||
           targetLayer === "component";
       } else if (sourceSegment === "interaction") {
         violation = targetLayer === "component" || targetArea === "flow/document";

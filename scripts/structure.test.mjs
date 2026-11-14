@@ -19,10 +19,12 @@ const tree = {
   "src/.nsh/generated.ts": "",
   "src/native/src/db.rs": "",
   "src/flow/scene.ts":
-    '// import x from "./test/helper"\nimport "./fixtures/a";\nexport { x } from "./fixtures/b";\nexport const later = () => import("./fixtures/c");',
+    '// import x from "./test/helper"\nimport "./fixtures/a";\nexport { x } from "./fixtures/b";\nexport const later = () => import("./fixtures/c");\nimport type { A } from "./fixtures/type-a";\nexport type { B } from "./fixtures/type-b";',
   "src/flow/fixtures/a.ts": "",
   "src/flow/fixtures/b.ts": "",
   "src/flow/fixtures/c.ts": "",
+  "src/flow/fixtures/type-a.ts": "",
+  "src/flow/fixtures/type-b.ts": "",
   "src/flow/new.ts": "",
   "src/flow/utils/thing.ts": "",
   "src/flow/canvas/index.ts": "",
@@ -30,10 +32,14 @@ const tree = {
   "src/flow/canvas/geometry/point.ts": 'import "../model/camera";',
   "src/components/search/SearchPalette.tsx": 'import "../../flow/canvas";',
   "src/flow/document/session/session.ts": 'import "../test/helper";',
+  "src/flow/document/session/type-only.ts": 'import type { Helper } from "../test/helper";',
   "src/flow/document/session/deep.ts": 'import "../../canvas/model/camera";',
+  "src/flow/document/session/y.ts": "",
+  "src/flow/document/model/x.ts": 'import "../session/y";',
   "src/flow/document/test/helper.ts": "",
   "src/components/canvas/index.ts": "",
   "src/components/canvas/helper.ts": 'import "@flow/native";',
+  "src/components/canvas/type-only.ts": 'import type { NodeSummary } from "@flow/native";',
   "src/components/Widget.tsx": "",
   "src/pages/FlowPage.tsx": "",
 };
@@ -78,6 +84,7 @@ test("reports a new flat module, a missing facade and a forbidden folder", () =>
         "new flat module at the flow/ root: src/flow/new.ts",
         "new flat module at the components/ root: src/components/Widget.tsx",
         "src/flow/document/session/session.ts imports test support (../test/helper)",
+        "src/flow/document/session/type-only.ts imports test support (../test/helper)",
       ].toSorted(),
     );
     expect(result.reports).toContain(
@@ -97,14 +104,26 @@ test("reports a new flat module, a missing facade and a forbidden folder", () =>
     expect(result.reports).toContain(
       "src/components/canvas/helper.ts imports @flow/native outside the document seam",
     );
+    expect(result.reports).toContain(
+      "src/components/canvas/type-only.ts imports @flow/native outside the document seam",
+    );
+    expect(result.reports).not.toContain(
+      "src/flow/document/model/x.ts (model) may not import src/flow/document/session/y.ts",
+    );
   });
 });
 
-test("reads static, re-export and dynamic imports but not comments", () => {
+test("reads static, re-export, dynamic and type-only imports but not comments", () => {
   withTree(tree, (root) => {
     const imports = readImports(root, "src/flow/scene.ts");
     expect(imports).toEqual(
-      expect.arrayContaining(["./fixtures/a", "./fixtures/b", "./fixtures/c"]),
+      expect.arrayContaining([
+        "./fixtures/a",
+        "./fixtures/b",
+        "./fixtures/c",
+        "./fixtures/type-a",
+        "./fixtures/type-b",
+      ]),
     );
     expect(imports).not.toContain("./test/helper");
   });
@@ -115,6 +134,7 @@ test("fails a production import of test support and allows test code to import i
     const files = collectSourceFiles(root);
     expect(checkTestSupportImports(root, files)).toEqual([
       "src/flow/document/session/session.ts imports test support (../test/helper)",
+      "src/flow/document/session/type-only.ts imports test support (../test/helper)",
     ]);
   });
 });
@@ -172,6 +192,9 @@ test("Phase 5 turns the area findings into failures", () => {
       );
       expect(result.failures).toContain(
         "src/components/canvas/helper.ts imports @flow/native outside the document seam",
+      );
+      expect(result.failures).toContain(
+        "src/components/canvas/type-only.ts imports @flow/native outside the document seam",
       );
     } finally {
       Object.assign(ENFORCEMENT, previous);

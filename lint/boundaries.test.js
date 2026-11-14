@@ -56,6 +56,8 @@ const areaTree = {
   "src/flow/document/index.ts": "",
   "src/flow/document/session/session.ts": "",
   "src/flow/document/session/harness.ts": "",
+  "src/flow/document/session/y.ts": "",
+  "src/flow/document/model/x.ts": "",
   "src/flow/document/test/helper.ts": "",
   "src/app-test-harness.ts": "",
   "src/flow/nodes/index.ts": "",
@@ -302,6 +304,10 @@ test("keeps geometry pure and model/interaction view-free", () => {
           root,
         ).map((report) => report.messageId),
       ).toEqual(["forbidden"]);
+
+      expect(
+        reportsForRule(segmentDirection, "src/flow/document/model/x.ts", "../session/y", root),
+      ).toEqual([]);
     }),
   );
 });
