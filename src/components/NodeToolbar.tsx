@@ -2,7 +2,7 @@ import { Image as ImageIcon, Type, Upload } from "lucide";
 import { Text, token, View } from "nsh";
 import { Button } from "nsh/base";
 import type { NodeKindId } from "../flow/node-kinds";
-import { Icon } from "./Icon";
+import { Icon } from "./primitives";
 
 export interface NodeToolbarProps {
   readonly onAdd: (kind: NodeKindId) => void;

@@ -1,5 +1,5 @@
 /** Loads the visible image cards' asset URLs after a scene read. */
-import type { Document } from "@flow/native";
+import type { Document } from "./shared";
 import type { AssetUrls } from "./asset-urls";
 import { loadPreviews, type PreviewTarget } from "./previews";
 import type { FlowScene } from "./scene";

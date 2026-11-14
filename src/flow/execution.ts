@@ -3,14 +3,16 @@
  * provider calls); Rust stores the immutable batch and its items.
  */
 import { token } from "nsh";
-import type {
-  ChangeSet,
-  Document,
-  InputItemSummary,
-  NodeDetail,
-  ResultBatchInput,
-  ResultItemInput,
-} from "@flow/native";
+import {
+  imageResultItem,
+  resultBatch,
+  textResultItem,
+  type ChangeSet,
+  type Document,
+  type InputItemSummary,
+  type NodeDetail,
+  type ResultItemInput,
+} from "./shared";
 import {
   imageModelLabel,
   type ImageResolution,
@@ -206,15 +208,7 @@ export class NodeRunner {
 
       const items = await Promise.all(
         result.items.map(async (item, position): Promise<ResultItemInput> => {
-          if (item.kind === "text") {
-            return {
-              id: `item-${crypto.randomUUID()}`,
-              position,
-              portId: "text",
-              kind: "text",
-              text: item.text,
-            };
-          }
+          if (item.kind === "text") return textResultItem(position, item.text);
           const asset = await this.document.importAsset({
             id: `asset-${crypto.randomUUID()}`,
             kind: "image",
@@ -223,20 +217,12 @@ export class NodeRunner {
             bytes: item.bytes,
             metaJson: item.metaJson,
           });
-          return {
-            id: `item-${crypto.randomUUID()}`,
-            position,
-            portId: "image",
-            kind: "image",
-            text: "",
-            assetId: asset.id,
-            metaJson: item.metaJson,
-          };
+          return imageResultItem(position, asset.id, item.metaJson);
         }),
       );
 
       if (controller.signal.aborted) throw new CancelledError();
-      const batch: ResultBatchInput = {
+      const batch = resultBatch({
         id: batchId,
         nodeId,
         trigger: "run",
@@ -244,7 +230,7 @@ export class NodeRunner {
         model: result.model,
         paramsJson: result.paramsJson,
         status: "done",
-      };
+      });
       this.apply(await this.document.saveRun(batch, items));
     } catch (error) {
       // The app is closing: the database is gone and startup recovery will

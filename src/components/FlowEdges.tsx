@@ -5,15 +5,8 @@
  * A connector rests faint in its port type's color; the clicked one is
  * thicker and fully lit.
  */
-import {
-  type Accessor,
-  Canvas,
-  type CanvasRenderingContext2D,
-  colorScheme,
-  computed,
-  token,
-} from "nsh";
-import type { EdgeSummary } from "@flow/native";
+import { type Accessor, Canvas, type CanvasRenderingContext2D, colorScheme, computed } from "nsh";
+import { sameBox, type EdgeSummary } from "../flow/shared";
 import {
   type BoxGeometry,
   type Point,
@@ -23,10 +16,9 @@ import {
   overlaps,
 } from "../flow/connection";
 import { cubicInsideView, visibleCubicRuns } from "../flow/edge-clip";
-import { connectorLayerBox, sameBox, trimConnectorBox } from "../flow/edge-layer";
-import { isPortKind } from "../flow/node-kinds";
-import { portVisual } from "../flow/port-visuals";
+import { connectorLayerBox, trimConnectorBox } from "../flow/edge-layer";
 import type { FlowScene } from "../flow/scene";
+import { connectorColor } from "./canvas";
 
 /** The selected connector's stroke: one point thicker than the rest, so a
  * lit line reads as bold. */
@@ -163,7 +155,7 @@ export function FlowEdges(props: FlowEdgesProps) {
         touching.has(edge.toId) ||
         previewing.has(edge.fromId) ||
         previewing.has(edge.toId);
-      cx.strokeStyle = portColor(edge.portKind);
+      cx.strokeStyle = connectorColor(edge.portKind);
       cx.lineWidth = lit ? SELECTED_THICKNESS : EDGE_THICKNESS;
       cx.globalAlpha = lit ? 1 : REST_ALPHA;
       cx.beginPath();
@@ -186,9 +178,4 @@ export function FlowEdges(props: FlowEdgesProps) {
       draw={draw}
     />
   );
-}
-
-/** The stroke color of a connector from its port type. */
-function portColor(kind: string): string {
-  return token(portVisual(isPortKind(kind) ? kind : "text").token);
 }

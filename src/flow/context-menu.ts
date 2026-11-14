@@ -7,6 +7,7 @@ import type { NodeKindId } from "./node-kinds";
 import type { StageSize } from "./overlay";
 import type { FlowScene } from "./scene";
 import { portAt } from "./scene-ports";
+import { samePoint, sameRect } from "./shared";
 
 /** A secondary-button press in the canvas's screen points. */
 export interface ContextMenuPoint {
@@ -307,14 +308,6 @@ export function dismissContextMenuOnChange(
     edgeAnchor = null;
     untracked(() => menu.close());
   });
-}
-
-function sameRect(a: BoxGeometry, b: BoxGeometry): boolean {
-  return a.x === b.x && a.y === b.y && a.width === b.width && a.height === b.height;
-}
-
-function samePoint(a: Point, b: Point): boolean {
-  return a.x === b.x && a.y === b.y;
 }
 
 function clamp(value: number, min: number, max: number): number {

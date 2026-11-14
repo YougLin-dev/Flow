@@ -1,5 +1,5 @@
 /** Screen-space geometry and hit testing for a card's invisible resize handles. */
-import type { NodeSummary } from "@flow/native";
+import type { NodeSummary } from "./shared";
 import type { CanvasCamera } from "./camera";
 import type { CanvasCursor } from "./canvas-controller";
 import type { FlowScene } from "./scene";

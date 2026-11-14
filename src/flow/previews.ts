@@ -1,4 +1,4 @@
-import type { Document } from "@flow/native";
+import type { Document } from "./shared";
 import type { AssetUrls } from "./asset-urls";
 import type { PreviewView } from "./scene";
 

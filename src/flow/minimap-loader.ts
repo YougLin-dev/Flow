@@ -1,6 +1,6 @@
 /** Loads the whole document's card silhouettes for the minimap. */
 import { signal, type Accessor } from "nsh";
-import type { ChangeSet, Document, Overview, OverviewCard } from "@flow/native";
+import type { ChangeSet, Document, Overview, OverviewCard } from "./shared";
 import { sameOverview } from "./minimap";
 
 /** A burst of command changes coalesces into one overview read. */

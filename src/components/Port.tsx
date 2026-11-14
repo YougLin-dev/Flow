@@ -6,10 +6,10 @@
  * asks for none, while its connector anchor stays put.
  */
 import { cleanup, createAnimatedValue, effect, token, View } from "nsh";
-import { Icon } from "./Icon";
+import { Icon } from "./primitives";
 import { followPoint, type Point, PORT_FOLLOW_MAX, PORT_SIZE } from "../flow/connection";
 import type { InputPort, OutputPort } from "../flow/node-kinds";
-import { portVisual, type PortToken } from "../flow/port-visuals";
+import { portVisual, type PortToken } from "./canvas";
 
 /** The hovered port's follow and return springs, tuned to settle quickly. */
 const FOLLOW_SPRING = { stiffness: 1200, damping: 68, mass: 1 } as const;

@@ -6,8 +6,8 @@
 import { Image as NshImage, token, View } from "nsh";
 import { Button } from "nsh/base";
 import { Image as ImageIcon, X } from "lucide";
-import type { InputItemSummary } from "@flow/native";
-import { Icon } from "./Icon";
+import type { InputItemSummary } from "../flow/shared";
+import { Icon } from "./primitives";
 
 /** The tile's size in points, matching the attach row's add button. */
 export const TILE_SIZE = 44;

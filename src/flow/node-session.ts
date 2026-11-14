@@ -6,7 +6,7 @@
  */
 import { signal } from "nsh";
 import type { PickedImage, PickImagesOptions, Signal } from "nsh";
-import type { ChangeSet, EdgeInput, NodeDetail, NodeInput } from "@flow/native";
+import type { ChangeSet, EdgeInput, NodeDetail, NodeInput } from "./shared";
 import { canSkipDetailReload, detailAssetIds } from "./composer-detail";
 import type { ConnectionPair } from "./connection-gesture";
 import type { NodeRunner } from "./execution";

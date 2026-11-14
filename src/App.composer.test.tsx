@@ -6,7 +6,7 @@ import {
   PNG_1X1,
   selectSeed,
   selectedOf,
-} from "./app-test-harness";
+} from "./test-support/app";
 
 /**
  * The composer always sits directly below its card and a revealed card is

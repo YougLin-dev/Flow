@@ -1,5 +1,5 @@
 /** Opening a search hit: fit its card, load it into the scene, select it. */
-import type { Document } from "@flow/native";
+import type { Document } from "./shared";
 import type { FlowScene } from "./scene";
 import type { ViewportController } from "./viewport-controller";
 

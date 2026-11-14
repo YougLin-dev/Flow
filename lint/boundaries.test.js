@@ -60,7 +60,7 @@ const areaTree = {
   "src/flow/document/model/x.ts": "",
   "src/flow/document/interaction/controller.ts": "",
   "src/flow/document/test/helper.ts": "",
-  "src/app-test-harness.ts": "",
+  "src/test-support/app.ts": "",
   "src/flow/nodes/index.ts": "",
   "src/flow/nodes/node-kinds.ts": "",
   "src/flow/shared/index.ts": "",
@@ -349,7 +349,7 @@ test("reports production imports of test support", () => {
       reportsForRule(
         testSupportInProduction,
         "src/flow/document/session/harness.ts",
-        "../../../app-test-harness",
+        "../../../test-support/app",
         root,
       ).map((report) => report.messageId),
     ).toEqual(["testSupport"]);

@@ -7,7 +7,7 @@ import {
   PNG_1X1,
   selectSeed,
   selectedOf,
-} from "./app-test-harness";
+} from "./test-support/app";
 import { seedNodes } from "./flow/data";
 
 /** Rests the pointer on a canvas control and proves its tooltip shows `label`. */

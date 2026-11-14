@@ -12,13 +12,13 @@ import {
   type PressEvent,
   type ViewStyle,
 } from "nsh";
-import type { Overview, OverviewCard } from "@flow/native";
+import type { Overview, OverviewCard } from "../flow/shared";
 import { type CanvasCamera, wheelNotches } from "../flow/camera";
+import { sameBounds } from "../flow/shared";
 import {
   minimapLayout,
   minimapRect,
   minimapViewport,
-  sameBounds,
   sameLayout,
   unionBounds,
 } from "../flow/minimap";

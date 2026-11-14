@@ -8,7 +8,7 @@
 import { token } from "nsh";
 import { Input } from "nsh/base";
 import { CARD_BODY_FONT_SIZE, CARD_BODY_LINE_HEIGHT } from "../flow/card-layout";
-import { keepsWheel } from "../flow/page-chrome";
+import { keepsWheel } from "../flow/shared";
 
 export interface InlineTextEditorProps {
   /** The body's world size; the surrounding view scales it with the camera. */

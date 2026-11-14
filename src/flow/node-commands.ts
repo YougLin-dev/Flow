@@ -4,7 +4,7 @@
  * and write through the document, so the menu stays a state and gesture
  * controller.
  */
-import type { ChangeSet, Document, NodeInput } from "@flow/native";
+import { resultBatch, resultItem, type ChangeSet, type Document, type NodeInput } from "./shared";
 import { type NodeSettings, serializeSettings } from "./node-kinds";
 import type { FlowScene } from "./scene";
 
@@ -91,24 +91,24 @@ export async function copyNode(
         ? await document.insertNodes([input])
         : await document.insertUploadNode(
             input,
-            {
-              id: `batch-${crypto.randomUUID()}`,
+            resultBatch({
               nodeId: copyId,
               trigger: uploadBatch.trigger,
               provider: uploadBatch.provider,
               model: uploadBatch.model,
               paramsJson: uploadBatch.paramsJson,
               status: "done",
-            },
-            uploadBatch.items.map((item, position) => ({
-              id: `item-${crypto.randomUUID()}`,
-              position,
-              portId: item.portId,
-              kind: item.kind,
-              text: item.text,
-              assetId: item.assetId ?? null,
-              metaJson: item.metaJson,
-            })),
+            }),
+            uploadBatch.items.map((item, position) =>
+              resultItem({
+                position,
+                portId: item.portId,
+                kind: item.kind,
+                text: item.text,
+                assetId: item.assetId ?? null,
+                metaJson: item.metaJson,
+              }),
+            ),
           );
     if (host.isDisposed()) return;
     host.applyChanges(changes);

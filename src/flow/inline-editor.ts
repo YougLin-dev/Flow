@@ -9,7 +9,7 @@
  * write landing never closes an editor reopened since it started.
  */
 import { signal } from "nsh";
-import type { ChangeSet, Document, ResultBatchInput, ResultItemInput } from "@flow/native";
+import { manualTextResult, type ChangeSet, type Document } from "./shared";
 
 /** What the editor needs from the session and the document. */
 export interface InlineEditorHost {
@@ -94,22 +94,7 @@ export class InlineEditor {
       const current = await document.getNode(nodeId);
       if (!current) return false;
       if (current.body === text) return true;
-      const batch: ResultBatchInput = {
-        id: `batch-${crypto.randomUUID()}`,
-        nodeId,
-        trigger: "manual",
-        provider: "manual",
-        model: "",
-        paramsJson: "{}",
-        status: "done",
-      };
-      const item: ResultItemInput = {
-        id: `item-${crypto.randomUUID()}`,
-        position: 0,
-        portId: "text",
-        kind: "text",
-        text,
-      };
+      const { batch, item } = manualTextResult(nodeId, text);
       const changes = await document.setManualText(nodeId, text, batch, item);
       if (this.host.isDisposed()) return false;
       this.applyingOwnWrite = own;

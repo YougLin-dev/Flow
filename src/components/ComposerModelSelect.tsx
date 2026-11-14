@@ -6,7 +6,7 @@
 import { Text, token } from "nsh";
 import { Button, Select } from "nsh/base";
 import { ChevronDown } from "lucide";
-import { Icon } from "./Icon";
+import { Icon } from "./primitives";
 
 /** One choice in a kind's model catalog. */
 export interface ComposerModel {

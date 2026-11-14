@@ -5,7 +5,13 @@
  * read its signals and the page drives its commands.
  */
 import { batch, signal, type Signal, untracked } from "nsh";
-import type { EdgeSummary, NodeBounds, NodeSummary, SceneSnapshot } from "@flow/native";
+import {
+  sameRectWithin,
+  type EdgeSummary,
+  type NodeBounds,
+  type NodeSummary,
+  type SceneSnapshot,
+} from "./shared";
 import {
   type BoxGeometry,
   connectionBounds,
@@ -151,7 +157,7 @@ export class FlowScene {
         );
         this.setApplied(node);
         const override = this.overrideRects.get(node.id);
-        if (override && sameRect(override, rectOfNode(node))) this.dropOverride(node.id);
+        if (override && sameRectWithin(override, rectOfNode(node))) this.dropOverride(node.id);
       }
       for (const id of changes.removed) {
         this.byId.delete(id);
@@ -213,7 +219,7 @@ export class FlowScene {
     for (const [id, rect] of this.overrideRects) {
       const applied = this.applied.get(id);
       if (!applied) continue;
-      if (!sameRect(applied, rect)) changed.push({ id, ...rect });
+      if (!sameRectWithin(applied, rect)) changed.push({ id, ...rect });
     }
     return changed;
   }
@@ -339,7 +345,7 @@ export class FlowScene {
   private setApplied(node: NodeSummary): void {
     const rect = rectOfNode(node);
     const previous = this.applied.get(node.id);
-    const kept = previous && sameRect(previous, rect) ? previous : rect;
+    const kept = previous && sameRectWithin(previous, rect) ? previous : rect;
     this.applied.set(node.id, kept);
     // A transient override stays authoritative; dropping it publishes the
     // applied rect then.
@@ -653,15 +659,6 @@ function samePairs(a: Set<string>, b: Set<string>): boolean {
 
 function rectOfNode(node: NodeSummary): BoxGeometry {
   return { x: node.x, y: node.y, width: node.width, height: node.height };
-}
-
-function sameRect(a: BoxGeometry, b: BoxGeometry): boolean {
-  return (
-    Math.abs(a.x - b.x) <= 0.01 &&
-    Math.abs(a.y - b.y) <= 0.01 &&
-    Math.abs(a.width - b.width) <= 0.01 &&
-    Math.abs(a.height - b.height) <= 0.01
-  );
 }
 
 function samePreviews(a: readonly ConnectionPreview[], b: readonly ConnectionPreview[]): boolean {

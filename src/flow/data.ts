@@ -1,4 +1,4 @@
-import type { Document, NodeInput, ResultBatchInput, ResultItemInput } from "@flow/native";
+import { manualTextResult, type Document, type NodeInput } from "./shared";
 import { portOffset } from "./connection";
 import { serializeSettings } from "./node-kinds";
 
@@ -70,22 +70,7 @@ export function seedNodes(): NodeInput[] {
 export async function seedDocument(document: Document): Promise<void> {
   await document.insertNodes(seedNodes());
 
-  const batch: ResultBatchInput = {
-    id: `batch-${crypto.randomUUID()}`,
-    nodeId: TEXT_NODE_ID,
-    trigger: "manual",
-    provider: "manual",
-    model: "",
-    paramsJson: "{}",
-    status: "done",
-  };
-  const item: ResultItemInput = {
-    id: `item-${crypto.randomUUID()}`,
-    position: 0,
-    portId: "text",
-    kind: "text",
-    text: SEED_TEXT,
-  };
+  const { batch, item } = manualTextResult(TEXT_NODE_ID, SEED_TEXT);
   await document.setManualText(TEXT_NODE_ID, SEED_TEXT, batch, item);
   await document.connectEdge({
     id: SEED_EDGE_ID,

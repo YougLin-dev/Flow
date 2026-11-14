@@ -7,7 +7,7 @@
 import { Text, View } from "nsh";
 import { Button } from "nsh/base";
 import { CONTEXT_MENU_WIDTH } from "../flow/context-menu";
-import { keepsWheel } from "../flow/page-chrome";
+import { keepsWheel } from "../flow/shared";
 
 export interface CanvasContextMenuProps {
   readonly left: number;

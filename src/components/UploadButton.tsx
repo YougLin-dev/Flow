@@ -8,8 +8,8 @@
 import { Text, token } from "nsh";
 import { Button } from "nsh/base";
 import { ImageUp, LoaderCircle, RefreshCw } from "lucide";
-import type { IconNode } from "../flow/icon-shape";
-import { Icon } from "./Icon";
+import type { IconNode } from "./primitives";
+import { Icon } from "./primitives";
 
 /** The button's size and inset from the card's bottom-right, in world points. */
 export const UPLOAD_BUTTON_WIDTH = 104;

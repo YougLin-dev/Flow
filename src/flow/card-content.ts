@@ -6,7 +6,7 @@
  * these accessors instead wakes a binding only when its value really moves.
  */
 import { type Accessor, computed } from "nsh";
-import type { NodeSummary } from "@flow/native";
+import type { NodeSummary } from "./shared";
 import { type FlowAccent, hasImageOutput, nodeKind, statusLabel } from "./node-kinds";
 
 export class CardContent {

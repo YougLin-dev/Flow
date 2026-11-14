@@ -1,5 +1,5 @@
 import { expect, test } from "nsh/test";
-import { openApp, percentOf, selectedOf } from "./app-test-harness";
+import { openApp, percentOf, selectedOf } from "./test-support/app";
 import { CONTENT } from "./flow/data";
 
 /** Half the flow's size in world coordinates. */

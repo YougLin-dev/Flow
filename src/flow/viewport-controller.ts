@@ -2,7 +2,7 @@
  * The camera and viewport read loop: fitting, panning, zooming and throttled
  * scene reads. It owns no UI; the page binds the values it publishes.
  */
-import type { ChangeSet, Document, Viewport } from "@flow/native";
+import type { ChangeSet, Document, Viewport } from "./shared";
 import type { CanvasCamera } from "./camera";
 import { CONTENT } from "./data";
 import type { FlowScene } from "./scene";

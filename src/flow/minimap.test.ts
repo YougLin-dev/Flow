@@ -4,7 +4,6 @@ import {
   minimapLayout,
   minimapRect,
   minimapViewport,
-  sameBounds,
   sameLayout,
   sameOverview,
   unionBounds,
@@ -40,14 +39,6 @@ test("unions the document with the viewport", () => {
     width: 250,
     height: 100,
   });
-});
-
-test("an unchanged union compares equal by value", () => {
-  const bounds = { x: 1, y: 2, width: 3, height: 4 };
-  expect(sameBounds(null, null)).toBe(true);
-  expect(sameBounds(bounds, { x: 1, y: 2, width: 3, height: 4 })).toBe(true);
-  expect(sameBounds(null, bounds)).toBe(false);
-  expect(sameBounds(bounds, { x: 1, y: 2, width: 3, height: 5 })).toBe(false);
 });
 
 test("keeps silhouettes visible when the document dwarfs the panel", () => {

@@ -2,24 +2,12 @@
 import { type Accessor, computed } from "nsh";
 import { type BoxGeometry, connectionBounds, EDGE_PADDING, mergeBounds } from "./connection";
 import type { FlowScene } from "./scene";
+import { sameBox } from "./shared";
 
 /** How coarse the canvas box is, in world points: fine enough that rounding
  * it outward never shows, coarse enough that moving a card does not resize
  * the canvas surface every pointer move. */
 const BOX_STEP = 64;
-
-/** Compares the rounded rectangle, not its short-lived object identity. */
-export function sameBox(a: BoxGeometry | null, b: BoxGeometry | null): boolean {
-  if (a === b) return true;
-  return (
-    a !== null &&
-    b !== null &&
-    a.x === b.x &&
-    a.y === b.y &&
-    a.width === b.width &&
-    a.height === b.height
-  );
-}
 
 /** `box` rounded outward to whole `BOX_STEP`s, never clipping what it holds. */
 function roundOut(box: BoxGeometry): BoxGeometry {

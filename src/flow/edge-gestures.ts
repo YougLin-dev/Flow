@@ -3,7 +3,7 @@
  * a card's typed port or a selection frame's group port, and moving either
  * end of the selected edge.
  */
-import type { EdgeSummary } from "@flow/native";
+import type { EdgeSummary } from "./shared";
 import type { CanvasCamera } from "./camera";
 import {
   type ConnectionPair,

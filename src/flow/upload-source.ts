@@ -5,13 +5,14 @@
  * immutable result batch, so connecting, previews and downstream snapshots
  * reuse the provider run's path. One upload replaces the node's output.
  */
-import type {
-  ChangeSet,
-  Document,
-  NodeBounds,
-  ResultBatchInput,
-  ResultItemInput,
-} from "@flow/native";
+import {
+  imageResultItem,
+  resultBatch,
+  type ChangeSet,
+  type Document,
+  type NodeBounds,
+  type ResultItemInput,
+} from "./shared";
 import type { PickedImage, PickImagesOptions } from "nsh";
 import { serializeSettings, type UploadSettings } from "./node-kinds";
 
@@ -83,15 +84,7 @@ export async function uploadSource(
         if (cardSize === null) {
           cardSize = uploadCardSize({ width: result.value.width, height: result.value.height });
         }
-        items.push({
-          id: `item-${crypto.randomUUID()}`,
-          position: items.length,
-          portId: "image",
-          kind: "image",
-          text: "",
-          assetId: result.value.assetId,
-          metaJson: result.value.metaJson,
-        });
+        items.push(imageResultItem(items.length, result.value.assetId, result.value.metaJson));
         names.push(result.value.name);
       } else {
         console.error("Flow could not import an uploaded image", result.reason);
@@ -115,15 +108,13 @@ export async function uploadSource(
         nodeId,
         serializeSettings(settings),
         names.join("\n").slice(0, BODY_LIMIT),
-        {
-          id: `batch-${crypto.randomUUID()}`,
+        resultBatch({
           nodeId,
           trigger: "upload",
           provider: "local",
-          model: "",
-          paramsJson: JSON.stringify({ files: items.length }),
           status: "done",
-        },
+          paramsJson: JSON.stringify({ files: items.length }),
+        }),
         items,
         bounds,
       );
@@ -230,16 +221,13 @@ async function recordFailure(
   error: string,
   host: UploadSourceHost,
 ): Promise<void> {
-  const batch: ResultBatchInput = {
-    id: `batch-${crypto.randomUUID()}`,
+  const batch = resultBatch({
     nodeId,
     trigger: "upload",
     provider: "local",
-    model: "",
-    paramsJson: "{}",
     status: "failed",
     error,
-  };
+  });
   try {
     const changes = await document.saveRun(batch, []);
     if (!host.isDisposed()) host.applyChanges(changes);

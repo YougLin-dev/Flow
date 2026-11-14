@@ -4,7 +4,7 @@
  * follows the same rule as the committed connectors, so the cost stays one
  * view however large the selection is.
  */
-import { Canvas, type CanvasRenderingContext2D, colorScheme, computed, token } from "nsh";
+import { Canvas, type CanvasRenderingContext2D, colorScheme, computed } from "nsh";
 import {
   type BoxGeometry,
   connectionBounds,
@@ -14,9 +14,8 @@ import {
   EDGE_THICKNESS,
   mergeBounds,
 } from "../flow/connection";
-import { isPortKind } from "../flow/node-kinds";
-import { portVisual } from "../flow/port-visuals";
 import type { ConnectionPreview } from "../flow/scene";
+import { connectorColor } from "./canvas";
 
 export interface FlowPreviewsProps {
   readonly previews: () => readonly ConnectionPreview[];
@@ -50,7 +49,7 @@ export function FlowPreviews(props: FlowPreviewsProps) {
     cx.lineCap = "round";
     cx.setLineDash(EDGE_DASH);
     for (const { from, to, portKind } of previews) {
-      cx.strokeStyle = token(portVisual(isPortKind(portKind) ? portKind : "text").token);
+      cx.strokeStyle = connectorColor(portKind);
       const { c1, c2 } = connectorControls(from, to);
       cx.beginPath();
       cx.moveTo(from.x - origin.x, from.y - origin.y);

@@ -1,6 +1,6 @@
 import { cleanup, effect, host, keymap, Picker, platform, signal, untracked, View } from "nsh";
 import { isAvailable } from "nsh/desktop";
-import type { ChangeSet, Document, NodeBounds, SearchHit } from "@flow/native";
+import type { ChangeSet, Document, NodeBounds, SearchHit } from "../flow/shared";
 import { BrandCard } from "../components/BrandCard";
 import { CanvasMenuLayer } from "../components/CanvasMenuLayer";
 import { FlowCanvas } from "../components/FlowCanvas";

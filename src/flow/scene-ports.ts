@@ -3,7 +3,7 @@
  * capacity arithmetic. They are free functions because they read the scene
  * through its public surface; the scene model keeps to reconciling records.
  */
-import type { EdgeSummary } from "@flow/native";
+import type { EdgeSummary } from "./shared";
 import type { PortSide, Point } from "./connection";
 import { portCenter, portHit, portOffset, PORT_CENTER_GAP } from "./connection";
 import { type PortKind, portsOfNode } from "./node-kinds";

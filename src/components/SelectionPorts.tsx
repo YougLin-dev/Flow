@@ -11,7 +11,7 @@ import type { BoxGeometry } from "../flow/connection";
 import { selectionFrame } from "../flow/frame-surface";
 import { type GroupPort, groupPorts } from "../flow/group-ports";
 import type { InputPort, OutputPort } from "../flow/node-kinds";
-import { portVisual } from "../flow/port-visuals";
+import { portVisual } from "./canvas";
 import type { FlowScene } from "../flow/scene";
 import { Port } from "./Port";
 

@@ -5,7 +5,7 @@
  * components read its signals.
  */
 import { batch, computed, signal, type ViewStyle } from "nsh";
-import type { NodeBounds } from "@flow/native";
+import type { NodeBounds } from "./shared";
 import type { CanvasCamera } from "./camera";
 import type { BoxGeometry, Point, PortSide } from "./connection";
 import type { ConnectionPair, MagnetPort } from "./connection-gesture";

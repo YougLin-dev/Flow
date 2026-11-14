@@ -1,6 +1,6 @@
 import { cleanup, keymap, List, signal, Text, token, View, type InputRef, type ListRef } from "nsh";
 import { Button, Dialog, Input } from "nsh/base";
-import type { SearchHit } from "@flow/native";
+import type { SearchHit } from "../flow/shared";
 
 const SEARCH_DELAY_MS = 120;
 

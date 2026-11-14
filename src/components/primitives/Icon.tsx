@@ -4,7 +4,7 @@
  * sharp at every size. Icons are decorative; their button carries the label.
  */
 import { Canvas, colorScheme, Path2D, token } from "nsh";
-import { ICON_GRID, type IconNode, iconPath } from "../flow/icon-shape";
+import { ICON_GRID, type IconNode, iconPath } from "./icon-shape";
 
 export interface IconProps {
   /** The icon's `IconNode` export, such as Lucide's `Plus`. */

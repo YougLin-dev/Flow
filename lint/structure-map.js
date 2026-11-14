@@ -169,7 +169,6 @@ export const AREAS = {
 
 /** Test-only modules: classified, exempt from the matrix, never production imports. */
 export const TEST_SUPPORT_FILES = new Set([
-  "src/app-test-harness.ts",
   "src/flow/node-session-harness.ts",
   "src/flow/document/test/node-session-harness.ts",
   "src/test-support/app.ts",
@@ -193,7 +192,6 @@ export const LEGACY_FLAT = new Set([
   "src/components/FlowPreviews.tsx",
   "src/components/FrameRate.tsx",
   "src/components/GridBackground.tsx",
-  "src/components/Icon.tsx",
   "src/components/InlineTextEditor.tsx",
   "src/components/MiniMap.tsx",
   "src/components/MinimapDragOverlay.tsx",
@@ -233,7 +231,6 @@ export const LEGACY_FLAT = new Set([
   "src/flow/grid.ts",
   "src/flow/group-ports.ts",
   "src/flow/hover-flags.ts",
-  "src/flow/icon-shape.ts",
   "src/flow/inline-editor.ts",
   "src/flow/keyed-flags.ts",
   "src/flow/minimap-controller.ts",
@@ -245,7 +242,6 @@ export const LEGACY_FLAT = new Set([
   "src/flow/node-session.ts",
   "src/flow/overlay.ts",
   "src/flow/page-chrome.ts",
-  "src/flow/port-visuals.ts",
   "src/flow/preview-grid.ts",
   "src/flow/preview-loader.ts",
   "src/flow/previews.ts",

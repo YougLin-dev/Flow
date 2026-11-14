@@ -3,7 +3,7 @@
  * shows. Pure policy beside `NodeSession`, which loads the detail and applies
  * it; keeping it here leaves the session to the document-facing commands.
  */
-import type { InputItemSummary, NodeDetail, NodeSummary } from "@flow/native";
+import type { InputItemSummary, NodeDetail, NodeSummary } from "./shared";
 
 /** The failed run's error line for a detail, empty when it has none. */
 export function errorOf(detail: NodeDetail): string {

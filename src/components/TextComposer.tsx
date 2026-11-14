@@ -8,14 +8,14 @@
 import { computed, Text, token, View } from "nsh";
 import { Button, Input } from "nsh/base";
 import { ArrowUp, ImagePlus, Square, X } from "lucide";
-import type { NodeDetail } from "@flow/native";
+import type { NodeDetail } from "../flow/shared";
 import { errorOf, inputUrl } from "../flow/composer-detail";
 import type { ComposerState } from "../flow/composer-state";
 import { isTextModel, TEXT_MODELS, textModelLabel } from "../flow/node-kinds";
-import { keepsWheel } from "../flow/page-chrome";
+import { keepsWheel } from "../flow/shared";
 import { ComposerInputTile, TILE_SIZE } from "./ComposerInputTile";
 import { ComposerModelSelect } from "./ComposerModelSelect";
-import { Icon } from "./Icon";
+import { Icon } from "./primitives";
 
 /** The prompt's limit, shown beside the field as a live counter. */
 const PROMPT_LIMIT = 10000;

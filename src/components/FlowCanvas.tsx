@@ -14,7 +14,8 @@ import {
   type MouseEvent as NshMouseEvent,
   type PressEvent,
 } from "nsh";
-import { type CanvasCamera, type CameraSize, sameBounds, wheelNotches } from "../flow/camera";
+import { type CanvasCamera, type CameraSize, wheelNotches } from "../flow/camera";
+import { sameBounds } from "../flow/shared";
 import type { CanvasController } from "../flow/canvas-controller";
 import type { ContextMenuPoint } from "../flow/context-menu";
 import { inlineBodyBox } from "../flow/overlay";

@@ -11,8 +11,8 @@
 import { computed, host, Image, Text, token, View } from "nsh";
 import { Input } from "nsh/base";
 import { Image as ImageIcon } from "lucide";
-import type { NodeSummary } from "@flow/native";
-import { Icon } from "./Icon";
+import type { NodeSummary } from "../flow/shared";
+import { Icon } from "./primitives";
 import { Port } from "./Port";
 import { portKey, type PortHover } from "../flow/canvas-controller";
 import { CardContent } from "../flow/card-content";

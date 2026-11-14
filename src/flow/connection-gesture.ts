@@ -3,7 +3,7 @@
  * A group drag holds several fixed ends at once and moves the single end
  * under the pointer, so one gesture can connect a whole selection.
  */
-import type { EdgeSummary } from "@flow/native";
+import type { EdgeSummary } from "./shared";
 import type { CanvasCamera } from "./camera";
 import { magnetEndPoint, PORT_MAGNET_RADIUS, type Point, type PortSide } from "./connection";
 import type { PortKind } from "./node-kinds";

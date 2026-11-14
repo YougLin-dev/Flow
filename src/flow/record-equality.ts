@@ -4,10 +4,10 @@
  * bindings that read the scene's lists do not re-run for a field-equal read.
  *
  * These comparisons are exact per field. The geometry tolerance stays in
- * `scene.ts`'s `sameRect` (0.01 world units), which decides whether an
- * applied rectangle kept its value; the two precisions are deliberate.
+ * `flow/shared`'s `sameRectWithin` (0.01 world units), which decides whether
+ * an applied rectangle kept its value; the two precisions are deliberate.
  */
-import type { EdgeSummary, NodeSummary } from "@flow/native";
+import { samePoint, type EdgeSummary, type NodeSummary } from "./shared";
 import type { PreviewView } from "./scene";
 
 /**
@@ -89,15 +89,4 @@ export function samePreviewMap(
     if (!left || !right || left[0] !== right[0] || left[1] !== right[1]) return false;
   }
   return true;
-}
-
-interface EdgePointLike {
-  readonly x: number;
-  readonly y: number;
-}
-
-function samePoint(a: EdgePointLike | null, b: EdgePointLike | null): boolean {
-  if (a === null && b === null) return true;
-  if (a === null || b === null) return false;
-  return a.x === b.x && a.y === b.y;
 }

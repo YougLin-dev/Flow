@@ -1,9 +1,5 @@
 import { keymap } from "nsh";
-
-/** The canvas' zoom and fit shortcuts; the controls show the same keys in their hints. */
-export const ZOOM_IN_KEY = "mod+=";
-export const ZOOM_OUT_KEY = "mod+-";
-export const FIT_KEY = "mod+0";
+import { FIT_KEY, ZOOM_IN_KEY, ZOOM_OUT_KEY } from "./shared";
 
 export interface FlowKeyActions {
   readonly setZoom: (factor: number) => void;
