@@ -28,7 +28,7 @@ Stroke each connector's cubic once on a native `<Canvas>`:
   shared canvas, sized to the union of their control-point bounds.
 - `components/FlowEdge.tsx` draws the connection preview in its own canvas
   above the cards.
-- The control points and bounds stay in `flow/canvas/geometry/connection.ts`
+- The control points and bounds stay in `flow/connection.ts`
   (`connectorControls`, `connectionBounds`); hit testing stays geometric in
   the scene model (`edgeAt`), never pixel-based.
 - Cards, ports, selection, the composer and every gesture remain ordinary NSH

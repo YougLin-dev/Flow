@@ -1773,8 +1773,9 @@ layout) and extracted `scene-types.ts` (`SceneReader`, `PreviewView`,
 gone. `CameraSize`/`CameraBounds` are now aliases of the shared `Size`/
 `BoxGeometry`. The inline-editor test moved beside `inline-body.ts`. The
 scene's internal split (and the `scene-hits.test.ts` rename) stays in Phase 7
-because §11 step 3 forbids a behavior split. `LEGACY_FLAT` is down to 58
-modules.
+because §11 step 3 forbids a behavior split. Accepted ADRs keep their
+historical module paths, per `docs/adr/README.md`'s immutability rule.
+`LEGACY_FLAT` is down to 58 modules.
 
 ---
 
