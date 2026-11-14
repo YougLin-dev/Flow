@@ -1,4 +1,5 @@
 /** The shared kernel's public surface; cross-area imports use this facade. */
+export { AsyncDrain, type DrainStep, type DrainStepResult } from "./async-drain";
 export type { Point, Rect, Size } from "./geometry";
 export { RECT_EPSILON, sameBounds, sameBox, samePoint, sameRect, sameRectWithin } from "./equality";
 export { keepsWheel } from "./wheel";

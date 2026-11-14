@@ -1,5 +1,5 @@
 /** Loads the visible image cards' asset URLs after a scene read. */
-import type { Document } from "./shared";
+import { AsyncDrain, type Document, type DrainStepResult } from "./shared";
 import type { AssetUrls } from "./asset-urls";
 import { loadPreviews, type PreviewTarget } from "./previews";
 import type { FlowScene } from "./scene";
@@ -31,13 +31,16 @@ export function sameTargets(
   return true;
 }
 
+/** The target list a drain iteration reads; each follow-up replaces it. */
+interface PreviewDrain {
+  targets: readonly PreviewTarget[];
+}
+
 export class PreviewLoader {
   private timer: ReturnType<typeof setTimeout> | null = null;
   private generation = 0;
   private lastTargets: readonly PreviewTarget[] | null = null;
-  private inFlight: Promise<void> | null = null;
-  private dirty = false;
-  private pendingResolvers: Array<() => void> = [];
+  private readonly drain = new AsyncDrain();
 
   constructor(private readonly host: PreviewHost) {}
 
@@ -55,91 +58,66 @@ export class PreviewLoader {
     const scene = this.host.scene();
     if (!document || !assets || !scene || this.host.isDisposed()) return Promise.resolve();
     const targets = scene.previewTargets();
-    if (this.inFlight !== null) {
-      // Join the active drain without touching lastTargets. An unchanged list
-      // needs no follow-up read; every refresh still gets a promise settled by
-      // the drain so its caller awaits progress.
-      if (!sameTargets(this.lastTargets, targets)) this.dirty = true;
-      return new Promise<void>((resolve) => {
-        this.pendingResolvers.push(resolve);
-      });
-    }
+    // Join the active drain without touching lastTargets. An unchanged list
+    // needs no follow-up read; every refresh still gets a promise settled by
+    // the drain so its caller awaits progress.
+    const joined = this.drain.join(!sameTargets(this.lastTargets, targets));
+    if (joined !== null) return joined;
     // Every viewport read and change set schedules a refresh; an unchanged
     // target list has nothing to load and must not publish again.
     if (sameTargets(this.lastTargets, targets)) return Promise.resolve();
-    // Publish the drain before starting it: an empty first target list
-    // completes synchronously and would otherwise clear `inFlight` before it
-    // was ever assigned.
-    const drain = new Promise<void>((resolve) => {
-      this.pendingResolvers.push(resolve);
-    });
-    this.inFlight = drain;
-    void this.runReads(document, assets, targets);
-    return drain;
+    const pending: PreviewDrain = { targets };
+    return this.drain.start((isDirty) => this.drainStep(document, assets, pending, isDirty));
   }
 
-  /** One queued drain: a current read plus at most one per newer request. */
-  private async runReads(
+  /** One queued iteration: a read now, and at most one for newer targets. */
+  private async drainStep(
     document: Document,
     assets: AssetUrls,
-    firstTargets: readonly PreviewTarget[],
-  ): Promise<void> {
-    let targets = firstTargets;
-    while (true) {
-      if (this.host.isDisposed()) break;
-      // Clear the flag before awaiting so a request arriving during this read
-      // marks the loop dirty again.
-      this.dirty = false;
-      if (sameTargets(this.lastTargets, targets)) break;
-      const previousTargets = this.lastTargets;
-      this.lastTargets = targets;
-      if (targets.length === 0) {
-        // Nothing to load. Clear a previous publication so a card whose batch
-        // went away stops showing stale thumbnails; a cold start publishes
-        // nothing at all. A completed iteration, not a read.
-        if (previousTargets !== null && previousTargets.length > 0) {
-          const scene = this.host.scene();
-          if (!scene) break;
-          scene.applyPreviews([]);
-        }
-        if (!this.dirty) break;
+    pending: PreviewDrain,
+    isDirty: () => boolean,
+  ): Promise<DrainStepResult> {
+    if (this.host.isDisposed()) return "done";
+    const targets = pending.targets;
+    if (sameTargets(this.lastTargets, targets)) return "done";
+    const previousTargets = this.lastTargets;
+    this.lastTargets = targets;
+    if (targets.length === 0) {
+      // Nothing to load. Clear a previous publication so a card whose batch
+      // went away stops showing stale thumbnails; a cold start publishes
+      // nothing at all. A completed iteration, not a read.
+      if (previousTargets !== null && previousTargets.length > 0) {
         const scene = this.host.scene();
-        if (!scene) break;
-        targets = scene.previewTargets();
-        continue;
+        if (!scene) return "done";
+        scene.applyPreviews([]);
       }
-      const generation = ++this.generation;
-      try {
-        // The drain is deliberately sequential: one read, then at most one
-        // follow-up for the newest targets.
-        // eslint-disable-next-line no-await-in-loop
-        const views = await loadPreviews(document, assets, targets);
-        if (generation !== this.generation) break;
-        if (!this.host.isDisposed()) {
-          const current = this.host.scene();
-          if (!current) break;
-          current.applyPreviews(views);
-        }
-      } catch (error) {
-        if (!this.host.isDisposed()) console.error("Flow could not load image previews", error);
-      }
-      if (this.host.isDisposed() || generation !== this.generation) break;
-      if (!this.dirty) break;
-      // Each follow-up reads the newest targets, immediately before its read.
+      if (!isDirty()) return "done";
       const scene = this.host.scene();
-      if (!scene) break;
-      targets = scene.previewTargets();
+      if (!scene) return "done";
+      pending.targets = scene.previewTargets();
+      return "continue";
     }
-    this.finishReads();
-  }
-
-  private finishReads(): void {
-    this.inFlight = null;
-    const resolvers = this.pendingResolvers;
-    this.pendingResolvers = [];
-    // Callers observe settlement, not proof that an outdated target list was
-    // applied: a dropped read resolves here once its request finishes.
-    for (const resolve of resolvers) resolve();
+    const generation = ++this.generation;
+    try {
+      // The drain is deliberately sequential: one read, then at most one
+      // follow-up for the newest targets.
+      const views = await loadPreviews(document, assets, targets);
+      if (generation !== this.generation) return "done";
+      if (!this.host.isDisposed()) {
+        const current = this.host.scene();
+        if (!current) return "done";
+        current.applyPreviews(views);
+      }
+    } catch (error) {
+      if (!this.host.isDisposed()) console.error("Flow could not load image previews", error);
+    }
+    if (this.host.isDisposed() || generation !== this.generation) return "done";
+    if (!isDirty()) return "done";
+    // Each follow-up reads the newest targets, immediately before its read.
+    const scene = this.host.scene();
+    if (!scene) return "done";
+    pending.targets = scene.previewTargets();
+    return "continue";
   }
 
   dispose(): void {
