@@ -214,7 +214,7 @@ run `bun run check:fix` before committing.
 | `bun run lint`            | NSH check, then Oxlint (names and boundaries)         |
 | `bun run typecheck`       | NSH's TypeScript settings via `nsh check src`         |
 | `bun run check`           | Formatting + lint + type check + rule/structure tests |
-| `bun run check:structure` | Area, facade, root and budget report (part of check)  |
+| `bun run check:structure` | Area, facade, root and budget gate (part of check)    |
 | `bun run test`            | Headless tests                                        |
 | `bun run test:lint`       | Boundary and structure rule tests (part of check)     |
 

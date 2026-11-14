@@ -14,7 +14,7 @@ nsh test src/flow/canvas/model/camera.test.ts   # one file
 bun run test:host                  # the *.host.test.tsx platform tests on this machine's host
 bun run test:host -- --filter zoom # one host behaviour (extra args go to nsh test)
 bun run test:lint                  # boundary and structure rule tests (part of check)
-bun run check:structure            # area/facade/root report; part of check
+bun run check:structure            # area/facade/root gate; part of check
 bun run test:bench                 # the ignored 100k SQLite/FTS5/RTree benchmark
 bun run test:100k                  # seeds 100k nodes, then drives the real host UI
 bun run test:junit                 # also write src/.nsh/junit.xml for CI

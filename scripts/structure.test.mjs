@@ -35,6 +35,7 @@ const tree = {
   "src/flow/bindings.ts": 'import "./canvas";',
   "src/flow/utils/thing.ts": "",
   "src/flow/canvas/index.ts": "",
+  "src/flow/canvas/native/utils/thing.ts": "",
   "src/flow/canvas/model/camera.ts": "",
   "src/flow/canvas/geometry/point.ts": 'import "../model/camera";\nimport "../../execution/index";',
   "src/flow/execution/index.ts": "",
@@ -94,6 +95,7 @@ test("reports a new flat module, a missing facade and a forbidden folder", () =>
       [
         "area components/search is missing its src/components/search/index.ts facade",
         "area flow/document is missing its src/flow/document/index.ts facade",
+        'forbidden folder "utils" in src/flow/canvas/native/utils/thing.ts',
         'forbidden folder "utils" in src/flow/utils/thing.ts',
         "new flat module at the components/ root: src/components/Widget.tsx",
         "new flat module at the components/ root: src/components/index.tsx",
@@ -266,10 +268,16 @@ test("reports unclassified flat fixtures and keeps the Rust report advisory", ()
       const files = collectSourceFiles(root);
       expect(files).toContain("src/pages/FlowPage.tsx");
       expect(files).toContain("src/flow/page-chrome.ts");
+      expect(files).toContain("src/flow/canvas/native/utils/thing.ts");
       expect(checkRustLayout(root)).toEqual([
         "Rust module at the crate root: src/native/src/extra.rs",
       ]);
       expect(checkUnclassified(files)).toContain("unclassified module: src/flow/page-chrome.ts");
+      const result = runStructureCheck(root);
+      expect(result.reports).toContain("Rust module at the crate root: src/native/src/extra.rs");
+      expect(result.failures).not.toContain(
+        "Rust module at the crate root: src/native/src/extra.rs",
+      );
     },
   );
 });

@@ -1895,13 +1895,16 @@ in the page area; creation order, the lazy `applyChanges` capture, the
 the `components/`, `flow/` or `pages/` root; the manifest keeps the empty set
 only until Phase 5 removes it. `bun run test:host` passes 14/14.
 
-Phase 5 removed the report-only mode and the legacy allow-list: every
-boundary rule and every structure check now fails `bun run check`, the
+Phase 5 removed the report-only mode and the legacy allow-list: every gating
+boundary and structure check now fails `bun run check`, the
 `structure-map.js` manifest no longer exports `ENFORCEMENT` or `LEGACY_FLAT`,
 and the tooling tests assert the failures by default. The budget keeps its
-advisory report at 12 direct entries and its failure at 20; the Rust layout
-stays advisory until Phase 6. The gate on the final tree is green and the
-structure report prints `183 source files, 17 areas`.
+advisory report above 12 direct entries and its failure above 20; the Rust
+layout stays a reporting check (the compiler and clippy are the Rust gate).
+The walker now skips only `src/native` and `src/assets` at the app root, so a
+nested `native/` or `assets/` part folder is classified like any other. The
+gate on the final tree is green and the structure report prints
+`183 source files, 17 areas`.
 
 ---
 

@@ -26,7 +26,7 @@ import {
   segmentOf,
 } from "../lint/structure-map.js";
 
-const SKIP_DIRS = new Set([".nsh", "node_modules", "target", "native"]);
+const SKIP_DIRS = new Set([".nsh", "node_modules", "target"]);
 
 function toPosix(path) {
   return path.split(sep).join("/");
@@ -38,9 +38,14 @@ export function collectSourceFiles(root) {
   const source = join(root, "src");
   const walk = (directory) => {
     for (const entry of readdirSync(directory, { withFileTypes: true })) {
-      // Only the app-root assets folder holds binaries; area-owned part
-      // folders (for example `flow/document/assets/`) hold TypeScript.
-      if (SKIP_DIRS.has(entry.name) || (entry.name === "assets" && directory === source)) continue;
+      // Only the app-root assets folder holds binaries and only src/native is
+      // the Rust crate; area-owned folders with the same names are TypeScript.
+      if (
+        SKIP_DIRS.has(entry.name) ||
+        ((entry.name === "assets" || entry.name === "native") && directory === source)
+      ) {
+        continue;
+      }
       const full = join(directory, entry.name);
       if (entry.isDirectory()) {
         walk(full);
@@ -290,7 +295,7 @@ export function checkAreaImports(root, files) {
   return { areaReports, nativeReports };
 }
 
-/** The whole structure gate. Budget reports stay advisory; the Rust layout waits for Phase 6. */
+/** The whole structure gate. Budget reports and the Rust layout stay advisory. */
 export function runStructureCheck(root) {
   const files = collectSourceFiles(root);
   const budget = checkBudget(root);

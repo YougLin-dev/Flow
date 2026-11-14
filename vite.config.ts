@@ -45,8 +45,8 @@ export default defineConfig({
       // store; neither may import a page. Cycles are never allowed. The
       // project-specific direction check is a JS plugin (lint/boundaries.js).
       "boundaries/no-upward-import": "error",
-      // Area rules are defined in Phase 0 and enforced after Phase 5; the
-      // plugin no-ops until `ENFORCEMENT` in lint/structure-map.js is flipped.
+      // The area rules are always errors; `lint/structure-map.js` is the one
+      // matrix both this plugin and the structure gate read.
       "boundaries/deep-cross-feature": "error",
       "boundaries/forbidden-area": "error",
       "boundaries/segment-direction": "error",
