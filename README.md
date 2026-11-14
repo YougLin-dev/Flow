@@ -98,6 +98,9 @@ src/                   the NSH app: its root, entry, config and assets
       icon-shape.ts    Lucide icon nodes as one SVG path
     canvas/
       port-visuals.ts  the icon and theme token a port type uses everywhere
+      world/
+        ConnectorCanvas.tsx  the native canvas both connector layers share
+        connector-layer.ts   its position/size/origin mapping
     FlowEdges.tsx      every connector, stroked as one native-canvas layer
     FlowEdge.tsx       the connection preview, one canvas stroke
     GridBackground.tsx the dot-grid backdrop

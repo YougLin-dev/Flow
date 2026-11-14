@@ -1,8 +1,8 @@
 # Code organization and architecture standard
 
-- **Status:** Accepted 2026-11-14; Phases 0–1c are implemented on stacked
+- **Status:** Accepted 2026-11-14; Phases 0–1d are implemented on stacked
   branches (standard and tooling, shared kernel and first reuse, composer
-  shell, AsyncDrain core).
+  shell, AsyncDrain core, connector layer).
 - **Scope:** `src/` (TSX app) and `src/native/` (Rust document core).
 - **Related:** [standards](../standards.md), [architecture](../architecture.md),
   [conventions](../conventions.md), [testing](../testing.md),
@@ -1736,6 +1736,16 @@ racing starts) and migrated `PreviewLoader` onto it; `preview-loader.test.ts`
 stayed the oracle and passes unchanged. `ViewportController` and
 `MinimapLoader` keep their own drains until Phase 7, as their scheduling,
 revision fences and retry rules differ.
+
+Phase 1d extracted `components/canvas/world/{connector-layer,ConnectorCanvas}`
+for `FlowEdges`/`FlowPreviews`: the per-mounted-layer computed box, the
+64-step trim and the draw-time `token()` reads stay where they were, and the
+canvas view now shares its position/size/padding mapping. The primitive
+candidates were surveyed against the "at least two real consumers" rule and
+none qualified in this phase: the floating-panel class has one consumer, the
+context-menu rows live in one component, the two tooltip implementations use
+different mechanisms, and the icon-only buttons carry distinct sizes and
+colors. They wait for the Phase 3 area moves, which create the consumers.
 
 ---
 
