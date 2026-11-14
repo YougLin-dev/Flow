@@ -911,7 +911,13 @@ mod tests {
             ("edges_identity_immutable", &["UPDATE OF id, seq"][..]),
             (
                 "edges_no_duplicate_update",
-                &["UPDATE OF from_id, from_port, to_id, to_port"][..],
+                &[
+                    "UPDATE OF from_id, from_port, to_id, to_port",
+                    "AND from_id = NEW.from_id",
+                    "AND from_port = NEW.from_port",
+                    "AND to_id = NEW.to_id",
+                    "AND to_port = NEW.to_port",
+                ][..],
             ),
         ] {
             let sql: String = conn
@@ -1301,6 +1307,13 @@ mod tests {
         );
         assert!(nul_title.is_err(), "NUL title must fail");
 
+        let embedded_nul_title = conn.execute(
+            "INSERT INTO document (id, project_id, title, created_at, updated_at) \
+             VALUES (1, '0123456789abcdef0123456789abcdef', 'a' || char(0) || 'b', ?1, ?1)",
+            params![now],
+        );
+        assert!(embedded_nul_title.is_err(), "embedded NUL title must fail");
+
         let bad_camera = conn.execute(
             "INSERT INTO document (id, project_id, camera_zoom, created_at, updated_at) \
              VALUES (1, '0123456789abcdef0123456789abcdef', 0, ?1, ?1)",
@@ -1415,9 +1428,11 @@ mod tests {
                 .expect_err("blank title must be refused");
             assert_eq!(error, "the Flow database has an empty title");
         }
-        let error = validate_document(valid_id.clone(), "\0".to_owned(), 0.0, 0.0, 1.0)
-            .expect_err("NUL title must be refused");
-        assert_eq!(error, "the Flow database has an invalid title");
+        for title in ["\0", "a\0", "\0b"] {
+            let error = validate_document(valid_id.clone(), title.to_owned(), 0.0, 0.0, 1.0)
+                .expect_err("NUL title must be refused");
+            assert_eq!(error, "the Flow database has an invalid title");
+        }
 
         for (x, y, zoom) in [
             (1.5e308, 0.0, 1.0),
@@ -1529,6 +1544,13 @@ mod tests {
             [],
         )
         .expect("insert a distinct port pair");
+        conn.execute(
+            "INSERT INTO edges \
+             (id, from_id, to_id, from_port, to_port, port_kind, from_offset, to_offset) \
+             VALUES ('e5', 'n1', 'n2', 'out', 'in2', 'text', 0, 0)",
+            [],
+        )
+        .expect("insert a distinct to-port pair");
         let duplicate_update = conn.execute("UPDATE edges SET to_id = 'n2' WHERE id = 'e2'", []);
         assert!(duplicate_update.is_err(), "duplicate pair update must fail");
         let replace_update = conn.execute(
@@ -1555,7 +1577,15 @@ mod tests {
             duplicate_from_port.is_err(),
             "duplicate pair by from_port must fail"
         );
-        assert_eq!(count(&conn, "SELECT edge_count FROM document"), 4);
+        let duplicate_to_port = conn.execute(
+            "UPDATE OR REPLACE edges SET to_port = 'in' WHERE id = 'e5'",
+            [],
+        );
+        assert!(
+            duplicate_to_port.is_err(),
+            "duplicate pair by to_port must fail"
+        );
+        assert_eq!(count(&conn, "SELECT edge_count FROM document"), 5);
     }
 
     #[test]
@@ -1581,12 +1611,27 @@ mod tests {
             [],
         )
         .expect("insert an item");
+        conn.execute(
+            "INSERT INTO result_items (id, batch_id, position, port_id, kind, text) \
+             VALUES ('i2', 'b1', 0, 'out2', 'text', 'other port')",
+            [],
+        )
+        .expect("same position on another port");
         let duplicate_item = conn.execute(
             "INSERT INTO result_items (id, batch_id, position, port_id, kind, text) \
-             VALUES ('i2', 'b1', 0, 'out', 'text', 'duplicate')",
+             VALUES ('i3', 'b1', 0, 'out', 'text', 'duplicate')",
             [],
         );
         assert!(duplicate_item.is_err(), "duplicate item position must fail");
+        let duplicate_other_port = conn.execute(
+            "INSERT INTO result_items (id, batch_id, position, port_id, kind, text) \
+             VALUES ('i4', 'b1', 0, 'out2', 'text', 'duplicate')",
+            [],
+        );
+        assert!(
+            duplicate_other_port.is_err(),
+            "duplicate position on another port must fail"
+        );
         conn.execute(
             "UPDATE result_batches SET status = 'done', finished_at = 0 WHERE id = 'b1'",
             [],
@@ -1618,15 +1663,39 @@ mod tests {
             [],
         )
         .expect("insert a matching edge input");
+        conn.execute(
+            "INSERT INTO edges \
+             (id, from_id, to_id, from_port, to_port, port_kind, from_offset, to_offset) \
+             VALUES ('e2', 'n1', 'n2', 'out', 'in2', 'text', 0, 0)",
+            [],
+        )
+        .expect("insert a second input port edge");
+        conn.execute(
+            "INSERT INTO node_inputs \
+             (id, node_id, port_id, position, kind, origin, edge_id, item_id, text, created_at) \
+             VALUES ('in2', 'n2', 'in2', 0, 'text', 'edge', 'e2', 'i1', 'hello', 0)",
+            [],
+        )
+        .expect("same position on another port");
         let duplicate_input = conn.execute(
             "INSERT INTO node_inputs \
              (id, node_id, port_id, position, kind, origin, edge_id, item_id, text, created_at) \
-             VALUES ('in2', 'n2', 'in', 0, 'text', 'edge', 'e1', 'i1', 'hello', 0)",
+             VALUES ('in-dup', 'n2', 'in', 0, 'text', 'edge', 'e1', 'i1', 'hello', 0)",
             [],
         );
         assert!(
             duplicate_input.is_err(),
             "duplicate input position must fail"
+        );
+        let duplicate_other_port = conn.execute(
+            "INSERT INTO node_inputs \
+             (id, node_id, port_id, position, kind, origin, edge_id, item_id, text, created_at) \
+             VALUES ('in-dup2', 'n2', 'in2', 0, 'text', 'edge', 'e2', 'i1', 'hello', 0)",
+            [],
+        );
+        assert!(
+            duplicate_other_port.is_err(),
+            "duplicate position on another port must fail"
         );
         let wrong_text = conn.execute(
             "INSERT INTO node_inputs \
@@ -1645,6 +1714,14 @@ mod tests {
         let wrong_update =
             conn.execute("UPDATE node_inputs SET text = 'wrong' WHERE id = 'in1'", []);
         assert!(wrong_update.is_err(), "producer update mismatch must fail");
+        let wrong_port_update = conn.execute(
+            "UPDATE node_inputs SET port_id = 'other' WHERE id = 'in1'",
+            [],
+        );
+        assert!(
+            wrong_port_update.is_err(),
+            "producer port update mismatch must fail"
+        );
     }
 
     #[test]
@@ -1670,9 +1747,11 @@ mod tests {
             assert!(error.contains("title"), "{error}");
             assert_eq!(inspect(&conn), Ok(FileState::New));
         }
-        let error = create(&conn, "\0").expect_err("NUL title must be refused");
-        assert!(error.contains("invalid"), "{error}");
-        assert_eq!(inspect(&conn), Ok(FileState::New));
+        for title in ["\0", "a\0", "\0b"] {
+            let error = create(&conn, title).expect_err("NUL title must be refused");
+            assert!(error.contains("invalid"), "{error}");
+            assert_eq!(inspect(&conn), Ok(FileState::New));
+        }
     }
 
     #[test]
