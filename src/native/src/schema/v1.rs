@@ -195,6 +195,9 @@ pub fn inspect(conn: &Connection) -> Result<FileState, String> {
 
 /// Creates a v1 package in one transaction and returns its identity.
 pub fn create(conn: &Connection, title: &str) -> Result<ProjectInfo, String> {
+    if title.contains('\0') {
+        return Err("the project title is invalid".to_owned());
+    }
     if is_blank_title(title) {
         return Err("the project title is empty".to_owned());
     }
@@ -266,6 +269,9 @@ fn validate_document(
     // guard rechecks it so a direct schema edit cannot smuggle a bad identity.
     if !is_project_id(&project_id) {
         return Err("the Flow database has an invalid project_id".to_owned());
+    }
+    if title.contains('\0') {
+        return Err("the Flow database has an invalid title".to_owned());
     }
     if is_blank_title(&title) {
         return Err("the Flow database has an empty title".to_owned());
@@ -360,7 +366,7 @@ mod tests {
         rows.map(Result::unwrap).collect()
     }
 
-    fn column_definition(conn: &Connection, table: &str, column: &str) -> (String, i64, i64) {
+    fn table_definition(conn: &Connection, table: &str) -> Vec<String> {
         let mut statement = conn
             .prepare(&format!("PRAGMA table_info({table})"))
             .expect("prepare table_info");
@@ -370,17 +376,19 @@ mod tests {
                     row.get::<_, String>(1)?,
                     row.get::<_, String>(2)?,
                     row.get::<_, i64>(3)?,
+                    row.get::<_, Option<String>>(4)?,
                     row.get::<_, i64>(5)?,
                 ))
             })
             .expect("query table_info");
-        for row in rows {
-            let (name, kind, not_null, primary_key) = row.expect("read table_info row");
-            if name == column {
-                return (kind, not_null, primary_key);
-            }
-        }
-        panic!("missing column {table}.{column}");
+        rows.map(|row| {
+            let (name, kind, not_null, default, primary_key) = row.expect("read table_info row");
+            format!(
+                "{name}|{kind}|{not_null}|{}|{primary_key}",
+                default.unwrap_or_default()
+            )
+        })
+        .collect()
     }
 
     fn objects(conn: &Connection, kind: &str) -> Vec<String> {
@@ -710,6 +718,13 @@ mod tests {
                 "result_items_asset",
             ]
         );
+        let mut required_indexes: Vec<String> = REQUIRED_OBJECTS
+            .iter()
+            .filter(|(kind, _)| *kind == "index")
+            .map(|(_, name)| (*name).to_owned())
+            .collect();
+        required_indexes.sort();
+        assert_eq!(required_indexes, named_indexes);
 
         let edge_auto_indexes: i64 = conn
             .query_row(
@@ -724,25 +739,153 @@ mod tests {
             "edges must have only the id autoindex"
         );
 
+        for (table, expected) in [
+            ("document", 1),
+            ("assets", 2),
+            ("result_batches", 2),
+            ("nodes", 1),
+            ("edges", 1),
+            ("result_items", 2),
+            ("node_inputs", 2),
+            ("nodes_geometry_dirty", 1),
+        ] {
+            let auto_indexes: i64 = conn
+                .query_row(
+                    "SELECT count(*) FROM sqlite_master \
+                     WHERE type = 'index' AND tbl_name = ?1 AND sql IS NULL",
+                    [table],
+                    |row| row.get(0),
+                )
+                .expect("count table autoindexes");
+            assert_eq!(auto_indexes, expected, "{table} autoindex count");
+        }
+
         assert_eq!(
-            column_definition(&conn, "nodes", "x"),
-            ("REAL".to_owned(), 1, 0)
+            table_definition(&conn, "document"),
+            [
+                "id|INTEGER|0||1",
+                "project_id|TEXT|1||0",
+                "title|TEXT|1|'Flow'|0",
+                "rev|INTEGER|1|0|0",
+                "node_count|INTEGER|1|0|0",
+                "edge_count|INTEGER|1|0|0",
+                "demo_seeded|INTEGER|1|0|0",
+                "clean_shutdown|INTEGER|1|0|0",
+                "min_x|REAL|0||0",
+                "max_x|REAL|0||0",
+                "min_y|REAL|0||0",
+                "max_y|REAL|0||0",
+                "bounds_exact|INTEGER|1|1|0",
+                "camera_x|REAL|1|0.0|0",
+                "camera_y|REAL|1|0.0|0",
+                "camera_zoom|REAL|1|1.0|0",
+                "created_at|INTEGER|1||0",
+                "updated_at|INTEGER|1||0",
+            ]
         );
         assert_eq!(
-            column_definition(&conn, "nodes", "width"),
-            ("REAL".to_owned(), 1, 0)
+            table_definition(&conn, "assets"),
+            [
+                "id|TEXT|1||1",
+                "hash|TEXT|1||0",
+                "kind|TEXT|1||0",
+                "name|TEXT|1||0",
+                "mime|TEXT|1||0",
+                "size|INTEGER|1||0",
+                "meta_json|TEXT|1|'{}'|0",
+                "created_at|INTEGER|1||0",
+            ]
         );
         assert_eq!(
-            column_definition(&conn, "document", "project_id"),
-            ("TEXT".to_owned(), 1, 0)
+            table_definition(&conn, "result_batches"),
+            [
+                "seq|INTEGER|0||1",
+                "id|TEXT|1||0",
+                "node_id|TEXT|1||0",
+                "node_seq|INTEGER|1||0",
+                "trigger|TEXT|1||0",
+                "provider|TEXT|1|''|0",
+                "model|TEXT|1|''|0",
+                "params_json|TEXT|1|'{}'|0",
+                "status|TEXT|1||0",
+                "error|TEXT|0||0",
+                "item_count|INTEGER|1|0|0",
+                "created_at|INTEGER|1||0",
+                "finished_at|INTEGER|0||0",
+            ]
         );
         assert_eq!(
-            column_definition(&conn, "document", "title"),
-            ("TEXT".to_owned(), 1, 0)
+            table_definition(&conn, "nodes"),
+            [
+                "seq|INTEGER|0||1",
+                "id|TEXT|1||0",
+                "kind|TEXT|1||0",
+                "title|TEXT|1|''|0",
+                "body|TEXT|1|''|0",
+                "tags|TEXT|1|''|0",
+                "x|REAL|1||0",
+                "y|REAL|1||0",
+                "width|REAL|1||0",
+                "height|REAL|1||0",
+                "z|REAL|1||0",
+                "data_json|TEXT|1|'{}'|0",
+                "settings_json|TEXT|1|'{}'|0",
+                "status|TEXT|1|'idle'|0",
+                "output_batch_id|TEXT|0||0",
+                "rev|INTEGER|1|1|0",
+                "created_at|INTEGER|1||0",
+                "updated_at|INTEGER|1||0",
+            ]
         );
         assert_eq!(
-            column_definition(&conn, "edges", "from_port"),
-            ("TEXT".to_owned(), 1, 0)
+            table_definition(&conn, "edges"),
+            [
+                "seq|INTEGER|0||1",
+                "id|TEXT|1||0",
+                "from_id|TEXT|1||0",
+                "to_id|TEXT|1||0",
+                "from_port|TEXT|1||0",
+                "to_port|TEXT|1||0",
+                "port_kind|TEXT|1||0",
+                "from_offset|REAL|1||0",
+                "to_offset|REAL|1||0",
+                "kind|TEXT|1|'flow'|0",
+                "data_json|TEXT|1|'{}'|0",
+            ]
+        );
+        assert_eq!(
+            table_definition(&conn, "result_items"),
+            [
+                "id|TEXT|1||1",
+                "batch_id|TEXT|1||0",
+                "position|INTEGER|1||0",
+                "port_id|TEXT|1||0",
+                "kind|TEXT|1||0",
+                "text|TEXT|1|''|0",
+                "asset_id|TEXT|0||0",
+                "meta_json|TEXT|1|'{}'|0",
+            ]
+        );
+        assert_eq!(
+            table_definition(&conn, "node_inputs"),
+            [
+                "id|TEXT|1||1",
+                "node_id|TEXT|1||0",
+                "port_id|TEXT|1||0",
+                "position|INTEGER|1||0",
+                "kind|TEXT|1||0",
+                "origin|TEXT|1||0",
+                "edge_id|TEXT|0||0",
+                "item_id|TEXT|0||0",
+                "asset_id|TEXT|0||0",
+                "text|TEXT|1|''|0",
+                "meta_json|TEXT|1|'{}'|0",
+                "created_at|INTEGER|1||0",
+            ]
+        );
+        assert_eq!(
+            table_definition(&conn, "nodes_geometry_dirty"),
+            ["node_id|TEXT|1||1"]
         );
 
         let running_sql: String = conn
@@ -764,6 +907,12 @@ mod tests {
             ("nodes_rtree_au", &["UPDATE OF x, y, width, height"][..]),
             ("nodes_fts_au", &["UPDATE OF title, body, tags"][..]),
             ("nodes_bounds_au", &["bounds_exact"][..]),
+            ("nodes_identity_immutable", &["UPDATE OF id, seq"][..]),
+            ("edges_identity_immutable", &["UPDATE OF id, seq"][..]),
+            (
+                "edges_no_duplicate_update",
+                &["UPDATE OF from_id, from_port, to_id, to_port"][..],
+            ),
         ] {
             let sql: String = conn
                 .query_row(
@@ -836,6 +985,13 @@ mod tests {
             .collect();
         expected_triggers.sort();
         assert_eq!(actual_triggers, expected_triggers);
+        let mut required_triggers: Vec<String> = REQUIRED_OBJECTS
+            .iter()
+            .filter(|(kind, _)| *kind == "trigger")
+            .map(|(_, name)| (*name).to_owned())
+            .collect();
+        required_triggers.sort();
+        assert_eq!(required_triggers, actual_triggers);
 
         let fts: String = conn
             .query_row(
@@ -1138,6 +1294,13 @@ mod tests {
         );
         assert!(tab_title.is_err(), "whitespace-only title must fail");
 
+        let nul_title = conn.execute(
+            "INSERT INTO document (id, project_id, title, created_at, updated_at) \
+             VALUES (1, '0123456789abcdef0123456789abcdef', char(0), ?1, ?1)",
+            params![now],
+        );
+        assert!(nul_title.is_err(), "NUL title must fail");
+
         let bad_camera = conn.execute(
             "INSERT INTO document (id, project_id, camera_zoom, created_at, updated_at) \
              VALUES (1, '0123456789abcdef0123456789abcdef', 0, ?1, ?1)",
@@ -1195,6 +1358,15 @@ mod tests {
         let error = inspect(&conn).expect_err("tab-only title must be refused");
         assert_eq!(error, "the Flow database has an empty title");
 
+        conn.execute_batch("PRAGMA ignore_check_constraints = ON")
+            .expect("ignore checks");
+        conn.execute("UPDATE document SET title = char(0) WHERE id = 1", [])
+            .expect("write a NUL title past the CHECK");
+        conn.execute_batch("PRAGMA ignore_check_constraints = OFF")
+            .expect("restore checks");
+        let error = inspect(&conn).expect_err("NUL title must be refused");
+        assert_eq!(error, "the Flow database has an invalid title");
+
         conn.execute("UPDATE document SET title = 'Restored' WHERE id = 1", [])
             .expect("restore title");
         conn.execute_batch("PRAGMA ignore_check_constraints = ON")
@@ -1243,6 +1415,9 @@ mod tests {
                 .expect_err("blank title must be refused");
             assert_eq!(error, "the Flow database has an empty title");
         }
+        let error = validate_document(valid_id.clone(), "\0".to_owned(), 0.0, 0.0, 1.0)
+            .expect_err("NUL title must be refused");
+        assert_eq!(error, "the Flow database has an invalid title");
 
         for (x, y, zoom) in [
             (1.5e308, 0.0, 1.0),
@@ -1336,11 +1511,24 @@ mod tests {
 
         let node_identity = conn.execute("UPDATE nodes SET id = 'renamed' WHERE id = 'n1'", []);
         assert!(node_identity.is_err(), "node id update must fail");
+        let node_seq_identity = conn.execute("UPDATE nodes SET seq = 999 WHERE id = 'n1'", []);
+        assert!(node_seq_identity.is_err(), "node seq update must fail");
         let edge_identity = conn.execute("UPDATE edges SET seq = 999 WHERE id = 'e1'", []);
         assert!(edge_identity.is_err(), "edge seq update must fail");
+        let edge_id_identity = conn.execute("UPDATE edges SET id = 'renamed' WHERE id = 'e1'", []);
+        assert!(edge_id_identity.is_err(), "edge id update must fail");
 
         insert_node(&conn, "n3", "three");
+        insert_node(&conn, "n4", "four");
         insert_edge(&conn, "e2", "n1", "n3");
+        insert_edge(&conn, "e3", "n4", "n2");
+        conn.execute(
+            "INSERT INTO edges \
+             (id, from_id, to_id, from_port, to_port, port_kind, from_offset, to_offset) \
+             VALUES ('e4', 'n1', 'n2', 'out2', 'in', 'text', 0, 0)",
+            [],
+        )
+        .expect("insert a distinct port pair");
         let duplicate_update = conn.execute("UPDATE edges SET to_id = 'n2' WHERE id = 'e2'", []);
         assert!(duplicate_update.is_err(), "duplicate pair update must fail");
         let replace_update = conn.execute(
@@ -1351,7 +1539,112 @@ mod tests {
             replace_update.is_err(),
             "UPDATE OR REPLACE duplicate must fail"
         );
-        assert_eq!(count(&conn, "SELECT edge_count FROM document"), 2);
+        let duplicate_from_id = conn.execute(
+            "UPDATE OR REPLACE edges SET from_id = 'n1' WHERE id = 'e3'",
+            [],
+        );
+        assert!(
+            duplicate_from_id.is_err(),
+            "duplicate pair by from_id must fail"
+        );
+        let duplicate_from_port = conn.execute(
+            "UPDATE OR REPLACE edges SET from_port = 'out' WHERE id = 'e4'",
+            [],
+        );
+        assert!(
+            duplicate_from_port.is_err(),
+            "duplicate pair by from_port must fail"
+        );
+        assert_eq!(count(&conn, "SELECT edge_count FROM document"), 4);
+    }
+
+    #[test]
+    fn result_items_and_inputs_enforce_positions_and_producer_shape() {
+        let conn = memory();
+        create(&conn, "Inputs").expect("create v1");
+        insert_node(&conn, "n1", "source");
+        insert_node(&conn, "n2", "target");
+        let source_seq: i64 = conn
+            .query_row("SELECT seq FROM nodes WHERE id = 'n1'", [], |row| {
+                row.get(0)
+            })
+            .expect("read source seq");
+        conn.execute(
+            "INSERT INTO result_batches (id, node_id, node_seq, trigger, status, created_at) \
+             VALUES ('b1', 'n1', ?1, 'run', 'running', 0)",
+            params![source_seq],
+        )
+        .expect("insert a running batch");
+        conn.execute(
+            "INSERT INTO result_items (id, batch_id, position, port_id, kind, text) \
+             VALUES ('i1', 'b1', 0, 'out', 'text', 'hello')",
+            [],
+        )
+        .expect("insert an item");
+        let duplicate_item = conn.execute(
+            "INSERT INTO result_items (id, batch_id, position, port_id, kind, text) \
+             VALUES ('i2', 'b1', 0, 'out', 'text', 'duplicate')",
+            [],
+        );
+        assert!(duplicate_item.is_err(), "duplicate item position must fail");
+        conn.execute(
+            "UPDATE result_batches SET status = 'done', finished_at = 0 WHERE id = 'b1'",
+            [],
+        )
+        .expect("settle the batch");
+        let item_update = conn.execute(
+            "UPDATE result_items SET text = 'changed' WHERE id = 'i1'",
+            [],
+        );
+        assert!(item_update.is_err(), "result items are immutable");
+        let item_delete = conn.execute("DELETE FROM result_items WHERE id = 'i1'", []);
+        assert!(item_delete.is_err(), "settled item delete must fail");
+        let terminal_update = conn.execute(
+            "UPDATE result_batches SET status = 'failed' WHERE id = 'b1'",
+            [],
+        );
+        assert!(terminal_update.is_err(), "terminal batch update must fail");
+        let wrong_count = conn.execute(
+            "UPDATE result_batches SET item_count = 5 WHERE id = 'b1'",
+            [],
+        );
+        assert!(wrong_count.is_err(), "item_count must stay derived");
+
+        insert_edge(&conn, "e1", "n1", "n2");
+        conn.execute(
+            "INSERT INTO node_inputs \
+             (id, node_id, port_id, position, kind, origin, edge_id, item_id, text, created_at) \
+             VALUES ('in1', 'n2', 'in', 0, 'text', 'edge', 'e1', 'i1', 'hello', 0)",
+            [],
+        )
+        .expect("insert a matching edge input");
+        let duplicate_input = conn.execute(
+            "INSERT INTO node_inputs \
+             (id, node_id, port_id, position, kind, origin, edge_id, item_id, text, created_at) \
+             VALUES ('in2', 'n2', 'in', 0, 'text', 'edge', 'e1', 'i1', 'hello', 0)",
+            [],
+        );
+        assert!(
+            duplicate_input.is_err(),
+            "duplicate input position must fail"
+        );
+        let wrong_text = conn.execute(
+            "INSERT INTO node_inputs \
+             (id, node_id, port_id, position, kind, origin, edge_id, item_id, text, created_at) \
+             VALUES ('in3', 'n2', 'in', 1, 'text', 'edge', 'e1', 'i1', 'wrong', 0)",
+            [],
+        );
+        assert!(wrong_text.is_err(), "producer text mismatch must fail");
+        let wrong_port = conn.execute(
+            "INSERT INTO node_inputs \
+             (id, node_id, port_id, position, kind, origin, edge_id, item_id, text, created_at) \
+             VALUES ('in4', 'n2', 'other', 1, 'text', 'edge', 'e1', 'i1', 'hello', 0)",
+            [],
+        );
+        assert!(wrong_port.is_err(), "producer port mismatch must fail");
+        let wrong_update =
+            conn.execute("UPDATE node_inputs SET text = 'wrong' WHERE id = 'in1'", []);
+        assert!(wrong_update.is_err(), "producer update mismatch must fail");
     }
 
     #[test]
@@ -1377,6 +1670,9 @@ mod tests {
             assert!(error.contains("title"), "{error}");
             assert_eq!(inspect(&conn), Ok(FileState::New));
         }
+        let error = create(&conn, "\0").expect_err("NUL title must be refused");
+        assert!(error.contains("invalid"), "{error}");
+        assert_eq!(inspect(&conn), Ok(FileState::New));
     }
 
     #[test]

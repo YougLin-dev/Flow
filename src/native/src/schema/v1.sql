@@ -8,7 +8,8 @@ CREATE TABLE document (
                  CHECK (length(project_id) = 32
                         AND project_id NOT GLOB '*[^0-9a-f]*'),
   title          TEXT    NOT NULL DEFAULT 'Flow'
-                 CHECK (length(trim(title, ' ' || char(9) || char(10) || char(13))) > 0),
+                 CHECK (instr(title, char(0)) = 0
+                    AND length(trim(title, ' ' || char(9) || char(10) || char(13))) > 0),
   rev            INTEGER NOT NULL DEFAULT 0 CHECK (rev >= 0),
   node_count     INTEGER NOT NULL DEFAULT 0 CHECK (node_count >= 0),
   edge_count     INTEGER NOT NULL DEFAULT 0 CHECK (edge_count >= 0),
