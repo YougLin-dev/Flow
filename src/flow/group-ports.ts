@@ -4,8 +4,9 @@
  * group port stands for every selected card's port of that type; dragging it
  * fans the connection out to all of them.
  */
-import type { BoxGeometry, Point, PortSide } from "./connection";
-import { PORT_CENTER_GAP, PORT_HIT_RADIUS, portOffset } from "./connection";
+import type { PortSide } from "./canvas/geometry/connection";
+import { PORT_CENTER_GAP, PORT_HIT_RADIUS, portOffset } from "./canvas/geometry/connection";
+import type { BoxGeometry, Point } from "./shared";
 import { PORT_KINDS, type PortKind, portsOfNode } from "./nodes";
 import type { FlowScene } from "./scene";
 import { capacityOf, portCenterWorld, portOffsetAt } from "./scene-ports";

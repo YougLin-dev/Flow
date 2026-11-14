@@ -5,12 +5,12 @@
  * rendering cannot drift apart.
  */
 import type { CanvasCamera } from "./camera";
-import type { BoxGeometry } from "./connection";
-import { PORT_CENTER_GAP, PORT_HIT_RADIUS, PORT_SIZE } from "./connection";
+import { PORT_CENTER_GAP, PORT_HIT_RADIUS, PORT_SIZE } from "./canvas/geometry/connection";
+import type { ScreenRect } from "./canvas/geometry/selection";
 import type { GroupPort } from "./group-ports";
 import { groupPortAt } from "./group-ports";
 import type { FlowScene } from "./scene";
-import { containsPoint, type ScreenRect } from "./selection";
+import { containsPoint, type BoxGeometry } from "./shared";
 
 /** How far a card's port icon reaches outside its border. */
 const PORT_EXTENT = PORT_CENTER_GAP + PORT_SIZE / 2;

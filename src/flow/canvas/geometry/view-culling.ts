@@ -6,8 +6,7 @@
  * painting their scaled decorations and text is work for the clip to throw
  * away.
  */
-import type { CameraBounds } from "./camera";
-import { overlaps, type BoxGeometry } from "./connection";
+import { overlaps, type BoxGeometry } from "../../shared";
 
 /**
  * How far outside the viewport a card may still show pixels: the title row
@@ -19,7 +18,7 @@ export const CARD_CULL_MARGIN = 64;
 /** Whether a card's body can put any pixel inside `view`. */
 export function cardInView(
   rect: BoxGeometry,
-  view: CameraBounds,
+  view: BoxGeometry,
   margin: number = CARD_CULL_MARGIN,
 ): boolean {
   return overlaps(rect, view, margin);

@@ -1,5 +1,5 @@
 import { expect, test } from "nsh/test";
-import type { BoxGeometry, Point } from "./connection";
+import type { BoxGeometry, Point } from "../../shared";
 import { cubicInView, curveInsideView, visibleCurveRuns } from "./edge-clip";
 
 const view: BoxGeometry = { x: 0, y: 0, width: 390, height: 844 };

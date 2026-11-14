@@ -7,8 +7,9 @@
  */
 import { cleanup, createAnimatedValue, effect, token, View } from "nsh";
 import { Icon } from "./primitives";
-import { followPoint, type Point, PORT_FOLLOW_MAX, PORT_SIZE } from "../flow/connection";
+import { followPoint, PORT_FOLLOW_MAX, PORT_SIZE } from "../flow/canvas";
 import type { InputPort, OutputPort } from "../flow/nodes";
+import type { Point } from "../flow/shared";
 import { portVisual, type PortToken } from "./canvas";
 
 /** The hovered port's follow and return springs, tuned to settle quickly. */

@@ -10,11 +10,11 @@
 import { cleanup, computed, effect, signal, Text, View } from "nsh";
 import type { CanvasCamera, CameraSize } from "../flow/camera";
 import type { CanvasController } from "../flow/canvas-controller";
-import type { Point, PortSide } from "../flow/connection";
+import { tipWidth, tooltipBox, type PortSide, type TipPlacement } from "../flow/canvas";
 import { portsOfNode } from "../flow/nodes";
+import type { Point } from "../flow/shared";
 import { portVisual } from "./canvas";
 import type { FlowScene } from "../flow/scene";
-import { tipWidth, tooltipBox, type TipPlacement } from "../flow/tooltip";
 
 /** The bubble's size, padding, pointer-rest delay and spacing, in points. */
 const TIP_HEIGHT = 26;

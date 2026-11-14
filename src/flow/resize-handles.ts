@@ -3,7 +3,7 @@ import type { NodeSummary } from "./shared";
 import type { CanvasCamera } from "./camera";
 import type { CanvasCursor } from "./canvas-controller";
 import type { FlowScene } from "./scene";
-import { handleAt, type ResizeHandle, type ScreenRect } from "./selection";
+import { handleAt, type ResizeHandle, type ScreenRect } from "./canvas/geometry/selection";
 
 /** The screen rectangle of a card, or null when it is not in the scene. */
 export function screenRect(scene: FlowScene, camera: CanvasCamera, id: string): ScreenRect | null {

@@ -1,11 +1,11 @@
 import { expect, test } from "nsh/test";
 import type { EdgeSummary, NodeSummary, SceneSnapshot } from "@flow/native";
+import type { Point } from "./shared";
 import {
   connectionBounds,
   distanceToConnection,
   EDGE_HIT_DISTANCE,
-  type Point,
-} from "./connection";
+} from "./canvas/geometry/connection";
 import { FlowScene } from "./scene";
 
 function node(id: string, x: number, y: number, overrides: Partial<NodeSummary> = {}): NodeSummary {

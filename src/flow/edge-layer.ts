@@ -1,8 +1,8 @@
 /** The shared connector canvas's box, derived once for its styles and drawing. */
 import { type Accessor, computed } from "nsh";
-import { type BoxGeometry, connectionBounds, EDGE_PADDING, mergeBounds } from "./connection";
+import { mergeBounds, sameBox, type BoxGeometry } from "./shared";
+import { connectionBounds, EDGE_PADDING } from "./canvas/geometry/connection";
 import type { FlowScene } from "./scene";
-import { sameBox } from "./shared";
 
 /** How coarse the canvas box is, in world points: fine enough that rounding
  * it outward never shows, coarse enough that moving a card does not resize

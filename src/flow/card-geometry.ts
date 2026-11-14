@@ -6,7 +6,7 @@
  */
 import { type Accessor, computed } from "nsh";
 import { CARD_TITLE_BAND, CARD_TITLE_HEIGHT } from "./card-layout";
-import type { BoxGeometry, Point } from "./connection";
+import type { BoxGeometry, Point } from "./shared";
 import { samePoint } from "./shared";
 
 export interface CardSize {

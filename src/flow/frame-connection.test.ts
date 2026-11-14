@@ -8,7 +8,7 @@ import { expect, test } from "nsh/test";
 import type { EdgeSummary, NodeSummary } from "@flow/native";
 import { CanvasCamera } from "./camera";
 import { type CanvasHost, CanvasController } from "./canvas-controller";
-import { PORT_CENTER_GAP, PORT_SIZE, portOffset } from "./connection";
+import { PORT_CENTER_GAP, PORT_SIZE, portOffset } from "./canvas/geometry/connection";
 import { selectionFrame } from "./frame-surface";
 import { FlowScene } from "./scene";
 

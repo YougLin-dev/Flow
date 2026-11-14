@@ -10,9 +10,9 @@
 import { View } from "nsh";
 import type { CanvasCamera } from "../flow/camera";
 import type { CanvasController } from "../flow/canvas-controller";
-import type { BoxGeometry } from "../flow/connection";
 import { selectionFrame } from "../flow/frame-surface";
 import type { FlowScene } from "../flow/scene";
+import type { BoxGeometry } from "../flow/shared";
 
 export interface SelectionFrameProps {
   readonly scene: FlowScene;

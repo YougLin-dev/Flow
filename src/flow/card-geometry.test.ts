@@ -2,7 +2,7 @@ import { effect, signal } from "nsh";
 import { expect, test } from "nsh/test";
 import type { NodeSummary, SceneSnapshot } from "@flow/native";
 import { CardGeometry, cardLocalLayout } from "./card-geometry";
-import type { BoxGeometry } from "./connection";
+import type { BoxGeometry } from "./shared";
 import { FlowScene } from "./scene";
 
 function node(id: string, x: number, y: number, overrides: Partial<NodeSummary> = {}): NodeSummary {

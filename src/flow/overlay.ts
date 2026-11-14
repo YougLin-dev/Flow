@@ -1,6 +1,6 @@
 import { CARD_BODY_INSET } from "./card-layout";
 import type { CanvasCamera } from "./camera";
-import type { BoxGeometry } from "./connection";
+import type { BoxGeometry } from "./shared";
 
 /** The in-place text editor's anchor: the body's world size and the camera's
  * scale, so the editor lays out at world type and scales like the card. */

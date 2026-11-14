@@ -7,14 +7,8 @@
  * leaves only what can be seen, so the stroked geometry has about the length
  * of the screen at any zoom.
  */
-import {
-  type BoxGeometry,
-  type Point,
-  connectorControls,
-  cubicAt,
-  cubicBounds,
-  overlaps,
-} from "./connection";
+import { overlaps, type BoxGeometry, type Point } from "../../shared";
+import { connectorControls, cubicAt, cubicBounds } from "./connection";
 
 /** The fewest samples an edge gets, so a short curve is still smooth. */
 const MIN_STEPS = 12;

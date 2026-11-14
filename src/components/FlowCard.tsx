@@ -11,7 +11,7 @@
 import { computed, host, Image, Text, token, View } from "nsh";
 import { Input } from "nsh/base";
 import { Image as ImageIcon } from "lucide";
-import type { NodeSummary } from "../flow/shared";
+import type { BoxGeometry, NodeSummary } from "../flow/shared";
 import { Icon } from "./primitives";
 import { Port } from "./Port";
 import { portKey, type PortHover } from "../flow/canvas-controller";
@@ -23,10 +23,9 @@ import {
   CARD_BODY_LINE_HEIGHT,
   CARD_TITLE_HEIGHT,
 } from "../flow/card-layout";
-import { type BoxGeometry, magnetIconPoint, PORT_CENTER_GAP, portOffset } from "../flow/connection";
+import { magnetIconPoint, PORT_CENTER_GAP, portOffset, previewCell } from "../flow/canvas";
 import type { MagnetPort } from "../flow/connection-gesture";
 import { type FlowAccent, portsOfNode } from "../flow/nodes";
-import { previewCell } from "../flow/preview-grid";
 import type { PreviewView } from "../flow/scene";
 
 /** One image load or failure, reported for the host image regression. */

@@ -7,7 +7,7 @@ import { expect, test } from "nsh/test";
 import type { EdgeSummary, NodeSummary, SceneSnapshot } from "@flow/native";
 import { CanvasCamera } from "./camera";
 import { type CanvasHost, CanvasController } from "./canvas-controller";
-import { magnetEndPoint, PORT_MAGNET_RADIUS } from "./connection";
+import { magnetEndPoint, PORT_MAGNET_RADIUS } from "./canvas/geometry/connection";
 import type { ConnectionPair } from "./connection-gesture";
 import { FlowScene } from "./scene";
 

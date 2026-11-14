@@ -5,17 +5,15 @@
  * view however large the selection is.
  */
 import { type CanvasRenderingContext2D, colorScheme, computed } from "nsh";
+import { mergeBounds, type BoxGeometry, type Point } from "../flow/shared";
 import {
-  type BoxGeometry,
   connectionBounds,
   connectorControls,
   EDGE_DASH,
   EDGE_PADDING,
   EDGE_THICKNESS,
-  mergeBounds,
-} from "../flow/connection";
+} from "../flow/canvas";
 import type { ConnectionPreview } from "../flow/scene";
-import type { Point } from "../flow/shared";
 import { ConnectorCanvas, connectorColor, traceCubic } from "./canvas";
 
 export interface FlowPreviewsProps {

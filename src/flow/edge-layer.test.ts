@@ -1,7 +1,8 @@
 import { type Accessor, effect } from "nsh";
 import { expect, test } from "nsh/test";
 import type { EdgeSummary, NodeSummary, SceneSnapshot } from "@flow/native";
-import { type BoxGeometry, type Point, connectionBounds, connectorControls } from "./connection";
+import type { BoxGeometry, Point } from "./shared";
+import { connectionBounds, connectorControls } from "./canvas/geometry/connection";
 import {
   CONNECTOR_VIEW_MARGIN,
   connectorLayerBounds,

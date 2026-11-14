@@ -6,16 +6,14 @@
  * thicker and fully lit.
  */
 import { type Accessor, type CanvasRenderingContext2D, colorScheme, computed } from "nsh";
-import { sameBox, type EdgeSummary } from "../flow/shared";
+import { overlaps, sameBox, type BoxGeometry, type EdgeSummary, type Point } from "../flow/shared";
 import {
-  type BoxGeometry,
-  type Point,
   connectorControls,
   cubicBounds,
+  cubicInsideView,
   EDGE_THICKNESS,
-  overlaps,
-} from "../flow/connection";
-import { cubicInsideView, visibleCubicRuns } from "../flow/edge-clip";
+  visibleCubicRuns,
+} from "../flow/canvas";
 import { connectorLayerBox, trimConnectorBox } from "../flow/edge-layer";
 import type { FlowScene } from "../flow/scene";
 import { ConnectorCanvas, connectorColor, traceCubic } from "./canvas";

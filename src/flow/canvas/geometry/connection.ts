@@ -1,16 +1,5 @@
 /** Connection geometry: port anchors, the cubic curve, and hit testing. */
-
-export interface BoxGeometry {
-  x: number;
-  y: number;
-  width: number;
-  height: number;
-}
-
-export interface Point {
-  x: number;
-  y: number;
-}
+import type { BoxGeometry, Point } from "../../shared";
 
 export type PortSide = "in" | "out";
 
@@ -143,28 +132,6 @@ export function cubicBounds(from: Point, c1: Point, c2: Point, to: Point): BoxGe
 export function connectionBounds(from: Point, to: Point): BoxGeometry {
   const { c1, c2 } = connectorControls(from, to);
   return cubicBounds(from, c1, c2, to);
-}
-
-/** Whether `a` and `b` meet; `margin` grows `b` on every side. */
-export function overlaps(a: BoxGeometry, b: BoxGeometry, margin = 0): boolean {
-  return (
-    a.x <= b.x + b.width + margin &&
-    a.x + a.width >= b.x - margin &&
-    a.y <= b.y + b.height + margin &&
-    a.y + a.height >= b.y - margin
-  );
-}
-
-/** The box holding both boxes. */
-export function mergeBounds(a: BoxGeometry, b: BoxGeometry): BoxGeometry {
-  const x = Math.min(a.x, b.x);
-  const y = Math.min(a.y, b.y);
-  return {
-    x,
-    y,
-    width: Math.max(a.x + a.width, b.x + b.width) - x,
-    height: Math.max(a.y + a.height, b.y + b.height) - y,
-  };
 }
 
 /** Sample points along the connector, from the output port to the input. */

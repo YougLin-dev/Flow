@@ -1,5 +1,5 @@
 /** Pure geometry for selection, resizing, marquee selection and placement. */
-import { overlaps, type BoxGeometry } from "./connection";
+import { overlaps, type BoxGeometry } from "../../shared";
 
 export type ResizeHandle = "nw" | "n" | "ne" | "e" | "se" | "s" | "sw" | "w";
 
@@ -8,16 +8,6 @@ export interface ScreenRect {
   readonly y: number;
   readonly width: number;
   readonly height: number;
-}
-
-/** Whether a screen point lies inside a rectangle, expanded by a margin. */
-export function containsPoint(rect: ScreenRect, x: number, y: number, margin = 0): boolean {
-  return (
-    x >= rect.x - margin &&
-    x <= rect.x + rect.width + margin &&
-    y >= rect.y - margin &&
-    y <= rect.y + rect.height + margin
-  );
 }
 
 /**

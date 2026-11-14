@@ -20,7 +20,7 @@ import type { CanvasController } from "../flow/canvas-controller";
 import type { ContextMenuPoint } from "../flow/context-menu";
 import { inlineBodyBox } from "../flow/overlay";
 import type { FlowScene } from "../flow/scene";
-import { cardInView } from "../flow/view-culling";
+import { cardInView } from "../flow/canvas";
 import { FlowCard, type CardImageEvent } from "./FlowCard";
 import { FlowEdges } from "./FlowEdges";
 import { FlowPreviews } from "./FlowPreviews";

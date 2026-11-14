@@ -5,9 +5,9 @@
  * components read its signals.
  */
 import { batch, computed, signal, type ViewStyle } from "nsh";
-import type { NodeBounds } from "./shared";
+import type { BoxGeometry, NodeBounds, Point } from "./shared";
+import type { PortSide } from "./canvas/geometry/connection";
 import type { CanvasCamera } from "./camera";
-import type { BoxGeometry, Point, PortSide } from "./connection";
 import type { ConnectionPair, MagnetPort } from "./connection-gesture";
 import { EdgeGestures } from "./edge-gestures";
 import {
@@ -28,7 +28,7 @@ import {
   type ResizeHandle,
   resizedRect,
   type ScreenRect,
-} from "./selection";
+} from "./canvas/geometry/selection";
 
 export type CanvasCursor = NonNullable<ViewStyle["cursor"]>;
 

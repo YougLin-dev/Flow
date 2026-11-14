@@ -6,27 +6,27 @@
  */
 import { batch, signal, type Signal, untracked } from "nsh";
 import {
+  containsPoint,
   KeyedFlags,
   sameRectWithin,
+  type BoxGeometry,
   type EdgeSummary,
   type NodeBounds,
   type NodeSummary,
+  type Point,
   type SceneSnapshot,
 } from "./shared";
 import {
-  type BoxGeometry,
   connectionBounds,
   distanceToConnection,
   EDGE_HIT_DISTANCE,
-  type Point,
   PORT_CENTER_GAP,
   portCenter,
-} from "./connection";
+} from "./canvas/geometry/connection";
 import { CARD_TITLE_BAND } from "./card-layout";
 import { hasImageOutput, type PortKind } from "./nodes";
 import { sameEdge, sameNode, samePreviewMap, samePreviewView } from "./record-equality";
 import { edgePortOffsets } from "./scene-ports";
-import { containsPoint } from "./selection";
 
 /** The URLs a card's image body should show, loaded by the page. */
 export interface PreviewView {

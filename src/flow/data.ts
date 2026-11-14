@@ -1,5 +1,5 @@
 import { manualTextResult, type Document, type NodeInput } from "./shared";
-import { portOffset } from "./connection";
+import { portOffset } from "./canvas";
 import { serializeSettings } from "./nodes";
 
 export const NODE_WIDTH = 300;

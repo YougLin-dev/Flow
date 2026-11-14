@@ -3,7 +3,7 @@ import { expect, test } from "nsh/test";
 import { CanvasCamera } from "./camera";
 import { cursorForHandle, handleAtPoint, screenRect } from "./resize-handles";
 import { FlowScene } from "./scene";
-import type { ResizeHandle } from "./selection";
+import type { ResizeHandle } from "./canvas/geometry/selection";
 
 function node(id: string, x: number, y: number, overrides: Partial<NodeSummary> = {}): NodeSummary {
   return {

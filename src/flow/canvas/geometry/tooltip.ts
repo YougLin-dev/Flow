@@ -3,8 +3,8 @@
  * card, unless `placement` names a side. A bubble that would leave the stage
  * flips to the opposite side, then clamps inside the margin.
  */
-import type { CameraSize } from "./camera";
-import type { Point, PortSide } from "./connection";
+import type { Point, Size } from "../../shared";
+import type { PortSide } from "./connection";
 
 /** The side of the port icon a bubble prefers. */
 export type TipSide = "left" | "right" | "above" | "below";
@@ -22,7 +22,7 @@ export interface TipBoxInput {
   readonly center: Point;
   readonly width: number;
   readonly height: number;
-  readonly stage: CameraSize;
+  readonly stage: Size;
   readonly portSide: PortSide;
   readonly placement: TipPlacement;
   /** Between the icon and the bubble. */

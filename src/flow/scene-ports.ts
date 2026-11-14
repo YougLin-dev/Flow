@@ -3,9 +3,9 @@
  * capacity arithmetic. They are free functions because they read the scene
  * through its public surface; the scene model keeps to reconciling records.
  */
-import type { EdgeSummary } from "./shared";
-import type { PortSide, Point } from "./connection";
-import { portCenter, portHit, portOffset, PORT_CENTER_GAP } from "./connection";
+import type { EdgeSummary, Point } from "./shared";
+import type { PortSide } from "./canvas/geometry/connection";
+import { portCenter, portHit, portOffset, PORT_CENTER_GAP } from "./canvas/geometry/connection";
 import { type PortKind, portsOfNode } from "./nodes";
 import type { FlowScene } from "./scene";
 

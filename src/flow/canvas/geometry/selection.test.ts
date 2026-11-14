@@ -1,5 +1,6 @@
 import { expect, test } from "nsh/test";
-import { containsPoint, handleAt, intersects, normalizeRect, resizedRect } from "./selection";
+import { containsPoint } from "../../shared";
+import { handleAt, intersects, normalizeRect, resizedRect } from "./selection";
 
 test("hit-tests corners and whole edges of a screen rectangle", () => {
   const rect = { x: 10, y: 20, width: 100, height: 60 };
