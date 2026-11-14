@@ -1817,10 +1817,11 @@ facade. `LEGACY_FLAT` is down to 29 modules.
 
 Phase 3 step 2 moved `FlowCanvas` to `components/canvas` and its world views
 (`FlowCard`, `FlowEdges`, `FlowPreviews`, `GridBackground`, `Port`) to
-`components/canvas/world`; the page imports the canvas facade, and
-`SelectionPorts` reaches `Port` through the same-feature deep import until
-step 3 moves it into `canvas/selection`. No module split or behavior change
-was made. `LEGACY_FLAT` is down to 23 modules.
+`components/canvas/world`; the page imports the canvas facade. `SelectionPorts`
+reaches `Port` and `PortTooltip` reaches `port-visuals` through same-feature
+deep imports until step 3 moves them into `canvas/selection`/`canvas/feedback`.
+No module split or behavior change was made. `LEGACY_FLAT` is down to 23
+modules.
 
 ---
 

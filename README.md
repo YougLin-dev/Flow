@@ -102,11 +102,11 @@ src/                   the NSH app: its root, entry, config and assets
       FlowCanvas.tsx   the canvas: world-space cards and edges, gestures
       port-visuals.ts  the icon and theme token a port type uses everywhere
       world/
-        FlowCard.tsx     one card: title, status, body, ports
-        FlowEdges.tsx    every connector, stroked as one native-canvas layer
-        FlowPreviews.tsx the pulled connection previews
-        GridBackground.tsx the dot-grid backdrop
-        Port.tsx         one typed port, drawn as a native view
+        FlowCard.tsx         one card: title, status, body, ports
+        FlowEdges.tsx        every connector, stroked as one native-canvas layer
+        FlowPreviews.tsx     the pulled connection previews
+        GridBackground.tsx   the dot-grid backdrop
+        Port.tsx             one typed port, drawn as a native view
         ConnectorCanvas.tsx  the native canvas both connector layers share
         connector-layer.ts   its position/size/origin mapping
     SelectionOverlay.tsx selection borders, resize handles and the marquee

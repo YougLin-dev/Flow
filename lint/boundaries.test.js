@@ -75,6 +75,7 @@ const areaTree = {
   "src/flow/shared/native-types.ts": "",
   "src/components/canvas/index.ts": "",
   "src/components/canvas/world/Card.tsx": "",
+  "src/components/canvas/world/FlowCard.tsx": "",
   "src/components/search/index.ts": "",
   "src/components/search/SearchPalette.tsx": "",
   "src/pages/flow/index.ts": "",
@@ -139,7 +140,7 @@ test("classifies files and bare directory imports", () => {
   expect(areaOf("src/flow/execution/index.ts")).toBe("flow/execution");
   expect(areaOf("src/flow/minimap/index.ts")).toBe("flow/minimap");
   expect(areaOf("src/components/canvas/world/Card.tsx")).toBe("components/canvas");
-  expect(areaOf("src/components/SelectionPorts.tsx")).toBeNull();
+  expect(areaOf("src/components/CanvasProbe.tsx")).toBeNull();
   expect(areaOf("src/pages/flow/FlowPage.tsx")).toBe("pages/flow");
   expect(areaOf("src/pages/FlowPage.tsx")).toBeNull();
   expect(areaOf("src/App.tsx")).toBe("shell");
