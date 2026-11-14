@@ -369,10 +369,11 @@ ignored. Hover MUST NOT change the selection. (Test, Host for real pointers)
 
 ### 7.3 Resources and lifecycle
 
-Every object the page creates — the scene, controller, viewport refresh,
-preview loader, document session and runner — MUST be disposed by the page's
-`cleanup` (through the workspace's `dispose`), exactly once, in dependency
-order. The camera holds no resource and is not disposed. Key bindings MUST be
+Every disposable object the page creates — the viewport refresh (which also
+disposes the camera), preview loader, minimap, runner, assets and document —
+MUST be disposed by the page's `cleanup` (through the workspace's `dispose`),
+exactly once, in dependency order. The scene and controller hold no long-lived
+resource. Key bindings MUST be
 owned by the page's scope (declared in `pages/flow/workspace/bindings.ts` and bound by the
 page) or the mounted palette, and every command
 MUST exist once. Async work MUST drop its result after disposal. Tests that

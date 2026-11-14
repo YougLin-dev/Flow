@@ -126,7 +126,7 @@ report lists no root modules. Phase 4 then split the page: `flow-workspace.ts`
 owns construction and disposal, `flow-actions.ts` the key actions and Escape
 order, and `flow-effects.ts` the selection/composer effects; `FlowPage.tsx`
 keeps one synchronous construction call, the hook registrations and render,
-and is 205 lines (target ~250).
+and is 208 lines (target ~250).
 The old → new map is in
 [the plan's Appendix A](plans/code-organization.md#appendix-a--tsx-placement-map);
 `LEGACY_FLAT` in the manifest shrinks with every move and disappears in
