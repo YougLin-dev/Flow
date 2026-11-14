@@ -51,7 +51,9 @@ upload card has no output port.
   and a visible edge resolves its endpoints from the ports' current layout,
   so a resize keeps the line on the port. Hovering a port springs its icon a
   few points toward the pointer, like the old plus handle; the connector
-  anchor does not move.
+  anchor does not move. A compatible port inside a dragged end's magnet field
+  leans the same way and the preview eases onto it, so the release target is
+  visible before the join.
 - A card mounts its ports only when they can be read or acted on: selected,
   hovered, a snapped target, or connected and at least 56 on-screen points
   tall. A fit-to-board overview therefore pays no port views. Hovering a port

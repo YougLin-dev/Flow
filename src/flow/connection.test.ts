@@ -6,8 +6,14 @@ import {
   connectorControls,
   cubicAt,
   distanceToConnection,
+  followPoint,
+  magnetEndPoint,
+  magnetIconPoint,
+  magnetStrength,
   PORT_CENTER_GAP,
+  PORT_FOLLOW_MAX,
   PORT_HIT_RADIUS,
+  PORT_MAGNET_RADIUS,
   portCenter,
   portHit,
   portOffset,
@@ -32,6 +38,42 @@ test("typed ports spread evenly over the card side, outside the border", () => {
   expect(
     portHit(box, "out", portOffset(1, 2, 210), center.x + PORT_HIT_RADIUS + 0.5, center.y),
   ).toBe(false);
+});
+
+test("a dragged end meets the port icon and the field fades out at its edge", () => {
+  const anchor = { x: 300, y: 200 };
+  // Inside the follow reach the icon sits under the pointer and the dragged
+  // end is the pointer itself.
+  expect(magnetIconPoint(anchor, { x: 310, y: 200 })).toEqual({ x: 310, y: 200 });
+  expect(magnetEndPoint(anchor, { x: 310, y: 200 })).toEqual({ x: 310, y: 200 });
+
+  // At the field's edge the icon is at rest and the end is the pointer: the
+  // field has no visible boundary where the line would jump.
+  const edge = { x: 300 + PORT_MAGNET_RADIUS, y: 200 };
+  expect(magnetIconPoint(anchor, edge)).toEqual(anchor);
+  expect(magnetEndPoint(anchor, edge)).toEqual(edge);
+  expect(magnetStrength(PORT_FOLLOW_MAX)).toBe(1);
+  expect(magnetStrength(PORT_MAGNET_RADIUS)).toBe(0);
+
+  // Halfway through the field the icon leans out and the end settles between
+  // the pointer and the icon, never past either.
+  const pointer = { x: 300 + (PORT_FOLLOW_MAX + PORT_MAGNET_RADIUS) / 2, y: 200 };
+  const icon = magnetIconPoint(anchor, pointer);
+  const end = magnetEndPoint(anchor, pointer);
+  expect(Math.abs(magnetStrength(pointer.x - anchor.x) - 0.5) < 0.001).toBe(true);
+  expect(icon.x).toBeGreaterThan(anchor.x);
+  expect(icon.x).toBeLessThanOrEqual(anchor.x + PORT_FOLLOW_MAX);
+  expect(end.x).toBeLessThan(pointer.x);
+  expect(end.x).toBeGreaterThanOrEqual(icon.x);
+});
+
+test("a following port never leaves its reach", () => {
+  const center = { x: 100, y: 100 };
+  expect(followPoint(center, { x: 110, y: 100 }, PORT_FOLLOW_MAX)).toEqual({ x: 110, y: 100 });
+
+  const held = followPoint(center, { x: 160, y: 180 }, PORT_FOLLOW_MAX);
+  const distance = Math.hypot(held.x - center.x, held.y - center.y);
+  expect(distance > PORT_FOLLOW_MAX - 0.001 && distance < PORT_FOLLOW_MAX + 0.001).toBe(true);
 });
 
 test("measures a connector along its curve", () => {

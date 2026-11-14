@@ -23,7 +23,8 @@ import {
   CARD_BODY_LINE_HEIGHT,
   CARD_TITLE_HEIGHT,
 } from "../flow/card-layout";
-import { type BoxGeometry, PORT_CENTER_GAP, portOffset } from "../flow/connection";
+import { type BoxGeometry, magnetIconPoint, PORT_CENTER_GAP, portOffset } from "../flow/connection";
+import type { MagnetPort } from "../flow/connection-gesture";
 import { type FlowAccent, portsOfNode } from "../flow/node-kinds";
 import { previewCell } from "../flow/preview-grid";
 import type { PreviewView } from "../flow/scene";
@@ -56,6 +57,10 @@ export interface FlowCardProps {
   readonly hoveredPort: () => PortHover | null;
   /** The hovered port's identity; stable while the pointer moves over it. */
   readonly hoveredPortKey: () => string | null;
+  /** The port a dragged connector end magnetizes, if it belongs to this card. */
+  readonly targetPort: () => MagnetPort | null;
+  /** The magnetized port's identity; stable while the pointer moves. */
+  readonly targetPortKey: () => string | null;
   /** True while this card has an edge on either side. */
   readonly connected: () => boolean;
   /** The camera scale: below a readable size, idle ports stay out of the tree. */
@@ -147,11 +152,28 @@ export function FlowCard(props: FlowCardProps) {
     x: side === "in" ? -PORT_CENTER_GAP : size().width + PORT_CENTER_GAP,
     y: portOffset(index, count, size().height),
   });
-  /** The pointer's card-local point while this card's port is hovered. */
-  const portFollow = (side: "in" | "out", portId: string): { x: number; y: number } | null => {
-    // Read the identity before the record: every port subscribes to the
-    // identity, but only the hovered one reads the per-move pointer point.
-    if (props.hoveredPortKey() !== portKey(props.nodeId, side, portId)) return null;
+  /** The icon centre this card's port springs to while the pointer hovers it
+   * or a dragged connector end magnetizes it. */
+  const portFollow = (
+    side: "in" | "out",
+    portId: string,
+    index: number,
+    count: number,
+  ): { x: number; y: number } | null => {
+    const key = portKey(props.nodeId, side, portId);
+    // Read the identity before the per-move records and the card geometry:
+    // only the followed port wakes on a pointer move, and only it reads the
+    // position that a card drag changes.
+    if (props.targetPortKey() === key) {
+      const magnet = props.targetPort();
+      if (magnet === null) return null;
+      const origin = pos();
+      return magnetIconPoint(portCenter(side, index, count), {
+        x: magnet.point.x - origin.x,
+        y: magnet.point.y - origin.y,
+      });
+    }
+    if (props.hoveredPortKey() !== key) return null;
     const hover = props.hoveredPort();
     if (hover === null) return null;
     const origin = pos();
@@ -364,7 +386,7 @@ export function FlowCard(props: FlowCardProps) {
             <Port
               port={port()}
               center={() => portCenter("in", index(), spec().inputs.length)}
-              follow={() => portFollow("in", port().id)}
+              follow={() => portFollow("in", port().id, index(), spec().inputs.length)}
             />
           )}
         </Each>
@@ -373,7 +395,7 @@ export function FlowCard(props: FlowCardProps) {
             <Port
               port={port()}
               center={() => portCenter("out", index(), spec().outputs.length)}
-              follow={() => portFollow("out", port().id)}
+              follow={() => portFollow("out", port().id, index(), spec().outputs.length)}
             />
           )}
         </Each>

@@ -286,9 +286,11 @@ source states write these flags in the same update round, so a change wakes
 only the cards whose membership flipped. A port rests just outside the
 border; when hovered it springs toward the pointer within a small reach in
 both axes, and it springs back when the pointer leaves, while its connector
-anchor — the icon's centre — stays fixed. `FlowEdges` strokes every
-connector's cubic from `flow/connection.ts` in one native-canvas layer with
-round caps;
+anchor — the icon's centre — stays fixed. A compatible port under a dragged
+connector end leans out the same way inside its magnet field, and the
+preview eases onto the leaned icon (`flow/connection.ts`). `FlowEdges`
+strokes every connector's cubic from `flow/connection.ts` in one
+native-canvas layer with round caps;
 the canvas rasterizer draws at the transformed resolution, so the lines stay
 smooth and sharp at every camera scale instead of showing sampled joints, and
 there is no arrowhead. The canvas covers only the connector box clipped to the
@@ -313,7 +315,7 @@ accessors, and the page passes scene signals to them.
 The scene model (`flow/scene.ts`) is headless: it holds the visible nodes and
 edges, the selection, transient drag geometry (`overrides`, read per card so
 a drag updates only the cards it moves and their connectors), previews, the
-connection previews and the card a pulled connector would snap to, and answers
+connection previews and the card a pulled connector would join, and answers
 world-space hit questions (`nodeAt`, `edgeAt`); the typed-port queries
 (`portAt`, `nearestPort`, `portOffsetAt` in `flow/scene-ports.ts`) read it
 through that surface. Selected cards stack above every unselected one in
@@ -405,13 +407,16 @@ exists once.
 
 Pointer gestures above the canvas: dragging an output port previews a
 forward connection and an input port a reverse one; the preview is dashed
-until the connection is written. While the pointer is within the release
-snap of a compatible port, the preview snaps to that port and the target card
-takes the accent border, and the preview follows the pointer again when it
-leaves. A full input, a type mismatch and an already-connected pair never
-highlight, and a still press on a port writes nothing. Dragging either typed
-port of a selected edge's endpoints moves that end (source or target). A
-multi-card frame shows one group port per type on each side; dragging one
+until the connection is written. A compatible port inside the dragged end's
+magnet field (48 world points) leans its icon toward the pointer on the same
+spring as a hovered port, and the preview eases onto it, so the field has no
+snap threshold at its edge; releasing inside it joins the two. The target
+card takes the accent border, and on leaving the field the icon and the
+preview return smoothly to the pointer. A full input, a type mismatch and an
+already-connected pair never highlight, and a still press on a port writes
+nothing. Dragging either typed port of a selected edge's endpoints moves
+that end (source or target). A multi-card frame shows one group port per
+type on each side; dragging one
 fans the connection out to every matching selected port (or connects the
 target to every selected input). A press on a connector selects it;
 double-clicking a text card opens its inline editor.

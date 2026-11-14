@@ -23,6 +23,56 @@ export const PORT_CENTER_GAP = 14;
 export const PORT_HIT_RADIUS = 24;
 /** How far a lifted port follows the pointer from its anchor. */
 export const PORT_FOLLOW_MAX = 22;
+/** The field around a compatible port that captures a dragged connector end:
+ * inside it the port leans toward the pointer and the end eases onto it, and
+ * a release joins the two. */
+export const PORT_MAGNET_RADIUS = 48;
+
+/** The point within `reach` of `center` that a following port slides to. */
+export function followPoint(center: Point, pointer: Point, reach: number): Point {
+  const dx = pointer.x - center.x;
+  const dy = pointer.y - center.y;
+  const distance = Math.hypot(dx, dy);
+  if (distance <= reach) return pointer;
+  const scale = reach / distance;
+  return { x: center.x + dx * scale, y: center.y + dy * scale };
+}
+
+/** How strongly a port at `distance` pulls a dragged connector end: 1 within
+ * the follow reach, easing to 0 at the magnet radius, so the field has no
+ * visible edge. */
+export function magnetStrength(distance: number): number {
+  if (distance <= PORT_FOLLOW_MAX) return 1;
+  if (distance >= PORT_MAGNET_RADIUS) return 0;
+  const t = (PORT_MAGNET_RADIUS - distance) / (PORT_MAGNET_RADIUS - PORT_FOLLOW_MAX);
+  return t * t * (3 - 2 * t);
+}
+
+/** The leaned centre of a port icon while a connector end is dragged near it:
+ * it meets the pointer within the follow reach and eases back to its anchor
+ * at the magnet radius, so entering or leaving the field never jumps. */
+export function magnetIconPoint(anchor: Point, pointer: Point): Point {
+  const dx = pointer.x - anchor.x;
+  const dy = pointer.y - anchor.y;
+  const distance = Math.hypot(dx, dy);
+  if (distance === 0 || distance >= PORT_MAGNET_RADIUS) return anchor;
+  if (distance <= PORT_FOLLOW_MAX) return pointer;
+  const scale = (PORT_FOLLOW_MAX * magnetStrength(distance)) / distance;
+  return { x: anchor.x + dx * scale, y: anchor.y + dy * scale };
+}
+
+/** The dragged end while a port magnet holds it: the pointer, eased toward
+ * the leaning icon, so the line lands on the port instead of jumping at a
+ * threshold. */
+export function magnetEndPoint(anchor: Point, pointer: Point): Point {
+  const strength = magnetStrength(Math.hypot(pointer.x - anchor.x, pointer.y - anchor.y));
+  if (strength === 1) return pointer;
+  const icon = magnetIconPoint(anchor, pointer);
+  return {
+    x: pointer.x + (icon.x - pointer.x) * strength,
+    y: pointer.y + (icon.y - pointer.y) * strength,
+  };
+}
 
 /** A port's vertical anchor from the card's top: the stack is spread evenly
  * over the card's side, like `justify-evenly`, whatever the card's height. */

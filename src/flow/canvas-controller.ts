@@ -8,7 +8,7 @@ import { batch, computed, signal, type ViewStyle } from "nsh";
 import type { NodeBounds } from "@flow/native";
 import type { CanvasCamera } from "./camera";
 import type { BoxGeometry, Point, PortSide } from "./connection";
-import type { ConnectionPair } from "./connection-gesture";
+import type { ConnectionPair, MagnetPort } from "./connection-gesture";
 import { EdgeGestures } from "./edge-gestures";
 import {
   frameContains as frameContainsScreen,
@@ -103,6 +103,14 @@ export class CanvasController {
     const hover = this.hoveredPort();
     return hover === null ? null : portKey(hover.nodeId, hover.side, hover.portId);
   });
+  /** The compatible port a dragged connector end magnetizes. */
+  readonly connectionMagnet = signal<MagnetPort | null>(null);
+  /** The magnetized port's identity, without the per-move pointer point:
+   * port views subscribe to this, so only the held port follows the drag. */
+  readonly connectionMagnetKey = computed((): string | null => {
+    const magnet = this.connectionMagnet();
+    return magnet === null ? null : portKey(magnet.nodeId, magnet.side, magnet.portId);
+  });
   /** The selection frame's group port whose icon follows the pointer. */
   readonly hoveredGroup = signal<GroupPortHover | null>(null);
   /** The hovered group port's identity, without its per-move pointer point. */
@@ -194,6 +202,7 @@ export class CanvasController {
       this.gestureMoved.set(false);
       this.hoveredPort.set(null);
       this.hoveredGroup.set(null);
+      this.connectionMagnet.set(null);
       this.clearPreview();
       this.gesture = { ...idle(), startX: x, startY: y, lastX: x, lastY: y };
       const framed = this.multiFrame();
@@ -315,7 +324,7 @@ export class CanvasController {
       }
       if (gesture.mode === "edge") {
         if (this.edgeMode) {
-          this.edges.move(x, y);
+          this.connectionMagnet.set(this.edges.move(x, y));
           // A connector is pulled once the pointer leaves the press point;
           // the pre-move preview `down` published is still a click.
           if (x !== gesture.startX || y !== gesture.startY) this.markGestureMoved();
@@ -391,6 +400,7 @@ export class CanvasController {
         // to snap nearby.
         if (moved) this.edges.up(x, y);
         else this.edges.cancel();
+        this.connectionMagnet.set(null);
         this.hover(x, y);
         return;
       }
@@ -437,6 +447,7 @@ export class CanvasController {
       this.gestureMoved.set(false);
       this.hoveredPort.set(null);
       this.hoveredGroup.set(null);
+      this.connectionMagnet.set(null);
       if (this.gesture.mode === "drag" || this.gesture.mode === "resize") {
         this.host.scene().clearOverrides();
       }
@@ -453,6 +464,7 @@ export class CanvasController {
       this.setHovered(null);
       this.hoveredPort.set(null);
       this.hoveredGroup.set(null);
+      this.connectionMagnet.set(null);
       this.cursor.set("default");
     });
   }

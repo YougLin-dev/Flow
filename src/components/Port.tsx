@@ -1,13 +1,13 @@
 /**
  * One typed port: a small circle in the type's color with the type's icon.
  * It is the connector's handle; the canvas controller reads the port's hit
- * zone, so the view itself is never pressed. A hovered port springs toward
- * the pointer within a small reach and springs back when the pointer leaves,
- * while its connector anchor stays put.
+ * zone, so the view itself is never pressed. A following port springs to its
+ * caller's target within `PORT_FOLLOW_MAX` and springs back when the caller
+ * asks for none, while its connector anchor stays put.
  */
 import { cleanup, createAnimatedValue, effect, token, View } from "nsh";
 import { Icon } from "./Icon";
-import { type Point, PORT_FOLLOW_MAX, PORT_SIZE } from "../flow/connection";
+import { followPoint, type Point, PORT_FOLLOW_MAX, PORT_SIZE } from "../flow/connection";
 import type { InputPort, OutputPort } from "../flow/node-kinds";
 import { portVisual, type PortToken } from "../flow/port-visuals";
 
@@ -26,7 +26,9 @@ export interface PortProps {
   readonly port: InputPort | OutputPort;
   /** The icon centre in the parent's coordinates. */
   readonly center: () => Point;
-  /** The pointer in the parent's coordinates while this port is hovered. */
+  /** The target, in the parent's coordinates, this port follows while the
+   * pointer hovers it or a dragged connector end magnetizes it; the view caps
+   * the lean at `PORT_FOLLOW_MAX`. */
   readonly follow?: () => Point | null;
   /** False when the port cannot start a connection right now. */
   readonly enabled?: () => boolean;
@@ -39,9 +41,10 @@ export function Port(props: PortProps) {
   // Start where the port should be this instant: one mounted while the
   // pointer already holds it appears under the pointer, not at rest.
   const start = (): Point => {
-    const followed = followedPoint(props);
-    if (followed === null) return { x: 0, y: 0 };
+    const target = props.follow?.() ?? null;
+    if (target === null) return { x: 0, y: 0 };
     const center = props.center();
+    const followed = followPoint(center, target, PORT_FOLLOW_MAX);
     return { x: followed.x - center.x, y: followed.y - center.y };
   };
   const initial = start();
@@ -49,8 +52,8 @@ export function Port(props: PortProps) {
   const offsetY = createAnimatedValue(initial.y);
   let following = initial.x !== 0 || initial.y !== 0;
   effect(() => {
-    const followed = followedPoint(props);
-    if (followed === null) {
+    const target = props.follow?.() ?? null;
+    if (target === null) {
       // The other ports ignore the pointer; do not restart their rest
       // spring on every move.
       if (!following) return;
@@ -61,6 +64,7 @@ export function Port(props: PortProps) {
     }
     following = true;
     const center = props.center();
+    const followed = followPoint(center, target, PORT_FOLLOW_MAX);
     void offsetX.spring(followed.x - center.x, FOLLOW_SPRING);
     void offsetY.spring(followed.y - center.y, FOLLOW_SPRING);
   });
@@ -92,19 +96,6 @@ export function Port(props: PortProps) {
       <Icon icon={visual.icon} size={11} strokeWidth={2.4} tint={() => token(visual.token)} />
     </View>
   );
-}
-
-/** The pointer's point capped to the port's follow reach. */
-function followedPoint(props: PortProps): Point | null {
-  const pointer = props.follow?.();
-  if (!pointer) return null;
-  const center = props.center();
-  const dx = pointer.x - center.x;
-  const dy = pointer.y - center.y;
-  const distance = Math.hypot(dx, dy);
-  if (distance <= PORT_FOLLOW_MAX) return pointer;
-  const scale = PORT_FOLLOW_MAX / distance;
-  return { x: center.x + dx * scale, y: center.y + dy * scale };
 }
 
 /** The accessible name: the port's role, its type and its capacity. */

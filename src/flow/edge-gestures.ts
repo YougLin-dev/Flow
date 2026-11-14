@@ -5,7 +5,12 @@
  */
 import type { EdgeSummary } from "@flow/native";
 import type { CanvasCamera } from "./camera";
-import { type ConnectionPair, ConnectionGesture, type FixedPort } from "./connection-gesture";
+import {
+  type ConnectionPair,
+  ConnectionGesture,
+  type FixedPort,
+  type MagnetPort,
+} from "./connection-gesture";
 import type { GroupPort } from "./group-ports";
 import { isPortKind } from "./node-kinds";
 import type { FlowScene } from "./scene";
@@ -107,10 +112,12 @@ export class EdgeGestures {
     );
   }
 
-  move(x: number, y: number): void {
+  /** One drag step; returns the port the moving end is held by, if any. */
+  move(x: number, y: number): MagnetPort | null {
     const scene = this.host.scene();
     const camera = this.host.camera();
-    if (scene && camera) this.gesture.move(camera, scene, x, y);
+    if (scene && camera) return this.gesture.move(camera, scene, x, y);
+    return null;
   }
 
   up(x: number, y: number): void {

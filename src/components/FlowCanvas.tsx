@@ -425,6 +425,8 @@ export function FlowCanvas(props: FlowCanvasProps) {
                 hovered={() => props.controller.flags.isHovered(id)}
                 hoveredPort={() => props.controller.hoveredPort()}
                 hoveredPortKey={() => props.controller.hoveredPortKey()}
+                targetPort={() => props.controller.connectionMagnet()}
+                targetPortKey={() => props.controller.connectionMagnetKey()}
                 connected={() => connectedCards().has(id)}
                 zoom={() => props.camera.scaleView()}
                 target={() => props.scene.isConnectionTarget(id)}
