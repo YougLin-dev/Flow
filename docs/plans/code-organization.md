@@ -1808,7 +1808,7 @@ stay in the root `composer-detail.ts` for Phase 3 step 5), `sameOverview`
 moved with the minimap loader, and `ViewportHost.fallbackBounds` replaced the
 viewport controller's seed import. The structure walker now skips only
 `src/assets/`; skipping every `assets/` folder would have hidden the new
-area-owned segment. `LEGACY_FLAT` is down to 32 modules and the native-seam
+area-owned part folder. `LEGACY_FLAT` is down to 32 modules and the native-seam
 report is clear (the runtime import lives inside `flow/document`).
 
 ---

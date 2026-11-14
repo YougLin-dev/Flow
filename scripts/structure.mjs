@@ -41,8 +41,8 @@ export function collectSourceFiles(root) {
   const source = join(root, "src");
   const walk = (directory) => {
     for (const entry of readdirSync(directory, { withFileTypes: true })) {
-      // Only the app-root assets folder holds binaries; area-owned `assets/`
-      // segments (for example `flow/document/assets/`) hold TypeScript.
+      // Only the app-root assets folder holds binaries; area-owned part
+      // folders (for example `flow/document/assets/`) hold TypeScript.
       if (SKIP_DIRS.has(entry.name) || (entry.name === "assets" && directory === source)) continue;
       const full = join(directory, entry.name);
       if (entry.isDirectory()) {

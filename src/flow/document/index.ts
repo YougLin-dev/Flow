@@ -6,8 +6,6 @@ export { openFlowDocument } from "./lifecycle/document-session";
 export {
   CONTENT,
   IMAGE_NODE_ID,
-  NODE_HEIGHT,
-  NODE_WIDTH,
   SEED_EDGE_ID,
   seedDocument,
   seedNodes,

@@ -411,3 +411,21 @@ test("disposal cancels a pending automatic fit", async () => {
   expect(camera.scale).toBe(1);
   expect(camera.view()).toEqual({ x: 0, y: 0, scale: 1 });
 });
+
+test("fits the host's fallback bounds when the document reports none", async () => {
+  const fixture = setup();
+  try {
+    const { controller, camera, boundsDeferreds } = fixture;
+    const fitting = controller.fitToDocument(false, false);
+    takeBounds(boundsDeferreds, 0).resolve({ x: 0, y: 0, width: 0, height: 0 });
+    await fitting;
+
+    const expected = new CanvasCamera({ scheduler: inertScheduler });
+    const scale = expected.fit(CONTENT, { width: 800, height: 600 });
+    expect(camera.scale).toBe(scale);
+    expect(camera.x).toBe(expected.x);
+    expect(camera.y).toBe(expected.y);
+  } finally {
+    fixture.dispose();
+  }
+});
