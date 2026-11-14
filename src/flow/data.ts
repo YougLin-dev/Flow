@@ -1,6 +1,6 @@
 import { manualTextResult, type Document, type NodeInput } from "./shared";
 import { portOffset } from "./connection";
-import { serializeSettings } from "./node-kinds";
+import { serializeSettings } from "./nodes";
 
 export const NODE_WIDTH = 300;
 export const NODE_HEIGHT = 220;

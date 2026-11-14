@@ -6,6 +6,7 @@
  */
 import { batch, signal, type Signal, untracked } from "nsh";
 import {
+  KeyedFlags,
   sameRectWithin,
   type EdgeSummary,
   type NodeBounds,
@@ -22,8 +23,7 @@ import {
   portCenter,
 } from "./connection";
 import { CARD_TITLE_BAND } from "./card-layout";
-import { KeyedFlags } from "./keyed-flags";
-import { hasImageOutput, type PortKind } from "./node-kinds";
+import { hasImageOutput, type PortKind } from "./nodes";
 import { sameEdge, sameNode, samePreviewMap, samePreviewView } from "./record-equality";
 import { edgePortOffsets } from "./scene-ports";
 import { containsPoint } from "./selection";

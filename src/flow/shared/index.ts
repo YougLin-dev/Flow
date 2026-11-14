@@ -3,6 +3,7 @@ export { AsyncDrain, type DrainStep, type DrainStepResult } from "./async-drain"
 export type { Point, Rect, Size } from "./geometry";
 export { RECT_EPSILON, sameBounds, sameBox, samePoint, sameRect, sameRectWithin } from "./equality";
 export { keepsWheel } from "./wheel";
+export { KeyedFlags } from "./keyed-flags";
 export { FIT_KEY, ZOOM_IN_KEY, ZOOM_OUT_KEY } from "./shortcuts";
 export type {
   ChangeSet,

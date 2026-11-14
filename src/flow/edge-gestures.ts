@@ -12,7 +12,7 @@ import {
   type MagnetPort,
 } from "./connection-gesture";
 import type { GroupPort } from "./group-ports";
-import { isPortKind } from "./node-kinds";
+import { isPortKind } from "./nodes";
 import type { FlowScene } from "./scene";
 import { portCenterWorld, portOffsetAt, type PortHit } from "./scene-ports";
 

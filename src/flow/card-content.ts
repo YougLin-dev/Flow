@@ -7,7 +7,7 @@
  */
 import { type Accessor, computed } from "nsh";
 import type { NodeSummary } from "./shared";
-import { type FlowAccent, hasImageOutput, nodeKind, statusLabel } from "./node-kinds";
+import { type FlowAccent, hasImageOutput, nodeKind, statusLabel } from "./nodes";
 
 export class CardContent {
   readonly title: Accessor<string>;

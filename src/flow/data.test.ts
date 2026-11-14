@@ -1,6 +1,6 @@
 import { expect, test } from "nsh/test";
 import { CONTENT, IMAGE_NODE_ID, NODE_HEIGHT, NODE_WIDTH, TEXT_NODE_ID, seedNodes } from "./data";
-import { parseSettings } from "./node-kinds";
+import { parseSettings } from "./nodes";
 
 test("the seed has one text and one image node", () => {
   const nodes = seedNodes();

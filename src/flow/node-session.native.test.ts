@@ -1,7 +1,7 @@
 import { expect, test } from "nsh/test";
 import { Document } from "@flow/native";
 import { IMAGE_NODE_ID, TEXT_NODE_ID, seedDocument } from "./data";
-import { parseSettings } from "./node-kinds";
+import { parseSettings } from "./nodes";
 import { makeSession, until } from "./node-session-harness";
 import { FlowScene } from "./scene";
 

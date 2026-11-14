@@ -17,7 +17,7 @@ import {
 } from "./frame-surface";
 import type { GroupPort } from "./group-ports";
 import { HoverFlags } from "./hover-flags";
-import type { PortKind } from "./node-kinds";
+import type { PortKind } from "./nodes";
 import { cursorForHandle, handleAtPoint, screenRect } from "./resize-handles";
 import { RightGesture } from "./right-gesture";
 import type { FlowScene } from "./scene";

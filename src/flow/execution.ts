@@ -20,7 +20,7 @@ import {
   type NodeSettings,
   type TextSettings,
   textModelLabel,
-} from "./node-kinds";
+} from "./nodes";
 
 export interface ProviderRequest {
   readonly nodeId: string;

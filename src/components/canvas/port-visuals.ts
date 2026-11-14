@@ -1,7 +1,7 @@
 /** The icon and theme token a port type uses everywhere: cards, edges, previews. */
 import { token } from "nsh";
 import { Image, Type } from "lucide";
-import { isPortKind, type PortKind } from "../../flow/node-kinds";
+import { isPortKind, type PortKind } from "../../flow/nodes";
 import type { IconNode } from "../primitives";
 
 /** The theme tokens a port type may use for its icon, edges and previews. */

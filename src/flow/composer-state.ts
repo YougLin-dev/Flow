@@ -18,7 +18,7 @@ import {
   type NodeSettings,
   serializeSettings,
   type TextModelId,
-} from "./node-kinds";
+} from "./nodes";
 
 /** The writes the composer drafts make; `NodeSession` implements it. */
 export interface ComposerSaver {

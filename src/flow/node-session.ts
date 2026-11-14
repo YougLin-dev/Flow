@@ -27,7 +27,7 @@ import {
   nodeKind,
   portsOfNode,
   serializeSettings,
-} from "./node-kinds";
+} from "./nodes";
 import { capacityOf, hasPortEdge, incomingEdgeCount } from "./scene-ports";
 import { uploadSource as uploadSourceFile } from "./upload-source";
 

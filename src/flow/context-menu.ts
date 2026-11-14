@@ -3,7 +3,7 @@ import { effect, signal, untracked } from "nsh";
 import type { CanvasCamera } from "./camera";
 import type { CanvasController } from "./canvas-controller";
 import type { BoxGeometry, Point } from "./connection";
-import type { NodeKindId } from "./node-kinds";
+import type { NodeKindId } from "./nodes";
 import type { StageSize } from "./overlay";
 import type { FlowScene } from "./scene";
 import { portAt } from "./scene-ports";

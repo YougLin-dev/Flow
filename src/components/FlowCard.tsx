@@ -25,7 +25,7 @@ import {
 } from "../flow/card-layout";
 import { type BoxGeometry, magnetIconPoint, PORT_CENTER_GAP, portOffset } from "../flow/connection";
 import type { MagnetPort } from "../flow/connection-gesture";
-import { type FlowAccent, portsOfNode } from "../flow/node-kinds";
+import { type FlowAccent, portsOfNode } from "../flow/nodes";
 import { previewCell } from "../flow/preview-grid";
 import type { PreviewView } from "../flow/scene";
 

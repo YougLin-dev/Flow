@@ -11,7 +11,7 @@ import { cleanup, computed, effect, signal, Text, View } from "nsh";
 import type { CanvasCamera, CameraSize } from "../flow/camera";
 import type { CanvasController } from "../flow/canvas-controller";
 import type { Point, PortSide } from "../flow/connection";
-import { portsOfNode } from "../flow/node-kinds";
+import { portsOfNode } from "../flow/nodes";
 import { portVisual } from "./canvas";
 import type { FlowScene } from "../flow/scene";
 import { tipWidth, tooltipBox, type TipPlacement } from "../flow/tooltip";

@@ -16,7 +16,7 @@ import {
 import { AssetUrls } from "./asset-urls";
 import { IMAGE_NODE_ID, TEXT_NODE_ID, seedDocument } from "./data";
 import { NodeRunner } from "./execution";
-import { parseSettings } from "./node-kinds";
+import { parseSettings } from "./nodes";
 import { NodeSession, type AssetUrlSource, type NodeSessionHost } from "./node-session";
 
 /** Polls native async work: `app.waitUntil` only exists in an app test. */

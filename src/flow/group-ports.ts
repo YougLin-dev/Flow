@@ -6,7 +6,7 @@
  */
 import type { BoxGeometry, Point, PortSide } from "./connection";
 import { PORT_CENTER_GAP, PORT_HIT_RADIUS, portOffset } from "./connection";
-import { PORT_KINDS, type PortKind, portsOfNode } from "./node-kinds";
+import { PORT_KINDS, type PortKind, portsOfNode } from "./nodes";
 import type { FlowScene } from "./scene";
 import { capacityOf, portCenterWorld, portOffsetAt } from "./scene-ports";
 

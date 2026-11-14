@@ -5,7 +5,7 @@
  * itself. The sheet never shows the output, so the card stays the one place
  * the generated text lives.
  */
-import { isTextModel, TEXT_MODELS, textModelLabel } from "../../flow/node-kinds";
+import { isTextModel, TEXT_MODELS, textModelLabel } from "../../flow/nodes";
 import { ComposerModelSelect } from "../ComposerModelSelect";
 import { type ComposerVariantProps, ComposerSheet } from "./ComposerSheet";
 

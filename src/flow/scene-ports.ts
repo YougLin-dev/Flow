@@ -6,7 +6,7 @@
 import type { EdgeSummary } from "./shared";
 import type { PortSide, Point } from "./connection";
 import { portCenter, portHit, portOffset, PORT_CENTER_GAP } from "./connection";
-import { type PortKind, portsOfNode } from "./node-kinds";
+import { type PortKind, portsOfNode } from "./nodes";
 import type { FlowScene } from "./scene";
 
 /** One typed port under a pointer. `point` is the icon's centre, where its
