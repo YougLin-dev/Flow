@@ -91,6 +91,10 @@ src/                   the NSH app: its root, entry, config and assets
   pages/
     FlowPage.tsx       the workspace: document session, camera, overlays
   components/
+    app/
+      TitleBar.tsx     custom title bar (pin, drag, native window controls)
+      BrandCard.tsx    branding where the desktop shell is absent
+      FrameRate.tsx    the frame-rate readout
     FlowCanvas.tsx     the canvas: world-space cards and edges, gestures
     FlowCard.tsx       one card: title, status, body, ports
     primitives/
@@ -112,12 +116,10 @@ src/                   the NSH app: its root, entry, config and assets
       ImageComposer.tsx  the image node's prompt, model and image settings
     InlineTextEditor.tsx the screen-space text editor
     NodeToolbar.tsx    floating add-node buttons
-    TitleBar.tsx       custom title bar (pin, drag, native window controls)
     ZoomControls.tsx   zoom in / out / fit
     SearchButton.tsx   floating search entry point
     SearchPalette.tsx  debounced full-text search, filters and result navigation
     SelectionBadge.tsx selection count
-    BrandCard.tsx      branding shown where the desktop shell is absent
   flow/
     document/
       index.ts         the area facade: lifecycle, sessions and loaders

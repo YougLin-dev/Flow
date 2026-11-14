@@ -1,9 +1,9 @@
 # Code organization and architecture standard
 
-- **Status:** Accepted 2026-11-14; Phases 0–1d are implemented and Phase 2
-  is in progress on stacked branches (standard and tooling, shared kernel and
-  first reuse, composer shell, AsyncDrain core, connector layer, leaf area
-  moves).
+- **Status:** Accepted 2026-11-14; Phases 0–2 are implemented and Phase 3 is
+  in progress on stacked branches (standard and tooling, shared kernel and
+  first reuse, composer shell, AsyncDrain core, connector layer, the eight
+  `flow/` area moves, `components/app`).
 - **Scope:** `src/` (TSX app) and `src/native/` (Rust document core).
 - **Related:** [standards](../standards.md), [architecture](../architecture.md),
   [conventions](../conventions.md), [testing](../testing.md),
@@ -1810,6 +1810,10 @@ viewport controller's seed import. The structure walker now skips only
 `src/assets/`; skipping every `assets/` folder would have hidden the new
 area-owned part folder. `LEGACY_FLAT` is down to 32 modules and the native-seam
 report is clear (the runtime import lives inside `flow/document`).
+
+Phase 3 step 1 moved `TitleBar`, `BrandCard` and `FrameRate` to
+`components/app` behind the area facade; `App.tsx` and `FlowPage` import the
+facade. `LEGACY_FLAT` is down to 29 modules.
 
 ---
 

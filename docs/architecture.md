@@ -19,7 +19,7 @@ App.tsx                     app shell: title bar + page, nothing else
  │   ├─ components/*        presentational views and the canvas surface
  │   ├─ flow/*              node kinds, execution, scene, camera, gestures
  │   └─ store.ts            shared state behind readers and actions
- ├─ components/TitleBar.tsx window chrome (props only)
+ ├─ components/app/TitleBar.tsx window chrome (props only)
  └─ store.ts                zoom, selection count and pinned state
 ```
 
