@@ -26,6 +26,39 @@ test("selecting a text node opens its chat composer", async () => {
   expect(app.shows("id:composer-body")).toBe(false);
 });
 
+test("both composer variants mount the same shared sheet", async () => {
+  const app = await openTallApp();
+  await app.waitUntil(() => percentOf(app) > 0);
+
+  await selectSeed(app, "Text", "id:search-result-seed-text");
+  await app.waitUntil(() => app.shows("id:node-composer"));
+  for (const testID of [
+    "composer-image-button",
+    "composer-close",
+    "composer-prompt",
+    "composer-run",
+  ]) {
+    expect(app.shows(`id:${testID}`)).toBe(true);
+  }
+  // The text variant's counter is its own; image settings are not mounted.
+  expect(app.shows("id:composer-counter")).toBe(true);
+  expect(app.shows("id:composer-settings")).toBe(false);
+
+  await selectSeed(app, "Image", "id:search-result-seed-image");
+  await app.waitUntil(() => app.shows("id:composer-settings"));
+  for (const testID of [
+    "node-composer",
+    "composer-image-button",
+    "composer-close",
+    "composer-prompt",
+    "composer-run",
+  ]) {
+    expect(app.shows(`id:${testID}`)).toBe(true);
+  }
+  expect(app.shows("id:composer-counter")).toBe(false);
+  expect(app.shows("id:composer-count")).toBe(true);
+});
+
 test("edits a text card in place with Mod+Enter", async () => {
   const app = await openApp({ platform: "windows" });
   await app.waitUntil(() => percentOf(app) > 0);

@@ -1,16 +1,13 @@
 /**
- * The image node's composer: a chat-style prompt sheet attached under the
- * selected card, like the text node's. Its attachments are the node's image
- * inputs; the prompt and the image settings (model, aspect, resolution and
- * count) sit in the sheet's bottom row. Sending runs the mock image provider,
- * whose images land on the card itself.
+ * The image node's composer: the shared prompt sheet configured with the image
+ * model and the image settings (aspect, resolution and count) in the footer.
+ * Its attachments are the node's image inputs; sending runs the mock image
+ * provider, whose images land on the card itself.
  */
-import { computed, signal, Text, token, View } from "nsh";
-import { Button, Input, Popover, Select } from "nsh/base";
-import { ArrowUp, ChevronDown, ImagePlus, Square, X } from "lucide";
-import type { NodeDetail } from "../flow/shared";
-import { errorOf, inputUrl } from "../flow/composer-detail";
-import type { ComposerState } from "../flow/composer-state";
+import { signal, Text, token, View } from "nsh";
+import { Button, Popover, Select } from "nsh/base";
+import { ChevronDown } from "lucide";
+import type { ComposerState } from "../../flow/composer-state";
 import {
   IMAGE_ASPECTS,
   IMAGE_MODELS,
@@ -19,20 +16,18 @@ import {
   imageModelLabel,
   isImageModel,
   type ImageResolution,
-} from "../flow/node-kinds";
-import { keepsWheel } from "../flow/shared";
-import { ComposerInputTile, TILE_SIZE } from "./ComposerInputTile";
-import { ComposerModelSelect } from "./ComposerModelSelect";
-import { Icon } from "./primitives";
+} from "../../flow/node-kinds";
+import type { NodeDetail } from "../../flow/shared";
+import { ComposerModelSelect } from "../ComposerModelSelect";
+import { Icon } from "../primitives";
+import { ComposerSheet } from "./ComposerSheet";
 
 /** The prompt's limit, as the text composer's. */
 const PROMPT_LIMIT = 4000;
 /** How many images one run may ask for, as the provider supports. */
 const IMAGE_COUNTS: readonly number[] = [1, 2, 3, 4];
-/** The round send button's size, and the close button's glyph, in points. */
-const SEND_SIZE = 40;
 
-export interface NodeComposerProps {
+export interface ImageComposerProps {
   readonly detail: NodeDetail;
   readonly state: ComposerState;
   readonly left: number;
@@ -48,14 +43,8 @@ export interface NodeComposerProps {
 }
 
 /** The prompt sheet of an image node, with its image inputs and send button. */
-export function NodeComposer(props: NodeComposerProps) {
-  // Inputs arrive with the detail reloads; a run appends result items only.
-  const images = computed(() => props.detail.inputs.filter((input) => input.kind === "image"));
+export function ImageComposer(props: ImageComposerProps) {
   const settingsOpen = signal(false);
-  const prompt = (): string => props.state.prompt();
-  // The mock provider rejects an empty prompt, so an empty field disables the
-  // send button rather than recording a failure the user just saw.
-  const sendable = (): boolean => prompt().trim() !== "";
   const settingsLabel = (): string => `${props.state.aspect()} / ${props.state.resolution()}`;
 
   const chooseAspect = (aspect: ImageAspect): void => {
@@ -69,61 +58,24 @@ export function NodeComposer(props: NodeComposerProps) {
   };
 
   return (
-    <View
-      testID="node-composer"
-      class="absolute z-40 gap-2 rounded-2xl border border-border bg-card p-4 shadow-lg"
-      style={{ left: props.left, top: props.top, width: props.width }}
-    >
-      <View class="flex-row items-start justify-between gap-2">
-        <View class="flex-1 flex-row flex-wrap items-center gap-2">
-          <Button
-            testID="composer-image-button"
-            accessibilityLabel="Add an image"
-            onPress={props.onUpload}
-            class="items-center justify-center rounded-(--radius) bg-secondary hover:bg-accent active:bg-muted focus:bg-accent"
-            style={{ width: TILE_SIZE, height: TILE_SIZE }}
-          >
-            <Icon icon={ImagePlus} size={18} tint={() => token("secondary-foreground")} />
-          </Button>
-          <Each of={images()} key={(input) => input.id}>
-            {(input) => (
-              <ComposerInputTile
-                input={input}
-                url={() => inputUrl(input(), props.assetUrls())}
-                onRemove={props.onRemoveInput}
-              />
-            )}
-          </Each>
-        </View>
-        <Button
-          testID="composer-close"
-          accessibilityLabel="Close composer"
-          onPress={props.onClose}
-          class="items-center justify-center rounded-full p-1.5 hover:bg-accent active:bg-muted"
-        >
-          <Icon icon={X} size={16} tint={() => token("muted-foreground")} />
-        </Button>
-      </View>
-
-      <Input
-        testID="composer-prompt"
-        accessibilityLabel="Prompt"
-        value={prompt()}
-        onChange={(event) => props.state.setPrompt(event.value)}
-        placeholder="描述你想生成的画面..."
-        multiline
-        maxLength={PROMPT_LIMIT}
-        submitBehavior="newline"
-        onWheel={keepsWheel}
-        class="min-h-24 rounded-md px-1 py-1 text-sm text-card-foreground placeholder:text-muted-foreground"
-      />
-
-      {errorOf(props.detail) === "" ? null : (
-        <Text class="px-1 text-xs text-destructive">{errorOf(props.detail)}</Text>
-      )}
-
-      <View class="flex-row items-center justify-between gap-2">
-        <View class="flex-1 flex-row flex-wrap items-center gap-1 px-1">
+    <ComposerSheet
+      detail={props.detail}
+      state={props.state}
+      left={props.left}
+      top={props.top}
+      width={props.width}
+      assetUrls={props.assetUrls}
+      running={props.running}
+      onClose={props.onClose}
+      onRun={props.onRun}
+      onCancel={props.onCancel}
+      onRemoveInput={props.onRemoveInput}
+      onUpload={props.onUpload}
+      promptLimit={PROMPT_LIMIT}
+      placeholder="描述你想生成的画面..."
+      footerClass="flex-1 flex-row flex-wrap items-center gap-1 px-1"
+      footer={
+        <>
           <ComposerModelSelect
             accessibilityLabel="Image model"
             value={props.state.imageModel()}
@@ -211,31 +163,9 @@ export function NodeComposer(props: NodeComposerProps) {
               </Button>
             }
           />
-        </View>
-        {props.running() ? (
-          <Button
-            testID="composer-cancel"
-            accessibilityLabel="Cancel run"
-            onPress={props.onCancel}
-            class="items-center justify-center rounded-full bg-secondary hover:bg-accent active:bg-muted"
-            style={{ width: SEND_SIZE, height: SEND_SIZE }}
-          >
-            <Icon icon={Square} size={13} tint={() => token("secondary-foreground")} />
-          </Button>
-        ) : (
-          <Button
-            testID="composer-run"
-            accessibilityLabel="Send prompt"
-            disabled={!sendable()}
-            onPress={props.onRun}
-            class="items-center justify-center rounded-full bg-foreground hover:opacity-90 active:opacity-80 disabled:opacity-40"
-            style={{ width: SEND_SIZE, height: SEND_SIZE }}
-          >
-            <Icon icon={ArrowUp} size={18} strokeWidth={2.4} tint={() => token("background")} />
-          </Button>
-        )}
-      </View>
-    </View>
+        </>
+      }
+    />
   );
 }
 

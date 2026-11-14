@@ -3,16 +3,15 @@ import { isAvailable } from "nsh/desktop";
 import type { ChangeSet, Document, NodeBounds, SearchHit } from "../flow/shared";
 import { BrandCard } from "../components/BrandCard";
 import { CanvasMenuLayer } from "../components/CanvasMenuLayer";
+import { ImageComposer, TextComposer } from "../components/composer";
 import { FlowCanvas } from "../components/FlowCanvas";
 import { ImageLoadProbe, imageProbeText } from "../components/FlowCard";
 import { FrameRate } from "../components/FrameRate";
 import { MiniMap } from "../components/MiniMap";
 import { MinimapDragOverlay } from "../components/MinimapDragOverlay";
-import { NodeComposer } from "../components/NodeComposer";
 import { NodeToolbar } from "../components/NodeToolbar";
 import { SearchButton } from "../components/SearchButton";
 import { SearchPalette } from "../components/SearchPalette";
-import { TextComposer } from "../components/TextComposer";
 import { CanvasProbe } from "../components/CanvasProbe";
 import { ZoomControls, ZoomProbe } from "../components/ZoomControls";
 import { AssetUrls } from "../flow/asset-urls";
@@ -483,7 +482,7 @@ export function FlowPage() {
               <If
                 when={detail().node.kind === "text"}
                 else={
-                  <NodeComposer
+                  <ImageComposer
                     detail={detail()}
                     state={composerState}
                     left={position().left}
