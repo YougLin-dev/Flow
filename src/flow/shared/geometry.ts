@@ -18,6 +18,9 @@ export interface Size {
 /** A rectangle by origin and size. */
 export interface Rect extends Point, Size {}
 
+/** The stage's screen size, by the shared size shape. */
+export type StageSize = Size;
+
 /** A rectangle with mutable fields, the canvas' bounds language. */
 export interface BoxGeometry {
   x: number;

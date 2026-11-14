@@ -8,7 +8,7 @@ import {
   type CanvasMenuController,
   contextMenuPosition,
 } from "../flow/canvas/interaction/context-menu";
-import type { StageSize } from "../flow/overlay";
+import type { StageSize } from "../flow/shared";
 import { CanvasContextMenu } from "./CanvasContextMenu";
 
 export interface CanvasMenuLayerProps {

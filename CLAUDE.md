@@ -41,12 +41,12 @@ SQLite/search benchmark.
 - **The canvas is native views.** Cards, ports, selection and the composer are
   ordinary NSH views; connectors are stroked in one native `<Canvas>` layer
   (never a retained scene), and hit testing stays in the scene model. Keep
-  geometry in `src/flow/` (scene, camera, selection, overlay), gestures in
-  `src/flow/canvas-controller.ts`, and the views in
+  geometry and the scene in `src/flow/canvas/{geometry,model}`, gestures in
+  `src/flow/canvas/interaction/`, and the views in
   `src/components/FlowCanvas.tsx` and its parts; extend those with tests
-  instead of adding a canvas library. After Phase 2–3 the same code lives in
-  `flow/canvas/{geometry,model,interaction}` and `components/canvas/`; see
-  the code map and plan Appendix A.
+  instead of adding a canvas library. The composer placement still lives in
+  `flow/overlay.ts` until its area moves; see the code map and plan
+  Appendix A.
 - **The document core is Rust's.** `src/native/` is the mixed NSH Rust crate;
   it owns SQLite, FTS5, RTree, undo history and asset metadata. TSX must not
   open SQLite or write SQL. The canvas stays in TSX/QuickJS and is never moved

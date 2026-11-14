@@ -8,6 +8,7 @@ export {
   type Point,
   type Rect,
   type Size,
+  type StageSize,
 } from "./geometry";
 export { RECT_EPSILON, sameBounds, sameBox, samePoint, sameRect, sameRectWithin } from "./equality";
 export { keepsWheel } from "./wheel";
