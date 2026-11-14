@@ -1740,12 +1740,14 @@ revision fences and retry rules differ.
 Phase 1d extracted `components/canvas/world/{connector-layer,ConnectorCanvas}`
 for `FlowEdges`/`FlowPreviews`: the per-mounted-layer computed box, the
 64-step trim and the draw-time `token()` reads stay where they were, and the
-canvas view now shares its position/size/padding mapping. The primitive
-candidates were surveyed against the "at least two real consumers" rule and
-none qualified in this phase: the floating-panel class has one consumer, the
+canvas view now shares its position/size/padding mapping and the world-origin
+`traceCubic`. The primitive survey found the floating-panel recipe met the
+"at least two real consumers"
+gate — four components use the base card chrome and two use its pill — so
+`components/primitives/panel.ts` now owns `PANEL`/`PANEL_PILL`. The
 context-menu rows live in one component, the two tooltip implementations use
 different mechanisms, and the icon-only buttons carry distinct sizes and
-colors. They wait for the Phase 3 area moves, which create the consumers.
+colors; those wait for the Phase 3 area moves.
 
 ---
 

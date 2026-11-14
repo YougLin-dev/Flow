@@ -2,7 +2,7 @@ import { Button, Input, Tooltip } from "nsh/base";
 import { Map, Minus, Plus, Scan } from "lucide";
 import { keymap, Text, token, View } from "nsh";
 import { FIT_KEY, ZOOM_IN_KEY, ZOOM_OUT_KEY } from "../flow/shared";
-import { Icon } from "./primitives";
+import { Icon, PANEL } from "./primitives";
 
 export interface ZoomControlsProps {
   onZoomIn: () => void;
@@ -20,7 +20,7 @@ const controlClass =
 /** The canvas controls, in a compact column at the minimap's left. */
 export function ZoomControls(props: ZoomControlsProps) {
   return (
-    <View class="flex-col items-center gap-0.5 rounded-(--radius) border border-border bg-card p-1">
+    <View class={`flex-col items-center gap-0.5 ${PANEL} p-1`}>
       <Button
         testID="zoom-in"
         accessibilityLabel="Zoom in"

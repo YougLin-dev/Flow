@@ -2,7 +2,7 @@ import { Image as ImageIcon, Type, Upload } from "lucide";
 import { Text, token, View } from "nsh";
 import { Button } from "nsh/base";
 import type { NodeKindId } from "../flow/node-kinds";
-import { Icon } from "./primitives";
+import { Icon, PANEL } from "./primitives";
 
 export interface NodeToolbarProps {
   readonly onAdd: (kind: NodeKindId) => void;
@@ -11,7 +11,7 @@ export interface NodeToolbarProps {
 /** Floating buttons that add the M1 node kinds at the viewport's centre. */
 export function NodeToolbar(props: NodeToolbarProps) {
   return (
-    <View class="absolute top-16 left-4 flex-row items-center gap-1 rounded-(--radius) border border-border bg-card p-1">
+    <View class={`absolute top-16 left-4 flex-row items-center gap-1 ${PANEL} p-1`}>
       <Button
         testID="add-text-node"
         onPress={() => props.onAdd("text")}

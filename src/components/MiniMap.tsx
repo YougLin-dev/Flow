@@ -14,6 +14,7 @@ import {
 } from "nsh";
 import { type CanvasCamera, wheelNotches } from "../flow/camera";
 import { sameBounds, type Overview, type OverviewCard } from "../flow/shared";
+import { PANEL } from "./primitives";
 import {
   minimapLayout,
   minimapRect,
@@ -167,7 +168,7 @@ export function MiniMap(props: MiniMapProps) {
       accessibilityLabel="Document minimap"
       // Above an inline editor (z-30): the dock it sits in carries the z
       // layer; a card's composer (z-40) covers it where its sheet reaches it.
-      class="overflow-hidden rounded-(--radius) border border-border bg-card"
+      class={`overflow-hidden ${PANEL}`}
       style={{ width: MINIMAP_WIDTH, height: MINIMAP_HEIGHT, cursor: "grab" }}
       onPressDown={onDown}
       onWheel={(event) => {

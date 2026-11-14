@@ -1,4 +1,5 @@
 import { cleanup, signal, Text, View } from "nsh";
+import { PANEL_PILL } from "./primitives";
 
 /** How often the meter publishes what it counted. */
 const SAMPLE_MS = 500;
@@ -30,7 +31,7 @@ export function FrameRate() {
   return (
     <View
       testID="frame-rate"
-      class="absolute right-4 bottom-20 min-w-16 items-center rounded-full border border-border bg-card px-3 py-1.5"
+      class={`absolute right-4 bottom-20 min-w-16 items-center ${PANEL_PILL}`}
     >
       <Text class="text-sm tabular-nums text-muted-foreground">
         {fps() === 0 ? "— fps" : `${fps()} fps`}

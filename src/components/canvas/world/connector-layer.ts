@@ -1,5 +1,5 @@
-/** The screen-space box every connector canvas positions itself from. */
-import type { Accessor } from "nsh";
+/** The world-space box every connector canvas positions itself from. */
+import type { Accessor, CanvasRenderingContext2D } from "nsh";
 import type { Point, Rect } from "../../../flow/shared";
 
 export interface ConnectorLayerView {
@@ -13,8 +13,8 @@ export interface ConnectorLayerView {
 
 /**
  * The canvas style values for a connector layer box, padded by `padding` on
- * every side. `origin` is where the layer's world (0, 0) lands on screen; the
- * draw callbacks use it to keep their paths in world coordinates.
+ * every side. `origin` is the world coordinate that maps to the canvas' (0,
+ * 0): a world point p draws at p - origin.
  */
 export function connectorLayerView(box: Accessor<Rect | null>, padding = 0): ConnectorLayerView {
   return {
@@ -28,4 +28,24 @@ export function connectorLayerView(box: Accessor<Rect | null>, padding = 0): Con
       return { x: current.x - padding, y: current.y - padding };
     },
   };
+}
+
+/** Traces one connector cubic in canvas coordinates from its world origin. */
+export function traceCubic(
+  cx: CanvasRenderingContext2D,
+  origin: Point,
+  from: Point,
+  c1: Point,
+  c2: Point,
+  to: Point,
+): void {
+  cx.moveTo(from.x - origin.x, from.y - origin.y);
+  cx.bezierCurveTo(
+    c1.x - origin.x,
+    c1.y - origin.y,
+    c2.x - origin.x,
+    c2.y - origin.y,
+    to.x - origin.x,
+    to.y - origin.y,
+  );
 }

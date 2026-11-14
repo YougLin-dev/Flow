@@ -288,7 +288,8 @@ For behaviour below the pointer, test the pieces directly:
   `onWheel` are its only wiring.
 - `components/canvas/world/connector-layer.ts`: the canvas position/size and
   padded origin mapping for a layer box, including the missing-box and
-  no-padding cases, and the accessor staying live.
+  no-padding cases, the accessor staying live, and the cubic trace in canvas
+  coordinates.
 - `flow/shared/async-drain.ts`: a join settles with the active drain, a
   join that needs newer inputs runs exactly one more iteration, a join that
   found the same inputs adds none, and a racing start joins instead of

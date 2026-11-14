@@ -16,7 +16,7 @@ import {
 } from "../flow/connection";
 import type { ConnectionPreview } from "../flow/scene";
 import type { Point } from "../flow/shared";
-import { ConnectorCanvas, connectorColor } from "./canvas";
+import { ConnectorCanvas, connectorColor, traceCubic } from "./canvas";
 
 export interface FlowPreviewsProps {
   readonly previews: () => readonly ConnectionPreview[];
@@ -48,15 +48,7 @@ export function FlowPreviews(props: FlowPreviewsProps) {
       cx.strokeStyle = connectorColor(portKind);
       const { c1, c2 } = connectorControls(from, to);
       cx.beginPath();
-      cx.moveTo(from.x - origin.x, from.y - origin.y);
-      cx.bezierCurveTo(
-        c1.x - origin.x,
-        c1.y - origin.y,
-        c2.x - origin.x,
-        c2.y - origin.y,
-        to.x - origin.x,
-        to.y - origin.y,
-      );
+      traceCubic(cx, origin, from, c1, c2, to);
       cx.stroke();
     }
   };

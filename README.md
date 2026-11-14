@@ -96,6 +96,7 @@ src/                   the NSH app: its root, entry, config and assets
     primitives/
       Icon.tsx         one Lucide icon, drawn as a native canvas path
       icon-shape.ts    Lucide icon nodes as one SVG path
+      panel.ts         the floating-panel chrome recipes
     canvas/
       port-visuals.ts  the icon and theme token a port type uses everywhere
       world/

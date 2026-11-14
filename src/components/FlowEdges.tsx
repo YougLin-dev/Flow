@@ -18,7 +18,7 @@ import {
 import { cubicInsideView, visibleCubicRuns } from "../flow/edge-clip";
 import { connectorLayerBox, trimConnectorBox } from "../flow/edge-layer";
 import type { FlowScene } from "../flow/scene";
-import { ConnectorCanvas, connectorColor } from "./canvas";
+import { ConnectorCanvas, connectorColor, traceCubic as traceConnector } from "./canvas";
 
 /** The selected connector's stroke: one point thicker than the rest, so a
  * lit line reads as bold. */
@@ -74,8 +74,9 @@ export function FlowEdges(props: FlowEdgesProps) {
   const selectedCards = computed(() => new Set(props.scene.selection()));
 
   const draw = (cx: CanvasRenderingContext2D, origin: Point | null): void => {
-    // Nothing can be clipped correctly before layout; the first measured
-    // frame records, rather than a document-sized canvas recording now.
+    // Nothing can be clipped correctly before layout, and a layer without a
+    // box has nothing to draw; the first measured frame records rather than
+    // a document-sized canvas recording now.
     if (!measured() || origin === null) return;
     const view = clipView();
     const edges = props.scene.edges();
@@ -107,17 +108,6 @@ export function FlowEdges(props: FlowEdgesProps) {
       drawable.push({ edge, ports, controls, runs });
     }
     if (drawable.length === 0) return;
-    const traceCubic = (from: Point, c1: Point, c2: Point, to: Point): void => {
-      cx.moveTo(from.x - origin.x, from.y - origin.y);
-      cx.bezierCurveTo(
-        c1.x - origin.x,
-        c1.y - origin.y,
-        c2.x - origin.x,
-        c2.y - origin.y,
-        to.x - origin.x,
-        to.y - origin.y,
-      );
-    };
     const traceRuns = (runs: readonly (readonly Point[])[]): void => {
       for (const run of runs) {
         const first = run[0];
@@ -152,7 +142,7 @@ export function FlowEdges(props: FlowEdgesProps) {
       cx.lineWidth = lit ? SELECTED_THICKNESS : EDGE_THICKNESS;
       cx.globalAlpha = lit ? 1 : REST_ALPHA;
       cx.beginPath();
-      if (runs === null) traceCubic(from, controls.c1, controls.c2, to);
+      if (runs === null) traceConnector(cx, origin, from, controls.c1, controls.c2, to);
       else traceRuns(runs);
       cx.stroke();
     }
