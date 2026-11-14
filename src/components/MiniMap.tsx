@@ -21,8 +21,8 @@ import {
   minimapViewport,
   sameLayout,
   unionBounds,
+  type MinimapController,
 } from "../flow/minimap";
-import type { MinimapController } from "../flow/minimap-controller";
 
 const MINIMAP_WIDTH = 176;
 const MINIMAP_HEIGHT = 120;

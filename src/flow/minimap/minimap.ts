@@ -3,7 +3,7 @@
  * uniform scale that fits the document together with the camera's viewport,
  * shared by the card silhouettes, the viewport rectangle and drag-to-pan.
  */
-import { sameBounds, type Overview, type Viewport } from "./shared";
+import { sameBounds, type Overview, type Viewport } from "../shared";
 
 export interface MinimapSize {
   readonly width: number;

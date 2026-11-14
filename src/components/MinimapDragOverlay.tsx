@@ -4,7 +4,7 @@
  */
 import { platform, View, type MouseEvent as NshMouseEvent } from "nsh";
 import { wheelNotches } from "../flow/canvas";
-import type { MinimapController } from "../flow/minimap-controller";
+import type { MinimapController } from "../flow/minimap";
 
 export interface MinimapDragOverlayProps {
   readonly controller: MinimapController;

@@ -27,7 +27,7 @@ import { CONTENT } from "../flow/data";
 import { openFlowDocument } from "../flow/document-session";
 import { NodeRunner } from "../flow/execution";
 import { MinimapLoader } from "../flow/minimap-loader";
-import { MinimapController } from "../flow/minimap-controller";
+import { MinimapController } from "../flow/minimap";
 import type { NodeKindId } from "../flow/nodes";
 import { NodeSession } from "../flow/node-session";
 import { composerPlacement } from "../flow/overlay";
