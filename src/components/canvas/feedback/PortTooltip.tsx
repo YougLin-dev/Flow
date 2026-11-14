@@ -8,7 +8,7 @@
  * port rather than a native tooltip on the port view.
  */
 import { cleanup, computed, effect, signal, Text, View } from "nsh";
-import type { CanvasController } from "../flow/canvas/interaction/canvas-controller";
+import type { CanvasController } from "../../../flow/canvas/interaction/canvas-controller";
 import {
   tipWidth,
   tooltipBox,
@@ -17,10 +17,10 @@ import {
   type FlowScene,
   type PortSide,
   type TipPlacement,
-} from "../flow/canvas";
-import { portsOfNode } from "../flow/nodes";
-import type { Point } from "../flow/shared";
-import { portVisual } from "./canvas/port-visuals";
+} from "../../../flow/canvas";
+import { portsOfNode } from "../../../flow/nodes";
+import type { Point } from "../../../flow/shared";
+import { portVisual } from "../port-visuals";
 
 /** The bubble's size, padding, pointer-rest delay and spacing, in points. */
 const TIP_HEIGHT = 26;

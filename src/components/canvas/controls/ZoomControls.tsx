@@ -1,8 +1,8 @@
 import { Button, Input, Tooltip } from "nsh/base";
 import { Map, Minus, Plus, Scan } from "lucide";
 import { keymap, Text, token, View } from "nsh";
-import { FIT_KEY, ZOOM_IN_KEY, ZOOM_OUT_KEY } from "../flow/shared";
-import { Icon, PANEL } from "./primitives";
+import { FIT_KEY, ZOOM_IN_KEY, ZOOM_OUT_KEY } from "../../../flow/shared";
+import { Icon, PANEL } from "../../primitives";
 
 export interface ZoomControlsProps {
   onZoomIn: () => void;

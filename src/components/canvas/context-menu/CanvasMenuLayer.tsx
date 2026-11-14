@@ -7,8 +7,8 @@ import type { Accessor } from "nsh";
 import {
   type CanvasMenuController,
   contextMenuPosition,
-} from "../flow/canvas/interaction/context-menu";
-import type { StageSize } from "../flow/shared";
+} from "../../../flow/canvas/interaction/context-menu";
+import type { StageSize } from "../../../flow/shared";
 import { CanvasContextMenu } from "./CanvasContextMenu";
 
 export interface CanvasMenuLayerProps {

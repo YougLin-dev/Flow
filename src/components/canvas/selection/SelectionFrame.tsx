@@ -8,10 +8,11 @@
  * a normal selection.
  */
 import { View } from "nsh";
-import type { CanvasController } from "../flow/canvas/interaction/canvas-controller";
-import type { CanvasCamera, FlowScene } from "../flow/canvas";
-import { selectionFrame } from "../flow/canvas/interaction/frame-surface";
-import type { BoxGeometry } from "../flow/shared";
+import type { CanvasController } from "../../../flow/canvas/interaction/canvas-controller";
+import type { CanvasCamera, FlowScene } from "../../../flow/canvas";
+import { selectionFrame } from "../../../flow/canvas/interaction/frame-surface";
+import type { BoxGeometry } from "../../../flow/shared";
+import { SELECTION_OUTLINE, SELECTION_WASH } from "./selection-visuals";
 
 export interface SelectionFrameProps {
   readonly scene: FlowScene;
@@ -25,10 +26,10 @@ export function SelectionFrame(props: SelectionFrameProps) {
       {(box) => (
         <View
           testID="selection-frame"
-          class="absolute border border-selection"
+          class={SELECTION_OUTLINE}
           style={frameStyle(box(), props.camera.scaleView(), props.scene.frameZ())}
         >
-          <View class="absolute left-0 top-0 h-full w-full bg-foreground opacity-5" />
+          <View class={SELECTION_WASH} />
         </View>
       )}
     </If>

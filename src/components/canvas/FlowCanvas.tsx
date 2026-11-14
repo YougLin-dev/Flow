@@ -26,22 +26,22 @@ import {
 import { sameBounds } from "../../flow/shared";
 import type { CanvasController } from "../../flow/canvas/interaction/canvas-controller";
 import type { ContextMenuPoint } from "../../flow/canvas/interaction/context-menu";
-import { FlowCard } from "./world/FlowCard";
-import { FlowEdges } from "./world/FlowEdges";
-import { FlowPreviews } from "./world/FlowPreviews";
-import { GridBackground } from "./world/GridBackground";
-import { InlineTextEditor } from "../InlineTextEditor";
-import { PortTooltip } from "../PortTooltip";
-import { SelectionFrame } from "../SelectionFrame";
-import { SelectionOverlay } from "../SelectionOverlay";
-import { SelectionPorts } from "../SelectionPorts";
+import { InlineTextEditor } from "./editing/InlineTextEditor";
 import {
   UploadButton,
   UPLOAD_BUTTON_HEIGHT,
   UPLOAD_BUTTON_INSET,
   UPLOAD_BUTTON_WIDTH,
   type UploadButtonState,
-} from "../UploadButton";
+} from "./editing/UploadButton";
+import { PortTooltip } from "./feedback/PortTooltip";
+import { SelectionFrame } from "./selection/SelectionFrame";
+import { SelectionOverlay } from "./selection/SelectionOverlay";
+import { SelectionPorts } from "./selection/SelectionPorts";
+import { FlowCard } from "./world/FlowCard";
+import { FlowEdges } from "./world/FlowEdges";
+import { FlowPreviews } from "./world/FlowPreviews";
+import { GridBackground } from "./world/GridBackground";
 
 export interface FlowCanvasProps {
   readonly scene: FlowScene;

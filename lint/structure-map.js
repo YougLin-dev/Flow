@@ -179,23 +179,13 @@ export const TEST_SUPPORT_FILES = new Set([
  * list shrinks with every move PR and disappears in Phase 5.
  */
 export const LEGACY_FLAT = new Set([
-  "src/components/CanvasContextMenu.tsx",
-  "src/components/CanvasMenuLayer.tsx",
   "src/components/CanvasProbe.tsx",
   "src/components/ComposerInputTile.tsx",
   "src/components/ComposerModelSelect.tsx",
-  "src/components/InlineTextEditor.tsx",
   "src/components/MiniMap.tsx",
   "src/components/MinimapDragOverlay.tsx",
-  "src/components/NodeToolbar.tsx",
-  "src/components/PortTooltip.tsx",
   "src/components/SearchButton.tsx",
   "src/components/SearchPalette.tsx",
-  "src/components/SelectionFrame.tsx",
-  "src/components/SelectionOverlay.tsx",
-  "src/components/SelectionPorts.tsx",
-  "src/components/UploadButton.tsx",
-  "src/components/ZoomControls.tsx",
   "src/flow/bindings.ts",
   "src/flow/composer-detail.ts",
   "src/flow/page-chrome.ts",

@@ -5,13 +5,18 @@
  * zones, so the views themselves are never pressed.
  */
 import { computed, View } from "nsh";
-import type { CanvasController } from "../flow/canvas/interaction/canvas-controller";
-import { groupPorts, type CanvasCamera, type FlowScene, type GroupPort } from "../flow/canvas";
-import { selectionFrame } from "../flow/canvas/interaction/frame-surface";
-import type { InputPort, OutputPort } from "../flow/nodes";
-import type { BoxGeometry } from "../flow/shared";
-import { portVisual } from "./canvas/port-visuals";
-import { Port } from "./canvas/world/Port";
+import type { CanvasController } from "../../../flow/canvas/interaction/canvas-controller";
+import {
+  groupPorts,
+  type CanvasCamera,
+  type FlowScene,
+  type GroupPort,
+} from "../../../flow/canvas";
+import { selectionFrame } from "../../../flow/canvas/interaction/frame-surface";
+import type { InputPort, OutputPort } from "../../../flow/nodes";
+import type { BoxGeometry } from "../../../flow/shared";
+import { portVisual } from "../port-visuals";
+import { Port } from "../world/Port";
 
 export interface SelectionPortsProps {
   readonly scene: FlowScene;

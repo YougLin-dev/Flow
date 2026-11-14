@@ -6,8 +6,8 @@
  */
 import { Text, View } from "nsh";
 import { Button } from "nsh/base";
-import { CONTEXT_MENU_WIDTH } from "../flow/canvas/interaction/context-menu";
-import { keepsWheel } from "../flow/shared";
+import { CONTEXT_MENU_WIDTH } from "../../../flow/canvas/interaction/context-menu";
+import { keepsWheel } from "../../../flow/shared";
 
 export interface CanvasContextMenuProps {
   readonly left: number;

@@ -5,7 +5,8 @@
  * handles are invisible hit targets in the controller.
  */
 import { View } from "nsh";
-import type { CanvasController } from "../flow/canvas/interaction/canvas-controller";
+import type { CanvasController } from "../../../flow/canvas/interaction/canvas-controller";
+import { SELECTION_OUTLINE, SELECTION_WASH } from "./selection-visuals";
 
 export interface SelectionOverlayProps {
   readonly controller: CanvasController;
@@ -26,7 +27,7 @@ export function SelectionOverlay(props: SelectionOverlayProps) {
       <If when={props.controller.marquee()}>
         {(box) => (
           <View
-            class="absolute border border-selection"
+            class={SELECTION_OUTLINE}
             style={{
               left: box().x,
               top: box().y,
@@ -34,7 +35,7 @@ export function SelectionOverlay(props: SelectionOverlayProps) {
               height: box().height,
             }}
           >
-            <View class="absolute left-0 top-0 h-full w-full bg-foreground opacity-5" />
+            <View class={SELECTION_WASH} />
           </View>
         )}
       </If>

@@ -2,16 +2,21 @@ import { cleanup, effect, host, keymap, Picker, platform, signal, untracked, Vie
 import { isAvailable } from "nsh/desktop";
 import type { ChangeSet, Document, NodeBounds, SearchHit } from "../flow/shared";
 import { BrandCard, FrameRate } from "../components/app";
-import { CanvasMenuLayer } from "../components/CanvasMenuLayer";
 import { ImageComposer, TextComposer } from "../components/composer";
-import { FlowCanvas, ImageLoadProbe, imageProbeText } from "../components/canvas";
+import {
+  CanvasMenuLayer,
+  FlowCanvas,
+  ImageLoadProbe,
+  imageProbeText,
+  NodeToolbar,
+  ZoomControls,
+  ZoomProbe,
+} from "../components/canvas";
 import { MiniMap } from "../components/MiniMap";
 import { MinimapDragOverlay } from "../components/MinimapDragOverlay";
-import { NodeToolbar } from "../components/NodeToolbar";
 import { SearchButton } from "../components/SearchButton";
 import { SearchPalette } from "../components/SearchPalette";
 import { CanvasProbe } from "../components/CanvasProbe";
-import { ZoomControls, ZoomProbe } from "../components/ZoomControls";
 import { bindFlowKeys } from "../flow/bindings";
 import { CanvasCamera, FlowScene, wheelZoomFactor } from "../flow/canvas";
 import { CanvasController } from "../flow/canvas/interaction/canvas-controller";
