@@ -29,7 +29,11 @@ use crate::types::{
 };
 use crate::viewport;
 
-type Job = Box<dyn FnOnce(&DatabaseConnection) + Send + 'static>;
+/// A unit of work for the database thread. The enum keeps room for lifecycle
+/// jobs (`Close`) without changing the public `run` contract.
+enum Job {
+    Run(Box<dyn FnOnce(&DatabaseConnection) + Send + 'static>),
+}
 
 /// A handle to the database worker.
 ///
@@ -237,19 +241,29 @@ impl Database {
     pub fn undo(&self) -> Result<ChangeSet, String> {
         let history = Arc::clone(&self.history);
         self.run(move |conn| {
-            let mut history = lock_history(&history)?;
-            let Some(entry) = history.take_undo() else {
+            let entry = {
+                let mut history = lock_history(&history)?;
+                history.take_undo()
+            };
+            let Some(entry) = entry else {
                 return empty_change(conn);
             };
             let mut ops = entry.inverse.clone();
             ops.reverse();
             match mutation::apply_ops(conn, &ops) {
                 Ok(changes) => {
-                    history.push_redo(entry);
+                    // The undo is committed. A poisoned lock loses the redo
+                    // entry rather than reporting a failure and inviting a
+                    // duplicate retry.
+                    if let Ok(mut history) = history.lock() {
+                        history.push_redo(entry);
+                    }
                     Ok(changes)
                 }
                 Err(error) => {
-                    history.restore_undo(entry);
+                    if let Ok(mut history) = history.lock() {
+                        history.restore_undo(entry);
+                    }
                     Err(error)
                 }
             }
@@ -260,18 +274,25 @@ impl Database {
     pub fn redo(&self) -> Result<ChangeSet, String> {
         let history = Arc::clone(&self.history);
         self.run(move |conn| {
-            let mut history = lock_history(&history)?;
-            let Some(entry) = history.take_redo() else {
+            let entry = {
+                let mut history = lock_history(&history)?;
+                history.take_redo()
+            };
+            let Some(entry) = entry else {
                 return empty_change(conn);
             };
             let ops = entry.forward.clone();
             match mutation::apply_ops(conn, &ops) {
                 Ok(changes) => {
-                    history.push_undo_after_redo(entry);
+                    if let Ok(mut history) = history.lock() {
+                        history.push_undo_after_redo(entry);
+                    }
                     Ok(changes)
                 }
                 Err(error) => {
-                    history.push_redo(entry);
+                    if let Ok(mut history) = history.lock() {
+                        history.push_redo(entry);
+                    }
                     Err(error)
                 }
             }
@@ -279,9 +300,16 @@ impl Database {
     }
 
     /// Drops the undo and redo stacks; used after seeding demo data.
+    ///
+    /// Queued on the worker so it cannot overtake a preceding command and
+    /// leave that command's entry behind. Do not call it from inside a job:
+    /// the worker is busy executing that job.
     pub fn clear_history(&self) -> Result<(), String> {
-        lock_history(&self.history)?.clear();
-        Ok(())
+        let history = Arc::clone(&self.history);
+        self.run(move |_| {
+            lock_history(&history)?.clear();
+            Ok(())
+        })
     }
 
     pub fn viewport(&self, rect: Viewport, margin: f64) -> Result<Vec<NodeSummary>, String> {
@@ -345,11 +373,18 @@ impl Database {
     {
         let history = Arc::clone(&self.history);
         self.run(move |conn| {
+            // Fail before the write if the history is already poisoned.
+            ensure_history(&history)?;
             let mutation = work(conn)?;
-            lock_history(&history)?.push(HistoryEntry {
-                forward: mutation.forward.clone(),
-                inverse: mutation.inverse.clone(),
-            });
+            // The write is committed. If the lock is poisoned between the
+            // preflight and here, lose this undo entry rather than report a
+            // failure that invites a duplicate retry.
+            if let Ok(mut history) = history.lock() {
+                history.push(HistoryEntry {
+                    forward: mutation.forward.clone(),
+                    inverse: mutation.inverse.clone(),
+                });
+            }
             Ok(mutation)
         })
     }
@@ -360,9 +395,15 @@ impl Database {
         F: FnOnce(&DatabaseConnection) -> Result<T, String> + Send + 'static,
     {
         let (result_tx, result_rx) = mpsc::channel();
-        let job: Job = Box::new(move |conn| {
-            let _ = result_tx.send(work(conn));
-        });
+        let job = Job::Run(Box::new(move |conn| {
+            // A panic that unwinds through a SeaORM transaction can still
+            // abort if its rollback also fails; this covers the job body.
+            let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| work(conn)));
+            let _ = result_tx.send(match result {
+                Ok(result) => result,
+                Err(_) => Err("the database job panicked".to_owned()),
+            });
+        }));
 
         self.tx
             .lock()
@@ -389,7 +430,11 @@ fn worker(path: &str, ready: Sender<Result<(), String>>, jobs: Receiver<Job>) {
     };
 
     for job in jobs {
-        job(&conn);
+        // A Run body reports its own error. This outer guard keeps a future
+        // lifecycle job from killing the only worker thread.
+        let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| match job {
+            Job::Run(run) => run(&conn),
+        }));
     }
 }
 
@@ -426,6 +471,10 @@ fn lock_history(
     history
         .lock()
         .map_err(|_| "the undo history lock is poisoned".to_owned())
+}
+
+fn ensure_history(history: &Arc<Mutex<History>>) -> Result<(), String> {
+    lock_history(history).map(drop)
 }
 
 /// The document bounds at the current revision, reusing the last read.
@@ -591,6 +640,90 @@ mod tests {
             data_json: None,
             settings_json: None,
         }
+    }
+
+    #[test]
+    fn a_panicking_job_is_reported_and_the_worker_survives() {
+        let db = Database::open(":memory:").expect("open");
+        let error = db
+            .run(|_| -> Result<(), String> { panic!("deliberate job panic") })
+            .expect_err("a panicking job must report an error");
+        assert!(error.contains("panicked"), "{error}");
+        assert_eq!(db.count().expect("count after a panic"), 0);
+    }
+
+    #[test]
+    fn clear_history_is_ordered_after_an_earlier_job() {
+        let db = Database::open(":memory:").expect("open");
+        let (started_tx, started_rx) = mpsc::channel();
+        let (release_tx, release_rx) = mpsc::channel();
+
+        let history = Arc::clone(&db.history);
+        let job_db = db.clone();
+        let job = std::thread::spawn(move || {
+            job_db.run(move |_| {
+                started_tx.send(()).expect("signal the job started");
+                release_rx.recv().expect("wait for release");
+                lock_history(&history)?.push(HistoryEntry {
+                    forward: vec![HistoryOp::Delete {
+                        id: "pending".to_owned(),
+                    }],
+                    inverse: Vec::new(),
+                });
+                Ok(())
+            })
+        });
+
+        started_rx.recv().expect("worker started the job");
+        let (clear_started_tx, clear_started_rx) = mpsc::channel();
+        let (cleared_tx, cleared_rx) = mpsc::channel();
+        let clear_db = db.clone();
+        let clear = std::thread::spawn(move || {
+            clear_started_tx.send(()).expect("signal clear started");
+            let result = clear_db.clear_history();
+            let _ = cleared_tx.send(());
+            result
+        });
+        clear_started_rx.recv().expect("clear thread started");
+        assert!(
+            cleared_rx
+                .recv_timeout(std::time::Duration::from_millis(500))
+                .is_err(),
+            "clear_history must wait for the earlier job"
+        );
+        release_tx.send(()).expect("release the job");
+
+        job.join().expect("job thread").expect("blocking job");
+        clear.join().expect("clear thread").expect("clear history");
+
+        assert!(
+            db.history.lock().expect("history").take_undo().is_none(),
+            "clear_history must run after the earlier job pushed its entry"
+        );
+    }
+
+    #[test]
+    fn a_poisoned_history_lock_is_reported() {
+        let db = Database::open(":memory:").expect("open");
+        let history = Arc::clone(&db.history);
+        let poisoned = std::thread::spawn(move || {
+            let _guard = history.lock().expect("lock history");
+            panic!("deliberate history poison");
+        });
+        assert!(poisoned.join().is_err(), "the helper thread must panic");
+
+        let error = db
+            .insert_nodes(vec![node("a", "A", "", &[], 0.0, 0.0)])
+            .map(|_| ())
+            .expect_err("a poisoned history lock must fail before the write");
+        assert!(error.contains("poisoned"), "{error}");
+        assert_eq!(db.count().expect("count after a poisoned write"), 0);
+
+        let error = db
+            .clear_history()
+            .expect_err("a poisoned history lock must report an error");
+        assert!(error.contains("poisoned"), "{error}");
+        assert_eq!(db.count().expect("count after a poisoned clear"), 0);
     }
 
     #[test]
