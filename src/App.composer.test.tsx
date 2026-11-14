@@ -33,6 +33,7 @@ test("both composer variants mount the same shared sheet", async () => {
   await selectSeed(app, "Text", "id:search-result-seed-text");
   await app.waitUntil(() => app.shows("id:node-composer"));
   for (const testID of [
+    "node-composer",
     "composer-image-button",
     "composer-close",
     "composer-prompt",
@@ -40,9 +41,10 @@ test("both composer variants mount the same shared sheet", async () => {
   ]) {
     expect(app.shows(`id:${testID}`)).toBe(true);
   }
-  // The text variant's counter is its own; image settings are not mounted.
+  // The text variant's counter is its own; the image settings and count are not.
   expect(app.shows("id:composer-counter")).toBe(true);
   expect(app.shows("id:composer-settings")).toBe(false);
+  expect(app.shows("id:composer-count")).toBe(false);
 
   await selectSeed(app, "Image", "id:search-result-seed-image");
   await app.waitUntil(() => app.shows("id:composer-settings"));

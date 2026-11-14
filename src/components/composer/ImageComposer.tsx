@@ -7,7 +7,6 @@
 import { signal, Text, token, View } from "nsh";
 import { Button, Popover, Select } from "nsh/base";
 import { ChevronDown } from "lucide";
-import type { ComposerState } from "../../flow/composer-state";
 import {
   IMAGE_ASPECTS,
   IMAGE_MODELS,
@@ -17,30 +16,16 @@ import {
   isImageModel,
   type ImageResolution,
 } from "../../flow/node-kinds";
-import type { NodeDetail } from "../../flow/shared";
 import { ComposerModelSelect } from "../ComposerModelSelect";
 import { Icon } from "../primitives";
-import { ComposerSheet } from "./ComposerSheet";
+import { type ComposerVariantProps, ComposerSheet } from "./ComposerSheet";
 
 /** The prompt's limit, as the text composer's. */
 const PROMPT_LIMIT = 4000;
 /** How many images one run may ask for, as the provider supports. */
 const IMAGE_COUNTS: readonly number[] = [1, 2, 3, 4];
 
-export interface ImageComposerProps {
-  readonly detail: NodeDetail;
-  readonly state: ComposerState;
-  readonly left: number;
-  readonly top: number;
-  readonly width: number;
-  readonly assetUrls: () => Readonly<Record<string, string>>;
-  readonly running: () => boolean;
-  readonly onClose: () => void;
-  readonly onRun: () => void;
-  readonly onCancel: () => void;
-  readonly onRemoveInput: (id: string) => void;
-  readonly onUpload: () => void;
-}
+export type ImageComposerProps = ComposerVariantProps;
 
 /** The prompt sheet of an image node, with its image inputs and send button. */
 export function ImageComposer(props: ImageComposerProps) {

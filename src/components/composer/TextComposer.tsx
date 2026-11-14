@@ -5,29 +5,14 @@
  * itself. The sheet never shows the output, so the card stays the one place
  * the generated text lives.
  */
-import type { ComposerState } from "../../flow/composer-state";
 import { isTextModel, TEXT_MODELS, textModelLabel } from "../../flow/node-kinds";
-import type { NodeDetail } from "../../flow/shared";
 import { ComposerModelSelect } from "../ComposerModelSelect";
-import { ComposerSheet } from "./ComposerSheet";
+import { type ComposerVariantProps, ComposerSheet } from "./ComposerSheet";
 
 /** The prompt's limit, shown beside the field as a live counter. */
 const PROMPT_LIMIT = 10000;
 
-export interface TextComposerProps {
-  readonly detail: NodeDetail;
-  readonly state: ComposerState;
-  readonly left: number;
-  readonly top: number;
-  readonly width: number;
-  readonly assetUrls: () => Readonly<Record<string, string>>;
-  readonly running: () => boolean;
-  readonly onClose: () => void;
-  readonly onRun: () => void;
-  readonly onCancel: () => void;
-  readonly onRemoveInput: (id: string) => void;
-  readonly onUpload: () => void;
-}
+export type TextComposerProps = ComposerVariantProps;
 
 /** The prompt sheet of a text node, with its image inputs and send button. */
 export function TextComposer(props: TextComposerProps) {

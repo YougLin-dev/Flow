@@ -38,6 +38,12 @@ export interface ComposerSheetProps {
   readonly footer?: JSX.Element;
 }
 
+/** The props a composer variant passes through to the shared sheet. */
+export type ComposerVariantProps = Omit<
+  ComposerSheetProps,
+  "promptLimit" | "placeholder" | "counter" | "footerClass" | "footer"
+>;
+
 /** The shared composer sheet both node kinds mount. */
 export function ComposerSheet(props: ComposerSheetProps) {
   const prompt = (): string => props.state.prompt();

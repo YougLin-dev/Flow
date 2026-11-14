@@ -240,14 +240,15 @@ The composer is a native panel in the same view tree as the rest of the app.
 `flow/overlay.ts` places it directly under the selected card, centred on it,
 so the placement follows the card as the camera or the card moves; it never
 flips above or beside the card, and it may extend past the viewport. A text
-node gets the chat-style sheet (`components/TextComposer.tsx`): its image
+node gets the chat-style sheet (`components/composer/TextComposer.tsx`): its image
 inputs from upstream cards or local uploads sit in the attach row with an
 add-image button, the prompt and its 10,000-character counter take the middle,
 and the model select (DeepSeek V4.1 Flash, the design's default, or the mock)
 and round send button close the sheet; the generated text is shown only on the
-card. The image node's sheet
-(`components/NodeComposer.tsx`) is the same shape: its image inputs sit in the
-attach row with an add-image button (both composers share
+card. The image node's sheet (`components/composer/ImageComposer.tsx`) is the
+same shared `components/composer/ComposerSheet.tsx`, configured with the image
+model and its aspect, resolution and count settings: its image inputs sit in
+the attach row with an add-image button (both composers share
 `components/ComposerInputTile.tsx` and `components/ComposerModelSelect.tsx`),
 and its bottom row carries the model as a
 select (Qwen Image 3.0 Pro, the design's default, or the mock), a settings
