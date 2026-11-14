@@ -296,8 +296,8 @@ const AREA_NAMES = Object.keys(AREAS).toSorted((first, second) => second.length 
 
 /** The area a file belongs to, or null for a legacy/unclassified file. */
 export function areaOf(file) {
-  // A legacy flat module can share a name with a target area (`flow/execution.ts`
-  // vs `flow/execution/`); it stays unclassified until its own move lands.
+  // A legacy flat module stays unclassified until its own move lands, even
+  // when an area of a related name already exists.
   if (LEGACY_FLAT.has(file.replace(/\\/g, "/").replace(/^\.\//, ""))) return null;
   const path = projectPath(file);
   if (path === "App") return "shell";

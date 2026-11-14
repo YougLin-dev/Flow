@@ -1,9 +1,9 @@
 /**
  * The node kinds the editor knows. A kind declares its name, accent and
  * default size; its ports are resolved per node because an upload node's
- * outputs follow the media it holds. `execution.ts` selects the provider for
- * a runnable kind. Rust stores `kind` and the settings JSON without knowing
- * either.
+ * outputs follow the media it holds. `flow/execution/providers.ts` selects
+ * the provider for a runnable kind. Rust stores `kind` and the settings JSON
+ * without knowing either.
  */
 
 export type FlowAccent = "chart-1" | "chart-2" | "chart-3" | "chart-4" | "chart-5";

@@ -10,7 +10,15 @@ import {
   testSupportInProduction,
   unclassifiedSource,
 } from "./boundaries";
-import { ENFORCEMENT, areaOf, canImport, isFacade, layerOf, segmentOf } from "./structure-map";
+import {
+  ENFORCEMENT,
+  LEGACY_FLAT,
+  areaOf,
+  canImport,
+  isFacade,
+  layerOf,
+  segmentOf,
+} from "./structure-map";
 import { withTree } from "./test-tree";
 
 const cwd = process.cwd();
@@ -141,6 +149,18 @@ test("classifies files and bare directory imports", () => {
   expect(isFacade("src/flow/canvas/model/camera.ts")).toBe(false);
   expect(isFacade("src/store.ts")).toBe(true);
   expect(isFacade("src/App.tsx")).toBe(true);
+});
+
+test("keeps a legacy path unclassified even when it shares an area name", () => {
+  // No real module collides with an area after the Phase 2 moves; insert one
+  // for the duration of the check so the allow-list precedence stays covered.
+  const path = "src/flow/canvas.ts";
+  LEGACY_FLAT.add(path);
+  try {
+    expect(areaOf(path)).toBeNull();
+  } finally {
+    LEGACY_FLAT.delete(path);
+  }
 });
 
 test("resolves exact files, extensions and directory indexes", () => {

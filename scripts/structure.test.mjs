@@ -30,6 +30,8 @@ const tree = {
   "src/flow/index.ts": "",
   "src/components/index.tsx": "",
   "src/pages/index.ts": "",
+  // No legacy module collides with an area name after step 7; this fixture
+  // keeps the legacy-module import allowance covered.
   "src/flow/bindings.ts": 'import "./canvas";',
   "src/flow/utils/thing.ts": "",
   "src/flow/canvas/index.ts": "",
