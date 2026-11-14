@@ -87,11 +87,11 @@ const areaTree = {
 
 test("classifies layers, including test support", () => {
   expect(layerOf("src/App.tsx")).toBe("shell");
-  expect(layerOf("src/pages/FlowPage.tsx")).toBe("page");
+  expect(layerOf("src/pages/flow/FlowPage.tsx")).toBe("page");
   expect(layerOf("src/pages")).toBe("page");
   expect(layerOf("src/components/canvas/FlowCanvas.tsx")).toBe("component");
   expect(layerOf("src/store.ts")).toBe("store");
-  expect(layerOf("src/flow/page-chrome.ts")).toBe("foundation");
+  expect(layerOf("src/flow/shared/wheel.ts")).toBe("foundation");
   expect(layerOf("src/native/src/db.rs")).toBe("foundation");
   expect(layerOf("src/assets/icon.png")).toBe("asset");
   expect(layerOf("src/test-support/app.ts")).toBe("test");
@@ -137,14 +137,14 @@ test("classifies files and bare directory imports", () => {
   expect(noUpwardImport).toBeDefined();
   expect(areaOf("src/flow/canvas/model/scene/scene.ts")).toBe("flow/canvas");
   expect(areaOf("src/flow/canvas")).toBe("flow/canvas");
-  expect(areaOf("src/flow/page-chrome.ts")).toBeNull();
-  expect(areaOf("src/flow/search-navigation.ts")).toBeNull();
+  expect(areaOf("src/flow/legacy-helper.ts")).toBeNull();
+  expect(areaOf("src/flow/legacy-navigation.ts")).toBeNull();
   expect(areaOf("src/flow/execution/index.ts")).toBe("flow/execution");
   expect(areaOf("src/flow/minimap/index.ts")).toBe("flow/minimap");
   expect(areaOf("src/components/canvas/world/Card.tsx")).toBe("components/canvas");
-  expect(areaOf("src/flow/bindings.ts")).toBeNull();
+  expect(areaOf("src/flow/legacy-bindings.ts")).toBeNull();
   expect(areaOf("src/pages/flow/FlowPage.tsx")).toBe("pages/flow");
-  expect(areaOf("src/pages/FlowPage.tsx")).toBeNull();
+  expect(areaOf("src/pages/legacy-page.tsx")).toBeNull();
   expect(areaOf("src/App.tsx")).toBe("shell");
   expect(segmentOf("src/flow/canvas/model/scene/scene.ts")).toBe("model");
   expect(segmentOf("src/flow/canvas/index.ts")).toBeNull();
@@ -183,13 +183,13 @@ test("reports upward, unknown and unclassified imports", () => {
   expect(reportsFor("src/components/Card.tsx", "../pages/FlowPage")).toHaveLength(1);
   expect(reportsFor("src/components/Card.tsx", "../pages/FlowPage")[0].messageId).toBe("upward");
   expect(reportsFor("src/components/Card.tsx", "../pages")).toHaveLength(1);
-  expect(reportsFor("src/pages/FlowPage.tsx", "../unclassified/module")[0].messageId).toBe(
+  expect(reportsFor("src/pages/flow/FlowPage.tsx", "../../unclassified/module")[0].messageId).toBe(
     "unknown",
   );
   expect(reportsFor("src/unclassified/module.ts", "../components/canvas")[0].messageId).toBe(
     "unclassified",
   );
-  expect(reportsFor("src/pages/FlowPage.tsx", "../components/canvas")).toEqual([]);
+  expect(reportsFor("src/pages/flow/FlowPage.tsx", "../../components/canvas")).toEqual([]);
   expect(
     reportsFor("src/components/canvas/FlowCanvas.tsx", "../../flow/canvas/geometry/selection"),
   ).toEqual([]);

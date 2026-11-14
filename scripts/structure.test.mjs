@@ -32,8 +32,8 @@ const tree = {
   "src/flow/index.ts": "",
   "src/components/index.tsx": "",
   "src/pages/index.ts": "",
-  // No legacy module collides with an area name after step 7; this fixture
-  // keeps the legacy-module import allowance covered.
+  // A flat fixture module: with the legacy allow-list empty, the classifier
+  // treats it as unclassified by path alone.
   "src/flow/bindings.ts": 'import "./canvas";',
   "src/flow/utils/thing.ts": "",
   "src/flow/canvas/index.ts": "",
@@ -269,6 +269,7 @@ test("keeps the legacy allow-list and the Rust report non-failing", () => {
       (root) => {
         const files = collectSourceFiles(root);
         expect(files).toContain("src/pages/FlowPage.tsx");
+        expect(files).toContain("src/flow/page-chrome.ts");
         expect(checkRustLayout(root)).toEqual([
           "Rust module at the crate root: src/native/src/extra.rs",
         ]);
