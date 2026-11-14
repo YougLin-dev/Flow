@@ -275,9 +275,10 @@ composer, and opening a connector's menu selects that connector, so the menu
 visibly names what its items act on. A card under the press wins over a
 connector drawn behind it. It is drawn from ordinary views rather than opened
 with `Menu.popup`, because a system menu takes the pointer and would prevent
-the right-button drag from panning; `flow/canvas/interaction/context-menu.ts` wires the press,
-the pending press a release opens, the dismissal when the camera or the
-pressed card or connector moves away, and the item actions;
+the right-button drag from panning;
+`flow/canvas/interaction/context-menu.ts` wires the press, the pending press
+a release opens, the dismissal when the camera or the pressed card or
+connector moves away, and the item actions;
 `flow/node-commands.ts` performs the copy (writing an open editor's drafts
 first) and delete commands.
 
