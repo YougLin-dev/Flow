@@ -3,8 +3,9 @@
  * the body inside it and one typed port on each declared parameter. The
  * card's root carries its world position, and its chrome is laid out in
  * card-local points, so a drag moves one style instead of every geometry
- * derived style (see `flow/card-geometry.ts`); its document text is read
- * through equality-gated values (`flow/card-content.ts`), so a viewport
+ * derived style (see `flow/canvas/model/cards/card-geometry.ts`); its document
+ * text is read through equality-gated values
+ * (`flow/canvas/model/cards/card-content.ts`), so a viewport
  * refresh that carries the same card wakes no binding. Its pixel values
  * scale with the camera through the world view.
  */

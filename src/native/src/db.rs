@@ -4177,7 +4177,7 @@ mod tests {
         started.elapsed().as_secs_f64() * 1000.0
     }
 
-    /// Mirrors `camera.fit` in `src/flow/camera.ts`: 48 points of padding on
+    /// Mirrors `camera.fit` in `src/flow/canvas/model/camera.ts`: 48 points of padding on
     /// a 1920x1080 stage, capped at 1 and clamped to the 0.05 minimum.
     fn fit_scale(bounds: &Viewport) -> (f64, f64) {
         let available_width = (1920.0f64 - 48.0 * 2.0).max(1.0);

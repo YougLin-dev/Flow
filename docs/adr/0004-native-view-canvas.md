@@ -34,7 +34,7 @@ and the full hover/active/focus styling vocabulary.
 Remove Leafer and NSH's `<Canvas>` from the app. The canvas is a native view
 tree:
 
-- `src/flow/scene.ts` is a headless scene model (signals for visible nodes,
+- `src/flow/canvas/model/scene/scene.ts` is a headless scene model (signals for visible nodes,
   edges, selection, overrides, previews and the connection preview) with
   world-space hit tests.
 - `components/FlowCanvas.tsx` renders one world view positioned and scaled by

@@ -80,7 +80,7 @@ test("classifies layers, including test support", () => {
   expect(layerOf("src/pages")).toBe("page");
   expect(layerOf("src/components/TitleBar.tsx")).toBe("component");
   expect(layerOf("src/store.ts")).toBe("store");
-  expect(layerOf("src/flow/scene.ts")).toBe("foundation");
+  expect(layerOf("src/flow/overlay.ts")).toBe("foundation");
   expect(layerOf("src/native/src/db.rs")).toBe("foundation");
   expect(layerOf("src/assets/icon.png")).toBe("asset");
   expect(layerOf("src/test-support/app.ts")).toBe("test");
@@ -126,7 +126,7 @@ test("classifies files and bare directory imports", () => {
   expect(noUpwardImport).toBeDefined();
   expect(areaOf("src/flow/canvas/model/scene/scene.ts")).toBe("flow/canvas");
   expect(areaOf("src/flow/canvas")).toBe("flow/canvas");
-  expect(areaOf("src/flow/scene.ts")).toBeNull();
+  expect(areaOf("src/flow/overlay.ts")).toBeNull();
   expect(areaOf("src/flow/minimap.ts")).toBeNull();
   expect(areaOf("src/flow/execution.ts")).toBeNull();
   expect(areaOf("src/flow/minimap/index.ts")).toBe("flow/minimap");

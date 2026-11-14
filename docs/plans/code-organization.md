@@ -1771,8 +1771,10 @@ layout) and extracted `scene-types.ts` (`SceneReader`, `PreviewView`,
 `ConnectionPreview`), `cursor.ts`, `cards/card-image.ts` and
 `cards/inline-body.ts`; the scene ↔ helper and controller ↔ handle cycles are
 gone. `CameraSize`/`CameraBounds` are now aliases of the shared `Size`/
-`BoxGeometry`. The inline-editor test moved beside `inline-body.ts`.
-`LEGACY_FLAT` is down to 58 modules.
+`BoxGeometry`. The inline-editor test moved beside `inline-body.ts`. The
+scene's internal split (and the `scene-hits.test.ts` rename) stays in Phase 7
+because §11 step 3 forbids a behavior split. `LEGACY_FLAT` is down to 58
+modules.
 
 ---
 

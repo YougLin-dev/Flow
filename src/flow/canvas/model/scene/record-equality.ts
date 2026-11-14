@@ -61,7 +61,7 @@ export function sameEdge(a: EdgeSummary, b: EdgeSummary): boolean {
  * Element-wise preview equality: a reload that returns the same node, count
  * and URLs keeps the previous view object, so image cards do not re-render.
  * Hand-written because the URL list is an array; a new PreviewView field
- * needs a comparison here by hand (the interface is local to `scene.ts`).
+ * needs a comparison here by hand (the interface is local to `scene-types.ts`).
  */
 export function samePreviewView(a: PreviewView, b: PreviewView): boolean {
   return (

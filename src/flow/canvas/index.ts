@@ -1,7 +1,7 @@
 /**
- * The canvas area facade: the geometry other features and the views need.
- * The area's model and interaction modules stay internal; canvas views
- * deep-import those within the feature.
+ * The canvas area facade: the model and geometry surface other features and
+ * the views use. Interaction stays internal; canvas views deep-import the
+ * interaction modules within the feature.
  */
 export type { BoxGeometry } from "../shared";
 export { CanvasCamera, wheelNotches, wheelZoomFactor, type CameraSize } from "./model/camera";
