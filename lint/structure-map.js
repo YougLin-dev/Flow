@@ -212,7 +212,6 @@ export const LEGACY_FLAT = new Set([
   "src/flow/data.ts",
   "src/flow/database-path.ts",
   "src/flow/document-session.ts",
-  "src/flow/execution.ts",
   "src/flow/inline-editor.ts",
   "src/flow/minimap-loader.ts",
   "src/flow/node-commands.ts",

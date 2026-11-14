@@ -128,7 +128,7 @@ test("classifies files and bare directory imports", () => {
   expect(areaOf("src/flow/canvas")).toBe("flow/canvas");
   expect(areaOf("src/flow/page-chrome.ts")).toBeNull();
   expect(areaOf("src/flow/asset-urls.ts")).toBeNull();
-  expect(areaOf("src/flow/execution.ts")).toBeNull();
+  expect(areaOf("src/flow/execution/index.ts")).toBe("flow/execution");
   expect(areaOf("src/flow/minimap/index.ts")).toBe("flow/minimap");
   expect(areaOf("src/components/canvas/world/Card.tsx")).toBe("components/canvas");
   expect(areaOf("src/components/FlowCard.tsx")).toBeNull();

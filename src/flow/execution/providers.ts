@@ -1,18 +1,10 @@
 /**
- * Execution orchestration. TSX owns the run lifecycle (status, cancellation,
- * provider calls); Rust stores the immutable batch and its items.
+ * The mock providers a run calls: the request/result shapes, cancellation
+ * primitives and the text/image generators. They are pure apart from the
+ * theme tokens the mock SVG reads and the delay that simulates work.
  */
 import { token } from "nsh";
-import {
-  imageResultItem,
-  resultBatch,
-  textResultItem,
-  type ChangeSet,
-  type Document,
-  type InputItemSummary,
-  type NodeDetail,
-  type ResultItemInput,
-} from "./shared";
+import type { InputItemSummary } from "../shared";
 import {
   imageModelLabel,
   type ImageResolution,
@@ -20,7 +12,7 @@ import {
   type NodeSettings,
   type TextSettings,
   textModelLabel,
-} from "./nodes";
+} from "../nodes";
 
 export interface ProviderRequest {
   readonly nodeId: string;
@@ -51,13 +43,6 @@ interface ProviderRequestWithSettings extends ProviderRequest {
 }
 
 type Provider = (request: ProviderRequestWithSettings) => Promise<ProviderResult>;
-
-export interface RunCallbacks {
-  /** Applies a status or result change to the scene. */
-  onChange: (changes: ChangeSet) => void;
-  /** A run finished (or failed/was cancelled): reload the composer and previews. */
-  onSettled: (nodeId: string) => void;
-}
 
 export class CancelledError extends Error {
   constructor() {
@@ -92,7 +77,7 @@ export function wait(ms: number, signal: AbortSignal): Promise<void> {
   });
 }
 
-const mockText: Provider = async (request) => {
+export const mockText: Provider = async (request) => {
   const settings = asTextSettings(request.settings);
   await wait(TEXT_DELAY_MS, request.signal);
   const contexts = request.inputs
@@ -113,7 +98,7 @@ const mockText: Provider = async (request) => {
   };
 };
 
-const mockImage: Provider = async (request) => {
+export const mockImage: Provider = async (request) => {
   const settings = asImageSettings(request.settings);
   await wait(IMAGE_DELAY_MS, request.signal);
   const dimensions = aspectDimensions(settings.aspect, settings.resolution);
@@ -148,149 +133,6 @@ const mockImage: Provider = async (request) => {
   };
 };
 
-/** Starts and cancels node runs, at most one per node. */
-export class NodeRunner {
-  private readonly runs = new Map<string, AbortController>();
-  private disposed = false;
-
-  constructor(
-    private readonly document: Document,
-    private readonly callbacks: RunCallbacks,
-  ) {}
-
-  isRunning(nodeId: string): boolean {
-    return this.runs.has(nodeId);
-  }
-
-  cancel(nodeId: string): void {
-    this.runs.get(nodeId)?.abort();
-  }
-
-  dispose(): void {
-    this.disposed = true;
-    for (const controller of this.runs.values()) controller.abort();
-    this.runs.clear();
-  }
-
-  async run(detail: NodeDetail, settings: NodeSettings): Promise<void> {
-    const nodeId = detail.node.id;
-    if (this.disposed || this.runs.has(nodeId)) return;
-    // An upload node has no provider; its output comes from the local file.
-    // The kind registry keeps one from reaching a run, but settle the caller
-    // if it ever does rather than leaving its Run state busy.
-    if (!("prompt" in settings)) {
-      this.callbacks.onSettled(nodeId);
-      return;
-    }
-    if (settings.prompt.trim() === "") {
-      await this.settleFailure(nodeId, "Prompt cannot be empty", settings);
-      this.callbacks.onSettled(nodeId);
-      return;
-    }
-
-    const controller = new AbortController();
-    this.runs.set(nodeId, controller);
-    const batchId = `batch-${crypto.randomUUID()}`;
-    const provider = detail.node.kind === "image" ? mockImage : mockText;
-
-    try {
-      this.apply(await this.document.setNodeStatus(nodeId, "running"));
-      const inputs = await this.document.syncInputs(nodeId);
-      if (controller.signal.aborted) throw new CancelledError();
-      const result = await provider({
-        nodeId,
-        prompt: settings.prompt,
-        inputs,
-        settings,
-        signal: controller.signal,
-      });
-      if (controller.signal.aborted) throw new CancelledError();
-
-      const items = await Promise.all(
-        result.items.map(async (item, position): Promise<ResultItemInput> => {
-          if (item.kind === "text") return textResultItem(position, item.text);
-          const asset = await this.document.importAsset({
-            id: `asset-${crypto.randomUUID()}`,
-            kind: "image",
-            name: item.name,
-            mime: item.mime,
-            bytes: item.bytes,
-            metaJson: item.metaJson,
-          });
-          return imageResultItem(position, asset.id, item.metaJson);
-        }),
-      );
-
-      if (controller.signal.aborted) throw new CancelledError();
-      const batch = resultBatch({
-        id: batchId,
-        nodeId,
-        trigger: "run",
-        provider: result.provider,
-        model: result.model,
-        paramsJson: result.paramsJson,
-        status: "done",
-      });
-      this.apply(await this.document.saveRun(batch, items));
-    } catch (error) {
-      // The app is closing: the database is gone and startup recovery will
-      // mark the abandoned run interrupted.
-      if (this.disposed) return;
-      if (isCancelled(error)) {
-        await this.settle(nodeId, batchId, "cancelled", "", settings, "mock");
-      } else {
-        console.error("Flow could not run a node", error);
-        await this.settleFailure(nodeId, messageOf(error), settings, batchId);
-      }
-    } finally {
-      this.runs.delete(nodeId);
-      this.callbacks.onSettled(nodeId);
-    }
-  }
-
-  private async settleFailure(
-    nodeId: string,
-    error: string,
-    settings: TextSettings | ImageSettings,
-    batchId = `batch-${crypto.randomUUID()}`,
-  ): Promise<void> {
-    await this.settle(nodeId, batchId, "failed", error, settings, "mock");
-  }
-
-  private async settle(
-    nodeId: string,
-    batchId: string,
-    status: "failed" | "cancelled",
-    error: string,
-    settings: TextSettings | ImageSettings,
-    provider: string,
-  ): Promise<void> {
-    try {
-      this.apply(
-        await this.document.saveRun(
-          resultBatch({
-            id: batchId,
-            nodeId,
-            trigger: "run",
-            provider: `${provider}-${settings.model.replace(/^mock-/, "")}`,
-            model: settings.model,
-            paramsJson: JSON.stringify({ prompt: settings.prompt }),
-            status,
-            error,
-          }),
-          [],
-        ),
-      );
-    } catch (saveError) {
-      console.error("Flow could not record a failed run", saveError);
-    }
-  }
-
-  private apply(changes: ChangeSet): void {
-    this.callbacks.onChange(changes);
-  }
-}
-
 function asTextSettings(settings: NodeSettings): TextSettings {
   if (settings.version === 1 && "prompt" in settings && !("aspect" in settings)) return settings;
   throw new Error("a non-text settings object reached the text provider");
@@ -299,10 +141,6 @@ function asTextSettings(settings: NodeSettings): TextSettings {
 function asImageSettings(settings: NodeSettings): ImageSettings {
   if (settings.version === 1 && "aspect" in settings) return settings;
   throw new Error("a text settings object reached the image provider");
-}
-
-function messageOf(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
 }
 
 /** The image a ratio and resolution ask for: the long side, the other scaled. */

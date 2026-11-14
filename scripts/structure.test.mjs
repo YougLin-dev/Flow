@@ -30,7 +30,7 @@ const tree = {
   "src/flow/index.ts": "",
   "src/components/index.tsx": "",
   "src/pages/index.ts": "",
-  "src/flow/execution.ts": 'import "./canvas";',
+  "src/flow/bindings.ts": 'import "./canvas";',
   "src/flow/utils/thing.ts": "",
   "src/flow/canvas/index.ts": "",
   "src/flow/canvas/model/camera.ts": "",
@@ -130,7 +130,7 @@ test("reports a new flat module, a missing facade and a forbidden folder", () =>
       "src/flow/document/interaction/controller.ts (interaction) may not import src/flow/document/session/y.ts",
     );
     expect(result.reports).not.toContain(
-      "src/flow/execution.ts may not import flow/canvas (./canvas)",
+      "src/flow/bindings.ts may not import flow/canvas (./canvas)",
     );
   });
 });
@@ -210,7 +210,7 @@ test("Phase 5 turns the area findings into failures", () => {
         "src/flow/document/interaction/controller.ts (interaction) may not import src/flow/document/session/y.ts",
       );
       expect(result.failures).not.toContain(
-        "src/flow/execution.ts may not import flow/canvas (./canvas)",
+        "src/flow/bindings.ts may not import flow/canvas (./canvas)",
       );
       expect(result.failures).toContain(
         "src/flow/document/session/deep.ts deep-imports flow/canvas (../../canvas/model/camera)",
