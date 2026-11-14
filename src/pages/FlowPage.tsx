@@ -3,18 +3,10 @@ import { isAvailable } from "nsh/desktop";
 import type { ChangeSet, Document, NodeBounds, SearchHit } from "../flow/shared";
 import { BrandCard, FrameRate } from "../components/app";
 import { ImageComposer, TextComposer } from "../components/composer";
-import {
-  CanvasMenuLayer,
-  FlowCanvas,
-  ImageLoadProbe,
-  imageProbeText,
-  NodeToolbar,
-  ZoomControls,
-  ZoomProbe,
-} from "../components/canvas";
+import { CanvasMenuLayer, FlowCanvas, NodeToolbar, ZoomControls } from "../components/canvas";
 import { MiniMap, MinimapDragOverlay } from "../components/minimap";
 import { SEARCH_FILTERS, SearchButton, SearchPalette } from "../components/search";
-import { CanvasProbe } from "../components/CanvasProbe";
+import { CanvasProbe, ImageLoadProbe, imageProbeText, ZoomProbe } from "../components/probes";
 import { bindFlowKeys } from "../flow/bindings";
 import { CanvasCamera, FlowScene, wheelZoomFactor } from "../flow/canvas";
 import { CanvasController } from "../flow/canvas/interaction/canvas-controller";

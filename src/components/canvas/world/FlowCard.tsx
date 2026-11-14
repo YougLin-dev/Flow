@@ -9,8 +9,7 @@
  * refresh that carries the same card wakes no binding. Its pixel values
  * scale with the camera through the world view.
  */
-import { computed, host, Image, Text, token, View } from "nsh";
-import { Input } from "nsh/base";
+import { computed, Image, Text, token, View } from "nsh";
 import { Image as ImageIcon } from "lucide";
 import type { BoxGeometry, NodeSummary } from "../../../flow/shared";
 import { Icon } from "../../primitives";
@@ -448,22 +447,4 @@ function statusTextClass(status: string): string {
 
 function truncate(text: string, limit: number): string {
   return text.length <= limit ? text : `${text.slice(0, limit)}…`;
-}
-
-/** The host regression's report, or nothing unless its launch parameter asks. */
-export function imageProbeText(event: CardImageEvent): string {
-  if (host.params.flowImageLoadProbe !== 1) return "";
-  return [event.kind, event.nodeId, event.url, event.width, event.height, event.message].join(";");
-}
-
-/** The invisible input a host test reads the last image event from. */
-export function ImageLoadProbe(props: { readonly value: string }) {
-  return (
-    <Input
-      testID="image-load-probe"
-      readonly
-      value={props.value}
-      style={{ position: "absolute", left: 8, top: 8, width: 360, height: 1, opacity: 0 }}
-    />
-  );
 }

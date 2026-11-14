@@ -179,7 +179,6 @@ export const TEST_SUPPORT_FILES = new Set([
  * list shrinks with every move PR and disappears in Phase 5.
  */
 export const LEGACY_FLAT = new Set([
-  "src/components/CanvasProbe.tsx",
   "src/flow/bindings.ts",
   "src/flow/page-chrome.ts",
   "src/flow/search-navigation.ts",

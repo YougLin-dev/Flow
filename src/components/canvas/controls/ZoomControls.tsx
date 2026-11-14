@@ -1,4 +1,4 @@
-import { Button, Input, Tooltip } from "nsh/base";
+import { Button, Tooltip } from "nsh/base";
 import { Map, Minus, Plus, Scan } from "lucide";
 import { keymap, Text, token, View } from "nsh";
 import { FIT_KEY, ZOOM_IN_KEY, ZOOM_OUT_KEY } from "../../../flow/shared";
@@ -93,17 +93,5 @@ function ControlTip(props: ControlTipProps) {
         ) : null}
       </View>
     </Tooltip>
-  );
-}
-
-/** The invisible input a test reads the camera scale from, when it asks for it. */
-export function ZoomProbe(props: { readonly value: number | null }) {
-  return (
-    <Input
-      testID="zoom-probe"
-      readonly
-      value={props.value === null ? "" : String(props.value)}
-      style={{ position: "absolute", left: 8, top: 8, width: 1, height: 1, opacity: 0 }}
-    />
   );
 }
