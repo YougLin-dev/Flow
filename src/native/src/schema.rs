@@ -1,6 +1,9 @@
 //! Schema creation and the small virtual-table adapter.
 //!
-//! Ordinary tables come from the SeaORM entities. SQLite's FTS5 and RTree
+//! `v1` is the frozen release target: one literal DDL file and the open
+//! guard. The v5 SeaORM migration path below remains until step 2 switches
+//! the live open path; `schema` is crate-public until then so the tested v1
+//! API is reachable without a dead-code suppression. SQLite's FTS5 and RTree
 //! tables are virtual tables with no ORM schema support, so their DDL lives
 //! here, next to the migrations, and nowhere else.
 

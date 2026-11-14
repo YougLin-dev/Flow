@@ -7,7 +7,7 @@ CREATE TABLE document (
   project_id     TEXT    NOT NULL UNIQUE
                  CHECK (length(project_id) = 32
                         AND project_id NOT GLOB '*[^0-9a-f]*'),
-  title          TEXT    NOT NULL DEFAULT 'Flow',
+  title          TEXT    NOT NULL DEFAULT 'Flow' CHECK (length(trim(title)) > 0),
   rev            INTEGER NOT NULL DEFAULT 0 CHECK (rev >= 0),
   node_count     INTEGER NOT NULL DEFAULT 0 CHECK (node_count >= 0),
   edge_count     INTEGER NOT NULL DEFAULT 0 CHECK (edge_count >= 0),
@@ -18,9 +18,12 @@ CREATE TABLE document (
   min_y          REAL,
   max_y          REAL,
   bounds_exact   INTEGER NOT NULL DEFAULT 1 CHECK (bounds_exact IN (0, 1)),
-  camera_x       REAL    NOT NULL DEFAULT 0.0,
-  camera_y       REAL    NOT NULL DEFAULT 0.0,
-  camera_zoom    REAL    NOT NULL DEFAULT 1.0 CHECK (camera_zoom > 0.0),
+  camera_x       REAL    NOT NULL DEFAULT 0.0
+                 CHECK (camera_x >= -1.0e308 AND camera_x <= 1.0e308),
+  camera_y       REAL    NOT NULL DEFAULT 0.0
+                 CHECK (camera_y >= -1.0e308 AND camera_y <= 1.0e308),
+  camera_zoom    REAL    NOT NULL DEFAULT 1.0
+                 CHECK (camera_zoom > 0.0 AND camera_zoom < 1.0e308),
   created_at     INTEGER NOT NULL,
   updated_at     INTEGER NOT NULL,
   CHECK ((min_x IS NULL AND max_x IS NULL AND min_y IS NULL AND max_y IS NULL)
@@ -107,7 +110,6 @@ CREATE TABLE edges (
   kind        TEXT NOT NULL DEFAULT 'flow' CHECK (length(kind) > 0),
   data_json   TEXT NOT NULL DEFAULT '{}' CHECK (json_valid(data_json)),
   CHECK (from_id <> to_id),
-  UNIQUE (from_id, from_port, to_id, to_port),
   FOREIGN KEY (from_id) REFERENCES nodes (id) ON DELETE CASCADE ON UPDATE CASCADE,
   FOREIGN KEY (to_id) REFERENCES nodes (id) ON DELETE CASCADE ON UPDATE CASCADE
 ) STRICT;
@@ -227,14 +229,20 @@ BEGIN
   SELECT RAISE(ABORT, 'document.project_id is immutable');
 END;
 
+CREATE TRIGGER document_no_replace BEFORE INSERT ON document
+WHEN EXISTS (SELECT 1 FROM document WHERE id = NEW.id OR project_id = NEW.project_id)
+BEGIN
+  SELECT RAISE(ABORT, 'document: use UPDATE, not REPLACE');
+END;
+
 CREATE TRIGGER nodes_no_replace BEFORE INSERT ON nodes
-WHEN EXISTS (SELECT 1 FROM nodes WHERE id = NEW.id)
+WHEN EXISTS (SELECT 1 FROM nodes WHERE id = NEW.id OR seq = NEW.seq)
 BEGIN
   SELECT RAISE(ABORT, 'nodes: use UPDATE, not REPLACE');
 END;
 
 CREATE TRIGGER edges_no_replace BEFORE INSERT ON edges
-WHEN EXISTS (SELECT 1 FROM edges WHERE id = NEW.id)
+WHEN EXISTS (SELECT 1 FROM edges WHERE id = NEW.id OR seq = NEW.seq)
 BEGIN
   SELECT RAISE(ABORT, 'edges: use UPDATE, not REPLACE');
 END;

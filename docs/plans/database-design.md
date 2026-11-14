@@ -152,7 +152,7 @@ CREATE TABLE document (
   project_id     TEXT    NOT NULL UNIQUE
                  CHECK (length(project_id) = 32
                         AND project_id NOT GLOB '*[^0-9a-f]*'),
-  title          TEXT    NOT NULL DEFAULT 'Flow',
+  title          TEXT    NOT NULL DEFAULT 'Flow' CHECK (length(trim(title)) > 0),
   rev            INTEGER NOT NULL DEFAULT 0 CHECK (rev >= 0),
   node_count     INTEGER NOT NULL DEFAULT 0 CHECK (node_count >= 0),
   edge_count     INTEGER NOT NULL DEFAULT 0 CHECK (edge_count >= 0),
@@ -163,9 +163,12 @@ CREATE TABLE document (
   min_y          REAL,
   max_y          REAL,
   bounds_exact   INTEGER NOT NULL DEFAULT 1 CHECK (bounds_exact IN (0, 1)),
-  camera_x       REAL    NOT NULL DEFAULT 0.0,
-  camera_y       REAL    NOT NULL DEFAULT 0.0,
-  camera_zoom    REAL    NOT NULL DEFAULT 1.0 CHECK (camera_zoom > 0.0),
+  camera_x       REAL    NOT NULL DEFAULT 0.0
+                 CHECK (camera_x >= -1.0e308 AND camera_x <= 1.0e308),
+  camera_y       REAL    NOT NULL DEFAULT 0.0
+                 CHECK (camera_y >= -1.0e308 AND camera_y <= 1.0e308),
+  camera_zoom    REAL    NOT NULL DEFAULT 1.0
+                 CHECK (camera_zoom > 0.0 AND camera_zoom < 1.0e308),
   created_at     INTEGER NOT NULL,
   updated_at     INTEGER NOT NULL,
   CHECK ((min_x IS NULL AND max_x IS NULL AND min_y IS NULL AND max_y IS NULL)
@@ -252,7 +255,6 @@ CREATE TABLE edges (
   kind        TEXT NOT NULL DEFAULT 'flow' CHECK (length(kind) > 0),
   data_json   TEXT NOT NULL DEFAULT '{}' CHECK (json_valid(data_json)),
   CHECK (from_id <> to_id),
-  UNIQUE (from_id, from_port, to_id, to_port),
   FOREIGN KEY (from_id) REFERENCES nodes (id) ON DELETE CASCADE ON UPDATE CASCADE,
   FOREIGN KEY (to_id) REFERENCES nodes (id) ON DELETE CASCADE ON UPDATE CASCADE
 ) STRICT;
@@ -372,14 +374,20 @@ BEGIN
   SELECT RAISE(ABORT, 'document.project_id is immutable');
 END;
 
+CREATE TRIGGER document_no_replace BEFORE INSERT ON document
+WHEN EXISTS (SELECT 1 FROM document WHERE id = NEW.id OR project_id = NEW.project_id)
+BEGIN
+  SELECT RAISE(ABORT, 'document: use UPDATE, not REPLACE');
+END;
+
 CREATE TRIGGER nodes_no_replace BEFORE INSERT ON nodes
-WHEN EXISTS (SELECT 1 FROM nodes WHERE id = NEW.id)
+WHEN EXISTS (SELECT 1 FROM nodes WHERE id = NEW.id OR seq = NEW.seq)
 BEGIN
   SELECT RAISE(ABORT, 'nodes: use UPDATE, not REPLACE');
 END;
 
 CREATE TRIGGER edges_no_replace BEFORE INSERT ON edges
-WHEN EXISTS (SELECT 1 FROM edges WHERE id = NEW.id)
+WHEN EXISTS (SELECT 1 FROM edges WHERE id = NEW.id OR seq = NEW.seq)
 BEGIN
   SELECT RAISE(ABORT, 'edges: use UPDATE, not REPLACE');
 END;
@@ -750,7 +758,7 @@ The crossing-edge read caps at 4,000 rows and drops the redundant SQL `ORDER BY`
 
 - `PRAGMA foreign_keys=ON` is set and asserted in `configure()`; the current reliance on the driver default (`db.rs:538-546`) is removed. `PRAGMA recursive_triggers=OFF` is explicit; the trigger chains were verified with it off.
 - Node deletion cascades edges and inputs; the edge AFTER DELETE triggers remove `edges_rtree` rows, the node AFTER DELETE triggers remove `nodes_rtree`/`nodes_fts` rows, and counts decrement. This was verified on the bundled 3.51.1 and 3.53.1.
-- `INSERT OR REPLACE` on `nodes`/`edges` is banned by BEFORE INSERT triggers because REPLACE skips AFTER DELETE triggers and would corrupt counts/FTS/RTree. The app uses plain INSERT/UPDATE; a test asserts the ban.
+- `INSERT OR REPLACE` is banned by BEFORE INSERT triggers on `document` (by id or project_id), `nodes` and `edges` (by id or seq), because REPLACE skips AFTER DELETE triggers and would corrupt counts/FTS/RTree or the project identity. The app uses plain INSERT/UPDATE; tests assert the ban on every path.
 - No trigger may be assumed to run in a particular order; tests assert rejection, not messages.
 - `verify()` runs `PRAGMA quick_check`, `PRAGMA foreign_key_check`, FTS `integrity-check`/`rebuild` if needed, `rtreecheck` for both RTrees, the dirty flush and the bounds compaction. It is a maintenance command/post-open job, not part of the 300 ms open path (quick_check measured 0.682 s on the 100k/74 MB fixture).
 
@@ -871,14 +879,14 @@ The project layer above the document core owns the managed projects root, the pr
 
 `PRAGMA application_id = 1179406167` (`0x464C4F57`, "FLOW") and `PRAGMA user_version = 1` are set inside the creation transaction. Open reads `PRAGMA application_id`, `PRAGMA user_version` and `sqlite_master` before any DDL:
 
-| State                                                                       | Action                                                                                                          |
-| --------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------- |
-| `application_id=0`, `user_version=0`, no user tables                        | New package: create v1 in one transaction, insert the `document` row, set identity/version, commit              |
-| `application_id=0`, any user table                                          | Refuse with "not a Flow database"; never DROP (this catches the existing v5 dev files and foreign SQLite files) |
-| matching `application_id`, `user_version` = 1                               | Validate the document row and return `Current`                                                                  |
-| matching `application_id`, `user_version` < 1                               | Refuse: no earlier Flow schema exists; reset the project                                                        |
-| matching `application_id`, `user_version` > 1                               | Refuse as newer                                                                                                 |
-| matching id, missing/invalid `document` row, `project_id` or camera columns | Refuse; suggest `verify()` or a project reset/deletion                                                          |
+| State                                                                                        | Action                                                                                                          |
+| -------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------- |
+| `application_id=0`, `user_version=0`, no user tables or views                                | New package: create v1 in one transaction, insert the `document` row, set identity/version, commit              |
+| `application_id=0`, any user table or view                                                   | Refuse with "not a Flow database"; never DROP (this catches the existing v5 dev files and foreign SQLite files) |
+| matching `application_id`, `user_version` = 1                                                | Validate the document row and return `Current`                                                                  |
+| matching `application_id`, `user_version` < 1                                                | Refuse: no earlier Flow schema exists; reset the project                                                        |
+| matching `application_id`, `user_version` > 1                                                | Refuse as newer                                                                                                 |
+| matching id, missing/invalid `document` row, `project_id`, camera or required schema objects | Refuse; suggest `verify()` or a project reset/deletion                                                          |
 
 `PRAGMA quick_check` is not on the open path. Open sets `document.clean_shutdown=0`; an explicit `close()` checkpoints WAL, sets it to 1 and closes. On the next open, a `0` schedules the post-open `verify()` job (quick_check, FTS/RTree checks, dirty flush, bounds compaction, GC). The 300 ms open budget is preserved; a normal clean open does no integrity scan.
 
@@ -1017,7 +1025,7 @@ run_command(f) = conn.transaction(|txn| {
 | Project package    | Create in a temp dir and rename into place; open; read project_id/title/camera; rename title; duplicate mints a new project_id; delete moves to trash; import refuses a foreign/newer file; a second open is locked; rebuild the catalog from directories; camera survives close/open |
 | Constraints        | Every CHECK/FK/trigger rejects its negative case: self-edge, duplicate port pair, bad status/origin/kind, non-JSON, negative size/position, image without asset, node without output for done, output from another node/incarnation, idle with output                                 |
 | Cascades           | Delete node -> edges, inputs, RTree/FTS rows, counts; delete edge -> inputs, edge box; delete batch -> items, item_count; delete asset with references fails; delete node with connected ports? no ports table                                                                        |
-| REPLACE ban        | `INSERT OR REPLACE` on nodes/edges aborts; counts/FTS/RTree stay consistent                                                                                                                                                                                                           |
+| REPLACE ban        | `INSERT OR REPLACE` on document, nodes and edges aborts by id and by seq/project_id; counts/FTS/RTree/identity stay consistent                                                                                                                                                        |
 | Batch/item machine | Insert done directly fails; item into settled batch fails; item update/delete blocked; batch cascade succeeds; running batch delete blocked; item_count consistency trigger rejects a wrong direct update                                                                             |
 | Positions          | Reorder p2/p0/p1, undo, redo; insert-restore at a stored position; upload append while another insert races; sync_inputs renumber; no UNIQUE failure                                                                                                                                  |
 | Geometry           | SQL `edge_boxes` vs Rust `connection_bounds` vs TSX `scene.edgePorts` for a matrix; port gap 14, reach 60/260, padding 4; ±10,000,000 and ±2^23; resize offset scaling; dirty flush after 1,000-node move                                                                             |
@@ -1079,7 +1087,7 @@ The owner confirmed the project model on 2026-11-15 and delegated the remaining 
 
 ## 13. Approval and implementation order
 
-This is a **proposal whose direction is approved but which is not implemented**. It deliberately breaks compatibility with the current test-only v5 database: the development reset deletes the old database and its asset directory, while a project reset deletes the whole package, then reseeds. No production data exists, so no migration path is required before the first release.
+This is a **proposal whose direction is approved; step 1 is implemented and steps 2-7 are not**. It deliberately breaks compatibility with the current test-only v5 database: the development reset deletes the old database and its asset directory, while a project reset deletes the whole package, then reseeds. No production data exists, so no migration path is required before the first release.
 
 Implementation order:
 
