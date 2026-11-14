@@ -104,7 +104,7 @@ test("edits the prompt and runs with it", async () => {
   await app.type("id:composer-prompt", "A quiet lake at dusk");
   await app.press("id:composer-run");
   await app.waitUntil(() =>
-    app.texts().some((text) => text.includes("[Mock Text] A quiet lake at dusk")),
+    app.texts().some((text) => text.includes("[DeepSeek V4.1 Flash] A quiet lake at dusk")),
   );
 });
 
@@ -116,21 +116,24 @@ test("runs the selected text node with the mock provider", async () => {
   await app.waitUntil(() => app.shows("id:composer-run"));
 
   await app.press("id:composer-run");
-  await app.waitUntil(() => app.texts().some((text) => text.includes("[Mock Text]")));
+  await app.waitUntil(() => app.texts().some((text) => text.includes("[DeepSeek V4.1 Flash]")));
   expect(app.texts().some((text) => text.endsWith("Done"))).toBe(true);
 });
 
-test("removes an input from the composer", async () => {
-  const app = await openApp();
+test("attaches and removes an image in the image composer", async () => {
+  const app = await openApp({ width: 900 });
   await app.waitUntil(() => percentOf(app) > 0);
+  app.onPick(() => [{ name: "ref.png", type: "image/png", data: PNG_1X1 }]);
 
   await selectSeed(app, "Image", "id:search-result-seed-image");
-  await app.waitUntil(() => app.texts().includes("Inputs · 1"));
+  await app.waitUntil(() => app.shows("id:composer-image-button"));
 
-  await app.press("label:Remove input");
-  await app.waitUntil(() => app.texts().includes("Inputs · 0"));
-  // The upstream group and its chip are gone; the text card keeps its body.
-  expect(app.texts().some((text) => text.includes("From Text"))).toBe(false);
+  await app.press("id:composer-image-button");
+  await app.waitUntil(() => app.shows("label:Remove image input"));
+
+  await app.press("label:Remove image input");
+  await app.waitUntil(() => !app.shows("label:Remove image input"));
+  // The tile is gone; the upstream text card keeps its body.
   expect(app.texts().some((text) => text.includes("清晨"))).toBe(true);
 });
 
@@ -205,11 +208,31 @@ test("switches the composer to another node", async () => {
   await app.waitUntil(() => app.shows("id:composer-prompt"));
 
   await selectSeed(app, "Image", "id:search-result-seed-image");
-  await app.waitUntil(() => app.texts().includes("Inputs · 1"));
-  // The chat sheet belongs to text nodes; the image node keeps its own panel.
-  expect(app.shows("id:composer-image-button")).toBe(false);
+  // Both kinds use the chat sheet; the image node adds its generation settings.
+  await app.waitUntil(() => app.shows("id:composer-settings"));
+  expect(app.shows("id:composer-image-button")).toBe(true);
   // The drafts reset to the image node's settings.
   await app.waitUntil(() => (app.value("id:composer-prompt") ?? "").includes("mountain lake"));
+});
+
+test("picks the image aspect and resolution from the composer", async () => {
+  const app = await openApp();
+  await app.waitUntil(() => percentOf(app) > 0);
+
+  await selectSeed(app, "Image", "id:search-result-seed-image");
+  await app.waitUntil(() => app.shows("id:composer-settings"));
+  // The seed asks for 16:9 at 1K.
+  expect(app.shows("text:16:9 / 1K")).toBe(true);
+
+  await app.press("id:composer-settings");
+  await app.waitUntil(() => app.shows("id:composer-settings-popover"));
+  await app.press("id:composer-aspect-4:3");
+  await app.waitUntil(() => !app.shows("id:composer-settings-popover"));
+  expect(app.shows("text:4:3 / 1K")).toBe(true);
+
+  await app.press("id:composer-settings");
+  await app.press("id:composer-resolution-2k");
+  await app.waitUntil(() => app.shows("text:4:3 / 2K"));
 });
 
 test("keeps a draft when the composer switches nodes", async () => {
@@ -224,13 +247,78 @@ test("keeps a draft when the composer switches nodes", async () => {
   // A search result selects another node directly; the text node's draft
   // must be written before its detail is replaced.
   await selectSeed(app, "Image", "id:search-result-seed-image");
-  await app.waitUntil(() => app.texts().includes("Inputs · 1"));
+  await app.waitUntil(() => app.shows("id:composer-settings"));
 
   await selectSeed(app, "Text", "id:search-result-seed-text");
   await app.waitUntil(() => (app.value("id:composer-prompt") ?? "").includes("Keep this draft"));
 });
 
-test("shows why an empty-prompt run failed", async () => {
+test("picks the image model from the composer", async () => {
+  const app = await openApp();
+  await app.waitUntil(() => percentOf(app) > 0);
+
+  await selectSeed(app, "Image", "id:search-result-seed-image");
+  await app.waitUntil(() => app.shows("id:composer-model"));
+  // The seed asks for the design's default model.
+  expect(app.texts()).toContain("Qwen Image 3.0 Pro");
+
+  await app.press("id:composer-model");
+  await app.waitUntil(() => app.shows("text:Mock Image"));
+  await app.press("text:Mock Image");
+  await app.waitUntil(() => app.texts().includes("Mock Image"));
+});
+
+test("picks the text model from the composer", async () => {
+  const app = await openTallApp();
+  await app.waitUntil(() => percentOf(app) > 0);
+
+  await selectSeed(app, "Text", "id:search-result-seed-text");
+  await app.waitUntil(() => app.shows("id:composer-model"));
+  // The seed asks for the design's default text model.
+  expect(app.texts()).toContain("DeepSeek V4.1 Flash");
+
+  await app.press("id:composer-model");
+  await app.waitUntil(() => app.shows("text:Mock Text"));
+  await app.press("text:Mock Text");
+  await app.waitUntil(() => app.texts().includes("Mock Text"));
+
+  // The run carries the chosen model into its result.
+  await app.press("id:composer-run");
+  await app.waitUntil(() => app.texts().some((text) => text.includes("[Mock Text]")));
+});
+
+test("picks the image count from the composer", async () => {
+  const app = await openApp();
+  await app.waitUntil(() => percentOf(app) > 0);
+
+  await selectSeed(app, "Image", "id:search-result-seed-image");
+  await app.waitUntil(() => app.shows("id:composer-count"));
+  // The seed asks for two images.
+  expect(app.texts()).toContain("×2");
+
+  await app.press("id:composer-count");
+  await app.waitUntil(() => app.shows("text:×3"));
+  await app.press("text:×3");
+  await app.waitUntil(() => app.texts().includes("×3"));
+  expect(app.texts()).toContain("×3");
+});
+
+test("closes the image settings popover with Escape", async () => {
+  const app = await openApp();
+  await app.waitUntil(() => percentOf(app) > 0);
+
+  await selectSeed(app, "Image", "id:search-result-seed-image");
+  await app.waitUntil(() => app.shows("id:composer-settings"));
+
+  await app.press("id:composer-settings");
+  await app.waitUntil(() => app.shows("id:composer-settings-popover"));
+  await app.keyboard.press("escape");
+  await app.waitUntil(() => !app.shows("id:composer-settings-popover"));
+  // Escape closed the popover, not the composer.
+  expect(app.shows("id:composer-settings")).toBe(true);
+});
+
+test("disables the image send button for an empty prompt", async () => {
   const app = await openTallApp();
   await app.waitUntil(() => percentOf(app) > 0);
 
@@ -238,6 +326,7 @@ test("shows why an empty-prompt run failed", async () => {
   await app.waitUntil(() => app.shows("id:composer-run"));
 
   await app.clear("id:composer-prompt");
-  await app.press("id:composer-run");
-  await app.waitUntil(() => app.texts().includes("Prompt cannot be empty"));
+  await app.waitUntil(() => !app.enabled("id:composer-run"));
+  await app.type("id:composer-prompt", "A quiet lake");
+  await app.waitUntil(() => app.enabled("id:composer-run"));
 });

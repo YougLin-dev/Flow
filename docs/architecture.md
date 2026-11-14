@@ -148,11 +148,13 @@ result batches and the assets.
   and centred on it; the placement follows the card and never flips or
   clamps to stay inside the viewport. A text node's sheet is chat-style: an
   add-image button and the node's image inputs on top, the prompt with its
-  character counter below, then the model and a round send button; its
-  generated text appears on the card, never in the sheet. The image node's
-  panel keeps its input groups, which follow the node kind's input ports and
-  show the edge slots in use. Both are built from the same controls as the
-  rest of the app. A double-click edits a text card in place: a borderless
+  character counter below, then the model select (DeepSeek V4.1 Flash, the
+  design's default, or the mock) and a round send button; its generated text
+  appears on the card, never in the sheet. The image node's
+  sheet is the same: its image inputs on top, the prompt below, and a model
+  select, an aspect/resolution panel, a count select and a round send button
+  in the bottom row; its images appear on the card. Both are built from the same controls
+  as the rest of the app. A double-click edits a text card in place: a borderless
   input takes the body's own inset, size, type and line height, laid out at
   world type and scaled around the body's screen origin, so its font,
   wrapping and box match the card's text exactly at every zoom. Image cards

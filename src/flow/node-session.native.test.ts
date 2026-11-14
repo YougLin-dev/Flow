@@ -14,7 +14,10 @@ test("runs the mock image provider and stores an immutable batch", async () => {
   await until(() => session.detail() !== null);
   const detail = session.detail();
   if (!detail) throw new Error("the composer did not open");
-  const settings = parseSettings(detail.node.kind, detail.node.settingsJson);
+  const parsed = parseSettings(detail.node.kind, detail.node.settingsJson);
+  if (parsed.version !== 1 || !("aspect" in parsed)) throw new Error("the image settings");
+  // 2K asks for the longer side at 2048; the mock sizes its images by it.
+  const settings = { ...parsed, resolution: "2K" as const };
   await session.run(settings);
 
   const after = await document.nodeDetail(IMAGE_NODE_ID);
@@ -23,6 +26,15 @@ test("runs the mock image provider and stores an immutable batch", async () => {
   expect(after?.batch?.items.length).toBe(2);
   expect(after?.batch?.items.every((item) => item.kind === "image")).toBe(true);
   expect(after?.batch?.items[0]?.asset?.mime).toBe("image/svg+xml");
+  const meta = JSON.parse(after?.batch?.items[0]?.metaJson ?? "{}") as {
+    width?: number;
+    height?: number;
+    resolution?: string;
+  };
+  expect(meta.width).toBe(2048);
+  expect(meta.height).toBe(1152);
+  expect(meta.resolution).toBe("2K");
+  expect(after?.batch?.paramsJson).toContain('"resolution":"2K"');
   const assetIds = new Set<string>();
   for (const item of after?.batch?.items ?? []) {
     if (item.assetId) assetIds.add(item.assetId);
@@ -72,7 +84,7 @@ test("a text run replaces the body and marks a downstream node stale", async () 
 
   const afterText = await document.nodeDetail(TEXT_NODE_ID);
   expect(afterText?.node.status).toBe("done");
-  expect(afterText?.batch?.items[0]?.text).toContain("[Mock Text]");
+  expect(afterText?.batch?.items[0]?.text).toContain("[DeepSeek V4.1 Flash]");
 
   const afterImage = await document.nodeDetail(IMAGE_NODE_ID);
   expect(afterImage?.node.status).toBe("stale");

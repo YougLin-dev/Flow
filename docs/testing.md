@@ -382,8 +382,9 @@ easiest observable: it is `—` before the first fit and `<n>%` afterwards.
 - `pages/FlowPage.tsx`: through `App.test.tsx` for interaction flows, not
   through unit tests of its closures. Composer selection, runs, input removal,
   body edits and switching nodes are app tests.
-- `components/NodeComposer.tsx`: through `App.test.tsx`, where its controls
-  must re-read session signals inside JSX (components run once).
+- `components/NodeComposer.tsx` and `components/TextComposer.tsx`: through
+  `App.test.tsx` and `App.composer.test.tsx`, where their controls must
+  re-read session signals inside JSX (components run once).
 - `components/SearchPalette.tsx`: through `App.test.tsx` — opening by shortcut
   and button, typing, switching filters, choosing a result by click or Enter,
   Escape and the selection that follows a hit. Kind filtering itself is

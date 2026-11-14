@@ -177,8 +177,9 @@ letting the stale draft write back.
 
 M1 providers are deterministic mocks:
 
-- **Mock Text** waits, then returns `[Mock Text] <prompt>` plus the ordered
-  text contexts and a count of reference images.
+- **Mock Text** waits, then returns the selected text model's name in brackets
+  and the prompt, plus the ordered text contexts and a count of reference
+  images.
 - **Mock Image** waits, then returns 1–4 generated SVGs at the configured
   aspect ratio. Its prompt is required.
 
@@ -237,10 +238,17 @@ flips above or beside the card, and it may extend past the viewport. A text
 node gets the chat-style sheet (`components/TextComposer.tsx`): its image
 inputs from upstream cards or local uploads sit in the attach row with an
 add-image button, the prompt and its 10,000-character counter take the middle,
-and the model and round send button close the sheet; the generated text is
-shown only on the card. The image node keeps `components/NodeComposer.tsx`,
-whose input groups follow the node kind's input ports and show the edge slots
-in use. Its draft lives in `flow/composer-state.ts` (the signal-backed
+and the model select (DeepSeek V4.1 Flash, the design's default, or the mock)
+and round send button close the sheet; the generated text is shown only on the
+card. The image node's sheet
+(`components/NodeComposer.tsx`) is the same shape: its image inputs sit in the
+attach row with an add-image button (both composers share
+`components/ComposerInputTile.tsx` and `components/ComposerModelSelect.tsx`),
+and its bottom row carries the model as a
+select (Qwen Image 3.0 Pro, the design's default, or the mock), a settings
+panel for the aspect and resolution (1K or 2K, the long side of the generated
+image), the image count as a select and the round send button; the images land
+on the card. Its draft lives in `flow/composer-state.ts` (the signal-backed
 settings), written when the composer closes or the selection changes, and the
 settings are also written before a run. All controls are ordinary NSH
 controls, so they carry names, focus, keyboard operation and screen-reader

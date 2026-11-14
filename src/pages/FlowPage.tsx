@@ -498,7 +498,6 @@ export function FlowPage() {
                     }}
                     onCancel={() => currentSession()?.cancel()}
                     onRemoveInput={(id) => void currentSession()?.removeInput(id)}
-                    onReorderInputs={(ids) => void currentSession()?.reorderInputs(ids)}
                     onUpload={() => void currentSession()?.upload()}
                   />
                 }
@@ -527,9 +526,10 @@ export function FlowPage() {
       </If>
 
       {/* The controls and the map share the bottom-left corner. They stay
-          above a card's composer (z-20) and inline editor (z-30), while
-          search, the context menu and the map's drag overlay stay above. */}
-      <View class="absolute left-4 bottom-4 z-40 flex-row items-end gap-2">
+          above an inline editor (z-30) and the canvas, while a card's
+          composer (z-40) covers them where its sheet reaches them; search,
+          the context menu and the map's drag overlay stay above all. */}
+      <View class="absolute left-4 bottom-4 z-30 flex-row items-end gap-2">
         <ZoomControls
           onZoomIn={() => setZoom(1.2)}
           onZoomOut={() => setZoom(1 / 1.2)}

@@ -37,9 +37,62 @@ export function isRunnableKind(kind: string): kind is "text" | "image" {
   return kind === "text" || kind === "image";
 }
 
-export type ImageAspect = "1:1" | "16:9" | "9:16";
+export type ImageAspect = "1:1" | "16:9" | "9:16" | "4:3" | "3:4" | "3:2" | "2:3";
 
-export const IMAGE_ASPECTS: readonly ImageAspect[] = ["1:1", "16:9", "9:16"];
+export const IMAGE_ASPECTS: readonly ImageAspect[] = [
+  "1:1",
+  "16:9",
+  "9:16",
+  "4:3",
+  "3:4",
+  "3:2",
+  "2:3",
+];
+
+/** The generated image's long side: 1K is 1024 points, 2K 2048. */
+export type ImageResolution = "1K" | "2K";
+
+export const IMAGE_RESOLUTIONS: readonly ImageResolution[] = ["1K", "2K"];
+
+/** The models a text node offers; the mock provider stands in for either. */
+export const TEXT_MODELS = [
+  { id: "deepseek-v4.1-flash", label: "DeepSeek V4.1 Flash" },
+  { id: "mock-text", label: "Mock Text" },
+] as const;
+
+export type TextModelId = (typeof TEXT_MODELS)[number]["id"];
+
+/** The default model a new text node asks for. */
+export const DEFAULT_TEXT_MODEL: TextModelId = "deepseek-v4.1-flash";
+
+/** The model's name for the composer and result cards. */
+export function textModelLabel(id: TextModelId): string {
+  return TEXT_MODELS.find((model) => model.id === id)?.label ?? "Mock Text";
+}
+
+export function isTextModel(value: unknown): value is TextModelId {
+  return typeof value === "string" && TEXT_MODELS.some((model) => model.id === value);
+}
+
+/** The models an image node offers; the mock provider stands in for either. */
+export const IMAGE_MODELS = [
+  { id: "qwen-image-3.0-pro", label: "Qwen Image 3.0 Pro" },
+  { id: "mock-image", label: "Mock Image" },
+] as const;
+
+export type ImageModelId = (typeof IMAGE_MODELS)[number]["id"];
+
+/** The default model a new image node asks for. */
+export const DEFAULT_IMAGE_MODEL: ImageModelId = "qwen-image-3.0-pro";
+
+/** The model's name for the composer and result cards. */
+export function imageModelLabel(id: ImageModelId): string {
+  return IMAGE_MODELS.find((model) => model.id === id)?.label ?? "Mock Image";
+}
+
+export function isImageModel(value: unknown): value is ImageModelId {
+  return typeof value === "string" && IMAGE_MODELS.some((model) => model.id === value);
+}
 
 /** One input parameter of a node kind. */
 export interface InputPort {
@@ -60,14 +113,15 @@ export interface OutputPort {
 export interface TextSettings {
   version: 1;
   prompt: string;
-  model: "mock-text";
+  model: TextModelId;
 }
 
 export interface ImageSettings {
   version: 1;
   prompt: string;
-  model: "mock-image";
+  model: ImageModelId;
   aspect: ImageAspect;
+  resolution: ImageResolution;
   count: number;
 }
 
@@ -222,15 +276,16 @@ export function defaultSettings(kind: string): NodeSettings {
     return {
       version: 1,
       prompt: "",
-      model: "mock-image",
+      model: DEFAULT_IMAGE_MODEL,
       aspect: "1:1",
+      resolution: "1K",
       count: 1,
     };
   }
   if (kind === "upload") {
     return { version: 1, media: [] };
   }
-  return { version: 1, prompt: "", model: "mock-text" };
+  return { version: 1, prompt: "", model: DEFAULT_TEXT_MODEL };
 }
 
 /** Parses a node's opaque settings, filling missing or invalid values. */
@@ -249,12 +304,17 @@ export function parseSettings(kind: string, json: string): NodeSettings {
     return {
       version: 1,
       prompt,
-      model: "mock-image",
+      model: isImageModel(record.model) ? record.model : DEFAULT_IMAGE_MODEL,
       aspect: isAspect(record.aspect) ? record.aspect : "1:1",
+      resolution: isResolution(record.resolution) ? record.resolution : "1K",
       count: clampCount(record.count),
     };
   }
-  return { version: 1, prompt, model: "mock-text" };
+  return {
+    version: 1,
+    prompt,
+    model: isTextModel(record.model) ? record.model : DEFAULT_TEXT_MODEL,
+  };
 }
 
 function parseUploadSettings(json: string): UploadSettings {
@@ -274,11 +334,6 @@ function parseUploadSettings(json: string): UploadSettings {
 
 export function serializeSettings(settings: NodeSettings): string {
   return JSON.stringify(settings);
-}
-
-export function modelLabel(kind: string): string {
-  if (kind === "upload") return "Local file";
-  return kind === "image" ? "Mock Image" : "Mock Text";
 }
 
 export function statusLabel(status: string): string {
@@ -306,6 +361,10 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 function isAspect(value: unknown): value is ImageAspect {
   return typeof value === "string" && (IMAGE_ASPECTS as readonly string[]).includes(value);
+}
+
+function isResolution(value: unknown): value is ImageResolution {
+  return typeof value === "string" && (IMAGE_RESOLUTIONS as readonly string[]).includes(value);
 }
 
 function clampCount(value: unknown): number {

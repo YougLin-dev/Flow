@@ -5,21 +5,21 @@
  * provider, whose text lands on the card itself. The sheet never shows the
  * output, so the card stays the one place the generated text lives.
  */
-import { computed, Image as NshImage, Text, token, View } from "nsh";
+import { computed, Text, token, View } from "nsh";
 import { Button, Input } from "nsh/base";
-import { ArrowUp, ChevronDown, Image as ImageIcon, ImagePlus, Square, X } from "lucide";
-import type { InputItemSummary, NodeDetail } from "@flow/native";
+import { ArrowUp, ImagePlus, Square, X } from "lucide";
+import type { NodeDetail } from "@flow/native";
 import { errorOf, inputUrl } from "../flow/composer-detail";
 import type { ComposerState } from "../flow/composer-state";
+import { isTextModel, TEXT_MODELS, textModelLabel } from "../flow/node-kinds";
 import { keepsWheel } from "../flow/page-chrome";
+import { ComposerInputTile, TILE_SIZE } from "./ComposerInputTile";
+import { ComposerModelSelect } from "./ComposerModelSelect";
 import { Icon } from "./Icon";
 
 /** The prompt's limit, shown beside the field as a live counter. */
 const PROMPT_LIMIT = 10000;
-/** The model the mock text provider stands in for. */
-const MODEL_LABEL = "DeepSeek V4.1 Flash";
-/** The attach row's tile size and the round send button's, in points. */
-const ATTACH_SIZE = 44;
+/** The round send button's size in points. */
 const SEND_SIZE = 40;
 
 export interface TextComposerProps {
@@ -50,7 +50,7 @@ export function TextComposer(props: TextComposerProps) {
   return (
     <View
       testID="node-composer"
-      class="absolute z-20 gap-2 rounded-2xl border border-border bg-card p-4 shadow-lg"
+      class="absolute z-40 gap-2 rounded-2xl border border-border bg-card p-4 shadow-lg"
       style={{ left: props.left, top: props.top, width: props.width }}
     >
       <View class="flex-row items-start justify-between gap-2">
@@ -60,13 +60,13 @@ export function TextComposer(props: TextComposerProps) {
             accessibilityLabel="Add an image"
             onPress={props.onUpload}
             class="items-center justify-center rounded-(--radius) bg-secondary hover:bg-accent active:bg-muted focus:bg-accent"
-            style={{ width: ATTACH_SIZE, height: ATTACH_SIZE }}
+            style={{ width: TILE_SIZE, height: TILE_SIZE }}
           >
             <Icon icon={ImagePlus} size={18} tint={() => token("secondary-foreground")} />
           </Button>
           <Each of={images()} key={(input) => input.id}>
             {(input) => (
-              <InputTile
+              <ComposerInputTile
                 input={input}
                 url={() => inputUrl(input(), props.assetUrls())}
                 onRemove={props.onRemoveInput}
@@ -107,8 +107,15 @@ export function TextComposer(props: TextComposerProps) {
 
       <View class="flex-row items-center justify-between gap-2">
         <View class="flex-row items-center gap-1 px-1">
-          <Text class="text-sm text-card-foreground">{MODEL_LABEL}</Text>
-          <Icon icon={ChevronDown} size={14} tint={() => token("muted-foreground")} />
+          <ComposerModelSelect
+            accessibilityLabel="Text model"
+            value={props.state.textModel()}
+            label={textModelLabel(props.state.textModel())}
+            models={TEXT_MODELS}
+            onChange={(id) => {
+              if (isTextModel(id)) props.state.setTextModel(id);
+            }}
+          />
         </View>
         {props.running() ? (
           <Button
@@ -133,46 +140,6 @@ export function TextComposer(props: TextComposerProps) {
           </Button>
         )}
       </View>
-    </View>
-  );
-}
-
-interface InputTileProps {
-  /** The row's item accessor: a tile follows edits and reorders. */
-  readonly input: () => InputItemSummary;
-  readonly url: () => string | null;
-  readonly onRemove: (id: string) => void;
-}
-
-/** One attached image: its thumbnail with a remove control in the corner. */
-function InputTile(props: InputTileProps) {
-  return (
-    <View
-      testID={`composer-input-${props.input().id}`}
-      class="overflow-hidden rounded-(--radius) border border-border bg-muted"
-      style={{ position: "relative", width: ATTACH_SIZE, height: ATTACH_SIZE }}
-    >
-      <If when={props.url()}>
-        {(url) => (
-          <NshImage
-            src={url()}
-            style={{ width: ATTACH_SIZE, height: ATTACH_SIZE, objectFit: "cover" }}
-          />
-        )}
-      </If>
-      <If when={props.url() === null}>
-        <View class="h-full w-full items-center justify-center">
-          <Icon icon={ImageIcon} size={16} tint={() => token("muted-foreground")} />
-        </View>
-      </If>
-      <Button
-        accessibilityLabel="Remove image input"
-        onPress={() => props.onRemove(props.input().id)}
-        class="absolute right-0 top-0 items-center justify-center rounded-full bg-background active:bg-muted"
-        style={{ width: 18, height: 18 }}
-      >
-        <Icon icon={X} size={10} tint={() => token("muted-foreground")} />
-      </Button>
     </View>
   );
 }

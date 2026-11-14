@@ -47,7 +47,8 @@ test("adds an image node from the toolbar", async () => {
 
   await app.press("id:add-image-node");
   await app.waitUntil(() => selectedOf(app) === 1);
-  await app.waitUntil(() => app.texts().includes("Model · Mock Image"));
+  await app.waitUntil(() => app.shows("id:composer-model"));
+  expect(app.texts()).toContain("Qwen Image 3.0 Pro");
   expect(selectedOf(app)).toBe(1);
 });
 
@@ -208,7 +209,8 @@ test("adds an image node from the canvas menu", async () => {
   await app.waitUntil(() => app.shows("id:canvas-menu"));
   await app.press("id:context-add-image");
 
-  await app.waitUntil(() => app.texts().includes("Model · Mock Image"));
+  await app.waitUntil(() => app.shows("id:composer-model"));
+  expect(app.texts()).toContain("Qwen Image 3.0 Pro");
 });
 
 test("adds an upload node from the canvas menu", async () => {
@@ -321,9 +323,9 @@ test("deletes a connection from its menu", async () => {
   await app.press("id:context-delete-edge");
   await app.waitUntil(() => !app.shows("id:canvas-menu"));
 
-  // Both cards remain, but the image card's prompt input lost its source.
+  // Both cards remain, and the image card still opens its composer.
   await selectSeed(app, "Image", "id:search-result-seed-image");
-  await app.waitUntil(() => app.texts().includes("Inputs · 0"));
+  await app.waitUntil(() => (app.value("id:composer-prompt") ?? "").includes("mountain lake"));
 });
 
 test("copies a node with its unsaved prompt", async () => {

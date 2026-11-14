@@ -46,7 +46,9 @@ test("loads the draft from the node detail", () => {
   state.sync(detail("image", "image", IMAGE_JSON));
 
   expect(state.prompt()).toBe("mountain lake");
+  expect(state.imageModel()).toBe("mock-image");
   expect(state.aspect()).toBe("16:9");
+  expect(state.resolution()).toBe("1K");
   expect(state.count()).toBe(2);
 });
 
@@ -103,7 +105,7 @@ test("resets when the composer closes", () => {
   expect(state.prompt()).toBe("");
 });
 
-test("clamps the image count and changes the aspect", () => {
+test("clamps the image count and changes the aspect and resolution", () => {
   const state = new ComposerState();
   state.sync(detail("image", "image", IMAGE_JSON));
 
@@ -115,20 +117,50 @@ test("clamps the image count and changes the aspect", () => {
   expect(state.count()).toBe(4);
   state.setCount(-10);
   expect(state.count()).toBe(1);
+  state.setCountTo(3);
+  expect(state.count()).toBe(3);
+  state.setCountTo(0);
+  expect(state.count()).toBe(1);
 
   state.setAspect("9:16");
   expect(state.aspect()).toBe("9:16");
+  state.setResolution("2K");
+  expect(state.resolution()).toBe("2K");
+  state.setImageModel("qwen-image-3.0-pro");
+  expect(state.imageModel()).toBe("qwen-image-3.0-pro");
 });
 
-test("text nodes keep the default aspect and count", () => {
+test("keeps each kind's model apart", () => {
+  const state = new ComposerState();
+  state.sync(detail("text", "text", TEXT_JSON));
+  expect(state.textModel()).toBe("mock-text");
+  state.setTextModel("deepseek-v4.1-flash");
+  expect(state.textModel()).toBe("deepseek-v4.1-flash");
+  // A text node's model belongs to its own kind.
+  expect(state.imageModel()).toBe("qwen-image-3.0-pro");
+  state.setImageModel("mock-image");
+  expect(state.imageModel()).toBe("qwen-image-3.0-pro");
+
+  state.sync(detail("image", "image", IMAGE_JSON));
+  expect(state.imageModel()).toBe("mock-image");
+  state.setImageModel("qwen-image-3.0-pro");
+  expect(state.imageModel()).toBe("qwen-image-3.0-pro");
+  state.setTextModel("mock-text");
+  expect(state.textModel()).toBe("deepseek-v4.1-flash");
+});
+
+test("text nodes keep the default aspect, resolution and count", () => {
   const state = new ComposerState();
   state.sync(detail("text", "text", TEXT_JSON));
 
   expect(state.aspect()).toBe("1:1");
+  expect(state.resolution()).toBe("1K");
   expect(state.count()).toBe(1);
   state.setAspect("16:9");
+  state.setResolution("2K");
   state.setCount(1);
   expect(state.aspect()).toBe("1:1");
+  expect(state.resolution()).toBe("1K");
   expect(state.count()).toBe(1);
 });
 
@@ -139,6 +171,7 @@ test("saves the settings draft", () => {
   state.sync(current);
   state.setPrompt("A quiet lake");
   state.setAspect("9:16");
+  state.setResolution("2K");
   state.setCount(1);
 
   state.save(saver(writes), current);
@@ -150,6 +183,7 @@ test("saves the settings draft", () => {
         prompt: "A quiet lake",
         model: "mock-image",
         aspect: "9:16",
+        resolution: "2K",
         count: 3,
       },
     },

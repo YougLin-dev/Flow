@@ -1,29 +1,36 @@
 /**
- * The image node's composer sheet: the native panel attached to a card. The
- * text node's chat-style sheet lives in `TextComposer.tsx`.
+ * The image node's composer: a chat-style prompt sheet attached under the
+ * selected card, like the text node's. Its attachments are the node's image
+ * inputs; the prompt and the image settings (model, aspect, resolution and
+ * count) sit in the sheet's bottom row. Sending runs the mock image provider,
+ * whose images land on the card itself.
  */
-import { computed, Image as NshImage, Text, token, View } from "nsh";
-import { Button, Input } from "nsh/base";
-import type {
-  InputItemSummary,
-  NodeDetail,
-  NodeSummary,
-  PortIncoming,
-  ResultItemSummary,
-} from "@flow/native";
-import type { ComposerState } from "../flow/composer-state";
+import { computed, signal, Text, token, View } from "nsh";
+import { Button, Input, Popover, Select } from "nsh/base";
+import { ArrowUp, ChevronDown, ImagePlus, Square, X } from "lucide";
+import type { NodeDetail } from "@flow/native";
 import { errorOf, inputUrl } from "../flow/composer-detail";
+import type { ComposerState } from "../flow/composer-state";
 import {
   IMAGE_ASPECTS,
+  IMAGE_MODELS,
+  IMAGE_RESOLUTIONS,
   type ImageAspect,
-  type InputPort,
-  modelLabel,
-  portsOfNode,
-  statusLabel,
+  imageModelLabel,
+  isImageModel,
+  type ImageResolution,
 } from "../flow/node-kinds";
 import { keepsWheel } from "../flow/page-chrome";
-import { type PortVisual, portVisual } from "../flow/port-visuals";
+import { ComposerInputTile, TILE_SIZE } from "./ComposerInputTile";
+import { ComposerModelSelect } from "./ComposerModelSelect";
 import { Icon } from "./Icon";
+
+/** The prompt's limit, as the text composer's. */
+const PROMPT_LIMIT = 4000;
+/** How many images one run may ask for, as the provider supports. */
+const IMAGE_COUNTS: readonly number[] = [1, 2, 3, 4];
+/** The round send button's size, and the close button's glyph, in points. */
+const SEND_SIZE = 40;
 
 export interface NodeComposerProps {
   readonly detail: NodeDetail;
@@ -37,202 +44,194 @@ export interface NodeComposerProps {
   readonly onRun: () => void;
   readonly onCancel: () => void;
   readonly onRemoveInput: (id: string) => void;
-  readonly onReorderInputs: (ids: string[]) => void;
   readonly onUpload: () => void;
 }
 
-const sectionClass = "gap-1.5";
-const labelClass = "text-[11px] font-medium text-muted-foreground";
-
-/** The image node's native composer: inputs, prompt, model and run. */
+/** The prompt sheet of an image node, with its image inputs and send button. */
 export function NodeComposer(props: NodeComposerProps) {
-  // A detail reload replaces the record, not necessarily the content. These
-  // derived accessors keep same-kind reloads from remounting sections and
-  // lists: rows reconcile by key.
-  const isImage = (): boolean => props.detail.node.kind === "image";
-  const imageItems = computed(
-    () => props.detail.batch?.items.filter((item) => item.kind === "image") ?? [],
-  );
-  const groupRows = computed(() =>
-    inputGroups(props.detail.inputs, props.detail.node, props.detail.incoming),
-  );
+  // Inputs arrive with the detail reloads; a run appends result items only.
+  const images = computed(() => props.detail.inputs.filter((input) => input.kind === "image"));
+  const settingsOpen = signal(false);
+  const prompt = (): string => props.state.prompt();
+  // The mock provider rejects an empty prompt, so an empty field disables the
+  // send button rather than recording a failure the user just saw.
+  const sendable = (): boolean => prompt().trim() !== "";
+  const settingsLabel = (): string => `${props.state.aspect()} / ${props.state.resolution()}`;
+
+  const chooseAspect = (aspect: ImageAspect): void => {
+    props.state.setAspect(aspect);
+    settingsOpen.set(false);
+  };
+
+  const chooseResolution = (resolution: ImageResolution): void => {
+    props.state.setResolution(resolution);
+    settingsOpen.set(false);
+  };
 
   return (
     <View
       testID="node-composer"
-      class="absolute z-20 gap-3 rounded-(--radius) border border-border bg-popover p-3 shadow-lg"
+      class="absolute z-40 gap-2 rounded-2xl border border-border bg-card p-4 shadow-lg"
       style={{ left: props.left, top: props.top, width: props.width }}
     >
-      <View class="flex-row items-center justify-between">
-        <View class="gap-0.5">
-          <Text class="text-sm font-semibold text-popover-foreground">
-            {props.detail.node.title}
-          </Text>
-          <Text class="text-[11px] text-muted-foreground">
-            {modelLabel(props.detail.node.kind)}
-            {statusLabel(props.detail.node.status) === ""
-              ? ""
-              : ` · ${statusLabel(props.detail.node.status)}`}
-          </Text>
-        </View>
-        <Button
-          accessibilityLabel="Close composer"
-          onPress={props.onClose}
-          class="rounded-md px-2 py-1 active:bg-muted focus:bg-accent"
-        >
-          <Text class="text-sm text-muted-foreground">×</Text>
-        </Button>
-      </View>
-
-      {errorOf(props.detail) === "" ? null : (
-        <View class="rounded-md bg-muted px-2 py-1.5">
-          <Text class="text-xs text-destructive">{errorOf(props.detail)}</Text>
-        </View>
-      )}
-
-      <View class={sectionClass}>
-        <Text class={labelClass}>Inputs · {props.detail.inputs.length}</Text>
-        <If when={props.detail.inputs.length === 0}>
-          <Text class="text-xs text-muted-foreground">
-            Connect an upstream node or upload an image.
-          </Text>
-        </If>
-        <View class="gap-1">
-          <Each of={groupRows()} key={(group) => group.id}>
-            {(group) => (
-              <View class="gap-1">
-                <View class="flex-row items-center gap-1">
-                  <If when={group().visual}>
-                    {(visual) => (
-                      <Icon
-                        icon={visual().icon}
-                        size={12}
-                        strokeWidth={2.2}
-                        tint={() => token(visual().token)}
-                      />
-                    )}
-                  </If>
-                  <Text class="text-[10px] font-medium text-muted-foreground">{group().title}</Text>
-                  <Text class="text-[10px] text-muted-foreground">{group().detail}</Text>
-                </View>
-                <View>
-                  <Each of={group().entries} key={(entry) => entry.input.id}>
-                    {(entry) => (
-                      <InputChip
-                        input={() => entry().input}
-                        index={() => entry().index}
-                        count={() => entry().count}
-                        assetUrls={props.assetUrls}
-                        onRemove={props.onRemoveInput}
-                        onMove={(id, delta) => moveInput(props, id, delta)}
-                      />
-                    )}
-                  </Each>
-                </View>
-              </View>
+      <View class="flex-row items-start justify-between gap-2">
+        <View class="flex-1 flex-row flex-wrap items-center gap-2">
+          <Button
+            testID="composer-image-button"
+            accessibilityLabel="Add an image"
+            onPress={props.onUpload}
+            class="items-center justify-center rounded-(--radius) bg-secondary hover:bg-accent active:bg-muted focus:bg-accent"
+            style={{ width: TILE_SIZE, height: TILE_SIZE }}
+          >
+            <Icon icon={ImagePlus} size={18} tint={() => token("secondary-foreground")} />
+          </Button>
+          <Each of={images()} key={(input) => input.id}>
+            {(input) => (
+              <ComposerInputTile
+                input={input}
+                url={() => inputUrl(input(), props.assetUrls())}
+                onRemove={props.onRemoveInput}
+              />
             )}
           </Each>
         </View>
+        <Button
+          testID="composer-close"
+          accessibilityLabel="Close composer"
+          onPress={props.onClose}
+          class="items-center justify-center rounded-full p-1.5 hover:bg-accent active:bg-muted"
+        >
+          <Icon icon={X} size={16} tint={() => token("muted-foreground")} />
+        </Button>
       </View>
 
-      <View class={sectionClass}>
-        <Text class={labelClass}>Prompt</Text>
-        <Input
-          testID="composer-prompt"
-          accessibilityLabel="Prompt"
-          value={props.state.prompt()}
-          onChange={(event) => props.state.setPrompt(event.value)}
-          placeholder="Describe what this node should make…"
-          multiline
-          maxLength={4000}
-          submitBehavior="newline"
-          onWheel={keepsWheel}
-          class="min-h-16 rounded-md border border-input bg-card px-2 py-1.5 text-sm text-card-foreground placeholder:text-muted-foreground"
-        />
-      </View>
+      <Input
+        testID="composer-prompt"
+        accessibilityLabel="Prompt"
+        value={prompt()}
+        onChange={(event) => props.state.setPrompt(event.value)}
+        placeholder="描述你想生成的画面..."
+        multiline
+        maxLength={PROMPT_LIMIT}
+        submitBehavior="newline"
+        onWheel={keepsWheel}
+        class="min-h-24 rounded-md px-1 py-1 text-sm text-card-foreground placeholder:text-muted-foreground"
+      />
+
+      {errorOf(props.detail) === "" ? null : (
+        <Text class="px-1 text-xs text-destructive">{errorOf(props.detail)}</Text>
+      )}
 
       <View class="flex-row items-center justify-between gap-2">
-        <View testID="composer-model" class="flex-1 rounded-md border border-border px-2 py-1.5">
-          <Text class="text-xs text-card-foreground">
-            Model · {modelLabel(props.detail.node.kind)}
-          </Text>
-        </View>
-        <If when={isImage()}>
-          <Button
-            testID="composer-upload"
-            onPress={props.onUpload}
-            class="rounded-md border border-border px-2 py-1.5 active:bg-muted"
-          >
-            <Text class="text-xs text-card-foreground">Upload</Text>
-          </Button>
-        </If>
-      </View>
-
-      <If when={isImage()}>
-        <View class="flex-row items-center justify-between gap-2">
-          <View class="flex-row items-center gap-1">
-            {IMAGE_ASPECTS.map((aspect: ImageAspect) => (
+        <View class="flex-1 flex-row flex-wrap items-center gap-1 px-1">
+          <ComposerModelSelect
+            accessibilityLabel="Image model"
+            value={props.state.imageModel()}
+            label={imageModelLabel(props.state.imageModel())}
+            models={IMAGE_MODELS}
+            onChange={(id) => {
+              if (isImageModel(id)) props.state.setImageModel(id);
+            }}
+          />
+          {/* The core places it: above the chip, on the other side when only
+              that one fits, and it closes on an outside press or Escape. */}
+          <Popover
+            open={settingsOpen()}
+            onOpenChange={(event) => settingsOpen.set(event.open)}
+            placement="top"
+            align="start"
+            offset={8}
+            popupClass="rounded-xl border border-border bg-popover p-3 shadow-lg"
+            popupStyle={{ width: Math.min(320, props.width - 16) }}
+            trigger={
               <Button
-                testID={`composer-aspect-${aspect}`}
-                selected={props.state.aspect() === aspect}
-                onPress={() => props.state.setAspect(aspect)}
-                class="rounded-md border border-border px-2 py-1 active:bg-muted selected:bg-muted"
+                testID="composer-settings"
+                accessibilityLabel="Image settings"
+                class="flex-row items-center gap-0.5 rounded-md border border-border px-1.5 py-1 text-xs text-card-foreground hover:bg-accent active:bg-muted"
               >
-                <Text class="text-xs text-card-foreground">{aspect}</Text>
+                <Text class="text-xs">{settingsLabel()}</Text>
+                <Icon icon={ChevronDown} size={12} tint={() => token("muted-foreground")} />
               </Button>
-            ))}
-          </View>
-          <View class="flex-row items-center gap-1">
-            <Button
-              accessibilityLabel="Fewer images"
-              onPress={() => props.state.setCount(-1)}
-              class="rounded-md border border-border px-2 py-1 active:bg-muted"
-            >
-              <Text class="text-xs text-card-foreground">−</Text>
-            </Button>
-            <Text class="min-w-6 text-center text-xs tabular-nums text-card-foreground">
-              {props.state.count()}
-            </Text>
-            <Button
-              accessibilityLabel="More images"
-              onPress={() => props.state.setCount(1)}
-              class="rounded-md border border-border px-2 py-1 active:bg-muted"
-            >
-              <Text class="text-xs text-card-foreground">+</Text>
-            </Button>
-          </View>
+            }
+          >
+            <View testID="composer-settings-popover" class="gap-3">
+              <View class="gap-1.5">
+                <Text class="text-[11px] font-medium text-muted-foreground">比例</Text>
+                <View class="flex-row gap-1">
+                  {IMAGE_ASPECTS.map((aspect: ImageAspect) => (
+                    <Button
+                      testID={`composer-aspect-${aspect}`}
+                      selected={props.state.aspect() === aspect}
+                      onPress={() => chooseAspect(aspect)}
+                      class="flex-1 items-center gap-1 rounded-md border border-border px-0.5 py-1.5 text-[9px] text-card-foreground active:bg-muted selected:border-muted-foreground selected:bg-muted"
+                    >
+                      <AspectGlyph aspect={aspect} />
+                      <Text class="text-[9px] text-card-foreground">{aspect}</Text>
+                    </Button>
+                  ))}
+                </View>
+              </View>
+              <View class="gap-1.5">
+                <Text class="text-[11px] font-medium text-muted-foreground">清晰度</Text>
+                <View class="flex-row gap-1">
+                  {IMAGE_RESOLUTIONS.map((resolution: ImageResolution) => (
+                    <Button
+                      testID={`composer-resolution-${resolution.toLowerCase()}`}
+                      selected={props.state.resolution() === resolution}
+                      onPress={() => chooseResolution(resolution)}
+                      class="flex-1 items-center rounded-md border border-border px-2 py-1 active:bg-muted selected:border-muted-foreground selected:bg-muted"
+                    >
+                      <Text class="text-xs text-card-foreground">{resolution}</Text>
+                    </Button>
+                  ))}
+                </View>
+              </View>
+            </View>
+          </Popover>
+          <Select
+            accessibilityLabel="Image count"
+            value={String(props.state.count())}
+            items={IMAGE_COUNTS.map((count) => ({ value: String(count), title: `×${count}` }))}
+            onChange={(event) => {
+              if (event.value !== null) props.state.setCountTo(Number(event.value));
+            }}
+            placement="top"
+            align="start"
+            offset={8}
+            popupClass="rounded-xl border border-border bg-popover p-1 shadow-lg"
+            itemClass="rounded-md px-2 py-1 text-xs text-popover-foreground focus:bg-accent selected:bg-muted"
+            trigger={
+              <Button
+                testID="composer-count"
+                accessibilityLabel="Image count"
+                class="flex-row items-center gap-0.5 rounded-md border border-border px-1.5 py-1 text-xs text-card-foreground hover:bg-accent active:bg-muted"
+              >
+                <Text class="text-xs">×{props.state.count()}</Text>
+                <Icon icon={ChevronDown} size={12} tint={() => token("muted-foreground")} />
+              </Button>
+            }
+          />
         </View>
-      </If>
-
-      <If when={imageItems().length > 0}>
-        <View class={sectionClass}>
-          <Text class={labelClass}>Latest images</Text>
-          <View class="flex-row flex-wrap gap-1">
-            <Each of={imageItems().slice(0, 4)} key={(item) => item.id}>
-              {(item) => <ResultThumb item={item} assetUrls={props.assetUrls} />}
-            </Each>
-          </View>
-        </View>
-      </If>
-
-      <View class="flex-row items-center justify-end gap-2">
         {props.running() ? (
           <Button
             testID="composer-cancel"
+            accessibilityLabel="Cancel run"
             onPress={props.onCancel}
-            class="rounded-md border border-border px-3 py-1.5 active:bg-muted"
+            class="items-center justify-center rounded-full bg-secondary hover:bg-accent active:bg-muted"
+            style={{ width: SEND_SIZE, height: SEND_SIZE }}
           >
-            <Text class="text-sm text-card-foreground">Cancel</Text>
+            <Icon icon={Square} size={13} tint={() => token("secondary-foreground")} />
           </Button>
         ) : (
           <Button
             testID="composer-run"
+            accessibilityLabel="Send prompt"
+            disabled={!sendable()}
             onPress={props.onRun}
-            class="rounded-md bg-primary px-3 py-1.5 active:opacity-90"
+            class="items-center justify-center rounded-full bg-foreground hover:opacity-90 active:opacity-80 disabled:opacity-40"
+            style={{ width: SEND_SIZE, height: SEND_SIZE }}
           >
-            <Text class="text-sm font-medium text-primary-foreground">
-              {props.detail.batch ? "Regenerate" : "Run"}
-            </Text>
+            <Icon icon={ArrowUp} size={18} strokeWidth={2.4} tint={() => token("background")} />
           </Button>
         )}
       </View>
@@ -240,166 +239,16 @@ export function NodeComposer(props: NodeComposerProps) {
   );
 }
 
-function moveInput(props: NodeComposerProps, id: string, delta: number): void {
-  const inputs = props.detail.inputs;
-  const current = inputs.findIndex((input) => input.id === id);
-  if (current < 0) return;
-  const portId = inputs[current]?.portId;
-  // Reorder within the port only: the nearest input of the same port in the
-  // direction of travel takes this row's place.
-  let other = -1;
-  for (let index = current + delta; index >= 0 && index < inputs.length; index += delta) {
-    if (inputs[index]?.portId === portId) {
-      other = index;
-      break;
-    }
-  }
-  if (other < 0) return;
-  const ids = inputs.map((input) => input.id);
-  const moved = ids[current];
-  const displaced = ids[other];
-  if (!moved || !displaced) return;
-  ids[current] = displaced;
-  ids[other] = moved;
-  props.onReorderInputs(ids);
-}
-
-interface InputChipProps {
-  /** The row's item accessor: a retained row follows reorders and edits. */
-  readonly input: () => InputItemSummary;
-  readonly index: () => number;
-  readonly count: () => number;
-  readonly assetUrls: () => Readonly<Record<string, string>>;
-  readonly onRemove: (id: string) => void;
-  readonly onMove: (id: string, delta: number) => void;
-}
-
-function InputChip(props: InputChipProps) {
+/** The ratio's outline, as the design's aspect choices show it. */
+function AspectGlyph(props: { readonly aspect: ImageAspect }) {
+  const [width = 1, height = 1] = props.aspect.split(":").map(Number);
+  const long = 14;
+  const glyphWidth = width >= height ? long : Math.max(6, Math.round((long * width) / height));
+  const glyphHeight = height >= width ? long : Math.max(6, Math.round((long * height) / width));
   return (
-    <View class="flex-row items-center gap-2 rounded-md border border-border px-2 py-1">
-      <If when={inputUrl(props.input(), props.assetUrls())}>
-        {(url) => <NshImage src={url()} style={{ width: 28, height: 28, borderRadius: 4 }} />}
-      </If>
-      <View class="flex-1 gap-0.5">
-        <Text class="text-[10px] text-muted-foreground">{sourceLabel(props.input())}</Text>
-        <Text class="text-xs text-card-foreground">{chipLabel(props.input())}</Text>
-      </View>
-      <Button
-        accessibilityLabel="Move input up"
-        onPress={() => props.onMove(props.input().id, -1)}
-        disabled={props.index() === 0}
-        class="rounded-md px-1.5 py-0.5 active:bg-muted disabled:opacity-30"
-      >
-        <Text class="text-xs text-muted-foreground">↑</Text>
-      </Button>
-      <Button
-        accessibilityLabel="Move input down"
-        onPress={() => props.onMove(props.input().id, 1)}
-        disabled={props.index() === props.count() - 1}
-        class="rounded-md px-1.5 py-0.5 active:bg-muted disabled:opacity-30"
-      >
-        <Text class="text-xs text-muted-foreground">↓</Text>
-      </Button>
-      <Button
-        accessibilityLabel="Remove input"
-        onPress={() => props.onRemove(props.input().id)}
-        class="rounded-md px-1.5 py-0.5 active:bg-muted"
-      >
-        <Text class="text-xs text-destructive">×</Text>
-      </Button>
-    </View>
+    <View
+      class="rounded-[2px] border border-muted-foreground"
+      style={{ width: glyphWidth, height: glyphHeight }}
+    />
   );
-}
-
-function ResultThumb(props: {
-  /** The row's item accessor: thumbnails reconcile by item id. */
-  readonly item: () => ResultItemSummary;
-  readonly assetUrls: () => Readonly<Record<string, string>>;
-}) {
-  return (
-    <If when={itemUrl(props.item(), props.assetUrls())}>
-      {(url) => <NshImage src={url()} style={{ width: 64, height: 64, borderRadius: 6 }} />}
-    </If>
-  );
-}
-
-interface InputEntry {
-  readonly input: InputItemSummary;
-  /** The row's index and count inside its own port's list. */
-  readonly index: number;
-  readonly count: number;
-}
-
-interface InputGroup {
-  /** Unique per port, so rows reconcile across a reload. */
-  readonly id: string;
-  readonly title: string;
-  /** The edge slots in use, such as "2 / 16". */
-  readonly detail: string;
-  readonly visual: PortVisual | null;
-  readonly entries: InputEntry[];
-}
-
-/** One group per input port that has items, in the schema's order. */
-function inputGroups(
-  inputs: readonly InputItemSummary[],
-  node: NodeSummary,
-  incoming: readonly PortIncoming[],
-): InputGroup[] {
-  const ports = portsOfNode(node).inputs;
-  const counts = new Map(incoming.map((entry) => [entry.portId, entry.edges]));
-  const groups: InputGroup[] = [];
-  for (const port of ports) {
-    const matches = inputs.filter((input) => input.portId === port.id);
-    // Capacity is counted in connectors, not rows: an edge from a source
-    // with no items still occupies a slot, so its port stays visible.
-    const edges = counts.get(port.id) ?? 0;
-    if (matches.length > 0 || edges > 0) groups.push(groupOf(port, matches, edges));
-  }
-  const known = new Set(ports.map((port) => port.id));
-  const other = inputs.filter((input) => !known.has(input.portId));
-  if (other.length > 0) {
-    groups.push({
-      id: "other",
-      title: "Other inputs",
-      detail: "",
-      visual: null,
-      entries: other.map((input, index) => ({ input, index, count: other.length })),
-    });
-  }
-  return groups;
-}
-
-/** One port's group, with the edge slots its connectors occupy. */
-function groupOf(port: InputPort, matches: readonly InputItemSummary[], edges: number): InputGroup {
-  return {
-    id: port.id,
-    title: port.name,
-    detail: `${edges} / ${port.capacity}`,
-    visual: portVisual(port.kind),
-    entries: matches.map((input, index) => ({ input, index, count: matches.length })),
-  };
-}
-
-function chipLabel(input: InputItemSummary): string {
-  if (input.kind === "image") {
-    return input.asset?.name ?? input.item?.asset?.name ?? "Image";
-  }
-  const text = (input.item?.text ?? input.text).replace(/\s+/g, " ").trim();
-  if (text === "") return "Empty text";
-  return text.length > 80 ? `${text.slice(0, 80)}…` : text;
-}
-
-/** A chip's provenance line: its type and the upstream card, if any. */
-function sourceLabel(input: InputItemSummary): string {
-  const kind = input.kind === "image" ? "Image" : "Text";
-  if (!input.edgeId) return input.kind === "image" ? "Uploaded image" : "Local text";
-  return `${kind} · from ${input.sourceTitle ?? "upstream"}`;
-}
-
-function itemUrl(
-  item: ResultItemSummary,
-  assetUrls: Readonly<Record<string, string>>,
-): string | null {
-  return item.assetId ? (assetUrls[item.assetId] ?? null) : null;
 }

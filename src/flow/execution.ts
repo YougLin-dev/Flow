@@ -11,7 +11,14 @@ import type {
   ResultBatchInput,
   ResultItemInput,
 } from "@flow/native";
-import type { ImageSettings, NodeSettings, TextSettings } from "./node-kinds";
+import {
+  imageModelLabel,
+  type ImageResolution,
+  type ImageSettings,
+  type NodeSettings,
+  type TextSettings,
+  textModelLabel,
+} from "./node-kinds";
 
 export interface ProviderRequest {
   readonly nodeId: string;
@@ -91,7 +98,7 @@ const mockText: Provider = async (request) => {
     .map((input) => input.item?.text ?? input.text)
     .filter((text) => text.trim() !== "");
   const images = request.inputs.filter((input) => input.kind === "image").length;
-  const parts = [`[Mock Text] ${request.prompt}`];
+  const parts = [`[${textModelLabel(settings.model)}] ${request.prompt}`];
   if (contexts.length > 0) parts.push("", ...contexts);
   if (images > 0) {
     parts.push("", `Reference images: ${images}`);
@@ -107,7 +114,7 @@ const mockText: Provider = async (request) => {
 const mockImage: Provider = async (request) => {
   const settings = asImageSettings(request.settings);
   await wait(IMAGE_DELAY_MS, request.signal);
-  const dimensions = aspectDimensions(settings.aspect);
+  const dimensions = aspectDimensions(settings.aspect, settings.resolution);
   const items: ProviderItem[] = [];
   for (let index = 0; index < settings.count; index += 1) {
     const svg = mockSvg(request, settings, dimensions, index);
@@ -120,6 +127,7 @@ const mockImage: Provider = async (request) => {
         width: dimensions.width,
         height: dimensions.height,
         aspect: settings.aspect,
+        resolution: settings.resolution,
         index,
       }),
     });
@@ -130,6 +138,7 @@ const mockImage: Provider = async (request) => {
     paramsJson: JSON.stringify({
       prompt: request.prompt,
       aspect: settings.aspect,
+      resolution: settings.resolution,
       count: settings.count,
       images: request.inputs.filter((input) => input.kind === "image").length,
     }),
@@ -310,10 +319,18 @@ function messageOf(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
-function aspectDimensions(aspect: string): { width: number; height: number } {
-  if (aspect === "16:9") return { width: 1024, height: 576 };
-  if (aspect === "9:16") return { width: 576, height: 1024 };
-  return { width: 768, height: 768 };
+/** The image a ratio and resolution ask for: the long side, the other scaled. */
+function aspectDimensions(
+  aspect: string,
+  resolution: ImageResolution,
+): { width: number; height: number } {
+  const long = resolution === "2K" ? 2048 : 1024;
+  const [width = 0, height = 0] = aspect.split(":").map(Number);
+  if (!(width > 0 && height > 0)) return { width: long, height: long };
+  if (width >= height) {
+    return { width: long, height: Math.round((long * height) / width) };
+  }
+  return { width: Math.round((long * width) / height), height: long };
 }
 
 function mockSvg(
@@ -344,7 +361,7 @@ font-size="${fontSize}" font-weight="600" fill="${titleColor}">${line}</text>`,
 <rect width="100%" height="100%" fill="url(#g)"/>
 <circle cx="${dimensions.width * 0.82}" cy="${dimensions.height * 0.2}" r="${dimensions.width * 0.12}" fill="${accent}" opacity="0.25"/>
 ${title}
-<text x="${fontSize}" y="${dimensions.height - fontSize}" font-size="${Math.round(fontSize * 0.7)}" fill="${muted}">Mock Image · ${index + 1}/${settings.count} · ${escapeXml(settings.aspect)}</text>
+<text x="${fontSize}" y="${dimensions.height - fontSize}" font-size="${Math.round(fontSize * 0.7)}" fill="${muted}">${escapeXml(imageModelLabel(settings.model))} · ${index + 1}/${settings.count} · ${escapeXml(settings.aspect)}</text>
 </svg>`;
 }
 

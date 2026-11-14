@@ -2,13 +2,14 @@ import { expect, test } from "nsh/test";
 import {
   canConnectPorts,
   defaultSettings,
+  imageModelLabel,
   isPortKind,
   MEDIA_KINDS,
-  modelLabel,
   parseSettings,
   portsOfNode,
   serializeSettings,
   statusLabel,
+  textModelLabel,
   type PortSchemaSource,
 } from "./node-kinds";
 
@@ -17,7 +18,7 @@ const imageSubject: PortSchemaSource = { kind: "image", settingsJson: "" };
 
 test("parses settings with defaults for missing values", () => {
   const text = parseSettings("text", "{bad json");
-  expect(text).toEqual({ version: 1, prompt: "", model: "mock-text" });
+  expect(text).toEqual({ version: 1, prompt: "", model: "deepseek-v4.1-flash" });
 
   const image = parseSettings(
     "image",
@@ -26,21 +27,55 @@ test("parses settings with defaults for missing values", () => {
   expect(image).toEqual({
     version: 1,
     prompt: "A lake",
-    model: "mock-image",
+    model: "qwen-image-3.0-pro",
     aspect: "9:16",
+    resolution: "1K",
     count: 4,
   });
+});
+
+test("keeps a known image model and falls back for an unknown one", () => {
+  const mock = parseSettings("image", JSON.stringify({ model: "mock-image" }));
+  expect(mock).toMatchObject({ model: "mock-image" });
+  const known = parseSettings("image", JSON.stringify({ model: "qwen-image-3.0-pro" }));
+  expect(known).toMatchObject({ model: "qwen-image-3.0-pro" });
+  const unknown = parseSettings("image", JSON.stringify({ model: "not-a-model" }));
+  expect(unknown).toMatchObject({ model: "qwen-image-3.0-pro" });
+  expect(imageModelLabel("qwen-image-3.0-pro")).toBe("Qwen Image 3.0 Pro");
+  expect(imageModelLabel("mock-image")).toBe("Mock Image");
+});
+
+test("keeps a known text model and falls back for an unknown one", () => {
+  const mock = parseSettings("text", JSON.stringify({ model: "mock-text" }));
+  expect(mock).toMatchObject({ model: "mock-text" });
+  const known = parseSettings("text", JSON.stringify({ model: "deepseek-v4.1-flash" }));
+  expect(known).toMatchObject({ model: "deepseek-v4.1-flash" });
+  const unknown = parseSettings("text", JSON.stringify({ model: "not-a-model" }));
+  expect(unknown).toMatchObject({ model: "deepseek-v4.1-flash" });
+  expect(textModelLabel("deepseek-v4.1-flash")).toBe("DeepSeek V4.1 Flash");
+  expect(textModelLabel("mock-text")).toBe("Mock Text");
+});
+
+test("parses a known resolution and the wider aspect choices", () => {
+  const image = parseSettings(
+    "image",
+    JSON.stringify({ aspect: "4:3", resolution: "2K", count: 2 }),
+  );
+  expect(image).toEqual({
+    version: 1,
+    prompt: "",
+    model: "qwen-image-3.0-pro",
+    aspect: "4:3",
+    resolution: "2K",
+    count: 2,
+  });
+  const unknown = parseSettings("image", JSON.stringify({ resolution: "8K" }));
+  expect(unknown).toMatchObject({ resolution: "1K", aspect: "1:1" });
 });
 
 test("serializes and re-parses settings", () => {
   const settings = { ...defaultSettings("text"), prompt: "Hello" };
   expect(parseSettings("text", serializeSettings(settings))).toEqual(settings);
-});
-
-test("the kinds keep mock model labels", () => {
-  expect(modelLabel("text")).toBe("Mock Text");
-  expect(modelLabel("image")).toBe("Mock Image");
-  expect(modelLabel("upload")).toBe("Local file");
 });
 
 test("the image kind declares prompt, references and an image output", () => {

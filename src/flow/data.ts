@@ -37,7 +37,7 @@ export function seedNodes(): NodeInput[] {
       settingsJson: serializeSettings({
         version: 1,
         prompt: "Describe a calm lake at dawn in one sentence.",
-        model: "mock-text",
+        model: "deepseek-v4.1-flash",
       }),
     },
     {
@@ -54,8 +54,9 @@ export function seedNodes(): NodeInput[] {
       settingsJson: serializeSettings({
         version: 1,
         prompt: "A quiet mountain lake at dawn, soft light.",
-        model: "mock-image",
+        model: "qwen-image-3.0-pro",
         aspect: "16:9",
+        resolution: "1K",
         count: 2,
       }),
     },

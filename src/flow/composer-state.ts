@@ -3,15 +3,21 @@
  * they are written. The page owns one per open composer and saves it on
  * close or run. A text card's body is not a composer draft: the card edits
  * it in place (`InlineTextEditor`), so the composer only holds the prompt and
- * the image settings.
+ * its kind's settings: the model for both kinds, and the image's aspect,
+ * resolution and count.
  */
 import { signal, untracked } from "nsh";
 import type { NodeDetail } from "@flow/native";
 import {
+  DEFAULT_IMAGE_MODEL,
+  DEFAULT_TEXT_MODEL,
   type ImageAspect,
+  type ImageModelId,
+  type ImageResolution,
   parseSettings,
   type NodeSettings,
   serializeSettings,
+  type TextModelId,
 } from "./node-kinds";
 
 /** The writes the composer drafts make; `NodeSession` implements it. */
@@ -69,11 +75,57 @@ export class ComposerState {
     if (settings !== null && "prompt" in settings) this.settings.set({ ...settings, prompt });
   }
 
+  textModel(): TextModelId {
+    const settings = this.settings();
+    if (
+      settings !== null &&
+      settings.version === 1 &&
+      "prompt" in settings &&
+      !("aspect" in settings)
+    ) {
+      return settings.model;
+    }
+    return DEFAULT_TEXT_MODEL;
+  }
+
+  setTextModel(model: TextModelId): void {
+    const settings = this.settings();
+    if (
+      settings !== null &&
+      settings.version === 1 &&
+      "prompt" in settings &&
+      !("aspect" in settings)
+    ) {
+      this.settings.set({ ...settings, model });
+    }
+  }
+
+  imageModel(): ImageModelId {
+    const settings = this.settings();
+    return settings !== null && settings.version === 1 && "aspect" in settings
+      ? settings.model
+      : DEFAULT_IMAGE_MODEL;
+  }
+
+  setImageModel(model: ImageModelId): void {
+    const settings = this.settings();
+    if (settings !== null && settings.version === 1 && "aspect" in settings) {
+      this.settings.set({ ...settings, model });
+    }
+  }
+
   aspect(): ImageAspect {
     const settings = this.settings();
     return settings !== null && settings.version === 1 && "aspect" in settings
       ? settings.aspect
       : "1:1";
+  }
+
+  resolution(): ImageResolution {
+    const settings = this.settings();
+    return settings !== null && settings.version === 1 && "resolution" in settings
+      ? settings.resolution
+      : "1K";
   }
 
   count(): number {
@@ -88,12 +140,24 @@ export class ComposerState {
     }
   }
 
+  setResolution(resolution: ImageResolution): void {
+    const settings = this.settings();
+    if (settings !== null && settings.version === 1 && "resolution" in settings) {
+      this.settings.set({ ...settings, resolution });
+    }
+  }
+
   setCount(delta: number): void {
+    this.setCountTo(this.count() + delta);
+  }
+
+  /** Sets the image count, held to the one-to-four the kind supports. */
+  setCountTo(count: number): void {
     const settings = this.settings();
     if (settings !== null && settings.version === 1 && "count" in settings) {
       this.settings.set({
         ...settings,
-        count: Math.min(4, Math.max(1, settings.count + delta)),
+        count: Math.min(4, Math.max(1, Math.round(count))),
       });
     }
   }
