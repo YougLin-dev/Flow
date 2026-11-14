@@ -169,7 +169,6 @@ export const AREAS = {
 
 /** Test-only modules: classified, exempt from the matrix, never production imports. */
 export const TEST_SUPPORT_FILES = new Set([
-  "src/flow/node-session-harness.ts",
   "src/flow/document/test/node-session-harness.ts",
   "src/test-support/app.ts",
 ]);
@@ -206,24 +205,11 @@ export const LEGACY_FLAT = new Set([
   "src/components/TitleBar.tsx",
   "src/components/UploadButton.tsx",
   "src/components/ZoomControls.tsx",
-  "src/flow/asset-urls.ts",
   "src/flow/bindings.ts",
   "src/flow/composer-detail.ts",
-  "src/flow/data.ts",
-  "src/flow/database-path.ts",
-  "src/flow/document-session.ts",
-  "src/flow/inline-editor.ts",
-  "src/flow/minimap-loader.ts",
-  "src/flow/node-commands.ts",
-  "src/flow/node-session-harness.ts",
-  "src/flow/node-session.ts",
   "src/flow/page-chrome.ts",
-  "src/flow/preview-loader.ts",
-  "src/flow/previews.ts",
   "src/flow/search-filters.ts",
   "src/flow/search-navigation.ts",
-  "src/flow/upload-source.ts",
-  "src/flow/viewport-controller.ts",
   "src/pages/FlowPage.tsx",
 ]);
 

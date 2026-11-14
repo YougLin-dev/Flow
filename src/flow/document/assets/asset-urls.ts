@@ -3,7 +3,7 @@
  * into shared native image bytes once per URL, so this cache creates one
  * blob per asset and owns its revocation until the page is disposed.
  */
-import type { Document } from "./shared";
+import type { Document } from "../../shared";
 
 export class AssetUrls {
   private readonly urls = new Map<string, string>();

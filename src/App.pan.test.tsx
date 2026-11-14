@@ -1,6 +1,6 @@
 import { expect, test } from "nsh/test";
 import { openApp, percentOf, selectedOf } from "./test-support/app";
-import { CONTENT } from "./flow/data";
+import { CONTENT } from "./flow/document";
 
 /** Half the flow's size in world coordinates. */
 const HALF_WIDTH = CONTENT.width / 2;

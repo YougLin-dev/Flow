@@ -1,7 +1,8 @@
 import { expect, test } from "nsh/test";
 import type { Document, EdgeSummary, NodeSummary, SceneSnapshot, Viewport } from "@flow/native";
-import { CanvasCamera, FlowScene } from "./canvas";
-import type { CameraScheduler } from "./canvas/model/camera";
+import { CanvasCamera, FlowScene } from "../../canvas";
+import type { CameraScheduler } from "../../canvas/model/camera";
+import { CONTENT } from "../lifecycle/seed";
 import {
   ViewportController,
   type ViewportHost,
@@ -111,6 +112,7 @@ function setup(): Fixture {
     camera: () => camera,
     scene: () => scene,
     document: () => document,
+    fallbackBounds: () => CONTENT,
     applyChanges: () => {},
     schedulePreviews: () => {},
     publishZoom: () => {},

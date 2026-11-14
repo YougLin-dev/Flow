@@ -1,7 +1,7 @@
 import { expect, test } from "nsh/test";
 import { Document, type ResultBatchInput, type ResultItemInput } from "@flow/native";
-import { IMAGE_NODE_ID, TEXT_NODE_ID, seedDocument } from "./data";
-import { makeSession, until } from "./node-session-harness";
+import { IMAGE_NODE_ID, TEXT_NODE_ID, seedDocument } from "../lifecycle/seed";
+import { makeSession, until } from "../test/node-session-harness";
 
 test("edits a text node inline and closes the editor on save", async () => {
   const document = await Document.open(":memory:");

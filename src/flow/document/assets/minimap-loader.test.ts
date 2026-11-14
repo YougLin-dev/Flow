@@ -1,6 +1,25 @@
 import { expect, test } from "nsh/test";
 import type { ChangeSet, Document, NodeSummary, Overview, OverviewCard } from "@flow/native";
-import { MinimapLoader, type MinimapHost, type MinimapScheduler } from "./minimap-loader";
+import {
+  MinimapLoader,
+  sameOverview,
+  type MinimapHost,
+  type MinimapScheduler,
+} from "./minimap-loader";
+
+test("compares overview reads by value, ignoring the revision", () => {
+  const firstCard = { id: "a", x: 10, y: 20, width: 200, height: 84 };
+  const first = { rev: 1, bounds: { x: 0, y: 0, width: 100, height: 100 }, cards: [firstCard] };
+  expect(sameOverview(first, { ...first, rev: 2, cards: [{ ...firstCard }] })).toBe(true);
+  expect(sameOverview(first, { ...first, cards: [{ ...firstCard, x: 11 }] })).toBe(false);
+  expect(
+    sameOverview(first, {
+      ...first,
+      bounds: { x: 0, y: 0, width: 101, height: 100 },
+    }),
+  ).toBe(false);
+  expect(sameOverview(null, first)).toBe(false);
+});
 
 interface DeferredOverview {
   readonly resolve: (overview: Overview) => void;

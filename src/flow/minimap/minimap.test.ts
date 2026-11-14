@@ -5,7 +5,6 @@ import {
   minimapRect,
   minimapViewport,
   sameLayout,
-  sameOverview,
   unionBounds,
 } from "./minimap";
 
@@ -122,22 +121,10 @@ test("a drag moves the view with the scale captured at press", () => {
   expect(minimapDragCenter(drag, { x: 108, y: 70 })).toEqual({ x: 1080, y: 540 });
 });
 
-test("compares layouts and overviews by value", () => {
+test("compares layouts by value", () => {
   const layout = minimapLayout({ x: 0, y: 0, width: 100, height: 100 }, SIZE, 16);
   expect(sameLayout(layout, { ...layout })).toBe(true);
   expect(sameLayout(layout, { ...layout, offsetX: layout.offsetX + 1 })).toBe(false);
   expect(sameLayout(null, null)).toBe(true);
   expect(sameLayout(layout, null)).toBe(false);
-
-  const card = { id: "a", x: 10, y: 20, width: 200, height: 84 };
-  const first = { rev: 1, bounds: { x: 0, y: 0, width: 100, height: 100 }, cards: [card] };
-  expect(sameOverview(first, { ...first, rev: 2, cards: [{ ...card }] })).toBe(true);
-  expect(sameOverview(first, { ...first, cards: [{ ...card, x: 11 }] })).toBe(false);
-  expect(
-    sameOverview(first, {
-      ...first,
-      bounds: { x: 0, y: 0, width: 101, height: 100 },
-    }),
-  ).toBe(false);
-  expect(sameOverview(null, first)).toBe(false);
 });

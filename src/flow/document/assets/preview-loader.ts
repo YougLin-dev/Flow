@@ -1,8 +1,8 @@
 /** Loads the visible image cards' asset URLs after a scene read. */
-import { AsyncDrain, type Document, type DrainStepResult } from "./shared";
+import { AsyncDrain, type Document, type DrainStepResult } from "../../shared";
 import type { AssetUrls } from "./asset-urls";
 import { loadPreviews, type PreviewTarget } from "./previews";
-import type { FlowScene } from "./canvas";
+import type { FlowScene } from "../../canvas";
 
 const PREVIEW_DELAY_MS = 40;
 

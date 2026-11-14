@@ -1,7 +1,7 @@
 import { host } from "nsh";
 import { Document } from "@flow/native";
 import { databasePath } from "./database-path";
-import { seedDocument } from "./data";
+import { seedDocument } from "./seed";
 
 /**
  * Opens this launch's document and finishes startup: runs left running by

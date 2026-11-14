@@ -14,7 +14,6 @@ import { SearchButton } from "../components/SearchButton";
 import { SearchPalette } from "../components/SearchPalette";
 import { CanvasProbe } from "../components/CanvasProbe";
 import { ZoomControls, ZoomProbe } from "../components/ZoomControls";
-import { AssetUrls } from "../flow/asset-urls";
 import { bindFlowKeys } from "../flow/bindings";
 import { CanvasCamera, FlowScene, wheelZoomFactor } from "../flow/canvas";
 import { CanvasController } from "../flow/canvas/interaction/canvas-controller";
@@ -23,18 +22,21 @@ import {
   CanvasMenuController,
   dismissContextMenuOnChange,
 } from "../flow/canvas/interaction/context-menu";
-import { CONTENT } from "../flow/data";
-import { openFlowDocument } from "../flow/document-session";
+import {
+  AssetUrls,
+  CONTENT,
+  MinimapLoader,
+  NodeSession,
+  openFlowDocument,
+  PreviewLoader,
+  ViewportController,
+} from "../flow/document";
 import { NodeRunner } from "../flow/execution";
-import { MinimapLoader } from "../flow/minimap-loader";
 import { MinimapController } from "../flow/minimap";
 import type { NodeKindId } from "../flow/nodes";
-import { NodeSession } from "../flow/node-session";
 import { pageChromeHandlers } from "../flow/page-chrome";
-import { PreviewLoader } from "../flow/preview-loader";
 import { SEARCH_FILTERS } from "../flow/search-filters";
 import { revealSearchHit } from "../flow/search-navigation";
-import { ViewportController } from "../flow/viewport-controller";
 import { selectedCount, setSelectedCount, setZoomPercent, zoomPercent } from "../store";
 
 /**
@@ -91,6 +93,7 @@ export function FlowPage() {
     camera: () => camera,
     scene: () => scene,
     document: () => document,
+    fallbackBounds: () => CONTENT,
     applyChanges,
     schedulePreviews,
     publishZoom: (percent) => setZoomPercent(percent),

@@ -13,10 +13,10 @@ import {
   type ResultBatchInput,
   type ResultItemInput,
 } from "@flow/native";
-import { AssetUrls } from "./asset-urls";
-import { IMAGE_NODE_ID, TEXT_NODE_ID, seedDocument } from "./data";
-import { NodeRunner } from "./execution";
-import { parseSettings } from "./nodes";
+import { AssetUrls } from "../assets/asset-urls";
+import { IMAGE_NODE_ID, TEXT_NODE_ID, seedDocument } from "../lifecycle/seed";
+import { NodeRunner } from "../../execution";
+import { parseSettings } from "../../nodes";
 import { NodeSession, type AssetUrlSource, type NodeSessionHost } from "./node-session";
 
 /** Polls native async work: `app.waitUntil` only exists in an app test. */

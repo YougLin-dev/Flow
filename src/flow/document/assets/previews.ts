@@ -1,6 +1,6 @@
-import type { Document } from "./shared";
+import type { Document } from "../../shared";
 import type { AssetUrls } from "./asset-urls";
-import type { PreviewView } from "./canvas";
+import type { PreviewView } from "../../canvas";
 
 export interface PreviewTarget {
   readonly id: string;

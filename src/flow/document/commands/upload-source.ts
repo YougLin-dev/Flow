@@ -12,9 +12,9 @@ import {
   type Document,
   type NodeBounds,
   type ResultItemInput,
-} from "./shared";
+} from "../../shared";
 import type { PickedImage, PickImagesOptions } from "nsh";
-import { serializeSettings, type UploadSettings } from "./nodes";
+import { serializeSettings, type UploadSettings } from "../../nodes";
 
 /** The document, picker and change sink an upload needs. */
 export interface UploadSourceHost {

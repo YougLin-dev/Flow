@@ -1,8 +1,8 @@
 import { expect, test } from "nsh/test";
 import type { PickedImage } from "nsh";
 import { Document } from "@flow/native";
-import { defaultSettings, serializeSettings } from "./nodes";
-import { makeSession, until } from "./node-session-harness";
+import { defaultSettings, serializeSettings } from "../../nodes";
+import { makeSession, until } from "../test/node-session-harness";
 import { uploadCardSize } from "./upload-source";
 
 test("fits an upload card to the image's aspect ratio", () => {

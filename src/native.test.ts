@@ -3,7 +3,7 @@
 // headless runner links the Rust crate and runs this file with the rest.
 import { expect, test } from "nsh/test";
 import { Document } from "@flow/native";
-import { IMAGE_NODE_ID, SEED_EDGE_ID, TEXT_NODE_ID, seedDocument } from "./flow/data";
+import { IMAGE_NODE_ID, SEED_EDGE_ID, TEXT_NODE_ID, seedDocument } from "./flow/document";
 
 test("stores, searches and undoes nodes through the Rust core", async () => {
   const document = await Document.open(":memory:");

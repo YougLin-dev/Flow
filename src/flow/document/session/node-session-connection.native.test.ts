@@ -4,11 +4,11 @@
  */
 import { expect, test } from "nsh/test";
 import { Document, type ChangeSet } from "@flow/native";
-import { AssetUrls } from "./asset-urls";
-import { IMAGE_NODE_ID, TEXT_NODE_ID, seedDocument } from "./data";
-import { NodeRunner } from "./execution";
+import { AssetUrls } from "../assets/asset-urls";
+import { IMAGE_NODE_ID, TEXT_NODE_ID, seedDocument } from "../lifecycle/seed";
+import { NodeRunner } from "../../execution";
 import { NodeSession, type NodeSessionHost } from "./node-session";
-import { FlowScene } from "./canvas/model/scene/scene";
+import { FlowScene } from "../../canvas/model/scene/scene";
 
 function makeSession(
   document: Document,

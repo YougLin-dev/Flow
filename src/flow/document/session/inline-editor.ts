@@ -9,7 +9,7 @@
  * write landing never closes an editor reopened since it started.
  */
 import { signal } from "nsh";
-import { manualTextResult, type ChangeSet, type Document } from "./shared";
+import { manualTextResult, type ChangeSet, type Document } from "../../shared";
 
 /** What the editor needs from the session and the document. */
 export interface InlineEditorHost {

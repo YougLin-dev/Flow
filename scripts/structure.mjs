@@ -29,7 +29,7 @@ import {
   segmentOf,
 } from "../lint/structure-map.js";
 
-const SKIP_DIRS = new Set([".nsh", "node_modules", "target", "assets", "native"]);
+const SKIP_DIRS = new Set([".nsh", "node_modules", "target", "native"]);
 
 function toPosix(path) {
   return path.split(sep).join("/");
@@ -38,9 +38,12 @@ function toPosix(path) {
 /** Every .ts/.tsx file under src/, excluding generated and Rust folders. */
 export function collectSourceFiles(root) {
   const files = [];
+  const source = join(root, "src");
   const walk = (directory) => {
     for (const entry of readdirSync(directory, { withFileTypes: true })) {
-      if (SKIP_DIRS.has(entry.name)) continue;
+      // Only the app-root assets folder holds binaries; area-owned `assets/`
+      // segments (for example `flow/document/assets/`) hold TypeScript.
+      if (SKIP_DIRS.has(entry.name) || (entry.name === "assets" && directory === source)) continue;
       const full = join(directory, entry.name);
       if (entry.isDirectory()) {
         walk(full);
@@ -49,7 +52,6 @@ export function collectSourceFiles(root) {
       }
     }
   };
-  const source = join(root, "src");
   if (statSync(source, { throwIfNoEntry: false })?.isDirectory()) walk(source);
   return files.toSorted((first, second) => first.localeCompare(second));
 }

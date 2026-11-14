@@ -1,7 +1,34 @@
 /** Loads the whole document's card silhouettes for the minimap. */
 import { signal, type Accessor } from "nsh";
-import type { ChangeSet, Document, Overview, OverviewCard } from "./shared";
-import { sameOverview } from "./minimap";
+import {
+  sameBounds,
+  type ChangeSet,
+  type Document,
+  type Overview,
+  type OverviewCard,
+} from "../../shared";
+
+/** Whether two overview reads draw the same map (the revision is ignored). */
+export function sameOverview(first: Overview | null, second: Overview): boolean {
+  if (first === null) return false;
+  if (!sameBounds(first.bounds, second.bounds)) return false;
+  if (first.cards.length !== second.cards.length) return false;
+  for (let index = 0; index < first.cards.length; index += 1) {
+    const before = first.cards[index];
+    const after = second.cards[index];
+    if (before === undefined || after === undefined) return false;
+    if (
+      before.id !== after.id ||
+      before.x !== after.x ||
+      before.y !== after.y ||
+      before.width !== after.width ||
+      before.height !== after.height
+    ) {
+      return false;
+    }
+  }
+  return true;
+}
 
 /** A burst of command changes coalesces into one overview read. */
 const MINIMAP_DELAY_MS = 150;

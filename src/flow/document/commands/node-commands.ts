@@ -4,9 +4,15 @@
  * and write through the document, so the menu stays a state and gesture
  * controller.
  */
-import { resultBatch, resultItem, type ChangeSet, type Document, type NodeInput } from "./shared";
-import { type NodeSettings, serializeSettings } from "./nodes";
-import type { FlowScene } from "./canvas";
+import {
+  resultBatch,
+  resultItem,
+  type ChangeSet,
+  type Document,
+  type NodeInput,
+} from "../../shared";
+import { type NodeSettings, serializeSettings } from "../../nodes";
+import type { FlowScene } from "../../canvas";
 
 /** The session state a draft-aware copy writes before reading the card. */
 export interface DraftSession {

@@ -6,9 +6,9 @@
  */
 import { signal } from "nsh";
 import type { PickedImage, PickImagesOptions, Signal } from "nsh";
-import type { ChangeSet, EdgeInput, NodeDetail, NodeInput } from "./shared";
+import type { ChangeSet, EdgeInput, NodeDetail, NodeInput } from "../../shared";
 import { canSkipDetailReload, detailAssetIds } from "./composer-detail";
-import type { NodeRunner } from "./execution";
+import type { NodeRunner } from "../../execution";
 import { InlineEditor } from "./inline-editor";
 import {
   copyNode as copyNodeCommand,
@@ -16,7 +16,7 @@ import {
   deleteNodes as deleteNodesCommand,
   deleteNodeWithDrafts as deleteNodeWithDraftsCommand,
   type NodeCommandHost,
-} from "./node-commands";
+} from "../commands/node-commands";
 import {
   canConnectPorts,
   defaultSettings,
@@ -26,9 +26,9 @@ import {
   nodeKind,
   portsOfNode,
   serializeSettings,
-} from "./nodes";
-import { capacityOf, hasPortEdge, incomingEdgeCount, type ConnectionPair } from "./canvas";
-import { uploadSource as uploadSourceFile } from "./upload-source";
+} from "../../nodes";
+import { capacityOf, hasPortEdge, incomingEdgeCount, type ConnectionPair } from "../../canvas";
+import { uploadSource as uploadSourceFile } from "../commands/upload-source";
 
 /** The asset URL cache the composer reads; `AssetUrls` implements it. */
 export interface AssetUrlSource {

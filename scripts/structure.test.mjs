@@ -18,6 +18,8 @@ import {
 const tree = {
   "src/.nsh/generated.ts": "",
   "src/native/src/db.rs": "",
+  "src/assets/icon.ts": "",
+  "src/flow/document/assets/previews.ts": "",
   "src/flow/page-chrome.ts":
     '// import x from "./test/helper"\nimport "./fixtures/a";\nexport { x } from "./fixtures/b";\nexport const later = () => import("./fixtures/c");\nimport type { A } from "./fixtures/type-a";\nexport type { B } from "./fixtures/type-b";',
   "src/flow/fixtures/a.ts": "",
@@ -69,6 +71,8 @@ test("collects app modules but skips generated and Rust folders", () => {
     expect(files).toContain("src/components/canvas/index.ts");
     expect(files).not.toContain("src/.nsh/generated.ts");
     expect(files).not.toContain("src/native/src/db.rs");
+    expect(files).not.toContain("src/assets/icon.ts");
+    expect(files).toContain("src/flow/document/assets/previews.ts");
   });
 });
 
@@ -238,7 +242,7 @@ test("Phase 5 turns the area findings into failures", () => {
 test("reports stale legacy allow-list entries so the list shrinks", () => {
   const reports = checkLegacyAllowList(["src/flow/page-chrome.ts"]);
   expect(reports).not.toContain("stale legacy allow-list entry: src/flow/page-chrome.ts");
-  expect(reports).toContain("stale legacy allow-list entry: src/flow/node-session.ts");
+  expect(reports).toContain("stale legacy allow-list entry: src/flow/composer-detail.ts");
 });
 
 test("keeps the legacy allow-list and the Rust report non-failing", () => {

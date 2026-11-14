@@ -8,7 +8,7 @@ import {
   selectSeed,
   selectedOf,
 } from "./test-support/app";
-import { seedNodes } from "./flow/data";
+import { seedNodes } from "./flow/document";
 
 /** Rests the pointer on a canvas control and proves its tooltip shows `label`. */
 const expectTooltip = async (app: App, testID: string, label: string): Promise<void> => {

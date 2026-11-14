@@ -3,7 +3,7 @@
  * uniform scale that fits the document together with the camera's viewport,
  * shared by the card silhouettes, the viewport rectangle and drag-to-pan.
  */
-import { sameBounds, type Overview, type Viewport } from "../shared";
+import type { Viewport } from "../shared";
 
 export interface MinimapSize {
   readonly width: number;
@@ -90,28 +90,6 @@ export function sameLayout(first: MinimapLayout | null, second: MinimapLayout | 
     first.offsetX === second.offsetX &&
     first.offsetY === second.offsetY
   );
-}
-
-/** Whether two overview reads draw the same map (the revision is ignored). */
-export function sameOverview(first: Overview | null, second: Overview): boolean {
-  if (first === null) return false;
-  if (!sameBounds(first.bounds, second.bounds)) return false;
-  if (first.cards.length !== second.cards.length) return false;
-  for (let index = 0; index < first.cards.length; index += 1) {
-    const before = first.cards[index];
-    const after = second.cards[index];
-    if (before === undefined || after === undefined) return false;
-    if (
-      before.id !== after.id ||
-      before.x !== after.x ||
-      before.y !== after.y ||
-      before.width !== after.width ||
-      before.height !== after.height
-    ) {
-      return false;
-    }
-  }
-  return true;
 }
 
 /**

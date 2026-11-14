@@ -2,9 +2,8 @@
  * The camera and viewport read loop: fitting, panning, zooming and throttled
  * scene reads. It owns no UI; the page binds the values it publishes.
  */
-import type { ChangeSet, Document, Viewport } from "./shared";
-import type { CanvasCamera, FlowScene } from "./canvas";
-import { CONTENT } from "./data";
+import type { ChangeSet, Document, Viewport } from "../../shared";
+import type { CanvasCamera, FlowScene } from "../../canvas";
 
 const VIEWPORT_MARGIN = 0.25;
 const VIEWPORT_DELAY_MS = 80;
@@ -13,6 +12,8 @@ export interface ViewportHost {
   camera(): CanvasCamera | null;
   scene(): FlowScene | null;
   document(): Document | null;
+  /** The bounds a fit falls back to while the document is empty or unreadable. */
+  fallbackBounds(): Viewport;
   applyChanges(changes: ChangeSet): void;
   schedulePreviews(): void;
   publishZoom(percent: number): void;
@@ -171,7 +172,7 @@ export class ViewportController {
     const camera = this.host.camera();
     if (!document || !camera || this.host.isDisposed()) return;
     const generation = this.cameraGeneration;
-    let bounds: Viewport = CONTENT;
+    let bounds: Viewport = this.host.fallbackBounds();
     try {
       const documentBounds = await document.bounds();
       if (documentBounds.width > 0 || documentBounds.height > 0) bounds = documentBounds;
@@ -256,7 +257,7 @@ export class ViewportController {
 
   private visibleRect(): { rect: Viewport; margin: number } {
     const camera = this.host.camera();
-    if (!camera) return { rect: CONTENT, margin: 0 };
+    if (!camera) return { rect: this.host.fallbackBounds(), margin: 0 };
     const rect = camera.visibleBounds({ width: this.width, height: this.height });
     const margin = Math.max(rect.width, rect.height) * VIEWPORT_MARGIN;
     return { rect, margin };

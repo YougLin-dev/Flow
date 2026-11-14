@@ -1,6 +1,6 @@
-import { manualTextResult, type Document, type NodeInput } from "./shared";
-import { portOffset } from "./canvas";
-import { serializeSettings } from "./nodes";
+import { manualTextResult, type Document, type NodeInput } from "../../shared";
+import { portOffset } from "../../canvas";
+import { serializeSettings } from "../../nodes";
 
 export const NODE_WIDTH = 300;
 export const NODE_HEIGHT = 220;
