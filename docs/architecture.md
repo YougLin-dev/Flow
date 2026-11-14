@@ -349,7 +349,7 @@ gestures; the secondary button's drag pans. `CanvasCamera` stores logical `x`, `
 
 The dot grid and the cards follow the camera, but the composer does not: its
 position is computed in screen points from the selected card's current screen
-rectangle (`flow/overlay.ts`), so it keeps its size at every zoom and tracks
+rectangle (`flow/composer/placement.ts`), so it keeps its size at every zoom and tracks
 the card. It sits directly below the card, centred on it, and is allowed to
 extend past the viewport rather than move somewhere else. The inline editor
 is the card body itself: a borderless input at the body's world inset, size

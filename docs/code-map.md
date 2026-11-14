@@ -94,7 +94,9 @@ document-facing `ConnectionPair` type to the facade; `canvas-input.ts` was not
 extracted because §11 marks it optional and the touch state must stay on the
 mounted view. Step 5 moved the minimap mapping and drag controller to
 `flow/minimap`; `minimap-loader.ts` stays at the flow root until step 8 moves
-it to the document assets.
+it to the document assets. Step 6 moved the composer draft and the placement
+half of the old `overlay.ts` to `flow/composer`; `composer-detail.ts` moves
+with the document step.
 The rest of the source tree is still the legacy flat layout.
 The old → new map is in
 [the plan's Appendix A](plans/code-organization.md#appendix-a--tsx-placement-map);

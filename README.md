@@ -121,8 +121,9 @@ src/                   the NSH app: its root, entry, config and assets
   flow/
     data.ts            the demo nodes/edges used to seed an empty document
     database-path.ts   resolves the document path from host/env/data-dir
-    overlay.ts         composer placement
-    composer-state.ts  the composer's drafts
+    composer/
+      composer-state.ts the composer's settings draft
+      placement.ts     the native composer's placement
     minimap/
       minimap.ts       the panel's world-to-panel mapping
       minimap-controller.ts the minimap drag state

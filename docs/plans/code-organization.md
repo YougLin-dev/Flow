@@ -1790,6 +1790,11 @@ behind the area facade. `minimap-loader.ts` stays at the flow root until the
 document step moves it to `flow/document/assets` (§6.4 keeps the loader in
 the document feature). `LEGACY_FLAT` is down to 48 modules.
 
+Phase 2 step 6 moved `composer-state.ts` and the placement half of
+`overlay.ts` to `flow/composer` (`placement.ts`); the inline-body half moved
+in step 3. `composer-detail.ts` stays for the document step. `LEGACY_FLAT` is
+down to 46 modules.
+
 ---
 
 ## Appendix A — TSX placement map (non-test)

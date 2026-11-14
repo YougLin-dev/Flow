@@ -237,7 +237,7 @@ surface below sees it. Selecting the card raises it above unselected cards,
 so another card passing touches through cannot cover the button.
 
 The composer is a native panel in the same view tree as the rest of the app.
-`flow/overlay.ts` places it directly under the selected card, centred on it,
+`flow/composer/placement.ts` places it directly under the selected card, centred on it,
 so the placement follows the card as the camera or the card moves; it never
 flips above or beside the card, and it may extend past the viewport. A text
 node gets the chat-style sheet (`components/composer/TextComposer.tsx`): its image
@@ -254,7 +254,7 @@ and its bottom row carries the model as a
 select (Qwen Image 3.0 Pro, the design's default, or the mock), a settings
 panel for the aspect and resolution (1K or 2K, the long side of the generated
 image), the image count as a select and the round send button; the images land
-on the card. Its draft lives in `flow/composer-state.ts` (the signal-backed
+on the card. Its draft lives in `flow/composer/composer-state.ts` (the signal-backed
 settings), written when the composer closes or the selection changes, and the
 settings are also written before a run. All controls are ordinary NSH
 controls, so they carry names, focus, keyboard operation and screen-reader
