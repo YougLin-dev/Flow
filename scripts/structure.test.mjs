@@ -1,7 +1,7 @@
 import { expect, test } from "bun:test";
 import { readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { AREAS, ENFORCEMENT, STRUCTURE_EXCEPTIONS } from "../lint/structure-map.js";
+import { AREAS, ENFORCEMENT, LEGACY_FLAT, STRUCTURE_EXCEPTIONS } from "../lint/structure-map.js";
 import { withTree } from "../lint/test-tree.js";
 import {
   checkBudget,
@@ -242,7 +242,11 @@ test("Phase 5 turns the area findings into failures", () => {
 test("reports stale legacy allow-list entries so the list shrinks", () => {
   const reports = checkLegacyAllowList(["src/flow/page-chrome.ts"]);
   expect(reports).not.toContain("stale legacy allow-list entry: src/flow/page-chrome.ts");
-  expect(reports).toContain("stale legacy allow-list entry: src/flow/composer-detail.ts");
+  // Any current entry outside the passed files is stale, so the fixture does
+  // not have to change with every move.
+  const stale = [...LEGACY_FLAT].find((file) => file !== "src/flow/page-chrome.ts");
+  expect(stale).toBeDefined();
+  expect(reports).toContain(`stale legacy allow-list entry: ${stale}`);
 });
 
 test("keeps the legacy allow-list and the Rust report non-failing", () => {

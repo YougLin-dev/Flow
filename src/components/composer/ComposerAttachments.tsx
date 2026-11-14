@@ -3,8 +3,8 @@ import { computed, token, View } from "nsh";
 import { Button } from "nsh/base";
 import { ImagePlus } from "lucide";
 import type { NodeDetail } from "../../flow/shared";
-import { inputUrl } from "../../flow/composer-detail";
-import { ComposerInputTile, TILE_SIZE } from "../ComposerInputTile";
+import { inputUrl } from "./detail-view";
+import { ComposerInputTile, TILE_SIZE } from "./ComposerInputTile";
 import { Icon } from "../primitives";
 
 export interface ComposerAttachmentsProps {

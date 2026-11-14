@@ -180,16 +180,8 @@ export const TEST_SUPPORT_FILES = new Set([
  */
 export const LEGACY_FLAT = new Set([
   "src/components/CanvasProbe.tsx",
-  "src/components/ComposerInputTile.tsx",
-  "src/components/ComposerModelSelect.tsx",
-  "src/components/MiniMap.tsx",
-  "src/components/MinimapDragOverlay.tsx",
-  "src/components/SearchButton.tsx",
-  "src/components/SearchPalette.tsx",
   "src/flow/bindings.ts",
-  "src/flow/composer-detail.ts",
   "src/flow/page-chrome.ts",
-  "src/flow/search-filters.ts",
   "src/flow/search-navigation.ts",
   "src/pages/FlowPage.tsx",
 ]);

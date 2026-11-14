@@ -16,7 +16,7 @@ import {
   isImageModel,
   type ImageResolution,
 } from "../../flow/nodes";
-import { ComposerModelSelect } from "../ComposerModelSelect";
+import { ComposerModelSelect } from "./ComposerModelSelect";
 import { Icon } from "../primitives";
 import { type ComposerVariantProps, ComposerSheet } from "./ComposerSheet";
 

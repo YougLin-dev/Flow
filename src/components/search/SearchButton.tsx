@@ -1,7 +1,7 @@
 import { Search } from "lucide";
 import { Text, token } from "nsh";
 import { Button } from "nsh/base";
-import { Icon, PANEL_PILL } from "./primitives";
+import { Icon, PANEL_PILL } from "../primitives";
 
 export interface SearchButtonProps {
   /** The platform's label for the search shortcut, such as `⌘K`. */

@@ -1,10 +1,10 @@
 /**
  * The composer's view helpers: the failed run's error line and the asset URL
- * an input item shows. The reload policy moved to
- * `flow/document/session/composer-detail.ts`; these helpers follow the
- * composer view in Phase 3.
+ * an input item shows. The reload policy lives in
+ * `flow/document/session/composer-detail.ts`; these helpers stay with the
+ * composer views.
  */
-import type { InputItemSummary, NodeDetail } from "./shared";
+import type { InputItemSummary, NodeDetail } from "../../flow/shared";
 
 /** The failed run's error line for a detail, empty when it has none. */
 export function errorOf(detail: NodeDetail): string {

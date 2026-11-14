@@ -1,14 +1,9 @@
 import { cleanup, keymap, List, signal, Text, token, View, type InputRef, type ListRef } from "nsh";
 import { Button, Dialog, Input } from "nsh/base";
-import type { SearchHit } from "../flow/shared";
+import type { SearchHit } from "../../flow/shared";
+import type { SearchFilter } from "./search-filters";
 
 const SEARCH_DELAY_MS = 120;
-
-export interface SearchFilter {
-  readonly label: string;
-  /** The node kind to filter by, or null for every kind. */
-  readonly kind: string | null;
-}
 
 export interface SearchPaletteProps {
   /** The type filters the palette offers; the first is the unfiltered one. */

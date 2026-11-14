@@ -12,10 +12,8 @@ import {
   ZoomControls,
   ZoomProbe,
 } from "../components/canvas";
-import { MiniMap } from "../components/MiniMap";
-import { MinimapDragOverlay } from "../components/MinimapDragOverlay";
-import { SearchButton } from "../components/SearchButton";
-import { SearchPalette } from "../components/SearchPalette";
+import { MiniMap, MinimapDragOverlay } from "../components/minimap";
+import { SEARCH_FILTERS, SearchButton, SearchPalette } from "../components/search";
 import { CanvasProbe } from "../components/CanvasProbe";
 import { bindFlowKeys } from "../flow/bindings";
 import { CanvasCamera, FlowScene, wheelZoomFactor } from "../flow/canvas";
@@ -38,7 +36,6 @@ import { NodeRunner } from "../flow/execution";
 import { MinimapController } from "../flow/minimap";
 import type { NodeKindId } from "../flow/nodes";
 import { pageChromeHandlers } from "../flow/page-chrome";
-import { SEARCH_FILTERS } from "../flow/search-filters";
 import { revealSearchHit } from "../flow/search-navigation";
 import { selectedCount, setSelectedCount, setZoomPercent, zoomPercent } from "../store";
 

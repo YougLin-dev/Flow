@@ -6,7 +6,7 @@
  * the generated text lives.
  */
 import { isTextModel, TEXT_MODELS, textModelLabel } from "../../flow/nodes";
-import { ComposerModelSelect } from "../ComposerModelSelect";
+import { ComposerModelSelect } from "./ComposerModelSelect";
 import { type ComposerVariantProps, ComposerSheet } from "./ComposerSheet";
 
 /** The prompt's limit, shown beside the field as a live counter. */

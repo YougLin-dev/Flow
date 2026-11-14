@@ -7,7 +7,7 @@ import { type JSX, Text, token, View } from "nsh";
 import { Button, Input } from "nsh/base";
 import { X } from "lucide";
 import type { NodeDetail } from "../../flow/shared";
-import { errorOf } from "../../flow/composer-detail";
+import { errorOf } from "./detail-view";
 import type { ComposerState } from "../../flow/composer";
 import { keepsWheel } from "../../flow/shared";
 import { Icon } from "../primitives";

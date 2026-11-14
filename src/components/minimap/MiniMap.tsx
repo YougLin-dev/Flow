@@ -12,9 +12,9 @@ import {
   type PressEvent,
   type ViewStyle,
 } from "nsh";
-import { wheelNotches, type CanvasCamera } from "../flow/canvas";
-import { sameBounds, type Overview, type OverviewCard } from "../flow/shared";
-import { PANEL } from "./primitives";
+import { wheelNotches, type CanvasCamera } from "../../flow/canvas";
+import { sameBounds, type Overview, type OverviewCard } from "../../flow/shared";
+import { PANEL } from "../primitives";
 import {
   minimapLayout,
   minimapRect,
@@ -22,7 +22,7 @@ import {
   sameLayout,
   unionBounds,
   type MinimapController,
-} from "../flow/minimap";
+} from "../../flow/minimap";
 
 const MINIMAP_WIDTH = 176;
 const MINIMAP_HEIGHT = 120;
