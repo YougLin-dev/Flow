@@ -111,7 +111,7 @@ canvas stays in TSX and owns only the scene model and its views.
   deterministic hash of the internal sequence spreads a capped low-zoom
   sample across the rectangle instead of one insertion strip. `bounds()`
   serves Fit without reading every node into TSX.
-- The search palette (`components/SearchPalette.tsx`) is mounted only while
+- The search palette (`components/search/SearchPalette.tsx`) is mounted only while
   open. It debounces input, calls `Document.search` with the selected kind
   filter, and renders FTS snippets; opening a hit calls `getNode(id)`, fits
   the camera to that card, reads the viewport and selects it. Its arrow-key
@@ -245,7 +245,7 @@ events and renders these layers:
   its native Upload/Replace button takes presses, so the camera scales the
   button with the card while every other point still reaches the canvas.
 
-The minimap (`components/MiniMap.tsx`) is a screen-space panel rendered by
+The minimap (`components/minimap/MiniMap.tsx`) is a screen-space panel rendered by
 `FlowPage` beside `FlowCanvas`, not inside it, in the bottom-left corner and
 desktop-only. It maps the union of the document's bounds and the camera's
 visible rectangle into the panel, so the content and the view are always both

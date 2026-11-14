@@ -409,7 +409,7 @@ easiest observable: it is `—` before the first fit and `<n>%` afterwards.
   inside JSX (components run once). The composer tests cover both variants on
   the shared sheet (the same shell testIDs, the text-only counter, the
   image-only settings) as well as each control.
-- `components/SearchPalette.tsx`: through `App.test.tsx` — opening by shortcut
+- `components/search/SearchPalette.tsx`: through `App.test.tsx` — opening by shortcut
   and button, typing, switching filters, choosing a result by click or Enter,
   Escape and the selection that follows a hit. Kind filtering itself is
   asserted through the Rust search tests; the palette's arrow bindings are

@@ -252,7 +252,8 @@ card. The image node's sheet (`components/composer/ImageComposer.tsx`) is the
 same shared `components/composer/ComposerSheet.tsx`, configured with the image
 model and its aspect, resolution and count settings: its image inputs sit in
 the attach row with an add-image button (both composers share
-`components/ComposerInputTile.tsx` and `components/ComposerModelSelect.tsx`),
+`components/composer/ComposerInputTile.tsx` and
+`components/composer/ComposerModelSelect.tsx`),
 and its bottom row carries the model as a
 select (Qwen Image 3.0 Pro, the design's default, or the mock), a settings
 panel for the aspect and resolution (1K or 2K, the long side of the generated

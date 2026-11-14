@@ -129,8 +129,18 @@ src/                   the NSH app: its root, entry, config and assets
       ComposerSheet.tsx  the shared prompt sheet both node kinds mount
       TextComposer.tsx   the text node's prompt, model and counter
       ImageComposer.tsx  the image node's prompt, model and image settings
-    SearchButton.tsx   floating search entry point
-    SearchPalette.tsx  debounced full-text search, filters and result navigation
+      ComposerAttachments.tsx the sheet's add-image button and inputs
+      ComposerFooter.tsx the sheet's variant controls and send button
+      ComposerInputTile.tsx one attached image with its remove control
+      ComposerModelSelect.tsx the model picker both sheets share
+      detail-view.ts     the failure line and input URL helpers
+    minimap/
+      MiniMap.tsx        the document silhouettes and the camera's viewport
+      MinimapDragOverlay.tsx the full-canvas capture during a drag
+    search/
+      SearchButton.tsx   floating search entry point
+      SearchPalette.tsx  debounced full-text search, filters and result navigation
+      search-filters.ts  the palette's one type filter definition
   flow/
     document/
       index.ts         the area facade: lifecycle, sessions and loaders

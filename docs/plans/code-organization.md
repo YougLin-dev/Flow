@@ -3,7 +3,8 @@
 - **Status:** Accepted 2026-11-14; Phases 0–2 are implemented and Phase 3 is
   in progress on stacked branches (standard and tooling, shared kernel and
   first reuse, composer shell, AsyncDrain core, connector layer, the eight
-  `flow/` area moves, `components/app`, the canvas world and its overlays).
+  `flow/` area moves, `components/app`, the canvas world and its overlays,
+  the composer, minimap and search areas).
 - **Scope:** `src/` (TSX app) and `src/native/` (Rust document core).
 - **Related:** [standards](../standards.md), [architecture](../architecture.md),
   [conventions](../conventions.md), [testing](../testing.md),
@@ -1836,6 +1837,15 @@ build. `menu-items.ts`
 was not extracted because one view renders every item. The page imports the
 controls it mounts through the canvas facade. `LEGACY_FLAT` is down to 13
 modules.
+
+Phase 3 step 4 moved the remaining composer views (`ComposerInputTile`,
+`ComposerModelSelect`) and the `errorOf`/`inputUrl` view helpers (now
+`composer/detail-view.ts`, retiring the root `flow/composer-detail.ts`) into
+`components/composer`, the minimap into `components/minimap`, and the search
+entry point, palette and the one `SearchFilter` definition (from
+`flow/search-filters.ts`) into `components/search`; the palette's duplicate
+filter type is gone and the page imports the new facades. `LEGACY_FLAT` is
+down to 5 modules.
 
 ---
 
