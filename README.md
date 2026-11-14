@@ -101,6 +101,22 @@ src/                   the NSH app: its root, entry, config and assets
     canvas/
       FlowCanvas.tsx   the canvas: world-space cards and edges, gestures
       port-visuals.ts  the icon and theme token a port type uses everywhere
+      selection/
+        SelectionFrame.tsx   the multi-card selection frame
+        SelectionOverlay.tsx selection borders, resize handles and the marquee
+        SelectionPorts.tsx   the frame's typed group ports
+        selection-visuals.ts its outline and wash
+      editing/
+        InlineTextEditor.tsx the screen-space text editor
+        UploadButton.tsx     the upload card's Upload/Replace pill
+      controls/
+        NodeToolbar.tsx      floating add-node buttons
+        ZoomControls.tsx     zoom in / out / fit
+      feedback/
+        PortTooltip.tsx      the hovered port's bubble
+      context-menu/
+        CanvasContextMenu.tsx the right-click menu
+        CanvasMenuLayer.tsx   its page-mounted popup layer
       world/
         FlowCard.tsx         one card: title, status, body, ports
         FlowEdges.tsx        every connector, stroked as one native-canvas layer
@@ -109,14 +125,10 @@ src/                   the NSH app: its root, entry, config and assets
         Port.tsx             one typed port, drawn as a native view
         ConnectorCanvas.tsx  the native canvas both connector layers share
         connector-layer.ts   its position/size/origin mapping
-    SelectionOverlay.tsx selection borders, resize handles and the marquee
     composer/
       ComposerSheet.tsx  the shared prompt sheet both node kinds mount
       TextComposer.tsx   the text node's prompt, model and counter
       ImageComposer.tsx  the image node's prompt, model and image settings
-    InlineTextEditor.tsx the screen-space text editor
-    NodeToolbar.tsx    floating add-node buttons
-    ZoomControls.tsx   zoom in / out / fit
     SearchButton.tsx   floating search entry point
     SearchPalette.tsx  debounced full-text search, filters and result navigation
   flow/

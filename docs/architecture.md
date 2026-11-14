@@ -265,7 +265,8 @@ small panel and keep dragging; a pointer that leaves the window pauses the
 drag but does not end it. The panel listens with its own `onWheel`, so the
 wheel over it zooms the canvas about the viewport's center.
 
-The canvas context menu (`components/CanvasContextMenu.tsx`) is a native-view
+The canvas context menu (`components/canvas/context-menu/CanvasContextMenu.tsx`)
+is a native-view
 popup anchored at a secondary-button press: on empty canvas it adds a text or
 image card at the pressed world point, on a card it copies or deletes the
 pressed card, on a connector it deletes that connector, and it closes on a

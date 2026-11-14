@@ -202,14 +202,15 @@ card with its typed ports (`components/canvas/world/Port.tsx`),
 `components/canvas/world/FlowEdges.tsx` strokes the viewport's connectors in
 one native canvas and `components/canvas/world/FlowPreviews.tsx` the pulled
 connection previews.
-`components/SelectionPorts.tsx` renders the multi-card frame's group ports
+`components/canvas/selection/SelectionPorts.tsx` renders the multi-card frame's group ports
 from `flow/canvas/model/scene/group-ports.ts`. `flow/canvas/model/scene/scene.ts` is the headless model,
 `flow/canvas/model/scene/scene-ports.ts` answers typed-port hits and capacity queries, and
 `flow/canvas/interaction/canvas-controller.ts` turns pointer events into selection, drag,
 resize, marquee, pan and connector gestures.
 `components/canvas/world/GridBackground.tsx` draws the dot grid in screen
 space.
-`components/CanvasContextMenu.tsx` is the right-click menu: on empty canvas,
+`components/canvas/context-menu/CanvasContextMenu.tsx` is the right-click menu:
+on empty canvas,
 Add text node, Add image node and Add upload node place the card at the
 pressed point; on a card, Edit text opens a text card's body in place,
 Copy node duplicates that card's content and settings beside it and Delete
@@ -230,7 +231,7 @@ scrolls over any part of it reach TSX, which zooms the camera about the
 pointer.
 
 An Upload card has no composer. Its empty body shows the upload icon, label
-and format hint, and `components/UploadButton.tsx` renders its native
+and format hint, and `components/canvas/editing/UploadButton.tsx` renders its native
 Upload/Replace pill, icon included, in the canvas's world-point controls
 layer above the pointer surface, so the button scales with the camera and
 stays where the card's bottom-right corner is. The layer is `box-none`: its own area passes

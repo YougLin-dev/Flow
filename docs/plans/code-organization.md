@@ -3,7 +3,7 @@
 - **Status:** Accepted 2026-11-14; Phases 0–2 are implemented and Phase 3 is
   in progress on stacked branches (standard and tooling, shared kernel and
   first reuse, composer shell, AsyncDrain core, connector layer, the eight
-  `flow/` area moves, `components/app`, the canvas world).
+  `flow/` area moves, `components/app`, the canvas world and its overlays).
 - **Scope:** `src/` (TSX app) and `src/native/` (Rust document core).
 - **Related:** [standards](../standards.md), [architecture](../architecture.md),
   [conventions](../conventions.md), [testing](../testing.md),
@@ -1818,9 +1818,19 @@ facade. `LEGACY_FLAT` is down to 29 modules.
 Phase 3 step 2 moved `FlowCanvas` to `components/canvas` and its world views
 (`FlowCard`, `FlowEdges`, `FlowPreviews`, `GridBackground`, `Port`) to
 `components/canvas/world`; the page imports the canvas facade. `SelectionPorts`
-reaches `Port` and `PortTooltip` reaches `port-visuals` through same-feature
-deep imports until step 3 moves them into `canvas/selection`/`canvas/feedback`.
-No module split or behavior change was made. `LEGACY_FLAT` is down to 23
+reaches `Port` and `PortTooltip` reaches `port-visuals` through temporary deep
+imports within the canvas feature until step 3 moves them into
+`canvas/selection`/`canvas/feedback`. No module split or behavior change was
+made. `LEGACY_FLAT` is down to 23 modules.
+
+Phase 3 step 3 moved the selection surfaces (`SelectionFrame`,
+`SelectionOverlay`, `SelectionPorts`) to `canvas/selection`, the inline editor
+and upload button to `canvas/editing`, the node toolbar and zoom controls to
+`canvas/controls`, the port tooltip to `canvas/feedback` and the context menu
+to `canvas/context-menu`. The outline-and-wash classes the frame and the
+marquee shared became `selection/selection-visuals.ts`; `menu-items.ts` was
+not extracted because one view renders every item. The page imports the
+controls it mounts through the canvas facade. `LEGACY_FLAT` is down to 13
 modules.
 
 ---
