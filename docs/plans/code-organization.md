@@ -1830,7 +1830,9 @@ zoom controls to `canvas/controls`, the port tooltip to `canvas/feedback` and
 the context menu to `canvas/context-menu`. The outline-and-wash classes the
 frame and the marquee shared became `selection/selection-visuals.ts`; as with
 the existing `PANEL` constants, the class strings are no longer statically
-checked by the bundler, so the mounted app tests are the guard. `menu-items.ts`
+checked by the bundler: the mounted app tests still exercise the selection
+surfaces, but a misspelled class would change styling without failing the
+build. `menu-items.ts`
 was not extracted because one view renders every item. The page imports the
 controls it mounts through the canvas facade. `LEGACY_FLAT` is down to 13
 modules.
