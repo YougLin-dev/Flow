@@ -7,11 +7,9 @@
  *   store                may use shared types and foundations
  *   foundation           may use foundations only (flow/, lib/, tool.ts)
  *
- * The layer rule is always on. The area rules (`deep-cross-feature`,
+ * The layer rule and every area rule (`deep-cross-feature`,
  * `forbidden-area`, `segment-direction`, `native-outside-seam`,
- * `unclassified-source`) are defined now but report only after Phase 5 flips
- * `ENFORCEMENT` in `structure-map.js`; `test-support-in-production` is live
- * from Phase 0 so the test seam never becomes a hole.
+ * `unclassified-source`, `test-support-in-production`) are always on.
  *
  * Loaded by `vite.config.ts` (`lint.jsPlugins`).
  */
@@ -20,8 +18,6 @@ import { definePlugin, defineRule } from "vite-plus/lint/plugins";
 import { resolveProjectImport, toProjectPath } from "./import-resolver.js";
 import {
   AREAS,
-  ENFORCEMENT,
-  LEGACY_FLAT,
   areaOf,
   canImport,
   canImportArea,
@@ -139,7 +135,6 @@ const deepCrossFeature = defineRule({
     },
   },
   create(context) {
-    if (!ENFORCEMENT.areas) return {};
     return forEachImport(context, ({ node, specifier, target, file }) => {
       if (!isAreaChecked(file)) return;
       const sourceArea = areaOf(file);
@@ -163,7 +158,6 @@ const forbiddenArea = defineRule({
     },
   },
   create(context) {
-    if (!ENFORCEMENT.areas) return {};
     return forEachImport(context, ({ node, specifier, target, file }) => {
       if (!isAreaChecked(file)) return;
       const sourceArea = areaOf(file);
@@ -191,7 +185,6 @@ const segmentDirection = defineRule({
     },
   },
   create(context) {
-    if (!ENFORCEMENT.areas) return {};
     return forEachImport(context, ({ node, target, file }) => {
       if (!isAreaChecked(file)) return;
       const sourceArea = areaOf(file);
@@ -271,7 +264,6 @@ const nativeOutsideSeam = defineRule({
     },
   },
   create(context) {
-    if (!ENFORCEMENT.nativeSeam) return {};
     const check = (node) => {
       const specifier = sourceOf(node);
       if (specifier !== "@flow/native") return;
@@ -295,19 +287,16 @@ const unclassifiedSource = defineRule({
   meta: {
     type: "problem",
     docs: {
-      description: "Every app module is classified as an area or an allow-listed legacy file.",
+      description: "Every app module is classified as an area.",
     },
     messages: {
-      unclassified:
-        "{{file}} is not an area or an allow-listed legacy flat module; move it into an area.",
+      unclassified: "{{file}} is not an area; move it into one.",
     },
   },
   create(context) {
-    if (!ENFORCEMENT.unclassified) return {};
     const file = toProjectPath(context.cwd, context.filename);
     if (!file.startsWith("src/") || !isAreaChecked(file)) return {};
     if (areaOf(file) !== null) return {};
-    if (LEGACY_FLAT.has(file)) return {};
     if (layerOf(file) === "asset") return {};
     if (file === "src/App.tsx" || file === "src/store.ts") return {};
     return {

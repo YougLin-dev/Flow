@@ -1,11 +1,10 @@
 #!/usr/bin/env bun
 /**
- * Phase 0 structure report. It reads `lint/structure-map.js` and checks the
- * shape of `src/` without touching files.
- *
- * Fails today only on a new module at the components/flow/pages root and on
- * production code importing test support. Every other finding is reported;
- * Phase 5 flips `ENFORCEMENT` and makes the area rules fail too.
+ * The structure gate. It reads `lint/structure-map.js` and checks the shape
+ * of `src/` without touching files: root modules, missing facades, forbidden
+ * folders, area/segment imports, the native seam and unclassified modules all
+ * fail `bun run check`. The area budget reports above 12 direct entries and
+ * fails above 20.
  */
 import { readdirSync, readFileSync, statSync } from "node:fs";
 import { join, relative, resolve, sep } from "node:path";
@@ -13,9 +12,7 @@ import { resolveProjectImport } from "../lint/import-resolver.js";
 import {
   AREAS,
   AREA_BUDGET,
-  ENFORCEMENT,
   FORBIDDEN_FOLDERS,
-  LEGACY_FLAT,
   STRUCTURE_EXCEPTIONS,
   areaOf,
   canImportArea,
@@ -84,9 +81,7 @@ export function resolveImport(root, fromFile, specifier) {
 
 function isDirectRootModule(file, rootDirectory) {
   const parts = file.split("/");
-  return (
-    parts.length === 3 && parts[1] === rootDirectory && !isTestFile(file) && !LEGACY_FLAT.has(file)
-  );
+  return parts.length === 3 && parts[1] === rootDirectory && !isTestFile(file);
 }
 
 /** A new app module directly under components/, flow/ or pages/. */
@@ -179,20 +174,13 @@ export function checkTestSupportImports(root, files) {
   return failures;
 }
 
-/** Legacy allow-list entries whose file is gone; the list must shrink. */
-export function checkLegacyAllowList(files) {
-  return [...LEGACY_FLAT]
-    .filter((file) => !files.includes(file))
-    .map((file) => `stale legacy allow-list entry: ${file}`);
-}
-
-/** Unclassified app modules outside the legacy allow-list. */
+/** Unclassified app modules: every production module must belong to an area. */
 export function checkUnclassified(files) {
   const reports = [];
   for (const file of files) {
     if (!isProductionFile(file) || !file.startsWith("src/")) continue;
     if (file === "src/App.tsx" || file === "src/store.ts") continue;
-    if (areaOf(file) !== null || LEGACY_FLAT.has(file)) continue;
+    if (areaOf(file) !== null) continue;
     reports.push(`unclassified module: ${file}`);
   }
   return reports;
@@ -230,9 +218,8 @@ export function checkRustLayout(root) {
 }
 
 /**
- * Import-level area findings for the report. The lint plugin enforces the
- * same rules; this walk keeps `check:structure` honest while the plugin's
- * area rules are report-only.
+ * Import-level area findings. The lint plugin enforces the same rules; this
+ * walk keeps `check:structure` honest independently of the lint run.
  */
 export function checkAreaImports(root, files) {
   const areaReports = [];
@@ -303,47 +290,29 @@ export function checkAreaImports(root, files) {
   return { areaReports, nativeReports };
 }
 
-/** The whole Phase 0 report; Phase 5 moves the area findings into failures. */
+/** The whole structure gate. Budget reports stay advisory; the Rust layout waits for Phase 6. */
 export function runStructureCheck(root) {
   const files = collectSourceFiles(root);
   const budget = checkBudget(root);
-  const facades = checkFacades(root, files);
-  const forbidden = checkForbiddenFolders(files);
-  const unclassified = checkUnclassified(files);
   const imports = checkAreaImports(root, files);
-  const legacy = checkLegacyAllowList(files);
   const failures = [
     ...checkRootModules(files),
     ...checkTestSupportImports(root, files),
-    ...(ENFORCEMENT.areas ? facades : []),
-    ...(ENFORCEMENT.areas ? forbidden : []),
-    ...(ENFORCEMENT.areas ? budget.failures : []),
-    ...(ENFORCEMENT.areas ? imports.areaReports : []),
-    ...(ENFORCEMENT.nativeSeam ? imports.nativeReports : []),
-    ...(ENFORCEMENT.areas ? legacy : []),
-    ...(ENFORCEMENT.unclassified ? unclassified : []),
+    ...checkFacades(root, files),
+    ...checkForbiddenFolders(files),
+    ...budget.failures,
+    ...imports.areaReports,
+    ...imports.nativeReports,
+    ...checkUnclassified(files),
   ];
-  const reports = [
-    ...(ENFORCEMENT.areas ? [] : facades),
-    ...(ENFORCEMENT.areas ? [] : forbidden),
-    ...budget.reports,
-    ...(ENFORCEMENT.areas ? [] : budget.failures),
-    ...(ENFORCEMENT.areas ? [] : imports.areaReports),
-    ...(ENFORCEMENT.nativeSeam ? [] : imports.nativeReports),
-    ...(ENFORCEMENT.areas ? [] : legacy),
-    ...(ENFORCEMENT.unclassified ? [] : unclassified),
-    ...checkRustLayout(root),
-  ];
+  const reports = [...budget.reports, ...checkRustLayout(root)];
   return { files, failures, reports };
 }
 
 function main() {
   const root = resolve(process.cwd());
   const { files, failures, reports } = runStructureCheck(root);
-  const legacy = files.filter((file) => LEGACY_FLAT.has(file)).length;
-  console.log(
-    `structure: ${files.length} source files, ${legacy} legacy flat modules, ${Object.keys(AREAS).length} areas`,
-  );
+  console.log(`structure: ${files.length} source files, ${Object.keys(AREAS).length} areas`);
   for (const report of reports) console.log(`report: ${report}`);
   for (const failure of failures) console.error(`fail: ${failure}`);
   if (failures.length > 0) {

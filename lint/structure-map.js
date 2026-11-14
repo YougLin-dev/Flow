@@ -10,17 +10,10 @@
  * segment is one of the reserved subfolders `geometry`, `model`,
  * `interaction`, `test`; any other subfolder is a part folder.
  *
- * Phase 0 runs the area rules in report-only mode. `ENFORCEMENT` is flipped
- * in Phase 5; the legacy flat files stay allow-listed only until their area
- * move lands.
+ * Every rule is enforced: a module outside an area, a root module, a
+ * forbidden folder, a cross-area import that skips a facade or a native
+ * import outside the seam fails the gate.
  */
-
-/** Which structure rules fail today. Phase 5 turns all of them on. */
-export const ENFORCEMENT = {
-  areas: false,
-  nativeSeam: false,
-  unclassified: false,
-};
 
 export const PAGE_AREA = "pages/flow";
 export const SHELL_AREA = "shell";
@@ -173,13 +166,6 @@ export const TEST_SUPPORT_FILES = new Set([
   "src/test-support/app.ts",
 ]);
 
-/**
- * Today's flat modules at the components/flow/pages roots. They are the only
- * root modules allowed during the migration; any other root file fails. The
- * list shrinks with every move PR and disappears in Phase 5.
- */
-export const LEGACY_FLAT = new Set();
-
 /** The layer graph `no-upward-import` enforces. Tests may reach everywhere. */
 export const LAYERS = {
   shell: new Set(["shell", "page", "component", "store", "foundation", "asset"]),
@@ -247,11 +233,8 @@ export function canImport(section, targetLayer) {
 
 const AREA_NAMES = Object.keys(AREAS).toSorted((first, second) => second.length - first.length);
 
-/** The area a file belongs to, or null for a legacy/unclassified file. */
+/** The area a file belongs to, or null for an unclassified file. */
 export function areaOf(file) {
-  // A legacy flat module stays unclassified until its own move lands, even
-  // when an area of a related name already exists.
-  if (LEGACY_FLAT.has(file.replace(/\\/g, "/").replace(/^\.\//, ""))) return null;
   const path = projectPath(file);
   if (path === "App") return "shell";
   for (const area of AREA_NAMES) {

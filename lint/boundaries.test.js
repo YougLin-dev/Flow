@@ -10,15 +10,7 @@ import {
   testSupportInProduction,
   unclassifiedSource,
 } from "./boundaries";
-import {
-  ENFORCEMENT,
-  LEGACY_FLAT,
-  areaOf,
-  canImport,
-  isFacade,
-  layerOf,
-  segmentOf,
-} from "./structure-map";
+import { areaOf, canImport, isFacade, layerOf, segmentOf } from "./structure-map";
 import { withTree } from "./test-tree";
 
 const cwd = process.cwd();
@@ -38,19 +30,6 @@ function reportsForRule(rule, relativeFile, source, root = cwd, visitor = "Impor
 
 function reportsFor(relativeFile, source) {
   return reportsForRule(noUpwardImport, relativeFile, source);
-}
-
-/** Turns the Phase 5 area rules on only for one test. */
-function withAreas(run) {
-  const previous = { ...ENFORCEMENT };
-  ENFORCEMENT.areas = true;
-  ENFORCEMENT.nativeSeam = true;
-  ENFORCEMENT.unclassified = true;
-  try {
-    return run();
-  } finally {
-    Object.assign(ENFORCEMENT, previous);
-  }
 }
 
 const areaTree = {
@@ -154,18 +133,6 @@ test("classifies files and bare directory imports", () => {
   expect(isFacade("src/App.tsx")).toBe(true);
 });
 
-test("keeps a legacy path unclassified even when it shares an area name", () => {
-  // No real module collides with an area after the Phase 2 moves; insert one
-  // for the duration of the check so the allow-list precedence stays covered.
-  const path = "src/flow/canvas.ts";
-  LEGACY_FLAT.add(path);
-  try {
-    expect(areaOf(path)).toBeNull();
-  } finally {
-    LEGACY_FLAT.delete(path);
-  }
-});
-
 test("resolves exact files, extensions and directory indexes", () => {
   withTree(areaTree, (root) => {
     const from = join(root, "src/components/canvas/world/Card.tsx");
@@ -196,175 +163,167 @@ test("reports upward, unknown and unclassified imports", () => {
 });
 
 test("reports a deep cross-area import but allows facades and same-feature deep imports", () => {
-  withTree(areaTree, (root) =>
-    withAreas(() => {
-      const deep = reportsForRule(
-        deepCrossFeature,
-        "src/flow/document/session/session.ts",
-        "../../canvas/model/camera",
-        root,
-      );
-      expect(deep.map((report) => report.messageId)).toEqual(["deep"]);
+  withTree(areaTree, (root) => {
+    const deep = reportsForRule(
+      deepCrossFeature,
+      "src/flow/document/session/session.ts",
+      "../../canvas/model/camera",
+      root,
+    );
+    expect(deep.map((report) => report.messageId)).toEqual(["deep"]);
 
-      const facade = reportsForRule(
-        deepCrossFeature,
-        "src/flow/document/session/session.ts",
-        "../../canvas",
-        root,
-      );
-      expect(facade).toEqual([]);
+    const facade = reportsForRule(
+      deepCrossFeature,
+      "src/flow/document/session/session.ts",
+      "../../canvas",
+      root,
+    );
+    expect(facade).toEqual([]);
 
-      const sameFeature = reportsForRule(
-        deepCrossFeature,
-        "src/components/canvas/world/Card.tsx",
-        "../../../flow/canvas/model/camera",
-        root,
-      );
-      expect(sameFeature).toEqual([]);
+    const sameFeature = reportsForRule(
+      deepCrossFeature,
+      "src/components/canvas/world/Card.tsx",
+      "../../../flow/canvas/model/camera",
+      root,
+    );
+    expect(sameFeature).toEqual([]);
 
-      const page = reportsForRule(
-        deepCrossFeature,
-        "src/pages/flow/FlowPage.tsx",
-        "../../flow/canvas/model/camera",
-        root,
-      );
-      expect(page).toEqual([]);
-    }),
-  );
+    const page = reportsForRule(
+      deepCrossFeature,
+      "src/pages/flow/FlowPage.tsx",
+      "../../flow/canvas/model/camera",
+      root,
+    );
+    expect(page).toEqual([]);
+  });
 });
 
 test("reports an area pair missing from the matrix", () => {
-  withTree(areaTree, (root) =>
-    withAreas(() => {
-      const reports = reportsForRule(
+  withTree(areaTree, (root) => {
+    const reports = reportsForRule(
+      forbiddenArea,
+      "src/components/search/SearchPalette.tsx",
+      "../../flow/canvas",
+      root,
+    );
+    expect(reports.map((report) => report.messageId)).toEqual(["forbidden"]);
+
+    expect(
+      reportsForRule(
         forbiddenArea,
-        "src/components/search/SearchPalette.tsx",
+        "src/components/probes/ImageLoadProbe.tsx",
+        "../../pages/flow",
+        root,
+      ).map((report) => report.messageId),
+    ).toEqual(["forbidden"]);
+    expect(
+      reportsForRule(
+        forbiddenArea,
+        "src/components/probes/ImageLoadProbe.tsx",
         "../../flow/canvas",
         root,
-      );
-      expect(reports.map((report) => report.messageId)).toEqual(["forbidden"]);
-
-      expect(
-        reportsForRule(
-          forbiddenArea,
-          "src/components/probes/ImageLoadProbe.tsx",
-          "../../pages/flow",
-          root,
-        ).map((report) => report.messageId),
-      ).toEqual(["forbidden"]);
-      expect(
-        reportsForRule(
-          forbiddenArea,
-          "src/components/probes/ImageLoadProbe.tsx",
-          "../../flow/canvas",
-          root,
-        ),
-      ).toEqual([]);
-    }),
-  );
+      ),
+    ).toEqual([]);
+  });
 });
 
 test("enforces the shell and allowed-area rows", () => {
-  withTree(areaTree, (root) =>
-    withAreas(() => {
-      expect(
-        reportsForRule(forbiddenArea, "src/App.tsx", "./components/search", root).map(
-          (report) => report.messageId,
-        ),
-      ).toEqual(["forbidden"]);
-      expect(reportsForRule(forbiddenArea, "src/App.tsx", "./pages/flow", root)).toEqual([]);
-      expect(
-        reportsForRule(
-          forbiddenArea,
-          "src/components/canvas/world/Card.tsx",
-          "../../../flow/canvas",
-          root,
-        ),
-      ).toEqual([]);
-    }),
-  );
+  withTree(areaTree, (root) => {
+    expect(
+      reportsForRule(forbiddenArea, "src/App.tsx", "./components/search", root).map(
+        (report) => report.messageId,
+      ),
+    ).toEqual(["forbidden"]);
+    expect(reportsForRule(forbiddenArea, "src/App.tsx", "./pages/flow", root)).toEqual([]);
+    expect(
+      reportsForRule(
+        forbiddenArea,
+        "src/components/canvas/world/Card.tsx",
+        "../../../flow/canvas",
+        root,
+      ),
+    ).toEqual([]);
+  });
 });
 
 test("keeps geometry pure and model/interaction view-free", () => {
-  withTree(areaTree, (root) =>
-    withAreas(() => {
-      expect(
-        reportsForRule(
-          segmentDirection,
-          "src/flow/canvas/geometry/connection.ts",
-          "../model/camera",
-          root,
-        ).map((report) => report.messageId),
-      ).toEqual(["segment"]);
+  withTree(areaTree, (root) => {
+    expect(
+      reportsForRule(
+        segmentDirection,
+        "src/flow/canvas/geometry/connection.ts",
+        "../model/camera",
+        root,
+      ).map((report) => report.messageId),
+    ).toEqual(["segment"]);
 
-      expect(
-        reportsForRule(
-          segmentDirection,
-          "src/flow/canvas/model/scene/scene.ts",
-          "../../interaction/canvas-controller",
-          root,
-        ).map((report) => report.messageId),
-      ).toEqual(["segment"]);
+    expect(
+      reportsForRule(
+        segmentDirection,
+        "src/flow/canvas/model/scene/scene.ts",
+        "../../interaction/canvas-controller",
+        root,
+      ).map((report) => report.messageId),
+    ).toEqual(["segment"]);
 
-      expect(
-        reportsForRule(
-          segmentDirection,
-          "src/flow/canvas/model/scene/scene.ts",
-          "../../../shared",
-          root,
-        ),
-      ).toEqual([]);
+    expect(
+      reportsForRule(
+        segmentDirection,
+        "src/flow/canvas/model/scene/scene.ts",
+        "../../../shared",
+        root,
+      ),
+    ).toEqual([]);
 
-      expect(
-        reportsForRule(
-          segmentDirection,
-          "src/flow/canvas/geometry/connection.ts",
-          "../../nodes/node-kinds",
-          root,
-        ).map((report) => report.messageId),
-      ).toEqual(["segment"]);
+    expect(
+      reportsForRule(
+        segmentDirection,
+        "src/flow/canvas/geometry/connection.ts",
+        "../../nodes/node-kinds",
+        root,
+      ).map((report) => report.messageId),
+    ).toEqual(["segment"]);
 
-      expect(
-        reportsForRule(
-          segmentDirection,
-          "src/flow/canvas/geometry/connection.ts",
-          "../port-visuals",
-          root,
-        ).map((report) => report.messageId),
-      ).toEqual(["segment"]);
+    expect(
+      reportsForRule(
+        segmentDirection,
+        "src/flow/canvas/geometry/connection.ts",
+        "../port-visuals",
+        root,
+      ).map((report) => report.messageId),
+    ).toEqual(["segment"]);
 
-      expect(
-        reportsForRule(
-          segmentDirection,
-          "src/flow/canvas/geometry/connection.ts",
-          "./edge-clip",
-          root,
-        ),
-      ).toEqual([]);
+    expect(
+      reportsForRule(
+        segmentDirection,
+        "src/flow/canvas/geometry/connection.ts",
+        "./edge-clip",
+        root,
+      ),
+    ).toEqual([]);
 
-      expect(
-        reportsForRule(
-          forbiddenArea,
-          "src/flow/canvas/interaction/canvas-controller.ts",
-          "../../document",
-          root,
-        ).map((report) => report.messageId),
-      ).toEqual(["forbidden"]);
+    expect(
+      reportsForRule(
+        forbiddenArea,
+        "src/flow/canvas/interaction/canvas-controller.ts",
+        "../../document",
+        root,
+      ).map((report) => report.messageId),
+    ).toEqual(["forbidden"]);
 
-      expect(
-        reportsForRule(segmentDirection, "src/flow/document/model/x.ts", "../session/y", root),
-      ).toEqual([]);
+    expect(
+      reportsForRule(segmentDirection, "src/flow/document/model/x.ts", "../session/y", root),
+    ).toEqual([]);
 
-      expect(
-        reportsForRule(
-          segmentDirection,
-          "src/flow/document/interaction/controller.ts",
-          "../session/y",
-          root,
-        ),
-      ).toEqual([]);
-    }),
-  );
+    expect(
+      reportsForRule(
+        segmentDirection,
+        "src/flow/document/interaction/controller.ts",
+        "../session/y",
+        root,
+      ),
+    ).toEqual([]);
+  });
 });
 
 test("reports production imports of test support", () => {
@@ -399,88 +358,66 @@ test("reports production imports of test support", () => {
 });
 
 test("confines the native module to flow/document and the type seam", () => {
-  withTree(areaTree, (root) =>
-    withAreas(() => {
-      expect(
-        reportsForRule(
-          nativeOutsideSeam,
-          "src/components/canvas/world/FlowCard.tsx",
-          "@flow/native",
-          root,
-        ),
-      ).toHaveLength(1);
-      expect(
-        reportsForRule(
-          nativeOutsideSeam,
-          "src/components/canvas/world/FlowCard.tsx",
-          "@flow/native",
-          root,
-          "ExportNamedDeclaration",
-        ),
-      ).toHaveLength(1);
-      expect(
-        reportsForRule(
-          nativeOutsideSeam,
-          "src/components/canvas/world/FlowCard.tsx",
-          "@flow/native",
-          root,
-          "ImportExpression",
-        ),
-      ).toHaveLength(1);
-      expect(
-        reportsForRule(
-          nativeOutsideSeam,
-          "src/flow/document/session/session.ts",
-          "@flow/native",
-          root,
-        ),
-      ).toEqual([]);
-      expect(
-        reportsForRule(nativeOutsideSeam, "src/flow/shared/native-types.ts", "@flow/native", root),
-      ).toEqual([]);
-    }),
-  );
+  withTree(areaTree, (root) => {
+    expect(
+      reportsForRule(
+        nativeOutsideSeam,
+        "src/components/canvas/world/FlowCard.tsx",
+        "@flow/native",
+        root,
+      ),
+    ).toHaveLength(1);
+    expect(
+      reportsForRule(
+        nativeOutsideSeam,
+        "src/components/canvas/world/FlowCard.tsx",
+        "@flow/native",
+        root,
+        "ExportNamedDeclaration",
+      ),
+    ).toHaveLength(1);
+    expect(
+      reportsForRule(
+        nativeOutsideSeam,
+        "src/components/canvas/world/FlowCard.tsx",
+        "@flow/native",
+        root,
+        "ImportExpression",
+      ),
+    ).toHaveLength(1);
+    expect(
+      reportsForRule(
+        nativeOutsideSeam,
+        "src/flow/document/session/session.ts",
+        "@flow/native",
+        root,
+      ),
+    ).toEqual([]);
+    expect(
+      reportsForRule(nativeOutsideSeam, "src/flow/shared/native-types.ts", "@flow/native", root),
+    ).toEqual([]);
+  });
 });
 
-test("reports an unclassified source module but keeps the legacy allow-list", () => {
-  withTree(areaTree, (root) =>
-    withAreas(() => {
-      const reports = [];
-      const context = {
-        cwd: root,
-        filename: join(root, "src/widgets/Widget.ts"),
-        report: (report) => reports.push(report),
-      };
-      const visitors = unclassifiedSource.create(context);
-      visitors.Program({});
-      expect(reports.map((report) => report.messageId)).toEqual(["unclassified"]);
+test("reports an unclassified source module", () => {
+  withTree(areaTree, (root) => {
+    const reports = [];
+    const context = {
+      cwd: root,
+      filename: join(root, "src/widgets/Widget.ts"),
+      report: (report) => reports.push(report),
+    };
+    const visitors = unclassifiedSource.create(context);
+    visitors.Program({});
+    expect(reports.map((report) => report.messageId)).toEqual(["unclassified"]);
 
-      // The allow-list is empty after the page move; a synthetic entry keeps
-      // the exemption path covered.
-      const legacyPath = "src/flow/legacy-module.ts";
-      LEGACY_FLAT.add(legacyPath);
-      try {
-        const legacy = [];
-        const legacyContext = {
-          cwd,
-          filename: join(cwd, legacyPath),
-          report: (report) => legacy.push(report),
-        };
-        const legacyVisitors = unclassifiedSource.create(legacyContext);
-        legacyVisitors.Program?.({});
-        expect(legacy).toEqual([]);
-      } finally {
-        LEGACY_FLAT.delete(legacyPath);
-      }
-
-      const rootIndex = [];
-      const rootIndexContext = {
-        cwd: root,
-        filename: join(root, "src/components/index.ts"),
-        report: (report) => rootIndex.push(report),
-      };
-      unclassifiedSource.create(rootIndexContext).Program({});
-      expect(rootIndex.map((report) => report.messageId)).toEqual(["unclassified"]);
-    }),
-  );
+    const rootIndex = [];
+    const rootIndexContext = {
+      cwd: root,
+      filename: join(root, "src/components/index.ts"),
+      report: (report) => rootIndex.push(report),
+    };
+    unclassifiedSource.create(rootIndexContext).Program({});
+    expect(rootIndex.map((report) => report.messageId)).toEqual(["unclassified"]);
+  });
 });
