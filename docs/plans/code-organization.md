@@ -1,10 +1,10 @@
 # Code organization and architecture standard
 
-- **Status:** Accepted 2026-11-14; Phases 0–2 are implemented and Phase 3 is
-  in progress on stacked branches (standard and tooling, shared kernel and
-  first reuse, composer shell, AsyncDrain core, connector layer, the eight
-  `flow/` area moves, `components/app`, the canvas world and its overlays,
-  the composer, minimap and search areas, the probes).
+- **Status:** Accepted 2026-11-14; Phases 0–3 are implemented and Phase 4 is
+  next on stacked branches (standard and tooling, shared kernel and first
+  reuse, composer shell, AsyncDrain core, connector layer, the eight `flow/`
+  area moves, `components/app`, the canvas world and its overlays, the
+  composer, minimap and search areas, the probes).
 - **Scope:** `src/` (TSX app) and `src/native/` (Rust document core).
 - **Related:** [standards](../standards.md), [architecture](../architecture.md),
   [conventions](../conventions.md), [testing](../testing.md),
@@ -1853,6 +1853,15 @@ the `ImageLoadProbe`/`imageProbeText` and `ZoomProbe` test views out of
 facade; the canvas facade no longer exports probes, and `FlowCard` keeps only
 the optional `imageEvent` observation seam. `LEGACY_FLAT` is down to 4
 modules.
+
+Phase 3 exit: §11 items 1, 2, 5, 6 and 7 are complete; the two optional items
+are not taken. FlowCard parts (item 3) stay in one module because the split is
+a refactor of the card's accessor props, not a move, and those accessors are
+load-bearing for drag/resize invalidation (§13); `canvas-input.ts` (item 4)
+stays unextracted because the touch state must live on the mounted view
+(recorded under Phase 2 step 4). The page imports the area facades for every
+moved component; `bun run test:host` passes 14/14. `LEGACY_FLAT` holds only
+the page and its three `flow/` helpers, which Phase 4 moves.
 
 ---
 
