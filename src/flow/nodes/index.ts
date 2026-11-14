@@ -1,4 +1,8 @@
-/** The nodes area facade: the node kinds, their ports and settings. */
+/**
+ * The nodes area facade: the node kinds, their ports and settings, and the
+ * model catalogs. The registry is a leaf module; this surface has no runtime
+ * dependencies of its own.
+ */
 export {
   canConnectPorts,
   DEFAULT_IMAGE_MODEL,
@@ -10,12 +14,9 @@ export {
   IMAGE_RESOLUTIONS,
   imageModelLabel,
   isImageModel,
-  isKnownKind,
-  isMediaKind,
   isPortKind,
   isRunnableKind,
   isTextModel,
-  MEDIA_KINDS,
   nodeKind,
   parseSettings,
   PORT_KINDS,
@@ -32,14 +33,10 @@ export type {
   ImageResolution,
   ImageSettings,
   InputPort,
-  MediaKind,
-  NodeKind,
   NodeKindId,
-  NodePorts,
   NodeSettings,
   OutputPort,
   PortKind,
-  PortSchemaSource,
   TextModelId,
   TextSettings,
   UploadSettings,
