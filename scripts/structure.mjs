@@ -20,7 +20,6 @@ import {
   areaOf,
   canImportArea,
   isFacadeOf,
-  isLayerIndex,
   isProductionFile,
   isSameFeatureDeep,
   isTestFile,
@@ -84,12 +83,7 @@ export function resolveImport(root, fromFile, specifier) {
 function isDirectRootModule(file, rootDirectory) {
   const parts = file.split("/");
   return (
-    parts.length === 3 &&
-    parts[1] === rootDirectory &&
-    parts[2] !== "index.ts" &&
-    parts[2] !== "index.tsx" &&
-    !isTestFile(file) &&
-    !LEGACY_FLAT.has(file)
+    parts.length === 3 && parts[1] === rootDirectory && !isTestFile(file) && !LEGACY_FLAT.has(file)
   );
 }
 
@@ -196,7 +190,7 @@ export function checkUnclassified(files) {
   for (const file of files) {
     if (!isProductionFile(file) || !file.startsWith("src/")) continue;
     if (file === "src/App.tsx" || file === "src/store.ts") continue;
-    if (areaOf(file) !== null || LEGACY_FLAT.has(file) || isLayerIndex(file)) continue;
+    if (areaOf(file) !== null || LEGACY_FLAT.has(file)) continue;
     reports.push(`unclassified module: ${file}`);
   }
   return reports;
@@ -286,7 +280,9 @@ export function checkAreaImports(root, files) {
           (targetArea !== sourceArea && targetArea === "flow/document") ||
           targetLayer === "component";
       } else if (sourceSegment === "interaction") {
-        violation = targetLayer === "component" || targetArea === "flow/document";
+        violation =
+          targetLayer === "component" ||
+          (targetArea !== sourceArea && targetArea === "flow/document");
       }
       if (violation) {
         areaReports.push(`${file} (${sourceSegment}) may not import ${target}`);

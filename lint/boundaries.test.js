@@ -58,6 +58,7 @@ const areaTree = {
   "src/flow/document/session/harness.ts": "",
   "src/flow/document/session/y.ts": "",
   "src/flow/document/model/x.ts": "",
+  "src/flow/document/interaction/controller.ts": "",
   "src/flow/document/test/helper.ts": "",
   "src/app-test-harness.ts": "",
   "src/flow/nodes/index.ts": "",
@@ -126,6 +127,9 @@ test("classifies files and bare directory imports", () => {
   expect(areaOf("src/flow/canvas/model/scene/scene.ts")).toBe("flow/canvas");
   expect(areaOf("src/flow/canvas")).toBe("flow/canvas");
   expect(areaOf("src/flow/scene.ts")).toBeNull();
+  expect(areaOf("src/flow/minimap.ts")).toBeNull();
+  expect(areaOf("src/flow/execution.ts")).toBeNull();
+  expect(areaOf("src/flow/minimap/index.ts")).toBe("flow/minimap");
   expect(areaOf("src/components/canvas/world/Card.tsx")).toBe("components/canvas");
   expect(areaOf("src/components/FlowCard.tsx")).toBeNull();
   expect(areaOf("src/pages/flow/FlowPage.tsx")).toBe("pages/flow");
@@ -308,6 +312,15 @@ test("keeps geometry pure and model/interaction view-free", () => {
       expect(
         reportsForRule(segmentDirection, "src/flow/document/model/x.ts", "../session/y", root),
       ).toEqual([]);
+
+      expect(
+        reportsForRule(
+          segmentDirection,
+          "src/flow/document/interaction/controller.ts",
+          "../session/y",
+          root,
+        ),
+      ).toEqual([]);
     }),
   );
 });
@@ -404,6 +417,15 @@ test("reports an unclassified source module but keeps the legacy allow-list", ()
       const legacyVisitors = unclassifiedSource.create(legacyContext);
       legacyVisitors.Program?.({});
       expect(legacy).toEqual([]);
+
+      const rootIndex = [];
+      const rootIndexContext = {
+        cwd: root,
+        filename: join(root, "src/components/index.ts"),
+        report: (report) => rootIndex.push(report),
+      };
+      unclassifiedSource.create(rootIndexContext).Program({});
+      expect(rootIndex.map((report) => report.messageId)).toEqual(["unclassified"]);
     }),
   );
 });

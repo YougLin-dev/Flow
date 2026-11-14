@@ -303,12 +303,6 @@ export function isTestSupportTarget(file) {
   return isTestFile(file) || isTestSupportPath(file);
 }
 
-/** A layer-level index, which is allowed at a layer root during the migration. */
-export function isLayerIndex(file) {
-  const path = projectPath(file);
-  return path === "components/index" || path === "flow/index" || path === "pages/index";
-}
-
 /** The layer of a project file, from its path relative to the repository. */
 export function layerOf(file) {
   if (isTestFile(file) || isTestSupportPath(file)) return "test";
@@ -339,6 +333,9 @@ const AREA_NAMES = Object.keys(AREAS).toSorted((first, second) => second.length 
 
 /** The area a file belongs to, or null for a legacy/unclassified file. */
 export function areaOf(file) {
+  // A legacy flat module can share a name with a target area (`flow/minimap.ts`
+  // vs `flow/minimap/`); it stays unclassified until its own move lands.
+  if (LEGACY_FLAT.has(file.replace(/\\/g, "/").replace(/^\.\//, ""))) return null;
   const path = projectPath(file);
   if (path === "App") return "shell";
   for (const area of AREA_NAMES) {

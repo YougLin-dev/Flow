@@ -25,7 +25,12 @@ const tree = {
   "src/flow/fixtures/c.ts": "",
   "src/flow/fixtures/type-a.ts": "",
   "src/flow/fixtures/type-b.ts": "",
+  "src/flow/fixtures/duplicate.ts": 'import "./a";\nimport "./a";',
   "src/flow/new.ts": "",
+  "src/flow/index.ts": "",
+  "src/components/index.tsx": "",
+  "src/pages/index.ts": "",
+  "src/flow/minimap.ts": 'import "./canvas";',
   "src/flow/utils/thing.ts": "",
   "src/flow/canvas/index.ts": "",
   "src/flow/canvas/model/camera.ts": "",
@@ -35,6 +40,7 @@ const tree = {
   "src/flow/document/session/type-only.ts": 'import type { Helper } from "../test/helper";',
   "src/flow/document/session/deep.ts": 'import "../../canvas/model/camera";',
   "src/flow/document/session/y.ts": "",
+  "src/flow/document/interaction/controller.ts": 'import "../session/y";',
   "src/flow/document/model/x.ts": 'import "../session/y";',
   "src/flow/document/test/helper.ts": "",
   "src/components/canvas/index.ts": "",
@@ -82,7 +88,10 @@ test("reports a new flat module, a missing facade and a forbidden folder", () =>
     expect(result.failures.toSorted()).toEqual(
       [
         "new flat module at the flow/ root: src/flow/new.ts",
+        "new flat module at the flow/ root: src/flow/index.ts",
         "new flat module at the components/ root: src/components/Widget.tsx",
+        "new flat module at the components/ root: src/components/index.tsx",
+        "new flat module at the pages/ root: src/pages/index.ts",
         "src/flow/document/session/session.ts imports test support (../test/helper)",
         "src/flow/document/session/type-only.ts imports test support (../test/helper)",
       ].toSorted(),
@@ -110,6 +119,12 @@ test("reports a new flat module, a missing facade and a forbidden folder", () =>
     expect(result.reports).not.toContain(
       "src/flow/document/model/x.ts (model) may not import src/flow/document/session/y.ts",
     );
+    expect(result.reports).not.toContain(
+      "src/flow/document/interaction/controller.ts (interaction) may not import src/flow/document/session/y.ts",
+    );
+    expect(result.reports).not.toContain(
+      "src/flow/minimap.ts may not import flow/canvas (./canvas)",
+    );
   });
 });
 
@@ -126,6 +141,8 @@ test("reads static, re-export, dynamic and type-only imports but not comments", 
       ]),
     );
     expect(imports).not.toContain("./test/helper");
+    const duplicated = readImports(root, "src/flow/fixtures/duplicate.ts");
+    expect(duplicated.filter((specifier) => specifier === "./a")).toHaveLength(1);
   });
 });
 
@@ -181,6 +198,13 @@ test("Phase 5 turns the area findings into failures", () => {
       );
       expect(result.failures).toContain('forbidden folder "utils" in src/flow/utils/thing.ts');
       expect(result.failures).toContain("unclassified module: src/flow/utils/thing.ts");
+      expect(result.failures).toContain("unclassified module: src/flow/index.ts");
+      expect(result.failures).not.toContain(
+        "src/flow/document/interaction/controller.ts (interaction) may not import src/flow/document/session/y.ts",
+      );
+      expect(result.failures).not.toContain(
+        "src/flow/minimap.ts may not import flow/canvas (./canvas)",
+      );
       expect(result.failures).toContain(
         "src/flow/document/session/deep.ts deep-imports flow/canvas (../../canvas/model/camera)",
       );

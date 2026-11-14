@@ -26,7 +26,6 @@ import {
   canImport,
   canImportArea,
   isFacadeOf,
-  isLayerIndex,
   isProductionFile,
   isSameFeatureDeep,
   isTestFile,
@@ -221,7 +220,9 @@ const segmentDirection = defineRule({
           (targetArea !== sourceArea && targetArea === "flow/document") ||
           targetLayer === "component";
       } else if (sourceSegment === "interaction") {
-        violation = targetLayer === "component" || targetArea === "flow/document";
+        violation =
+          targetLayer === "component" ||
+          (targetArea !== sourceArea && targetArea === "flow/document");
       }
 
       if (violation) {
@@ -306,7 +307,7 @@ const unclassifiedSource = defineRule({
     const file = toProjectPath(context.cwd, context.filename);
     if (!file.startsWith("src/") || !isAreaChecked(file)) return {};
     if (areaOf(file) !== null) return {};
-    if (LEGACY_FLAT.has(file) || isLayerIndex(file)) return {};
+    if (LEGACY_FLAT.has(file)) return {};
     if (layerOf(file) === "asset") return {};
     if (file === "src/App.tsx" || file === "src/store.ts") return {};
     return {
