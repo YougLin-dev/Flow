@@ -266,6 +266,15 @@ export function checkAreaImports(root, files) {
       }
 
       if (!sourceSegment || !sourceArea?.startsWith("flow/")) continue;
+      // A forbidden area pair belongs to the area finding above; the lint rule
+      // returns early for the same reason, so the report mirrors its output.
+      if (
+        targetArea !== null &&
+        targetArea !== sourceArea &&
+        !canImportArea(sourceArea, targetArea)
+      ) {
+        continue;
+      }
       let violation = false;
       if (sourceSegment === "geometry") {
         violation =

@@ -34,7 +34,8 @@ const tree = {
   "src/flow/utils/thing.ts": "",
   "src/flow/canvas/index.ts": "",
   "src/flow/canvas/model/camera.ts": "",
-  "src/flow/canvas/geometry/point.ts": 'import "../model/camera";',
+  "src/flow/canvas/geometry/point.ts": 'import "../model/camera";\nimport "../../execution";',
+  "src/flow/execution/index.ts": "",
   "src/components/search/SearchPalette.tsx": 'import "../../flow/canvas";',
   "src/flow/document/session/session.ts": 'import "../test/helper";',
   "src/flow/document/session/type-only.ts": 'import type { Helper } from "../test/helper";',
@@ -109,6 +110,12 @@ test("reports a new flat module, a missing facade and a forbidden folder", () =>
     );
     expect(result.reports).toContain(
       "src/flow/canvas/geometry/point.ts (geometry) may not import src/flow/canvas/model/camera.ts",
+    );
+    expect(result.reports).toContain(
+      "src/flow/canvas/geometry/point.ts may not import flow/execution (../../execution)",
+    );
+    expect(result.reports).not.toContain(
+      "src/flow/canvas/geometry/point.ts (geometry) may not import src/flow/execution/index.ts",
     );
     expect(result.reports).toContain(
       "src/components/canvas/helper.ts imports @flow/native outside the document seam",
