@@ -18,3 +18,8 @@ node_modules/
 .DS_Store
 Thumbs.db
 .idea/
+
+# Claude Code runtime state (the .agents skills are the tracked copy)
+.claude/scheduled_tasks.lock
+.claude/skills/
+.claude/worktrees/
