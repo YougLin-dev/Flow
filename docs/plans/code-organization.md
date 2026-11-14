@@ -1,7 +1,8 @@
 # Code organization and architecture standard
 
 - **Status:** Accepted 2026-11-14; Phase 0 (standard, ownership and
-  report-only tooling) is implemented. No source file has moved yet.
+  report-only tooling) is complete; Phase 1a (shared kernel and first
+  reuse) is implemented on a stacked branch.
 - **Scope:** `src/` (TSX app) and `src/native/` (Rust document core).
 - **Related:** [standards](../standards.md), [architecture](../architecture.md),
   [conventions](../conventions.md), [testing](../testing.md),
@@ -515,7 +516,8 @@ src/
 │   │   ├── keyed-flags.ts
 │   │   ├── wheel.ts                   wheelNotches / wheelNotchesOf / wheelZoomFactor
 │   │   ├── shortcuts.ts               key names and labels
-│   │   └── native-types.ts            the one type-only re-export of @flow/native
+│   │   ├── native-types.ts            the one type-only re-export of @flow/native
+│   │   └── result-inputs.ts           result batch/item factories (pure DTO shape)
 │   ├── nodes/
 │   │   ├── index.ts
 │   │   └── node-kinds.ts
@@ -587,8 +589,7 @@ src/
 │       │   └── composer-detail.ts       reload policy only
 │       ├── commands/
 │       │   ├── node-commands.ts
-│       │   ├── upload-source.ts
-│       │   └── result-inputs.ts
+│       │   └── upload-source.ts
 │       ├── assets/
 │       │   ├── asset-urls.ts
 │       │   ├── previews.ts
@@ -842,7 +843,7 @@ shape) stays in `model/camera.ts`.
 | -------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------- |
 | TextComposer/NodeComposer shell (~68 lines)                                | `ComposerSheet` + `ComposerAttachments` + `ComposerFooter`                                                                | `components/composer`                                          |
 | Single-flight drains (3 copies)                                            | shared in-flight/resolver core; migrate one loader per PR with its existing test as the oracle                            | `flow/shared/async-drain.ts`                                   |
-| Result batch/item construction (6 sites)                                   | `manualTextResult`, `manualUploadResult`, `resultItem`                                                                    | `flow/document/commands/result-inputs.ts`                      |
+| Result batch/item construction (6 sites)                                   | `resultBatch`, `textResultItem`, `imageResultItem`, `manualTextResult`                                                    | `flow/shared/result-inputs.ts`                                 |
 | Rect/screen conversion (3 copies)                                          | `containsPoint`, `overlaps`, `mergeBounds` in `geometry.ts`; `screenRectOf` in `flow/canvas/model/screen-rect.ts`         | `flow/shared` + canvas model                                   |
 | Equality helpers (~10 variants)                                            | `sameExactRect`, `sameTolerantRect`, `samePoint`, `sameBox`, `sameBounds`                                                 | `flow/shared/equality.ts`                                      |
 | Port color/type visuals (2+ copies)                                        | `portVisual(kind)` / `connectorColor(kind)`                                                                               | `components/canvas/port-visuals.ts`                            |
@@ -935,9 +936,9 @@ outside `components/probes`/`test/`."
   the app root because they mount `./App.tsx`; their helpers move to
   `src/test-support/`.
 - `app-test-harness.ts` → `src/test-support/app.ts`. `open(entry)` is resolved
-  **relative to the test file**, so the moved harness must call
-  `open("../App.tsx")`; add this to §11 mechanics and keep `App.test.tsx`
-  green. `node-session-harness.ts` →
+  **relative to the test file**, not the module that calls it, so the harness
+  keeps `open("./App.tsx")`; the `App*.test.tsx` files stay at the app root.
+  `node-session-harness.ts` →
   `flow/document/test/node-session-harness.ts`.
 - `NodeSession`'s native tests subclass it and override `protected
   nodeDetail`; when the class is split in Phase 7, preserve that seam or
@@ -1344,14 +1345,22 @@ shortcuts,native-types}`; route `sameBounds`/`sameBox`/`samePoint`/`sameRect`
 call sites through the named comparators (exact vs tolerant stays explicit);
 move the shortcut constants out of `flow/bindings.ts` and `keepsWheel` out of
 `flow/page-chrome.ts` (four component imports), so no component ever imports
-a page module. Add
-`portStroke`/`connectorColor` in the view layer and `result-inputs.ts` in
-`flow/document/commands`, and route the six construction sites. Add
-`native-types.ts` and route `@flow/native` **type** imports through it. Add
-`components/primitives/Icon` + `icon-shape`, and move `flow/port-visuals.ts`
-to `components/canvas`; these are the only file moves in 1a, and
-`port-visuals`' last flow dependency (`icon-shape`) moves with it. Add tests
-for the pure helpers.
+a page module. Add `connectorColor` in the view layer and
+`result-inputs.ts` in `flow/shared`, and route the six construction sites.
+Add `native-types.ts` and route `@flow/native` **type** imports through it.
+Add `components/primitives/Icon` + `icon-shape`, and move
+`flow/port-visuals.ts` to `components/canvas`; these are the only file moves
+in 1a, and `port-visuals`' last flow dependency (`icon-shape`) moves with
+it. Add tests for the pure helpers.
+
+Execution decision (Phase 1a): `result-inputs.ts` lives in `flow/shared`,
+not `flow/document/commands`, because `flow/execution` may not import
+`flow/document` (§4.6) and both areas construct batches; the factories are
+`resultBatch`, `textResultItem`, `imageResultItem`, `manualTextResult` plus
+the generic `resultItem` for copies. The `portStroke`/`connectorColor`
+concept is the single `connectorColor` helper in
+`components/canvas/port-visuals.ts`. The plan's earlier six-site note also
+named `node-commands.ts`, which builds batches through the same factories.
 1b. **Composer shell.** Extract `ComposerSheet`/`ComposerAttachments`/
 `ComposerFooter`; rewrite `TextComposer`/`ImageComposer` (renamed from
 `NodeComposer`) as configurations. Preserve the `<If when={detail}>` mount
@@ -1508,7 +1517,7 @@ compatibility shims after a phase.
   `import { label } from '../ui'`), so facades are safe.
 - **Tests move with subjects**; update `docs/testing.md` paths in the same
   PR.
-- **App harness:** `src/test-support/app.ts` must call `open("../App.tsx")`
+- **App harness:** `src/test-support/app.ts` keeps `open("./App.tsx")`
   because `open` resolves relative to the test file; keep the `App*.test.tsx`
   files at the app root and run the app tests after the move.
 - **No shims at the end of a phase.**
@@ -1532,7 +1541,7 @@ quality follow-up and can slip.
 | FlowCard parts re-create reactive graphs                  | A part reading `node()` or `camera.scale` rebuilds every card or stops updating | Pass the existing `CardGeometry`/`CardContent` instances and accessors; keep the two unit tests plus an app test |
 | FlowCanvas input state remounts                           | Press/pinch/suppress state resets                                               | Instantiate the input class once in the always-mounted body or page; run host/touch tests                        |
 | Lint cannot resolve facades                               | String matching cannot tell an area facade from a deep import                   | fs-based resolution with `.ts`/`.tsx`/`index.ts`; native types through `flow/shared/native-types`                |
-| Test harness `open("./App.tsx")` breaks after the move    | `open` is relative to the test file                                             | Change to `open("../App.tsx")` and keep `App.test.tsx` green                                                     |
+| Test harness `open("./App.tsx")` breaks after the move    | False: `open` is relative to the test file, not the caller                      | Keep `open("./App.tsx")`; no change                                                                              |
 | Migration PRs are too large                               | Review risk and standards' small-change rule                                    | One area per PR; split document, canvas and session work                                                         |
 | Migration churn breaks tests/docs                         | 100+ import paths change                                                        | Strangler facades, one area per PR, codemod + gate                                                               |
 | Over-abstraction (`panel`, `utils`)                       | Indirection without reuse                                                       | Rule of two; no generic primitive until two real features; no `utils`                                            |
@@ -1601,7 +1610,7 @@ quality follow-up and can slip.
    facade; `db.rs` + `db/tests/` also works until the split.)
 7. What should be the first PR after approval? (We recommend **Phase 1a**:
    geometry/equality/portStroke/result-inputs + the test-support
-   classification and the harness `open("../App.tsx")` fix. No loader or
+   classification and the harness `open("./App.tsx")` check. No loader or
    composer rewrite in the first PR.)
 
 ---
@@ -1629,7 +1638,7 @@ Their findings and dispositions:
 | BLOCKER  | `StageSize` had no legal home                                           | `Size`/`StageSize` in `flow/shared/geometry.ts`; no component→composer edge                                                   |
 | BLOCKER  | `composer-detail` created a document→composer edge                      | Reload policy stays `flow/document/session`; view helpers move to `components/composer/detail-view.ts`                        |
 | BLOCKER  | Geometry imported camera model types                                    | `Size`/`BoxGeometry` move to `flow/shared`; `tooltip`/`view-culling` use them                                                 |
-| BLOCKER  | Harness `open("./App.tsx")` breaks after the move                       | `open` is relative to the test file; use `open("../App.tsx")` and keep app tests green                                        |
+| BLOCKER  | Harness `open("./App.tsx")` breaks after the move                       | False: `open` is relative to the test file; the path stays                                                                    |
 | MAJOR    | `AsyncDrain` is not one identical state machine                         | Add the core and migrate `PreviewLoader` in 1c; migrate viewport/minimap one per PR in Phase 7 with their tests as oracles    |
 | MAJOR    | FlowCard parts can duplicate reactive graphs                            | Pass existing `CardGeometry`/`CardContent` instances/accessors; never read `node()`/`camera.scale` in a part; add an app test |
 | MAJOR    | FlowCanvas input state ownership                                        | Instantiate once in the always-mounted body or page; no conditional mount; run host/touch tests                               |
@@ -1704,6 +1713,12 @@ After the fixes: `bun run check` (including `check:structure`), `bun run test`
 outside `flow/document`) as the Phase 1a worklist. No source file moved;
 `LEGACY_FLAT` still matches the 81 flat modules exactly. Phase 0 is complete;
 Phase 1a is the next PR.
+
+Phase 1a routed every production `@flow/native` type import through the
+seam; `check:structure` now reports only `src/flow/document-session.ts`'s
+runtime import, which moves with its area in Phase 2. `LEGACY_FLAT` is down
+to 78 modules; the shared kernel, `components/primitives`,
+`components/canvas` and `src/test-support/app.ts` are in place.
 
 ---
 
@@ -1798,12 +1813,11 @@ subject; see §8.
 | `app-test-harness.ts`                | `test-support/app.ts`                                                                                            |
 
 New modules introduced by the plan: `flow/shared/{index,geometry,equality,
-async-drain,keyed-flags,wheel,shortcuts,native-types}.ts`,
+async-drain,keyed-flags,wheel,shortcuts,native-types,result-inputs}.ts`,
 `flow/canvas/model/{cursor,screen-rect}.ts`,
 `flow/canvas/model/scene/{scene-types,scene-hits,scene-selection,
 scene-records,scene-overrides}.ts`, `flow/canvas/model/cards/{card-image,
 inline-body}.ts`, `flow/canvas/interaction/canvas-input.ts`,
-`flow/document/commands/result-inputs.ts`,
 `flow/document/session/{composer-session,inline-session,asset-session}.ts`,
 `flow/execution/{runner,providers}.ts`,
 `components/canvas/world/{CardTitle,CardBody}.tsx`,

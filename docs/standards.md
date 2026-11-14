@@ -80,16 +80,16 @@ root `.nsh/out` MUST NOT be edited or committed. Asset and theme paths in
 `boundaries/no-upward-import` in `lint/boundaries.js` enforces this table for
 relative imports. Tests are exempt because they may reach into any layer.
 
-| Layer        | Path                                                                                           | MAY import                                    |
-| ------------ | ---------------------------------------------------------------------------------------------- | --------------------------------------------- |
-| Shell        | `src/App.tsx`                                                                                  | pages, components, store, foundations, assets |
-| Page         | `src/pages/**`                                                                                 | pages, components, store, foundations, assets |
-| Component    | `src/components/**`                                                                            | components, foundations, assets               |
-| Store        | `src/store.ts`                                                                                 | store, foundations, assets                    |
-| Foundation   | `src/flow/`, `src/native/`                                                                     | foundations, assets                           |
-| Test         | `src/test-support/`, `**/test/`, `src/app-test-harness.ts`, `src/flow/node-session-harness.ts` | every layer; production MUST NOT import it    |
-| Asset        | `src/assets/**`                                                                                | nothing                                       |
-| Unclassified | any other `src/` module                                                                        | nothing until classified                      |
+| Layer        | Path                                                                | MAY import                                    |
+| ------------ | ------------------------------------------------------------------- | --------------------------------------------- |
+| Shell        | `src/App.tsx`                                                       | pages, components, store, foundations, assets |
+| Page         | `src/pages/**`                                                      | pages, components, store, foundations, assets |
+| Component    | `src/components/**`                                                 | components, foundations, assets               |
+| Store        | `src/store.ts`                                                      | store, foundations, assets                    |
+| Foundation   | `src/flow/`, `src/native/`                                          | foundations, assets                           |
+| Test         | `src/test-support/`, `**/test/`, `src/flow/node-session-harness.ts` | every layer; production MUST NOT import it    |
+| Asset        | `src/assets/**`                                                     | nothing                                       |
+| Unclassified | any other `src/` module                                             | nothing until classified                      |
 
 Components, the store and foundations MUST NOT import a page or `src/App.tsx`.
 Foundations MUST NOT import the store. Cycles are forbidden. A page MAY import
