@@ -1489,7 +1489,11 @@ compatibility shims after a phase.
 - Migrate `ViewportController` and `MinimapLoader` to `AsyncDrain` one per
   PR, each with its existing test as the oracle. Do not treat them as one
   identical state machine: their scheduling, revision fences and retry rules
-  differ. (`PreviewLoader` migrates with the core in Phase 1c.)
+  differ. (`PreviewLoader` migrates with the core in Phase 1c.) When they
+  migrate, have each loader check its own disposed flag at the top of its
+  step: a join that lands in the drain's settlement gap can force one
+  follow-up after `dispose()` starts, and the current app avoids it only
+  because the page marks the host disposed first.
 - `NodeSession` split into composer/inline/asset/command sessions behind the
   facade; preserve `protected nodeDetail`, generation fencing and
   `copyNodeWithDrafts`/`deleteNodeWithDrafts`, or update the harness and its
