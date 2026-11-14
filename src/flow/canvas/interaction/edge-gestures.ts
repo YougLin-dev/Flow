@@ -3,18 +3,18 @@
  * a card's typed port or a selection frame's group port, and moving either
  * end of the selected edge.
  */
-import type { EdgeSummary } from "./shared";
-import type { CanvasCamera } from "./canvas/model/camera";
+import type { EdgeSummary } from "../../shared";
+import type { CanvasCamera } from "../model/camera";
 import {
   type ConnectionPair,
   ConnectionGesture,
   type FixedPort,
   type MagnetPort,
 } from "./connection-gesture";
-import type { GroupPort } from "./canvas/model/scene/group-ports";
-import { isPortKind } from "./nodes";
-import type { FlowScene } from "./canvas/model/scene/scene";
-import { portCenterWorld, portOffsetAt, type PortHit } from "./canvas/model/scene/scene-ports";
+import type { GroupPort } from "../model/scene/group-ports";
+import { isPortKind } from "../../nodes";
+import type { FlowScene } from "../model/scene/scene";
+import { portCenterWorld, portOffsetAt, type PortHit } from "../model/scene/scene-ports";
 
 export interface EdgeGestureHost {
   scene(): FlowScene | null;

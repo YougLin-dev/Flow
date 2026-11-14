@@ -17,9 +17,12 @@ import { ZoomControls, ZoomProbe } from "../components/ZoomControls";
 import { AssetUrls } from "../flow/asset-urls";
 import { bindFlowKeys } from "../flow/bindings";
 import { CanvasCamera, FlowScene, wheelZoomFactor } from "../flow/canvas";
-import { CanvasController } from "../flow/canvas-controller";
+import { CanvasController } from "../flow/canvas/interaction/canvas-controller";
 import { ComposerState } from "../flow/composer-state";
-import { CanvasMenuController, dismissContextMenuOnChange } from "../flow/context-menu";
+import {
+  CanvasMenuController,
+  dismissContextMenuOnChange,
+} from "../flow/canvas/interaction/context-menu";
 import { CONTENT } from "../flow/data";
 import { openFlowDocument } from "../flow/document-session";
 import { NodeRunner } from "../flow/execution";

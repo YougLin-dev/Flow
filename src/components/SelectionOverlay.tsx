@@ -5,7 +5,7 @@
  * handles are invisible hit targets in the controller.
  */
 import { View } from "nsh";
-import type { CanvasController } from "../flow/canvas-controller";
+import type { CanvasController } from "../flow/canvas/interaction/canvas-controller";
 
 export interface SelectionOverlayProps {
   readonly controller: CanvasController;

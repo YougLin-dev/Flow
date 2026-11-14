@@ -20,6 +20,7 @@ export { groupPorts, type GroupPort } from "./model/scene/group-ports";
 export { FlowScene } from "./model/scene/scene";
 export { capacityOf, hasPortEdge, incomingEdgeCount } from "./model/scene/scene-ports";
 export type { ConnectionPreview, PreviewView } from "./model/scene/scene-types";
+export type { ConnectionPair } from "./interaction/connection-gesture";
 export {
   connectionBounds,
   connectorControls,

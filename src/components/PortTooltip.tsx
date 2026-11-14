@@ -8,7 +8,7 @@
  * port rather than a native tooltip on the port view.
  */
 import { cleanup, computed, effect, signal, Text, View } from "nsh";
-import type { CanvasController } from "../flow/canvas-controller";
+import type { CanvasController } from "../flow/canvas/interaction/canvas-controller";
 import {
   tipWidth,
   tooltipBox,

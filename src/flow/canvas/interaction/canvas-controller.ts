@@ -5,10 +5,10 @@
  * components read its signals.
  */
 import { batch, computed, signal } from "nsh";
-import type { CanvasCursor } from "./canvas/model/cursor";
-import type { BoxGeometry, NodeBounds, Point } from "./shared";
-import type { PortSide } from "./canvas/geometry/connection";
-import type { CanvasCamera } from "./canvas/model/camera";
+import type { CanvasCursor } from "../model/cursor";
+import type { BoxGeometry, NodeBounds, Point } from "../../shared";
+import type { PortSide } from "../geometry/connection";
+import type { CanvasCamera } from "../model/camera";
 import type { ConnectionPair, MagnetPort } from "./connection-gesture";
 import { EdgeGestures } from "./edge-gestures";
 import {
@@ -16,20 +16,20 @@ import {
   framePortAt as framePortAtScreen,
   frameScreenRect,
 } from "./frame-surface";
-import type { GroupPort } from "./canvas/model/scene/group-ports";
+import type { GroupPort } from "../model/scene/group-ports";
 import { HoverFlags } from "./hover-flags";
-import type { PortKind } from "./nodes";
+import type { PortKind } from "../../nodes";
 import { cursorForHandle, handleAtPoint, screenRect } from "./resize-handles";
 import { RightGesture } from "./right-gesture";
-import type { FlowScene } from "./canvas/model/scene/scene";
-import { portAt } from "./canvas/model/scene/scene-ports";
+import type { FlowScene } from "../model/scene/scene";
+import { portAt } from "../model/scene/scene-ports";
 import {
   intersects,
   normalizeRect,
   type ResizeHandle,
   resizedRect,
   type ScreenRect,
-} from "./canvas/geometry/selection";
+} from "../geometry/selection";
 
 /** The typed port whose icon follows the pointer. */
 export interface PortHover {

@@ -6,11 +6,11 @@
  */
 import { expect, test } from "nsh/test";
 import type { EdgeSummary, NodeSummary } from "@flow/native";
-import { CanvasCamera } from "./canvas/model/camera";
+import { CanvasCamera } from "../model/camera";
 import { type CanvasHost, CanvasController } from "./canvas-controller";
-import { PORT_CENTER_GAP, PORT_SIZE, portOffset } from "./canvas/geometry/connection";
+import { PORT_CENTER_GAP, PORT_SIZE, portOffset } from "../geometry/connection";
 import { selectionFrame } from "./frame-surface";
-import { FlowScene } from "./canvas/model/scene/scene";
+import { FlowScene } from "../model/scene/scene";
 
 function node(id: string, x: number, y: number, overrides: Partial<NodeSummary> = {}): NodeSummary {
   return {

@@ -4,7 +4,10 @@
  * menu controller; this view binds its anchor, target and items.
  */
 import type { Accessor } from "nsh";
-import { type CanvasMenuController, contextMenuPosition } from "../flow/context-menu";
+import {
+  type CanvasMenuController,
+  contextMenuPosition,
+} from "../flow/canvas/interaction/context-menu";
 import type { StageSize } from "../flow/overlay";
 import { CanvasContextMenu } from "./CanvasContextMenu";
 

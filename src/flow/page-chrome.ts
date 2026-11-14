@@ -5,7 +5,7 @@
  */
 import { platform, type ContextMenuEvent, type MouseEvent, type WheelEvent } from "nsh";
 import { wheelNotches, wheelZoomFactor } from "./canvas";
-import type { ContextMenuPoint } from "./context-menu";
+import type { ContextMenuPoint } from "./canvas/interaction/context-menu";
 
 /** The menu controller's page-chrome entry points; a fake stands in for tests. */
 export interface ChromeMenu {

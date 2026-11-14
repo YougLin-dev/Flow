@@ -5,9 +5,9 @@
  * zones, so the views themselves are never pressed.
  */
 import { computed, View } from "nsh";
-import type { CanvasController } from "../flow/canvas-controller";
+import type { CanvasController } from "../flow/canvas/interaction/canvas-controller";
 import { groupPorts, type CanvasCamera, type FlowScene, type GroupPort } from "../flow/canvas";
-import { selectionFrame } from "../flow/frame-surface";
+import { selectionFrame } from "../flow/canvas/interaction/frame-surface";
 import type { InputPort, OutputPort } from "../flow/nodes";
 import type { BoxGeometry } from "../flow/shared";
 import { portVisual } from "./canvas";

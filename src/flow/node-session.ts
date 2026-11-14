@@ -8,7 +8,6 @@ import { signal } from "nsh";
 import type { PickedImage, PickImagesOptions, Signal } from "nsh";
 import type { ChangeSet, EdgeInput, NodeDetail, NodeInput } from "./shared";
 import { canSkipDetailReload, detailAssetIds } from "./composer-detail";
-import type { ConnectionPair } from "./connection-gesture";
 import type { NodeRunner } from "./execution";
 import { InlineEditor } from "./inline-editor";
 import {
@@ -28,7 +27,7 @@ import {
   portsOfNode,
   serializeSettings,
 } from "./nodes";
-import { capacityOf, hasPortEdge, incomingEdgeCount } from "./canvas";
+import { capacityOf, hasPortEdge, incomingEdgeCount, type ConnectionPair } from "./canvas";
 import { uploadSource as uploadSourceFile } from "./upload-source";
 
 /** The asset URL cache the composer reads; `AssetUrls` implements it. */

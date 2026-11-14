@@ -3,7 +3,7 @@
  * of canvas-controller.ts because that module is at the max-lines cap; the
  * controller writes through this helper inside its batched entry points.
  */
-import { KeyedFlags } from "./shared";
+import { KeyedFlags } from "../../shared";
 
 export class HoverFlags {
   private readonly hoveredFlags = new KeyedFlags();

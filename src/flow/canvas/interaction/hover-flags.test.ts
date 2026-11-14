@@ -1,9 +1,9 @@
 import { effect } from "nsh";
 import { expect, test } from "nsh/test";
 import type { NodeSummary, SceneSnapshot } from "@flow/native";
-import { CanvasCamera } from "./canvas/model/camera";
+import { CanvasCamera } from "../model/camera";
 import { CanvasController } from "./canvas-controller";
-import { FlowScene } from "./canvas/model/scene/scene";
+import { FlowScene } from "../model/scene/scene";
 
 function setup(): CanvasController {
   const nodes = [0, 300, 700].map((x, index): NodeSummary => ({

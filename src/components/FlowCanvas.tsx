@@ -24,8 +24,8 @@ import {
   wheelNotches,
 } from "../flow/canvas";
 import { sameBounds } from "../flow/shared";
-import type { CanvasController } from "../flow/canvas-controller";
-import type { ContextMenuPoint } from "../flow/context-menu";
+import type { CanvasController } from "../flow/canvas/interaction/canvas-controller";
+import type { ContextMenuPoint } from "../flow/canvas/interaction/context-menu";
 import { FlowCard } from "./FlowCard";
 import { FlowEdges } from "./FlowEdges";
 import { FlowPreviews } from "./FlowPreviews";
