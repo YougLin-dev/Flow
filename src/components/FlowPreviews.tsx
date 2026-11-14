@@ -4,7 +4,7 @@
  * follows the same rule as the committed connectors, so the cost stays one
  * view however large the selection is.
  */
-import { Canvas, type CanvasRenderingContext2D, colorScheme, computed } from "nsh";
+import { type CanvasRenderingContext2D, colorScheme, computed } from "nsh";
 import {
   type BoxGeometry,
   connectionBounds,
@@ -15,7 +15,8 @@ import {
   mergeBounds,
 } from "../flow/connection";
 import type { ConnectionPreview } from "../flow/scene";
-import { connectorColor } from "./canvas";
+import type { Point } from "../flow/shared";
+import { ConnectorCanvas, connectorColor } from "./canvas";
 
 export interface FlowPreviewsProps {
   readonly previews: () => readonly ConnectionPreview[];
@@ -34,15 +35,10 @@ export function FlowPreviews(props: FlowPreviewsProps) {
     }
     return union;
   });
-  const left = () => (box()?.x ?? 0) - EDGE_PADDING;
-  const top = () => (box()?.y ?? 0) - EDGE_PADDING;
-  const width = () => (box()?.width ?? 0) + EDGE_PADDING * 2;
-  const height = () => (box()?.height ?? 0) + EDGE_PADDING * 2;
 
-  const draw = (cx: CanvasRenderingContext2D): void => {
+  const draw = (cx: CanvasRenderingContext2D, origin: Point | null): void => {
     const previews = props.previews();
-    if (previews.length === 0) return;
-    const origin = { x: left(), y: top() };
+    if (previews.length === 0 || origin === null) return;
     // A theme switch repaints the previews in the new port colors.
     colorScheme();
     cx.lineWidth = EDGE_THICKNESS;
@@ -65,18 +61,5 @@ export function FlowPreviews(props: FlowPreviewsProps) {
     }
   };
 
-  return (
-    <Canvas
-      style={{
-        position: "absolute",
-        left: left(),
-        top: top(),
-        width: width(),
-        height: height(),
-        zIndex: props.zIndex,
-        pointerEvents: "none",
-      }}
-      draw={draw}
-    />
-  );
+  return <ConnectorCanvas box={box} padding={EDGE_PADDING} zIndex={props.zIndex} draw={draw} />;
 }

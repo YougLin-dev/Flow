@@ -5,7 +5,7 @@
  * A connector rests faint in its port type's color; the clicked one is
  * thicker and fully lit.
  */
-import { type Accessor, Canvas, type CanvasRenderingContext2D, colorScheme, computed } from "nsh";
+import { type Accessor, type CanvasRenderingContext2D, colorScheme, computed } from "nsh";
 import { sameBox, type EdgeSummary } from "../flow/shared";
 import {
   type BoxGeometry,
@@ -18,7 +18,7 @@ import {
 import { cubicInsideView, visibleCubicRuns } from "../flow/edge-clip";
 import { connectorLayerBox, trimConnectorBox } from "../flow/edge-layer";
 import type { FlowScene } from "../flow/scene";
-import { connectorColor } from "./canvas";
+import { ConnectorCanvas, connectorColor } from "./canvas";
 
 /** The selected connector's stroke: one point thicker than the rest, so a
  * lit line reads as bold. */
@@ -72,15 +72,11 @@ export function FlowEdges(props: FlowEdgesProps) {
   // The selection as one set, reused by every draw until it changes; a drag
   // re-records the canvas on each move and must not rebuild this per frame.
   const selectedCards = computed(() => new Set(props.scene.selection()));
-  const left = () => box()?.x ?? 0;
-  const top = () => box()?.y ?? 0;
-  const width = () => box()?.width ?? 0;
-  const height = () => box()?.height ?? 0;
 
-  const draw = (cx: CanvasRenderingContext2D): void => {
+  const draw = (cx: CanvasRenderingContext2D, origin: Point | null): void => {
     // Nothing can be clipped correctly before layout; the first measured
     // frame records, rather than a document-sized canvas recording now.
-    if (!measured()) return;
+    if (!measured() || origin === null) return;
     const view = clipView();
     const edges = props.scene.edges();
     const drawable: DrawableEdge[] = [];
@@ -111,9 +107,6 @@ export function FlowEdges(props: FlowEdgesProps) {
       drawable.push({ edge, ports, controls, runs });
     }
     if (drawable.length === 0) return;
-    const current = box();
-    if (current === null) return;
-    const origin = { x: current.x, y: current.y };
     const traceCubic = (from: Point, c1: Point, c2: Point, to: Point): void => {
       cx.moveTo(from.x - origin.x, from.y - origin.y);
       cx.bezierCurveTo(
@@ -165,17 +158,5 @@ export function FlowEdges(props: FlowEdgesProps) {
     }
   };
 
-  return (
-    <Canvas
-      style={{
-        position: "absolute",
-        left: left(),
-        top: top(),
-        width: width(),
-        height: height(),
-        pointerEvents: "none",
-      }}
-      draw={draw}
-    />
-  );
+  return <ConnectorCanvas box={box} draw={draw} />;
 }
