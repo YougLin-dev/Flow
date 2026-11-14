@@ -88,8 +88,11 @@ Step 3 moved the canvas model to `flow/canvas/model` (camera, the scene and its
 ports/record equality, the card content/geometry/layout and the connector
 layer), added `scene-types.ts`, `cursor.ts`, `cards/card-image.ts` and
 `cards/inline-body.ts` to break the scene/helper and controller/handle cycles,
-and left the placement half of `overlay.ts` for the composer step. The rest of
-the source tree is still the legacy flat layout. The old → new map is in
+and left the placement half of `overlay.ts` for the composer step. Step 4
+moved the interaction modules to `flow/canvas/interaction` and added the
+document-facing `ConnectionPair` type to the facade; `canvas-input.ts` was not
+extracted because §11 marks it optional and the touch state must stay on the
+mounted view. The rest of the source tree is still the legacy flat layout. The old → new map is in
 [the plan's Appendix A](plans/code-organization.md#appendix-a--tsx-placement-map);
 `LEGACY_FLAT` in the manifest shrinks with every move and disappears in
 Phase 5. Do not add a new file at the `components/`, `flow/` or `pages/`

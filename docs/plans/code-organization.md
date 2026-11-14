@@ -1777,6 +1777,14 @@ because §11 step 3 forbids a behavior split. Accepted ADRs keep their
 historical module paths, per `docs/adr/README.md`'s immutability rule.
 `LEGACY_FLAT` is down to 58 modules.
 
+Phase 2 step 4 moved the interaction modules to `flow/canvas/interaction`
+(controller, connection/edge/hover/right gestures, context menu, frame
+surface, resize handles). The facade gained `ConnectionPair` for
+`flow/document`; `CanvasController` stays unexported for the page and canvas
+views. Execution decision: `canvas-input.ts` is not extracted — §11 marks it
+optional and the touch responder state must stay on the always-mounted view,
+so no behavior change was made. `LEGACY_FLAT` is down to 50 modules.
+
 ---
 
 ## Appendix A — TSX placement map (non-test)

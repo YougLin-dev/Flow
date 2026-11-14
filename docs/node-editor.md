@@ -204,7 +204,7 @@ strokes the viewport's connectors in one native canvas and
 `components/SelectionPorts.tsx` renders the multi-card frame's group ports
 from `flow/canvas/model/scene/group-ports.ts`. `flow/canvas/model/scene/scene.ts` is the headless model,
 `flow/canvas/model/scene/scene-ports.ts` answers typed-port hits and capacity queries, and
-`flow/canvas-controller.ts` turns pointer events into selection, drag,
+`flow/canvas/interaction/canvas-controller.ts` turns pointer events into selection, drag,
 resize, marquee, pan and connector gestures.
 `components/GridBackground.tsx` draws the dot grid in screen space.
 `components/CanvasContextMenu.tsx` is the right-click menu: on empty canvas,
@@ -220,9 +220,9 @@ menu selects that connector; a card already in a multiple selection keeps it.
 a copy writes an open editor's drafts first, then inserts the card beside its
 source; delete removes the card and its connectors. An upload copy carries
 its output batch in the same command, so one undo removes the whole copy
-rather than leaving an empty card behind. `flow/right-gesture.ts`
+rather than leaving an empty card behind. `flow/canvas/interaction/right-gesture.ts`
 decides whether a right press becomes a camera pan or leaves the press to the
-menu, and `flow/context-menu.ts` holds the menu's anchor, target and delay.
+menu, and `flow/canvas/interaction/context-menu.ts` holds the menu's anchor, target and delay.
 The canvas root listens with `onWheel`, so the mouse wheel and touchpad
 scrolls over any part of it reach TSX, which zooms the camera about the
 pointer.

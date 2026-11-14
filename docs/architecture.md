@@ -275,7 +275,7 @@ composer, and opening a connector's menu selects that connector, so the menu
 visibly names what its items act on. A card under the press wins over a
 connector drawn behind it. It is drawn from ordinary views rather than opened
 with `Menu.popup`, because a system menu takes the pointer and would prevent
-the right-button drag from panning; `flow/context-menu.ts` wires the press,
+the right-button drag from panning; `flow/canvas/interaction/context-menu.ts` wires the press,
 the pending press a release opens, the dismissal when the camera or the
 pressed card or connector moves away, and the item actions;
 `flow/node-commands.ts` performs the copy (writing an open editor's drafts
@@ -296,7 +296,7 @@ inside the body box), and one typed port circle outside each side, shown when
 the card is selected, hovered, a connection target, or connected and readable
 on screen. A multi-card frame keeps those per-card ports while they are
 readable and adds the frame's group ports on its sides. Per-card selection and connection
-target flags come from `flow/shared/keyed-flags.ts`, while `flow/hover-flags.ts`
+target flags come from `flow/shared/keyed-flags.ts`, while `flow/canvas/interaction/hover-flags.ts`
 separately holds the controller's hover and marquee-preview mirrors; their
 source states write these flags in the same update round, so a change wakes
 only the cards whose membership flipped. A port rests just outside the

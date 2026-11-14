@@ -121,7 +121,6 @@ src/                   the NSH app: its root, entry, config and assets
   flow/
     data.ts            the demo nodes/edges used to seed an empty document
     database-path.ts   resolves the document path from host/env/data-dir
-    canvas-controller.ts pointer gestures: select, drag, resize, marquee, connect
     overlay.ts         composer placement
     composer-state.ts  the composer's drafts
     nodes/
@@ -138,6 +137,8 @@ src/                   the NSH app: its root, entry, config and assets
                        reader types
         cards/         card content, geometry, layout, image events and the
                        inline editor's body anchor
+      interaction/     the pointer router, connector/edge/hover gestures, the
+                       context menu, resize handles and the selection frame
     shared/            the shared kernel: geometry, equality, DTO factories
   native/              mixed NSH Rust crate (SQLite/FTS5/RTree document core)
     Cargo.toml
