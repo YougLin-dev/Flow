@@ -350,8 +350,8 @@ while pinned. (Test)
 `CanvasController` is the one pointer router: it selects and toggles cards,
 drags, resizes from a handle, box-selects, pans with the hand tool, and drives
 the port/edge gestures. The page MUST NOT add a second press path; new canvas
-interaction belongs in the controller and its pure geometry modules
-(`selection.ts`, `connection.ts`). A press that starts an edge gesture MUST be
+interaction belongs in the controller and its pure geometry modules in
+`flow/canvas/geometry/`. A press that starts an edge gesture MUST be
 consumed before card selection. (Test, Review)
 
 The minimap panel is a control overlay, not the canvas surface: its drag is
@@ -619,7 +619,7 @@ formatting owned by Oxfmt is not a review topic. (Review)
 | Store privacy, derivation, props, resources                   | Review; `store.test.ts`, `App.test.tsx`                                                                                                                      | A review finding; no lint rule sees these                                                                 |
 | Tokens, contrast                                              | Review; Manual light/dark                                                                                                                                    | A raw color, a new token without both schemes, a failing pair                                             |
 | Accessibility                                                 | Review; App tests using `label:`/`text:`; Manual host pass                                                                                                   | An unnamed control, color-only state, missing keyboard path                                               |
-| Canvas scene and interaction                                  | `scene.test.ts`, `canvas-controller.test.ts`, `selection.test.ts`, `overlay.test.ts`, `App.test.tsx`; Review                                                 | A new gesture with no unit or app test; geometry outside `flow/`                                          |
+| Canvas scene and interaction                                  | `scene.test.ts`, `canvas-controller.test.ts`, `flow/canvas/geometry/selection.test.ts`, `overlay.test.ts`, `App.test.tsx`; Review                            | A new gesture with no unit or app test; geometry outside `flow/`                                          |
 | Input and lifecycle                                           | `canvas-controller.test.ts`, `App.test.tsx`; Host (manual/local); Review                                                                                     | A missing cleanup, a second press path or a forgotten override clear                                      |
 | Performance                                                   | Review; Manual profiling                                                                                                                                     | A second render loop, per-frame scene rebuild or per-pointer-move document write                          |
 | Sandbox                                                       | NSH build/package when run; Review                                                                                                                           | A missing `capabilities` key or an unjustified host                                                       |

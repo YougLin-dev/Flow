@@ -167,7 +167,9 @@ test("reports upward, unknown and unclassified imports", () => {
     "unclassified",
   );
   expect(reportsFor("src/pages/FlowPage.tsx", "../components/TitleBar")).toEqual([]);
-  expect(reportsFor("src/components/FlowCanvas.tsx", "../flow/selection")).toEqual([]);
+  expect(reportsFor("src/components/FlowCanvas.tsx", "../flow/canvas/geometry/selection")).toEqual(
+    [],
+  );
 });
 
 test("reports a deep cross-area import but allows facades and same-feature deep imports", () => {

@@ -1,5 +1,4 @@
 import { expect, test } from "nsh/test";
-import { containsPoint } from "../../shared";
 import { handleAt, intersects, normalizeRect, resizedRect } from "./selection";
 
 test("hit-tests corners and whole edges of a screen rectangle", () => {
@@ -29,16 +28,6 @@ test("treats touching edges as an intersection", () => {
   expect(intersects(box, { x: 50, y: 20, width: 100, height: 50 })).toBe(true);
   expect(intersects(box, { x: 100, y: 50, width: 20, height: 20 })).toBe(true);
   expect(intersects(box, { x: 101, y: 0, width: 20, height: 20 })).toBe(false);
-});
-
-test("contains a point inside a rectangle, expanded by a margin", () => {
-  const rect = { x: 10, y: 20, width: 100, height: 60 };
-  expect(containsPoint(rect, 10, 20)).toBe(true);
-  expect(containsPoint(rect, 60, 50)).toBe(true);
-  expect(containsPoint(rect, 9, 50)).toBe(false);
-  // The margin widens the hit area without moving the rectangle.
-  expect(containsPoint(rect, 9, 50, 6)).toBe(true);
-  expect(containsPoint(rect, 3, 50, 6)).toBe(false);
 });
 
 test("resizes from the dragged edges and keeps the opposite one fixed", () => {

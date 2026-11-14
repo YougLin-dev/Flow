@@ -1762,7 +1762,8 @@ Phase 2 step 2 moved the pure-math modules to `flow/canvas/geometry`
 `overlaps`, `mergeBounds` and `containsPoint` now live in
 `flow/shared/geometry.ts` (the §6.4 home), so the geometry segment imports no
 model: `tooltip`/`view-culling` take shared `Size`/`BoxGeometry` instead of
-camera types. `LEGACY_FLAT` is down to 67 modules.
+camera types. The extracted helpers gained direct tests in
+`flow/shared/geometry.test.ts`. `LEGACY_FLAT` is down to 67 modules.
 
 ---
 

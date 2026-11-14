@@ -3,7 +3,7 @@
 //! SQLite virtual tables have no ORM schema, so this module is the edge
 //! index's adapter. A scene read uses it to find a connector whose curve
 //! crosses the viewport while both of its cards are outside the node read.
-//! The box mirrors `connectionBounds` in `src/flow/connection.ts`; every edge
+//! The box mirrors `connectionBounds` in `src/flow/canvas/geometry/connection.ts`; every edge
 //! or node write that changes it refreshes the row in the same transaction.
 
 use std::collections::{BTreeMap, BTreeSet, HashMap};
