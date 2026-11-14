@@ -1,10 +1,10 @@
 # Code organization and architecture standard
 
-- **Status:** Accepted 2026-11-14; Phases 0–3 are implemented and Phase 4 is
-  in progress on stacked branches (standard and tooling, shared kernel and
-  first reuse, composer shell, AsyncDrain core, connector layer, the eight
-  `flow/` area moves, `components/app`, the canvas world and its overlays, the
-  composer, minimap and search areas, the probes, the page area).
+- **Status:** Accepted 2026-11-14; Phases 0–4 are implemented on stacked
+  branches (standard and tooling, shared kernel and first reuse, composer
+  shell, AsyncDrain core, connector layer, the eight `flow/` area moves,
+  `components/app`, the canvas world and its overlays, the composer, minimap
+  and search areas, the probes, the page area and workspace split).
 - **Scope:** `src/` (TSX app) and `src/native/` (Rust document core).
 - **Related:** [standards](../standards.md), [architecture](../architecture.md),
   [conventions](../conventions.md), [testing](../testing.md),
@@ -1868,8 +1868,17 @@ and moved `bindings`, `page-chrome` and `search-navigation` (with their
 colocated tests) to `pages/flow/workspace`; the page imports the component
 areas through their facades. `LEGACY_FLAT` is empty. The tooling tests now
 inject synthetic entries so the allow-list report stays covered until Phase 5
-removes it. The workspace/effects split and the page-size target are the rest
-of Phase 4.
+removes it.
+
+Phase 4 step 2 split the page: `flow-workspace.ts` constructs the document
+session, scene, camera, controllers and loaders in the original order and
+disposes them in the original cleanup order; `flow-actions.ts` holds the key
+actions and Escape layer order; `flow-effects.ts` holds the selection and
+composer effect bodies. `FlowPage` still creates the workspace once,
+synchronously, in its body, keeps `bindFlowKeys`, `dismissContextMenuOnChange`
+and the hook registrations in its own owner, and drops from 568 to 207 lines
+(§14 target ~250). The `sized`/`opening` guards, lazy `applyChanges` capture
+and cleanup order are unchanged.
 
 ---
 

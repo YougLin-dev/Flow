@@ -93,6 +93,9 @@ src/                   the NSH app: its root, entry, config and assets
       FlowPage.tsx     the workspace: document session, camera, overlays
       workspace/
         bindings.ts    the global keyboard commands
+        flow-actions.ts the key actions and the Escape layer order
+        flow-effects.ts the selection and composer effects
+        flow-workspace.ts the document session, scene, camera and controllers
         page-chrome.ts the page root's pointer and wheel forwarding
         search-navigation.ts revealing a search hit
   components/

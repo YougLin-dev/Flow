@@ -416,6 +416,12 @@ that consumes or keeps the wheel declares its own listener instead.
 Presses, hovers and the marquee stay on the canvas interaction view, because
 they hit-test world geometry.
 
+The page creates one workspace object (`pages/flow/workspace/flow-workspace.ts`)
+synchronously in its body; that object owns the document session, scene,
+camera, controllers and loaders, and its `dispose` runs in the page's cleanup.
+`flow-effects.ts` supplies the selection and composer effects the page
+registers, and `flow-actions.ts` the key-action set the page binds.
+
 Keyboard commands are declared in `pages/flow/workspace/bindings.ts` (`bindFlowKeys`) and
 bound once by the page: `mod+=`/`mod+-`/`mod+0`
 zoom and fit, `mod+z`/`mod+shift+z` undo and redo, Delete/Backspace delete

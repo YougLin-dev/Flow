@@ -371,7 +371,8 @@ ignored. Hover MUST NOT change the selection. (Test, Host for real pointers)
 
 Every object the page creates — the scene, camera, controller, viewport
 refresh, preview loader, document session and runner — MUST be disposed by
-the page's `cleanup`, exactly once and idempotently. Key bindings MUST be
+the page's `cleanup` (through the workspace's `dispose`), exactly once and
+idempotently. Key bindings MUST be
 owned by the page's scope (declared in `pages/flow/workspace/bindings.ts` and bound by the
 page) or the mounted palette, and every command
 MUST exist once. Async work MUST drop its result after disposal. Tests that
