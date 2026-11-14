@@ -1179,7 +1179,7 @@ Every new area/segment must be added to the manifest and to
 
 Add `scripts/structure.mjs` and a `check:structure` package script, run from
 `bun run check`. Scope the TSX checks to `.ts`/`.tsx` under `src/`, ignoring
-`.nsh/**`, `target/**`, `node_modules` and `assets/`; item 7 is a
+`.nsh/**`, `target/**`, `node_modules` and `src/assets/**`; item 7 is a
 reporting-only Rust layout check over `.rs` files:
 
 1. Every non-test file under `src` is classified by the manifest; an
@@ -1192,7 +1192,7 @@ reporting-only Rust layout check over `.rs` files:
    `editing/`, `controls/`, `feedback/`, `context-menu/`, `cards/`, `scene/`,
    etc.) do not.
 4. Forbidden folder names fail only under app source, not under
-   `src/native/**`, `.nsh/**` or `assets/`; a `data.test.ts` file is not a
+   `src/native/**`, `.nsh/**` or `src/assets/**`; a `data.test.ts` file is not a
    `data/` folder.
 5. Direct-entry budget: an area with more than 12 direct non-test
    modules/entries without subfolders prints a report; more than 20 fails
@@ -1800,6 +1800,16 @@ and cancellation) and `providers.ts` (the mock text/image providers and the
 wait/cancel primitives) behind the area facade. The split is a move only: the
 bodies are copied unchanged and `NodeRunner` is the only external export.
 `LEGACY_FLAT` is down to 45 modules.
+
+Phase 2 step 8 moved the document lifecycle, sessions, commands, assets,
+viewport and the native-test harness under `flow/document/`. The composer
+reload policy split into `session/composer-detail.ts` (`errorOf`/`inputUrl`
+stay in the root `composer-detail.ts` for Phase 3 step 5), `sameOverview`
+moved with the minimap loader, and `ViewportHost.fallbackBounds` replaced the
+viewport controller's seed import. The structure walker now skips only
+`src/assets/`; skipping every `assets/` folder would have hidden the new
+area-owned segment. `LEGACY_FLAT` is down to 32 modules and the native-seam
+report is clear (the runtime import lives inside `flow/document`).
 
 ---
 

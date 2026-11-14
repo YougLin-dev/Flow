@@ -279,7 +279,7 @@ the right-button drag from panning;
 `flow/canvas/interaction/context-menu.ts` wires the press, the pending press
 a release opens, the dismissal when the camera or the pressed card or
 connector moves away, and the item actions;
-`flow/node-commands.ts` performs the copy (writing an open editor's drafts
+`flow/document/commands/node-commands.ts` performs the copy (writing an open editor's drafts
 first) and delete commands.
 
 `FlowCard`'s root carries the node's world position and lays its chrome out

@@ -119,8 +119,14 @@ src/                   the NSH app: its root, entry, config and assets
     SelectionBadge.tsx selection count
     BrandCard.tsx      branding shown where the desktop shell is absent
   flow/
-    data.ts            the demo nodes/edges used to seed an empty document
-    database-path.ts   resolves the document path from host/env/data-dir
+    document/
+      index.ts         the area facade: lifecycle, sessions and loaders
+      assets/          asset URLs, preview and minimap loaders
+      commands/        node/edge commands and the upload source
+      lifecycle/       database path, document session and the seed
+      session/         the node session, inline editor and composer reload policy
+      test/            the native-test harness
+      viewport/        the camera and viewport read loop
     composer/
       composer-state.ts the composer's settings draft
       placement.ts     the native composer's placement

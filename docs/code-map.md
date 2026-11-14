@@ -8,16 +8,16 @@ updates the owner.
 
 ## Layers
 
-| Layer      | Path                                                                | May import                                    |
-| ---------- | ------------------------------------------------------------------- | --------------------------------------------- |
-| Shell      | `src/App.tsx`                                                       | pages, components, store, foundations, assets |
-| Page       | `src/pages/`                                                        | pages, components, store, foundations, assets |
-| Component  | `src/components/`                                                   | components, foundations, assets               |
-| Store      | `src/store.ts`                                                      | store, foundations, assets                    |
-| Foundation | `src/flow/`                                                         | foundations, assets                           |
-| Test       | `src/test-support/`, `**/test/`, `src/flow/node-session-harness.ts` | every layer; never imported by production     |
-| Asset      | `src/assets/`                                                       | nothing                                       |
-| Other      | any other `src/` module                                             | nothing until classified or allow-listed      |
+| Layer      | Path                                                                              | May import                                    |
+| ---------- | --------------------------------------------------------------------------------- | --------------------------------------------- |
+| Shell      | `src/App.tsx`                                                                     | pages, components, store, foundations, assets |
+| Page       | `src/pages/`                                                                      | pages, components, store, foundations, assets |
+| Component  | `src/components/`                                                                 | components, foundations, assets               |
+| Store      | `src/store.ts`                                                                    | store, foundations, assets                    |
+| Foundation | `src/flow/`                                                                       | foundations, assets                           |
+| Test       | `src/test-support/`, `**/test/`, `src/flow/document/test/node-session-harness.ts` | every layer; never imported by production     |
+| Asset      | `src/assets/`                                                                     | nothing                                       |
+| Other      | any other `src/` module                                                           | nothing until classified or allow-listed      |
 
 `boundaries/no-upward-import` enforces this table. Tests are exempt because
 they may reach into any layer on purpose.
@@ -98,8 +98,13 @@ it to the document assets. Step 6 moved the composer draft and the placement
 half of the old `overlay.ts` to `flow/composer`; `composer-detail.ts` moves
 with the document step. Step 7 split `flow/execution.ts` into
 `flow/execution/{runner,providers}.ts` behind the area facade, moving code
-without changes.
-The rest of the source tree is still the legacy flat layout.
+without changes. Step 8 moved the document lifecycle, sessions, commands,
+assets and viewport under `flow/document/{lifecycle,session,commands,assets,
+viewport,test}`; the composer reload policy split from `composer-detail.ts`,
+`sameOverview` moved with the minimap loader, and `ViewportHost.fallbackBounds`
+replaced the controller's seed import. The structure walker now skips only
+`src/assets/`, so area-owned `assets/` segments are classified. The rest of
+the source tree is still the legacy flat layout.
 The old → new map is in
 [the plan's Appendix A](plans/code-organization.md#appendix-a--tsx-placement-map);
 `LEGACY_FLAT` in the manifest shrinks with every move and disappears in

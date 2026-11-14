@@ -13,7 +13,7 @@ Appendix A.
 Schema version 2 is a deliberate reset. `migration_2` drops every document
 table, including the version 1 nodes and edges, and recreates the current
 schema; there is no data migration. The TSX side seeds the text → image
-example into an empty database (`flow/data.ts`). Version 3 keeps the
+example into an empty database (`flow/document/lifecycle/seed.ts`). Version 3 keeps the
 document and adds the connector RTree, filled from the existing edges.
 Version 5 is the typed-port reset: it drops the document tables and recreates
 them with required edge port fields and `port_id` on inputs and result items;
@@ -173,8 +173,8 @@ or `interrupted` (`input-not-ready` is reserved for a later dependency gate).
 
 `flow/execution/runner.ts` owns the run lifecycle: one run per node, status
 `running`, input sync, provider call, asset import, batch save, cancellation
-and failure recording. `flow/node-session.ts` owns the document-facing
-composer state (settings, inputs, upload), and `flow/inline-editor.ts` owns
+and failure recording. `flow/document/session/node-session.ts` owns the document-facing
+composer state (settings, inputs, upload), and `flow/document/session/inline-editor.ts` owns
 the in-place body editor: its draft, the generation that keeps a late write
 from closing a reopened editor, and the write itself. An external body change
 under an open draft (a run, undo or another writer) closes it instead of
@@ -216,7 +216,7 @@ what is on screen and undo restores what was deleted; on a connector, Delete
 connection removes it. Opening a card's menu
 selects that card, without opening its composer, and opening a connector's
 menu selects that connector; a card already in a multiple selection keeps it.
-`flow/node-commands.ts` performs those two commands:
+`flow/document/commands/node-commands.ts` performs those two commands:
 a copy writes an open editor's drafts first, then inserts the card beside its
 source; delete removes the card and its connectors. An upload copy carries
 its output batch in the same command, so one undo removes the whole copy
@@ -260,7 +260,7 @@ settings are also written before a run. All controls are ordinary NSH
 controls, so they carry names, focus, keyboard operation and screen-reader
 semantics without an alternative path.
 
-`flow/viewport-controller.ts` keeps the scene reconciled while the camera
+`flow/document/viewport/viewport-controller.ts` keeps the scene reconciled while the camera
 moves.
 
 Keyboard: `Delete`/`Backspace` delete a selected edge or cards, `Mod+Z` /
