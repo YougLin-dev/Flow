@@ -38,11 +38,12 @@ export class AsyncDrain {
   }
 
   /**
-   * Starts a drain. Callers check `join` first; a drain that raced in is
-   * joined instead so no second read can start.
+   * Starts a drain, or joins one that raced in (with the follow-up a start
+   * implies) so no second read can start.
    */
   start(step: DrainStep): Promise<void> {
-    if (this.inFlight !== null) return this.join() ?? Promise.resolve();
+    const joined = this.join();
+    if (joined !== null) return joined;
     const drain = this.wait();
     this.inFlight = drain;
     void this.drain(step);
@@ -61,7 +62,7 @@ export class AsyncDrain {
         this.dirty = false;
         // One iteration at a time: the drain is single-flight by design.
         // eslint-disable-next-line no-await-in-loop
-      } while ((await step(() => this.dirty)) === "continue");
+      } while ((await step(() => this.dirty)) === "continue" || this.dirty);
     } catch (error) {
       // The step owns its read errors; reaching this means a caller bug.
       // Settle the drain in `finally` so no caller hangs, and report it

@@ -31,9 +31,10 @@ export function sameTargets(
   return true;
 }
 
-/** The target list a drain iteration reads; each follow-up replaces it. */
+/** The targets a drain iteration reads; follow-ups re-read them. */
 interface PreviewDrain {
   targets: readonly PreviewTarget[];
+  started: boolean;
 }
 
 export class PreviewLoader {
@@ -66,7 +67,7 @@ export class PreviewLoader {
     // Every viewport read and change set schedules a refresh; an unchanged
     // target list has nothing to load and must not publish again.
     if (sameTargets(this.lastTargets, targets)) return Promise.resolve();
-    const pending: PreviewDrain = { targets };
+    const pending: PreviewDrain = { targets, started: false };
     return this.drain.start((isDirty) => this.drainStep(document, assets, pending, isDirty));
   }
 
@@ -78,6 +79,13 @@ export class PreviewLoader {
     isDirty: () => boolean,
   ): Promise<DrainStepResult> {
     if (this.host.isDisposed()) return "done";
+    const scene = this.host.scene();
+    if (!scene) return "done";
+    // The first iteration uses the list `refresh` already compared; every
+    // follow-up re-reads the newest targets, including one that landed in the
+    // microtask gap after the previous iteration's last check.
+    if (pending.started) pending.targets = scene.previewTargets();
+    pending.started = true;
     const targets = pending.targets;
     if (sameTargets(this.lastTargets, targets)) return "done";
     const previousTargets = this.lastTargets;
@@ -87,14 +95,9 @@ export class PreviewLoader {
       // went away stops showing stale thumbnails; a cold start publishes
       // nothing at all. A completed iteration, not a read.
       if (previousTargets !== null && previousTargets.length > 0) {
-        const scene = this.host.scene();
-        if (!scene) return "done";
         scene.applyPreviews([]);
       }
       if (!isDirty()) return "done";
-      const scene = this.host.scene();
-      if (!scene) return "done";
-      pending.targets = scene.previewTargets();
       return "continue";
     }
     const generation = ++this.generation;
@@ -113,10 +116,6 @@ export class PreviewLoader {
     }
     if (this.host.isDisposed() || generation !== this.generation) return "done";
     if (!isDirty()) return "done";
-    // Each follow-up reads the newest targets, immediately before its read.
-    const scene = this.host.scene();
-    if (!scene) return "done";
-    pending.targets = scene.previewTargets();
     return "continue";
   }
 

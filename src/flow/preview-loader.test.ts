@@ -186,6 +186,58 @@ test("an empty target list is its own early-out", async () => {
   expect(applied).toHaveLength(0);
 });
 
+test("a changed target list right after an empty cold start still reads", async () => {
+  const reads: string[][] = [];
+  const applied: PreviewView[][] = [];
+  let targets: PreviewTarget[] = [];
+  const loader = new PreviewLoader(
+    stubHost(
+      stubDocument(reads),
+      stubScene(() => targets, applied),
+    ),
+  );
+
+  // The empty cold start completes synchronously; the second refresh lands
+  // before the drain's cleanup and must still read the newer targets.
+  const first = loader.refresh();
+  targets = [{ id: "a", batchId: "batch-a" }];
+  const second = loader.refresh();
+  await Promise.all([first, second]);
+
+  expect(reads).toEqual([["a"]]);
+  expect(applied).toHaveLength(1);
+});
+
+test("a refresh queued while the first read publishes is still read", async () => {
+  const reads: string[][] = [];
+  const applied: PreviewView[][] = [];
+  let targets: PreviewTarget[] = [{ id: "a", batchId: "batch-a" }];
+  const loaderRef: { current: PreviewLoader | null } = { current: null };
+  const scene = {
+    previewTargets: () => targets,
+    applyPreviews: (previews: readonly PreviewView[]) => {
+      applied.push([...previews]);
+      if (applied.length !== 1) return;
+      targets = [
+        { id: "a", batchId: "batch-a" },
+        { id: "b", batchId: "batch-b" },
+      ];
+      // The refresh lands after the step's last check but before its cleanup;
+      // the drain must honor it and read the newer targets.
+      queueMicrotask(() => void loaderRef.current?.refresh());
+    },
+  } as unknown as FlowScene;
+  const loader = new PreviewLoader(stubHost(stubDocument(reads), scene));
+  loaderRef.current = loader;
+
+  await loader.refresh();
+  await flushRead();
+
+  expect(reads).toEqual([["a"], ["a", "b"]]);
+  expect(applied).toHaveLength(2);
+  expect(applied[1]?.length).toBe(2);
+});
+
 test("an emptied target list clears the previous previews", async () => {
   const reads: string[][] = [];
   const applied: PreviewView[][] = [];
