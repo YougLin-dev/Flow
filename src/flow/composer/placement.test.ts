@@ -1,6 +1,6 @@
 import { expect, test } from "nsh/test";
-import { CanvasCamera } from "./canvas";
-import { composerAnchor, composerPlacement } from "./overlay";
+import { CanvasCamera } from "../canvas";
+import { composerAnchor, composerPlacement } from "./placement";
 
 const STAGE = { width: 800, height: 600 };
 

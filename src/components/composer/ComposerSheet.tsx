@@ -8,7 +8,7 @@ import { Button, Input } from "nsh/base";
 import { X } from "lucide";
 import type { NodeDetail } from "../../flow/shared";
 import { errorOf } from "../../flow/composer-detail";
-import type { ComposerState } from "../../flow/composer-state";
+import type { ComposerState } from "../../flow/composer";
 import { keepsWheel } from "../../flow/shared";
 import { Icon } from "../primitives";
 import { ComposerAttachments } from "./ComposerAttachments";

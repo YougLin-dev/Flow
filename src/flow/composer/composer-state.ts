@@ -7,7 +7,7 @@
  * resolution and count.
  */
 import { signal, untracked } from "nsh";
-import type { NodeDetail } from "./shared";
+import type { NodeDetail } from "../shared";
 import {
   DEFAULT_IMAGE_MODEL,
   DEFAULT_TEXT_MODEL,
@@ -18,7 +18,7 @@ import {
   type NodeSettings,
   serializeSettings,
   type TextModelId,
-} from "./nodes";
+} from "../nodes";
 
 /** The writes the composer drafts make; `NodeSession` implements it. */
 export interface ComposerSaver {

@@ -1,5 +1,5 @@
-import type { CanvasCamera } from "./canvas";
-import type { BoxGeometry, StageSize } from "./shared";
+import type { CanvasCamera } from "../canvas";
+import type { BoxGeometry, StageSize } from "../shared";
 
 export interface ComposerAnchor {
   readonly left: number;

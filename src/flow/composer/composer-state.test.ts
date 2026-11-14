@@ -2,7 +2,7 @@ import { expect, test } from "nsh/test";
 import { effect, signal } from "nsh";
 import type { NodeDetail, NodeSummary } from "@flow/native";
 import { ComposerState, type ComposerSaver } from "./composer-state";
-import type { NodeSettings } from "./nodes";
+import type { NodeSettings } from "../nodes";
 
 function detail(id: string, kind: string, settingsJson: string): NodeDetail {
   const node: NodeSummary = {

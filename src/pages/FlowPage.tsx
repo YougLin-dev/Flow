@@ -18,7 +18,7 @@ import { AssetUrls } from "../flow/asset-urls";
 import { bindFlowKeys } from "../flow/bindings";
 import { CanvasCamera, FlowScene, wheelZoomFactor } from "../flow/canvas";
 import { CanvasController } from "../flow/canvas/interaction/canvas-controller";
-import { ComposerState } from "../flow/composer-state";
+import { ComposerState, composerPlacement } from "../flow/composer";
 import {
   CanvasMenuController,
   dismissContextMenuOnChange,
@@ -30,7 +30,6 @@ import { MinimapLoader } from "../flow/minimap-loader";
 import { MinimapController } from "../flow/minimap";
 import type { NodeKindId } from "../flow/nodes";
 import { NodeSession } from "../flow/node-session";
-import { composerPlacement } from "../flow/overlay";
 import { pageChromeHandlers } from "../flow/page-chrome";
 import { PreviewLoader } from "../flow/preview-loader";
 import { SEARCH_FILTERS } from "../flow/search-filters";
