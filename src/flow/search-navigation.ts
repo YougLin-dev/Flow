@@ -1,6 +1,6 @@
 /** Opening a search hit: fit its card, load it into the scene, select it. */
 import type { Document } from "./shared";
-import type { FlowScene } from "./scene";
+import type { FlowScene } from "./canvas";
 import type { ViewportController } from "./viewport-controller";
 
 export interface RevealHost {

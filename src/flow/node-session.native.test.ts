@@ -3,7 +3,7 @@ import { Document } from "@flow/native";
 import { IMAGE_NODE_ID, TEXT_NODE_ID, seedDocument } from "./data";
 import { parseSettings } from "./nodes";
 import { makeSession, until } from "./node-session-harness";
-import { FlowScene } from "./scene";
+import { FlowScene } from "./canvas/model/scene/scene";
 
 test("runs the mock image provider and stores an immutable batch", async () => {
   const document = await Document.open(":memory:");

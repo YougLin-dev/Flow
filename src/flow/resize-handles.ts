@@ -1,8 +1,8 @@
 /** Screen-space geometry and hit testing for a card's invisible resize handles. */
 import type { NodeSummary } from "./shared";
-import type { CanvasCamera } from "./camera";
-import type { CanvasCursor } from "./canvas-controller";
-import type { FlowScene } from "./scene";
+import type { CanvasCamera } from "./canvas/model/camera";
+import type { CanvasCursor } from "./canvas/model/cursor";
+import type { FlowScene } from "./canvas/model/scene/scene";
 import { handleAt, type ResizeHandle, type ScreenRect } from "./canvas/geometry/selection";
 
 /** The screen rectangle of a card, or null when it is not in the scene. */

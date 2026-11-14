@@ -4,11 +4,11 @@
  * under the pointer, so one gesture can connect a whole selection.
  */
 import type { EdgeSummary, Point } from "./shared";
-import type { CanvasCamera } from "./camera";
+import type { CanvasCamera } from "./canvas/model/camera";
 import { magnetEndPoint, PORT_MAGNET_RADIUS, type PortSide } from "./canvas/geometry/connection";
 import type { PortKind } from "./nodes";
-import type { FlowScene } from "./scene";
-import { capacityOf, nearestPort, portAt, type PortHit } from "./scene-ports";
+import type { FlowScene } from "./canvas/model/scene/scene";
+import { capacityOf, nearestPort, portAt, type PortHit } from "./canvas/model/scene/scene-ports";
 
 /** The ids and ports of one connector a gesture completed. */
 export interface ConnectionPair {

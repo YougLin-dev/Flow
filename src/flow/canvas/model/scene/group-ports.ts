@@ -9,10 +9,10 @@ import {
   PORT_HIT_RADIUS,
   portOffset,
   type PortSide,
-} from "./canvas/geometry/connection";
-import type { BoxGeometry, Point } from "./shared";
-import { PORT_KINDS, type PortKind, portsOfNode } from "./nodes";
-import type { FlowScene } from "./scene";
+} from "../../geometry/connection";
+import type { BoxGeometry, Point } from "../../../shared";
+import { PORT_KINDS, type PortKind, portsOfNode } from "../../../nodes";
+import type { SceneReader } from "./scene-types";
 import { capacityOf, portCenterWorld, portOffsetAt } from "./scene-ports";
 
 /** One selected port a group port stands for. */
@@ -37,7 +37,7 @@ export interface GroupPort {
 }
 
 /** The group ports a selection frame exposes, centred on each side. */
-export function groupPorts(scene: FlowScene, frame: BoxGeometry): GroupPort[] {
+export function groupPorts(scene: SceneReader, frame: BoxGeometry): GroupPort[] {
   const ids = scene.selection();
   // The scene caches this per edge list, so a frame drag's per-move rebuild
   // does not rescan every edge.
@@ -94,7 +94,7 @@ export function groupPorts(scene: FlowScene, frame: BoxGeometry): GroupPort[] {
 /** The group port under a world point, if any; the nearest one wins when
  * two reaches overlap. */
 export function groupPortAt(
-  scene: FlowScene,
+  scene: SceneReader,
   frame: BoxGeometry,
   x: number,
   y: number,

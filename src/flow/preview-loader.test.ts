@@ -3,7 +3,7 @@ import type { Document, NodePreview } from "@flow/native";
 import type { AssetUrls } from "./asset-urls";
 import { PreviewLoader, sameTargets, type PreviewHost } from "./preview-loader";
 import type { PreviewTarget } from "./previews";
-import type { FlowScene, PreviewView } from "./scene";
+import type { FlowScene, PreviewView } from "./canvas";
 
 interface DocumentStub {
   previews(ids: string[]): Promise<NodePreview[]>;

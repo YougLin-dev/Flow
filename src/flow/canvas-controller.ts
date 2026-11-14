@@ -4,10 +4,11 @@
  * secondary button, and the port/edge gestures. It owns no views; the canvas
  * components read its signals.
  */
-import { batch, computed, signal, type ViewStyle } from "nsh";
+import { batch, computed, signal } from "nsh";
+import type { CanvasCursor } from "./canvas/model/cursor";
 import type { BoxGeometry, NodeBounds, Point } from "./shared";
 import type { PortSide } from "./canvas/geometry/connection";
-import type { CanvasCamera } from "./camera";
+import type { CanvasCamera } from "./canvas/model/camera";
 import type { ConnectionPair, MagnetPort } from "./connection-gesture";
 import { EdgeGestures } from "./edge-gestures";
 import {
@@ -15,13 +16,13 @@ import {
   framePortAt as framePortAtScreen,
   frameScreenRect,
 } from "./frame-surface";
-import type { GroupPort } from "./group-ports";
+import type { GroupPort } from "./canvas/model/scene/group-ports";
 import { HoverFlags } from "./hover-flags";
 import type { PortKind } from "./nodes";
 import { cursorForHandle, handleAtPoint, screenRect } from "./resize-handles";
 import { RightGesture } from "./right-gesture";
-import type { FlowScene } from "./scene";
-import { portAt } from "./scene-ports";
+import type { FlowScene } from "./canvas/model/scene/scene";
+import { portAt } from "./canvas/model/scene/scene-ports";
 import {
   intersects,
   normalizeRect,
@@ -29,8 +30,6 @@ import {
   resizedRect,
   type ScreenRect,
 } from "./canvas/geometry/selection";
-
-export type CanvasCursor = NonNullable<ViewStyle["cursor"]>;
 
 /** The typed port whose icon follows the pointer. */
 export interface PortHover {

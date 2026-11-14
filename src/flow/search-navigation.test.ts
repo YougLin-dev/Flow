@@ -1,6 +1,6 @@
 import { expect, test } from "nsh/test";
 import type { Document, NodeSummary } from "@flow/native";
-import type { FlowScene } from "./scene";
+import type { FlowScene } from "./canvas";
 import { revealSearchHit, type RevealHost } from "./search-navigation";
 import type { ViewportController } from "./viewport-controller";
 

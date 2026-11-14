@@ -28,7 +28,7 @@ import {
   portsOfNode,
   serializeSettings,
 } from "./nodes";
-import { capacityOf, hasPortEdge, incomingEdgeCount } from "./scene-ports";
+import { capacityOf, hasPortEdge, incomingEdgeCount } from "./canvas";
 import { uploadSource as uploadSourceFile } from "./upload-source";
 
 /** The asset URL cache the composer reads; `AssetUrls` implements it. */

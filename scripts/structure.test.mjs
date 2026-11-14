@@ -18,7 +18,7 @@ import {
 const tree = {
   "src/.nsh/generated.ts": "",
   "src/native/src/db.rs": "",
-  "src/flow/scene.ts":
+  "src/flow/overlay.ts":
     '// import x from "./test/helper"\nimport "./fixtures/a";\nexport { x } from "./fixtures/b";\nexport const later = () => import("./fixtures/c");\nimport type { A } from "./fixtures/type-a";\nexport type { B } from "./fixtures/type-b";',
   "src/flow/fixtures/a.ts": "",
   "src/flow/fixtures/b.ts": "",
@@ -63,7 +63,7 @@ test("code map mirrors the manifest areas and facades", () => {
 test("collects app modules but skips generated and Rust folders", () => {
   withTree(tree, (root) => {
     const files = collectSourceFiles(root);
-    expect(files).toContain("src/flow/scene.ts");
+    expect(files).toContain("src/flow/overlay.ts");
     expect(files).toContain("src/components/canvas/index.ts");
     expect(files).not.toContain("src/.nsh/generated.ts");
     expect(files).not.toContain("src/native/src/db.rs");
@@ -72,8 +72,8 @@ test("collects app modules but skips generated and Rust folders", () => {
 
 test("resolves exact files, extensions and directory indexes", () => {
   withTree(tree, (root) => {
-    expect(resolveImport(root, "src/components/Widget.tsx", "../flow/scene")).toBe(
-      "src/flow/scene.ts",
+    expect(resolveImport(root, "src/components/Widget.tsx", "../flow/overlay")).toBe(
+      "src/flow/overlay.ts",
     );
     expect(resolveImport(root, "src/components/Widget.tsx", "../flow/new")).toBe("src/flow/new.ts");
     expect(resolveImport(root, "src/components/Widget.tsx", "../components/canvas")).toBe(
@@ -137,7 +137,7 @@ test("reports a new flat module, a missing facade and a forbidden folder", () =>
 
 test("reads static, re-export, dynamic and type-only imports but not comments", () => {
   withTree(tree, (root) => {
-    const imports = readImports(root, "src/flow/scene.ts");
+    const imports = readImports(root, "src/flow/overlay.ts");
     expect(imports).toEqual(
       expect.arrayContaining([
         "./fixtures/a",
@@ -234,9 +234,9 @@ test("Phase 5 turns the area findings into failures", () => {
 });
 
 test("reports stale legacy allow-list entries so the list shrinks", () => {
-  const reports = checkLegacyAllowList(["src/flow/scene.ts"]);
-  expect(reports).not.toContain("stale legacy allow-list entry: src/flow/scene.ts");
-  expect(reports).toContain("stale legacy allow-list entry: src/flow/camera.ts");
+  const reports = checkLegacyAllowList(["src/flow/overlay.ts"]);
+  expect(reports).not.toContain("stale legacy allow-list entry: src/flow/overlay.ts");
+  expect(reports).toContain("stale legacy allow-list entry: src/flow/node-session.ts");
 });
 
 test("keeps the legacy allow-list and the Rust report non-failing", () => {
@@ -251,7 +251,7 @@ test("keeps the legacy allow-list and the Rust report non-failing", () => {
       expect(checkRustLayout(root)).toEqual([
         "Rust module at the crate root: src/native/src/extra.rs",
       ]);
-      expect(checkUnclassified(files)).not.toContain("unclassified module: src/flow/scene.ts");
+      expect(checkUnclassified(files)).not.toContain("unclassified module: src/flow/overlay.ts");
     },
   );
 });

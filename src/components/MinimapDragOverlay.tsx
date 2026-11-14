@@ -3,7 +3,7 @@
  * the small panel, so its moves must keep reaching the drag.
  */
 import { platform, View, type MouseEvent as NshMouseEvent } from "nsh";
-import { wheelNotches } from "../flow/camera";
+import { wheelNotches } from "../flow/canvas";
 import type { MinimapController } from "../flow/minimap-controller";
 
 export interface MinimapDragOverlayProps {

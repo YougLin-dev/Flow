@@ -6,7 +6,7 @@ import type { ChangeSet, Document } from "@flow/native";
 import { AssetUrls } from "./asset-urls";
 import { NodeRunner } from "./execution";
 import { NodeSession, type NodeSessionHost } from "./node-session";
-import type { FlowScene } from "./scene";
+import type { FlowScene } from "./canvas/model/scene/scene";
 
 /** Polls native async work: `app.waitUntil` only exists in an app test. */
 export function until(check: () => boolean, timeout = 5000): Promise<void> {

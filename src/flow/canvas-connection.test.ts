@@ -5,11 +5,11 @@
  */
 import { expect, test } from "nsh/test";
 import type { EdgeSummary, NodeSummary, SceneSnapshot } from "@flow/native";
-import { CanvasCamera } from "./camera";
+import { CanvasCamera } from "./canvas/model/camera";
 import { type CanvasHost, CanvasController } from "./canvas-controller";
 import { magnetEndPoint, PORT_MAGNET_RADIUS } from "./canvas/geometry/connection";
 import type { ConnectionPair } from "./connection-gesture";
-import { FlowScene } from "./scene";
+import { FlowScene } from "./canvas/model/scene/scene";
 
 function node(id: string, x: number, y: number): NodeSummary {
   return {

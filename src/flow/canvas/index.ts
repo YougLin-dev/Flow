@@ -4,6 +4,22 @@
  * deep-import those within the feature.
  */
 export type { BoxGeometry } from "../shared";
+export { CanvasCamera, wheelNotches, wheelZoomFactor, type CameraSize } from "./model/camera";
+export { CardContent } from "./model/cards/card-content";
+export type { CardImageEvent } from "./model/cards/card-image";
+export { CardGeometry, cardLocalLayout, type CardSize } from "./model/cards/card-geometry";
+export {
+  CARD_BODY_FONT_SIZE,
+  CARD_BODY_INSET,
+  CARD_BODY_LINE_HEIGHT,
+  CARD_TITLE_HEIGHT,
+} from "./model/cards/card-layout";
+export { inlineBodyBox } from "./model/cards/inline-body";
+export { connectorLayerBox, trimConnectorBox } from "./model/edge-layer";
+export { groupPorts, type GroupPort } from "./model/scene/group-ports";
+export { FlowScene } from "./model/scene/scene";
+export { capacityOf, hasPortEdge, incomingEdgeCount } from "./model/scene/scene-ports";
+export type { ConnectionPreview, PreviewView } from "./model/scene/scene-types";
 export {
   connectionBounds,
   connectorControls,

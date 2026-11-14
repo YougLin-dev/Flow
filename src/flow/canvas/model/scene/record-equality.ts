@@ -7,8 +7,8 @@
  * `flow/shared`'s `sameRectWithin` (0.01 world units), which decides whether
  * an applied rectangle kept its value; the two precisions are deliberate.
  */
-import { samePoint, type EdgeSummary, type NodeSummary } from "./shared";
-import type { PreviewView } from "./scene";
+import { samePoint, type EdgeSummary, type NodeSummary } from "../../../shared";
+import type { PreviewView } from "./scene-types";
 
 /**
  * Exhaustive per-field equality; a new NodeSummary field is a compile error

@@ -1,7 +1,7 @@
 import { expect, test } from "nsh/test";
 import type { Document, EdgeSummary, NodeSummary, SceneSnapshot, Viewport } from "@flow/native";
-import { CanvasCamera, type CameraScheduler } from "./camera";
-import { FlowScene } from "./scene";
+import { CanvasCamera, FlowScene } from "./canvas";
+import type { CameraScheduler } from "./canvas/model/camera";
 import {
   ViewportController,
   type ViewportHost,

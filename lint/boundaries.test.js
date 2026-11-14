@@ -413,7 +413,7 @@ test("reports an unclassified source module but keeps the legacy allow-list", ()
       const legacy = [];
       const legacyContext = {
         cwd,
-        filename: join(cwd, "src/flow/scene.ts"),
+        filename: join(cwd, "src/flow/overlay.ts"),
         report: (report) => legacy.push(report),
       };
       const legacyVisitors = unclassifiedSource.create(legacyContext);

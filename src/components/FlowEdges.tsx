@@ -9,13 +9,14 @@ import { type Accessor, type CanvasRenderingContext2D, colorScheme, computed } f
 import { overlaps, sameBox, type BoxGeometry, type EdgeSummary, type Point } from "../flow/shared";
 import {
   connectorControls,
+  connectorLayerBox,
   cubicBounds,
   cubicInsideView,
   EDGE_THICKNESS,
+  trimConnectorBox,
   visibleCubicRuns,
+  type FlowScene,
 } from "../flow/canvas";
-import { connectorLayerBox, trimConnectorBox } from "../flow/edge-layer";
-import type { FlowScene } from "../flow/scene";
 import { ConnectorCanvas, connectorColor, traceCubic } from "./canvas";
 
 /** The selected connector's stroke: one point thicker than the rest, so a

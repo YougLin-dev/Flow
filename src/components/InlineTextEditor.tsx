@@ -7,7 +7,7 @@
  */
 import { token } from "nsh";
 import { Input } from "nsh/base";
-import { CARD_BODY_FONT_SIZE, CARD_BODY_LINE_HEIGHT } from "../flow/card-layout";
+import { CARD_BODY_FONT_SIZE, CARD_BODY_LINE_HEIGHT } from "../flow/canvas";
 import { keepsWheel } from "../flow/shared";
 
 export interface InlineTextEditorProps {

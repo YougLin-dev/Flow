@@ -1,7 +1,7 @@
 import { expect, test } from "nsh/test";
 import { effect } from "nsh";
 import type { EdgeSummary, NodeSummary, SceneSnapshot } from "@flow/native";
-import type { BoxGeometry } from "./shared";
+import type { BoxGeometry } from "../../../shared";
 import { FlowScene } from "./scene";
 import { portAt } from "./scene-ports";
 

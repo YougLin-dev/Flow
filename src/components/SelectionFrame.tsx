@@ -8,10 +8,9 @@
  * a normal selection.
  */
 import { View } from "nsh";
-import type { CanvasCamera } from "../flow/camera";
 import type { CanvasController } from "../flow/canvas-controller";
+import type { CanvasCamera, FlowScene } from "../flow/canvas";
 import { selectionFrame } from "../flow/frame-surface";
-import type { FlowScene } from "../flow/scene";
 import type { BoxGeometry } from "../flow/shared";
 
 export interface SelectionFrameProps {

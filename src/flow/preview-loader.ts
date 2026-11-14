@@ -2,7 +2,7 @@
 import { AsyncDrain, type Document, type DrainStepResult } from "./shared";
 import type { AssetUrls } from "./asset-urls";
 import { loadPreviews, type PreviewTarget } from "./previews";
-import type { FlowScene } from "./scene";
+import type { FlowScene } from "./canvas";
 
 const PREVIEW_DELAY_MS = 40;
 

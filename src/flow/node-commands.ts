@@ -6,7 +6,7 @@
  */
 import { resultBatch, resultItem, type ChangeSet, type Document, type NodeInput } from "./shared";
 import { type NodeSettings, serializeSettings } from "./nodes";
-import type { FlowScene } from "./scene";
+import type { FlowScene } from "./canvas";
 
 /** The session state a draft-aware copy writes before reading the card. */
 export interface DraftSession {

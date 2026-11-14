@@ -15,33 +15,21 @@ import {
   type NodeSummary,
   type Point,
   type SceneSnapshot,
-} from "./shared";
+} from "../../../shared";
 import {
   connectionBounds,
   distanceToConnection,
   EDGE_HIT_DISTANCE,
   PORT_CENTER_GAP,
   portCenter,
-} from "./canvas/geometry/connection";
-import { CARD_TITLE_BAND } from "./card-layout";
-import { hasImageOutput, type PortKind } from "./nodes";
+} from "../../geometry/connection";
+import { CARD_TITLE_BAND } from "../cards/card-layout";
+import { hasImageOutput } from "../../../nodes";
 import { sameEdge, sameNode, samePreviewMap, samePreviewView } from "./record-equality";
+import type { ConnectionPreview, PreviewView, SceneReader } from "./scene-types";
 import { edgePortOffsets } from "./scene-ports";
 
-/** The URLs a card's image body should show, loaded by the page. */
-export interface PreviewView {
-  readonly nodeId: string;
-  readonly urls: readonly string[];
-  readonly count: number;
-}
-
-export interface ConnectionPreview {
-  readonly from: Point;
-  readonly to: Point;
-  readonly portKind: PortKind;
-}
-
-export class FlowScene {
+export class FlowScene implements SceneReader {
   /** The cards on the canvas, in creation order. */
   readonly nodes = signal<readonly NodeSummary[]>([]);
   readonly edges = signal<readonly EdgeSummary[]>([]);

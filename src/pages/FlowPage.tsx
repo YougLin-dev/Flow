@@ -16,7 +16,7 @@ import { CanvasProbe } from "../components/CanvasProbe";
 import { ZoomControls, ZoomProbe } from "../components/ZoomControls";
 import { AssetUrls } from "../flow/asset-urls";
 import { bindFlowKeys } from "../flow/bindings";
-import { CanvasCamera, wheelZoomFactor } from "../flow/camera";
+import { CanvasCamera, FlowScene, wheelZoomFactor } from "../flow/canvas";
 import { CanvasController } from "../flow/canvas-controller";
 import { ComposerState } from "../flow/composer-state";
 import { CanvasMenuController, dismissContextMenuOnChange } from "../flow/context-menu";
@@ -32,7 +32,6 @@ import { pageChromeHandlers } from "../flow/page-chrome";
 import { PreviewLoader } from "../flow/preview-loader";
 import { SEARCH_FILTERS } from "../flow/search-filters";
 import { revealSearchHit } from "../flow/search-navigation";
-import { FlowScene } from "../flow/scene";
 import { ViewportController } from "../flow/viewport-controller";
 import { selectedCount, setSelectedCount, setZoomPercent, zoomPercent } from "../store";
 

@@ -14,14 +14,19 @@ import {
   type MouseEvent as NshMouseEvent,
   type PressEvent,
 } from "nsh";
-import { type CanvasCamera, type CameraSize, wheelNotches } from "../flow/camera";
+import {
+  cardInView,
+  inlineBodyBox,
+  type CanvasCamera,
+  type CameraSize,
+  type CardImageEvent,
+  type FlowScene,
+  wheelNotches,
+} from "../flow/canvas";
 import { sameBounds } from "../flow/shared";
 import type { CanvasController } from "../flow/canvas-controller";
 import type { ContextMenuPoint } from "../flow/context-menu";
-import { inlineBodyBox } from "../flow/overlay";
-import type { FlowScene } from "../flow/scene";
-import { cardInView } from "../flow/canvas";
-import { FlowCard, type CardImageEvent } from "./FlowCard";
+import { FlowCard } from "./FlowCard";
 import { FlowEdges } from "./FlowEdges";
 import { FlowPreviews } from "./FlowPreviews";
 import { GridBackground } from "./GridBackground";

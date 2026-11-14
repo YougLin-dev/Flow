@@ -12,8 +12,8 @@ import {
   EDGE_DASH,
   EDGE_PADDING,
   EDGE_THICKNESS,
+  type ConnectionPreview,
 } from "../flow/canvas";
-import type { ConnectionPreview } from "../flow/scene";
 import { ConnectorCanvas, connectorColor, traceCubic } from "./canvas";
 
 export interface FlowPreviewsProps {

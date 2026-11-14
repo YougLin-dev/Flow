@@ -1,12 +1,12 @@
 /** The canvas context menu's anchor, target, stage placement and gestures. */
 import { effect, signal, untracked } from "nsh";
-import type { CanvasCamera } from "./camera";
+import type { CanvasCamera } from "./canvas/model/camera";
 import type { CanvasController } from "./canvas-controller";
 import { samePoint, sameRect, type BoxGeometry, type Point } from "./shared";
 import type { NodeKindId } from "./nodes";
 import type { StageSize } from "./overlay";
-import type { FlowScene } from "./scene";
-import { portAt } from "./scene-ports";
+import type { FlowScene } from "./canvas/model/scene/scene";
+import { portAt } from "./canvas/model/scene/scene-ports";
 
 /** A secondary-button press in the canvas's screen points. */
 export interface ContextMenuPoint {

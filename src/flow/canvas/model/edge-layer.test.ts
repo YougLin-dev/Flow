@@ -1,15 +1,15 @@
 import { type Accessor, effect } from "nsh";
 import { expect, test } from "nsh/test";
 import type { EdgeSummary, NodeSummary, SceneSnapshot } from "@flow/native";
-import type { BoxGeometry, Point } from "./shared";
-import { connectionBounds, connectorControls } from "./canvas/geometry/connection";
+import type { BoxGeometry, Point } from "../../shared";
+import { connectionBounds, connectorControls } from "../geometry/connection";
 import {
   CONNECTOR_VIEW_MARGIN,
   connectorLayerBounds,
   connectorLayerBox,
   trimConnectorBox,
 } from "./edge-layer";
-import { FlowScene } from "./scene";
+import { FlowScene } from "./scene/scene";
 
 function node(id: string, x: number, y: number): NodeSummary {
   return {

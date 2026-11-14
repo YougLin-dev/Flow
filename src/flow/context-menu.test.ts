@@ -1,6 +1,6 @@
 import { expect, test } from "nsh/test";
 import type { EdgeSummary, NodeSummary } from "@flow/native";
-import { CanvasCamera } from "./camera";
+import { CanvasCamera } from "./canvas/model/camera";
 import { CanvasController } from "./canvas-controller";
 import {
   CONTEXT_MENU_HEIGHT,
@@ -10,7 +10,7 @@ import {
   contextMenuPosition,
   dismissContextMenuOnChange,
 } from "./context-menu";
-import { FlowScene } from "./scene";
+import { FlowScene } from "./canvas/model/scene/scene";
 
 const STAGE = { width: 900, height: 700 };
 

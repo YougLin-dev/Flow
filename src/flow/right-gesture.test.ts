@@ -1,8 +1,8 @@
 import { expect, test } from "nsh/test";
-import { CanvasCamera } from "./camera";
+import { CanvasCamera } from "./canvas/model/camera";
 import { CanvasController } from "./canvas-controller";
 import { RIGHT_DRAG_THRESHOLD, RightGesture } from "./right-gesture";
-import { FlowScene } from "./scene";
+import { FlowScene } from "./canvas/model/scene/scene";
 
 type Call =
   | { readonly kind: "begin"; readonly x: number; readonly y: number }

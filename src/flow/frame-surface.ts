@@ -4,12 +4,12 @@
  * and the frame's port views share these functions, so hit testing and
  * rendering cannot drift apart.
  */
-import type { CanvasCamera } from "./camera";
+import type { CanvasCamera } from "./canvas/model/camera";
 import { PORT_CENTER_GAP, PORT_HIT_RADIUS, PORT_SIZE } from "./canvas/geometry/connection";
 import type { ScreenRect } from "./canvas/geometry/selection";
-import type { GroupPort } from "./group-ports";
-import { groupPortAt } from "./group-ports";
-import type { FlowScene } from "./scene";
+import type { GroupPort } from "./canvas/model/scene/group-ports";
+import { groupPortAt } from "./canvas/model/scene/group-ports";
+import type { FlowScene } from "./canvas/model/scene/scene";
 import { containsPoint, type BoxGeometry } from "./shared";
 
 /** How far a card's port icon reaches outside its border. */

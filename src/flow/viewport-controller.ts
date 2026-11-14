@@ -3,9 +3,8 @@
  * scene reads. It owns no UI; the page binds the values it publishes.
  */
 import type { ChangeSet, Document, Viewport } from "./shared";
-import type { CanvasCamera } from "./camera";
+import type { CanvasCamera, FlowScene } from "./canvas";
 import { CONTENT } from "./data";
-import type { FlowScene } from "./scene";
 
 const VIEWPORT_MARGIN = 0.25;
 const VIEWPORT_DELAY_MS = 80;

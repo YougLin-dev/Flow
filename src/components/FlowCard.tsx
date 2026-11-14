@@ -15,28 +15,24 @@ import type { BoxGeometry, NodeSummary } from "../flow/shared";
 import { Icon } from "./primitives";
 import { Port } from "./Port";
 import { portKey, type PortHover } from "../flow/canvas-controller";
-import { CardContent } from "../flow/card-content";
-import { CardGeometry, type CardSize, cardLocalLayout } from "../flow/card-geometry";
 import {
+  CardContent,
+  CardGeometry,
+  cardLocalLayout,
   CARD_BODY_FONT_SIZE,
   CARD_BODY_INSET,
   CARD_BODY_LINE_HEIGHT,
   CARD_TITLE_HEIGHT,
-} from "../flow/card-layout";
-import { magnetIconPoint, PORT_CENTER_GAP, portOffset, previewCell } from "../flow/canvas";
+  magnetIconPoint,
+  PORT_CENTER_GAP,
+  portOffset,
+  previewCell,
+  type CardImageEvent,
+  type CardSize,
+  type PreviewView,
+} from "../flow/canvas";
 import type { MagnetPort } from "../flow/connection-gesture";
 import { type FlowAccent, portsOfNode } from "../flow/nodes";
-import type { PreviewView } from "../flow/scene";
-
-/** One image load or failure, reported for the host image regression. */
-export interface CardImageEvent {
-  readonly nodeId: string;
-  readonly kind: "load" | "error";
-  readonly url: string;
-  readonly width: number;
-  readonly height: number;
-  readonly message: string;
-}
 
 export interface FlowCardProps {
   readonly node: () => NodeSummary;

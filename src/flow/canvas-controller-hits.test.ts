@@ -1,8 +1,8 @@
 import { expect, test } from "nsh/test";
 import type { EdgeSummary, NodeBounds, NodeSummary, SceneSnapshot } from "@flow/native";
-import { CanvasCamera } from "./camera";
+import { CanvasCamera } from "./canvas/model/camera";
 import { type CanvasHost, CanvasController } from "./canvas-controller";
-import { FlowScene } from "./scene";
+import { FlowScene } from "./canvas/model/scene/scene";
 
 function node(id: string, x: number, y: number, overrides: Partial<NodeSummary> = {}): NodeSummary {
   return {

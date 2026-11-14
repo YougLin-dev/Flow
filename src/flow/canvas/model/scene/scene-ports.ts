@@ -3,16 +3,16 @@
  * capacity arithmetic. They are free functions because they read the scene
  * through its public surface; the scene model keeps to reconciling records.
  */
-import type { EdgeSummary, Point } from "./shared";
+import type { EdgeSummary, Point } from "../../../shared";
 import {
   portCenter,
   portHit,
   portOffset,
   PORT_CENTER_GAP,
   type PortSide,
-} from "./canvas/geometry/connection";
-import { type PortKind, portsOfNode } from "./nodes";
-import type { FlowScene } from "./scene";
+} from "../../geometry/connection";
+import { type PortKind, portsOfNode } from "../../../nodes";
+import type { SceneReader } from "./scene-types";
 
 /** One typed port under a pointer. `point` is the icon's centre, where its
  * connector attaches. */
@@ -27,7 +27,7 @@ export interface PortHit {
 
 /** A port's vertical anchor from its card's top, centred on its side. */
 export function portOffsetAt(
-  scene: FlowScene,
+  scene: SceneReader,
   id: string,
   side: PortSide,
   portId: string,
@@ -42,7 +42,7 @@ export function portOffsetAt(
 
 /** Where a specific port's connector attaches: its icon's centre. */
 export function portCenterWorld(
-  scene: FlowScene,
+  scene: SceneReader,
   id: string,
   side: PortSide,
   portId: string,
@@ -54,7 +54,7 @@ export function portCenterWorld(
 
 /** The topmost typed port under a world point, optionally of one side/type. */
 export function portAt(
-  scene: FlowScene,
+  scene: SceneReader,
   x: number,
   y: number,
   side?: PortSide,
@@ -119,7 +119,7 @@ export function portAt(
  * to each candidate, so an invalid nearest port cannot hide a joinable one.
  */
 export function nearestPort(
-  scene: FlowScene,
+  scene: SceneReader,
   side: PortSide,
   portKind: PortKind,
   exclude: ReadonlySet<string> | undefined,
@@ -175,7 +175,7 @@ export function nearestPort(
 }
 
 /** The most edges an input port may receive; null for a missing port. */
-export function capacityOf(scene: FlowScene, nodeId: string, portId: string): number | null {
+export function capacityOf(scene: SceneReader, nodeId: string, portId: string): number | null {
   const node = scene.node(nodeId);
   if (node === null) return null;
   return portsOfNode(node).inputs.find((port) => port.id === portId)?.capacity ?? null;
@@ -183,7 +183,7 @@ export function capacityOf(scene: FlowScene, nodeId: string, portId: string): nu
 
 /** How many edges already enter one input port. */
 export function incomingEdgeCount(
-  scene: FlowScene,
+  scene: SceneReader,
   nodeId: string,
   portId: string,
   exceptEdgeId?: string,
@@ -197,7 +197,7 @@ export function incomingEdgeCount(
 
 /** Whether this exact port pair already has an edge. */
 export function hasPortEdge(
-  scene: FlowScene,
+  scene: SceneReader,
   fromId: string,
   fromPort: string,
   toId: string,
@@ -221,7 +221,10 @@ export function hasPortEdge(
  * cards are in the scene, or the offsets stored on the edge (for a far card)
  * otherwise. A resize therefore keeps a visible connector on its port.
  */
-export function edgePortOffsets(scene: FlowScene, edge: EdgeSummary): { from: number; to: number } {
+export function edgePortOffsets(
+  scene: SceneReader,
+  edge: EdgeSummary,
+): { from: number; to: number } {
   return {
     from: portOffsetAt(scene, edge.fromId, "out", edge.fromPort) ?? edge.fromOffset,
     to: portOffsetAt(scene, edge.toId, "in", edge.toPort) ?? edge.toOffset,

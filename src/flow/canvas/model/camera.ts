@@ -6,6 +6,7 @@
  * the container and everything positioned from it.
  */
 import { batch, signal, type Accessor, type OS } from "nsh";
+import type { BoxGeometry, Size } from "../../shared";
 
 export interface CameraView {
   readonly x: number;
@@ -13,17 +14,11 @@ export interface CameraView {
   readonly scale: number;
 }
 
-export interface CameraBounds {
-  x: number;
-  y: number;
-  width: number;
-  height: number;
-}
+/** The camera's world viewport, by the shared box shape. */
+export type CameraBounds = BoxGeometry;
 
-export interface CameraSize {
-  width: number;
-  height: number;
-}
+/** The stage's screen size, by the shared size shape. */
+export type CameraSize = Size;
 
 /** An owned settle timeout without exposing a platform timer to the camera. */
 export interface CameraTimer {

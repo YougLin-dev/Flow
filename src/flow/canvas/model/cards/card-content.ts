@@ -6,8 +6,8 @@
  * these accessors instead wakes a binding only when its value really moves.
  */
 import { type Accessor, computed } from "nsh";
-import type { NodeSummary } from "./shared";
-import { type FlowAccent, hasImageOutput, nodeKind, statusLabel } from "./nodes";
+import type { NodeSummary } from "../../../shared";
+import { type FlowAccent, hasImageOutput, nodeKind, statusLabel } from "../../../nodes";
 
 export class CardContent {
   readonly title: Accessor<string>;

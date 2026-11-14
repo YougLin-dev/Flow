@@ -1,8 +1,8 @@
 import type { NodeSummary, SceneSnapshot } from "@flow/native";
 import { expect, test } from "nsh/test";
-import { CanvasCamera } from "./camera";
+import { CanvasCamera } from "./canvas/model/camera";
 import { cursorForHandle, handleAtPoint, screenRect } from "./resize-handles";
-import { FlowScene } from "./scene";
+import { FlowScene } from "./canvas/model/scene/scene";
 import type { ResizeHandle } from "./canvas/geometry/selection";
 
 function node(id: string, x: number, y: number, overrides: Partial<NodeSummary> = {}): NodeSummary {

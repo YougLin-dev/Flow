@@ -1,8 +1,8 @@
 /** The shared connector canvas's box, derived once for its styles and drawing. */
 import { type Accessor, computed } from "nsh";
-import { mergeBounds, sameBox, type BoxGeometry } from "./shared";
-import { connectionBounds, EDGE_PADDING } from "./canvas/geometry/connection";
-import type { FlowScene } from "./scene";
+import { mergeBounds, sameBox, type BoxGeometry } from "../../shared";
+import { connectionBounds, EDGE_PADDING } from "../geometry/connection";
+import type { SceneReader } from "./scene/scene-types";
 
 /** How coarse the canvas box is, in world points: fine enough that rounding
  * it outward never shows, coarse enough that moving a card does not resize
@@ -62,7 +62,7 @@ export function trimConnectorBox(
 }
 
 /** The connector canvas's world box, or null with no usable connectors. */
-export function connectorLayerBox(scene: FlowScene): Accessor<BoxGeometry | null> {
+export function connectorLayerBox(scene: SceneReader): Accessor<BoxGeometry | null> {
   // One computation serves all four style bindings and the drawing origin;
   // rounded-box equality keeps an in-box move from resizing the canvas.
   return computed(

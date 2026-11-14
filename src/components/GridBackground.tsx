@@ -1,7 +1,6 @@
 /** The canvas' dot grid, as tiled static SVG images that cover the stage. */
 import { colorScheme, Image, signal, token, View } from "nsh";
-import type { CanvasCamera } from "../flow/camera";
-import { gridLayout, wrappedGridOffset } from "../flow/canvas";
+import { gridLayout, wrappedGridOffset, type CanvasCamera } from "../flow/canvas";
 
 export interface GridBackgroundProps {
   readonly camera: CanvasCamera;

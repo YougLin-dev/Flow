@@ -12,7 +12,7 @@ import {
   type PressEvent,
   type ViewStyle,
 } from "nsh";
-import { type CanvasCamera, wheelNotches } from "../flow/camera";
+import { wheelNotches, type CanvasCamera } from "../flow/canvas";
 import { sameBounds, type Overview, type OverviewCard } from "../flow/shared";
 import { PANEL } from "./primitives";
 import {
