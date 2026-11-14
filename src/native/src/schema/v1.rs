@@ -1633,6 +1633,21 @@ mod tests {
             "duplicate position on another port must fail"
         );
         conn.execute(
+            "INSERT INTO result_items (id, batch_id, position, port_id, kind, text) \
+             VALUES ('i5', 'b1', 1, 'out', 'text', 'second position')",
+            [],
+        )
+        .expect("next position on the same port");
+        let duplicate_second_position = conn.execute(
+            "INSERT INTO result_items (id, batch_id, position, port_id, kind, text) \
+             VALUES ('i6', 'b1', 1, 'out', 'text', 'duplicate')",
+            [],
+        );
+        assert!(
+            duplicate_second_position.is_err(),
+            "duplicate second position must fail"
+        );
+        conn.execute(
             "UPDATE result_batches SET status = 'done', finished_at = 0 WHERE id = 'b1'",
             [],
         )
@@ -1697,10 +1712,27 @@ mod tests {
             duplicate_other_port.is_err(),
             "duplicate position on another port must fail"
         );
+        conn.execute(
+            "INSERT INTO node_inputs \
+             (id, node_id, port_id, position, kind, origin, edge_id, item_id, text, created_at) \
+             VALUES ('in3', 'n2', 'in', 1, 'text', 'edge', 'e1', 'i1', 'hello', 0)",
+            [],
+        )
+        .expect("next position on the same port");
+        let duplicate_second_position = conn.execute(
+            "INSERT INTO node_inputs \
+             (id, node_id, port_id, position, kind, origin, edge_id, item_id, text, created_at) \
+             VALUES ('in-dup3', 'n2', 'in', 1, 'text', 'edge', 'e1', 'i1', 'hello', 0)",
+            [],
+        );
+        assert!(
+            duplicate_second_position.is_err(),
+            "duplicate second input position must fail"
+        );
         let wrong_text = conn.execute(
             "INSERT INTO node_inputs \
              (id, node_id, port_id, position, kind, origin, edge_id, item_id, text, created_at) \
-             VALUES ('in3', 'n2', 'in', 1, 'text', 'edge', 'e1', 'i1', 'wrong', 0)",
+             VALUES ('in-bad-text', 'n2', 'in', 2, 'text', 'edge', 'e1', 'i1', 'wrong', 0)",
             [],
         );
         assert!(wrong_text.is_err(), "producer text mismatch must fail");
