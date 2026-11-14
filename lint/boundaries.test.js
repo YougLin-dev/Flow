@@ -455,15 +455,23 @@ test("reports an unclassified source module but keeps the legacy allow-list", ()
       visitors.Program({});
       expect(reports.map((report) => report.messageId)).toEqual(["unclassified"]);
 
-      const legacy = [];
-      const legacyContext = {
-        cwd,
-        filename: join(cwd, "src/flow/page-chrome.ts"),
-        report: (report) => legacy.push(report),
-      };
-      const legacyVisitors = unclassifiedSource.create(legacyContext);
-      legacyVisitors.Program?.({});
-      expect(legacy).toEqual([]);
+      // The allow-list is empty after the page move; a synthetic entry keeps
+      // the exemption path covered.
+      const legacyPath = "src/flow/legacy-module.ts";
+      LEGACY_FLAT.add(legacyPath);
+      try {
+        const legacy = [];
+        const legacyContext = {
+          cwd,
+          filename: join(cwd, legacyPath),
+          report: (report) => legacy.push(report),
+        };
+        const legacyVisitors = unclassifiedSource.create(legacyContext);
+        legacyVisitors.Program?.({});
+        expect(legacy).toEqual([]);
+      } finally {
+        LEGACY_FLAT.delete(legacyPath);
+      }
 
       const rootIndex = [];
       const rootIndexContext = {

@@ -1,6 +1,6 @@
 import { platform, type ContextMenuEvent, type MouseEvent, type WheelEvent } from "nsh";
 import { expect, test } from "nsh/test";
-import { wheelNotches, wheelZoomFactor } from "./canvas";
+import { wheelNotches, wheelZoomFactor } from "../../../flow/canvas";
 import { type ChromeMenu, pageChromeHandlers } from "./page-chrome";
 
 const MODIFIERS = { control: false, alt: false, shift: false, platform: false };

@@ -1,7 +1,7 @@
 /** Opening a search hit: fit its card, load it into the scene, select it. */
-import type { Document } from "./shared";
-import type { FlowScene } from "./canvas";
-import type { ViewportController } from "./document";
+import type { Document } from "../../../flow/shared";
+import type { FlowScene } from "../../../flow/canvas";
+import type { ViewportController } from "../../../flow/document";
 
 export interface RevealHost {
   readonly document: Document | null;

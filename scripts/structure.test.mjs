@@ -94,8 +94,11 @@ test("reports a new flat module, a missing facade and a forbidden folder", () =>
     const result = runStructureCheck(root);
     expect(result.failures.toSorted()).toEqual(
       [
-        "new flat module at the flow/ root: src/flow/new.ts",
+        "new flat module at the flow/ root: src/flow/bindings.ts",
         "new flat module at the flow/ root: src/flow/index.ts",
+        "new flat module at the flow/ root: src/flow/new.ts",
+        "new flat module at the flow/ root: src/flow/page-chrome.ts",
+        "new flat module at the pages/ root: src/pages/FlowPage.tsx",
         "new flat module at the components/ root: src/components/Widget.tsx",
         "new flat module at the components/ root: src/components/index.tsx",
         "new flat module at the pages/ root: src/pages/index.ts",
@@ -240,30 +243,41 @@ test("Phase 5 turns the area findings into failures", () => {
 });
 
 test("reports stale legacy allow-list entries so the list shrinks", () => {
-  // Both the present and the absent entries come from the current list, so the
-  // fixture keeps covering both branches as modules move.
-  const [present, ...absent] = [...LEGACY_FLAT];
-  expect(absent.length).toBeGreaterThan(0);
-  expect(checkLegacyAllowList([present])).toEqual(
-    absent.map((file) => `stale legacy allow-list entry: ${file}`),
-  );
+  // The list is empty after the page move; synthetic entries keep both
+  // branches of the report covered.
+  const present = "src/components/kept.tsx";
+  const absent = "src/components/gone.tsx";
+  LEGACY_FLAT.add(present);
+  LEGACY_FLAT.add(absent);
+  try {
+    expect(checkLegacyAllowList([present])).toEqual([`stale legacy allow-list entry: ${absent}`]);
+  } finally {
+    LEGACY_FLAT.delete(present);
+    LEGACY_FLAT.delete(absent);
+  }
 });
 
 test("keeps the legacy allow-list and the Rust report non-failing", () => {
-  withTree(
-    {
-      ...tree,
-      "src/native/src/extra.rs": "",
-    },
-    (root) => {
-      const files = collectSourceFiles(root);
-      expect(files).toContain("src/pages/FlowPage.tsx");
-      expect(checkRustLayout(root)).toEqual([
-        "Rust module at the crate root: src/native/src/extra.rs",
-      ]);
-      expect(checkUnclassified(files)).not.toContain(
-        "unclassified module: src/flow/page-chrome.ts",
-      );
-    },
-  );
+  // The list is empty after the page move; the fixture restores its semantics.
+  LEGACY_FLAT.add("src/flow/page-chrome.ts");
+  try {
+    withTree(
+      {
+        ...tree,
+        "src/native/src/extra.rs": "",
+      },
+      (root) => {
+        const files = collectSourceFiles(root);
+        expect(files).toContain("src/pages/FlowPage.tsx");
+        expect(checkRustLayout(root)).toEqual([
+          "Rust module at the crate root: src/native/src/extra.rs",
+        ]);
+        expect(checkUnclassified(files)).not.toContain(
+          "unclassified module: src/flow/page-chrome.ts",
+        );
+      },
+    );
+  } finally {
+    LEGACY_FLAT.delete("src/flow/page-chrome.ts");
+  }
 });

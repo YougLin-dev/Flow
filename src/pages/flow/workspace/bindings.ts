@@ -1,5 +1,5 @@
 import { keymap } from "nsh";
-import { FIT_KEY, ZOOM_IN_KEY, ZOOM_OUT_KEY } from "./shared";
+import { FIT_KEY, ZOOM_IN_KEY, ZOOM_OUT_KEY } from "../../../flow/shared";
 
 export interface FlowKeyActions {
   readonly setZoom: (factor: number) => void;

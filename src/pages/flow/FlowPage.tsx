@@ -1,20 +1,20 @@
 import { cleanup, effect, host, keymap, Picker, platform, signal, untracked, View } from "nsh";
 import { isAvailable } from "nsh/desktop";
-import type { ChangeSet, Document, NodeBounds, SearchHit } from "../flow/shared";
-import { BrandCard, FrameRate } from "../components/app";
-import { ImageComposer, TextComposer } from "../components/composer";
-import { CanvasMenuLayer, FlowCanvas, NodeToolbar, ZoomControls } from "../components/canvas";
-import { MiniMap, MinimapDragOverlay } from "../components/minimap";
-import { SEARCH_FILTERS, SearchButton, SearchPalette } from "../components/search";
-import { CanvasProbe, ImageLoadProbe, imageProbeText, ZoomProbe } from "../components/probes";
-import { bindFlowKeys } from "../flow/bindings";
-import { CanvasCamera, FlowScene, wheelZoomFactor } from "../flow/canvas";
-import { CanvasController } from "../flow/canvas/interaction/canvas-controller";
-import { ComposerState, composerPlacement } from "../flow/composer";
+import type { ChangeSet, Document, NodeBounds, SearchHit } from "../../flow/shared";
+import { BrandCard, FrameRate } from "../../components/app";
+import { ImageComposer, TextComposer } from "../../components/composer";
+import { CanvasMenuLayer, FlowCanvas, NodeToolbar, ZoomControls } from "../../components/canvas";
+import { MiniMap, MinimapDragOverlay } from "../../components/minimap";
+import { SEARCH_FILTERS, SearchButton, SearchPalette } from "../../components/search";
+import { CanvasProbe, ImageLoadProbe, imageProbeText, ZoomProbe } from "../../components/probes";
+import { bindFlowKeys } from "./workspace/bindings";
+import { CanvasCamera, FlowScene, wheelZoomFactor } from "../../flow/canvas";
+import { CanvasController } from "../../flow/canvas/interaction/canvas-controller";
+import { ComposerState, composerPlacement } from "../../flow/composer";
 import {
   CanvasMenuController,
   dismissContextMenuOnChange,
-} from "../flow/canvas/interaction/context-menu";
+} from "../../flow/canvas/interaction/context-menu";
 import {
   AssetUrls,
   CONTENT,
@@ -23,13 +23,13 @@ import {
   openFlowDocument,
   PreviewLoader,
   ViewportController,
-} from "../flow/document";
-import { NodeRunner } from "../flow/execution";
-import { MinimapController } from "../flow/minimap";
-import type { NodeKindId } from "../flow/nodes";
-import { pageChromeHandlers } from "../flow/page-chrome";
-import { revealSearchHit } from "../flow/search-navigation";
-import { selectedCount, setSelectedCount, setZoomPercent, zoomPercent } from "../store";
+} from "../../flow/document";
+import { NodeRunner } from "../../flow/execution";
+import { MinimapController } from "../../flow/minimap";
+import type { NodeKindId } from "../../flow/nodes";
+import { pageChromeHandlers } from "./workspace/page-chrome";
+import { revealSearchHit } from "./workspace/search-navigation";
+import { selectedCount, setSelectedCount, setZoomPercent, zoomPercent } from "../../store";
 
 /**
  * The flow workspace: a native canvas of cards and connectors, the page's

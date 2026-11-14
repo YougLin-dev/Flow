@@ -1,8 +1,8 @@
 import { expect, test } from "nsh/test";
 import type { Document, NodeSummary } from "@flow/native";
-import type { FlowScene } from "./canvas";
+import type { FlowScene } from "../../../flow/canvas";
 import { revealSearchHit, type RevealHost } from "./search-navigation";
-import type { ViewportController } from "./document";
+import type { ViewportController } from "../../../flow/document";
 
 function node(id: string): NodeSummary {
   return {

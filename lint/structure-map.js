@@ -178,12 +178,7 @@ export const TEST_SUPPORT_FILES = new Set([
  * root modules allowed during the migration; any other root file fails. The
  * list shrinks with every move PR and disappears in Phase 5.
  */
-export const LEGACY_FLAT = new Set([
-  "src/flow/bindings.ts",
-  "src/flow/page-chrome.ts",
-  "src/flow/search-navigation.ts",
-  "src/pages/FlowPage.tsx",
-]);
+export const LEGACY_FLAT = new Set();
 
 /** The layer graph `no-upward-import` enforces. Tests may reach everywhere. */
 export const LAYERS = {

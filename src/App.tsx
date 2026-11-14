@@ -1,14 +1,14 @@
 import { isAvailable } from "nsh/desktop";
 import { mount, View } from "nsh";
 import { TitleBar } from "./components/app";
-import { FlowPage } from "./pages/FlowPage";
+import { FlowPage } from "./pages/flow";
 import { isPinned, togglePinned } from "./store";
 
 /**
  * Flow — an infinite canvas built with NSH's native view tree.
  *
  * The shell owns the window chrome and composes the page; the workspace and
- * its interactions live in `pages/FlowPage.tsx`, and its shared state in
+ * its interactions live in `pages/flow/FlowPage.tsx`, and its shared state in
  * `store.ts`.
  */
 function App() {
