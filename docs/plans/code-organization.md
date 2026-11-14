@@ -1884,6 +1884,15 @@ tests and a shared menu fixture), matching §4.5/§7.3. The canvas's two-finger
 `onPan` keeps its unguarded `panViewport`, while the keyboard pan keeps the
 search-open guard.
 
+Phase 4 exit: the §11 Phase 4 bullets are complete. `pages/flow` owns the page
+and its workspace; the composition root, actions and effects are split;
+bindings, page-chrome, search-navigation and the menu-dismissal effects live
+in the page area; creation order, the lazy `applyChanges` capture, the
+`sized`/`opening` guards and the cleanup order are preserved; `FlowPage` is
+208 lines (§14 target ~250). `LEGACY_FLAT` is empty and no module remains at
+the `components/`, `flow/` or `pages/` root; the manifest keeps the empty set
+only until Phase 5 removes it. `bun run test:host` passes 14/14.
+
 ---
 
 ## Appendix A — TSX placement map (non-test)
