@@ -20,7 +20,7 @@ import {
 } from "../flow/canvas";
 import { portsOfNode } from "../flow/nodes";
 import type { Point } from "../flow/shared";
-import { portVisual } from "./canvas";
+import { portVisual } from "./canvas/port-visuals";
 
 /** The bubble's size, padding, pointer-rest delay and spacing, in points. */
 const TIP_HEIGHT = 26;

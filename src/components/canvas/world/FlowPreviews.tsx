@@ -5,7 +5,7 @@
  * view however large the selection is.
  */
 import { type CanvasRenderingContext2D, colorScheme, computed } from "nsh";
-import { mergeBounds, type BoxGeometry, type Point } from "../flow/shared";
+import { mergeBounds, type BoxGeometry, type Point } from "../../../flow/shared";
 import {
   connectionBounds,
   connectorControls,
@@ -13,8 +13,10 @@ import {
   EDGE_PADDING,
   EDGE_THICKNESS,
   type ConnectionPreview,
-} from "../flow/canvas";
-import { ConnectorCanvas, connectorColor, traceCubic } from "./canvas";
+} from "../../../flow/canvas";
+import { ConnectorCanvas } from "./ConnectorCanvas";
+import { connectorColor } from "../port-visuals";
+import { traceCubic } from "./connector-layer";
 
 export interface FlowPreviewsProps {
   readonly previews: () => readonly ConnectionPreview[];

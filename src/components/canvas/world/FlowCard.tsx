@@ -12,10 +12,10 @@
 import { computed, host, Image, Text, token, View } from "nsh";
 import { Input } from "nsh/base";
 import { Image as ImageIcon } from "lucide";
-import type { BoxGeometry, NodeSummary } from "../flow/shared";
-import { Icon } from "./primitives";
+import type { BoxGeometry, NodeSummary } from "../../../flow/shared";
+import { Icon } from "../../primitives";
 import { Port } from "./Port";
-import { portKey, type PortHover } from "../flow/canvas/interaction/canvas-controller";
+import { portKey, type PortHover } from "../../../flow/canvas/interaction/canvas-controller";
 import {
   CardContent,
   CardGeometry,
@@ -31,9 +31,9 @@ import {
   type CardImageEvent,
   type CardSize,
   type PreviewView,
-} from "../flow/canvas";
-import type { MagnetPort } from "../flow/canvas/interaction/connection-gesture";
-import { type FlowAccent, portsOfNode } from "../flow/nodes";
+} from "../../../flow/canvas";
+import type { MagnetPort } from "../../../flow/canvas/interaction/connection-gesture";
+import { type FlowAccent, portsOfNode } from "../../../flow/nodes";
 
 export interface FlowCardProps {
   readonly node: () => NodeSummary;

@@ -6,7 +6,13 @@
  * thicker and fully lit.
  */
 import { type Accessor, type CanvasRenderingContext2D, colorScheme, computed } from "nsh";
-import { overlaps, sameBox, type BoxGeometry, type EdgeSummary, type Point } from "../flow/shared";
+import {
+  overlaps,
+  sameBox,
+  type BoxGeometry,
+  type EdgeSummary,
+  type Point,
+} from "../../../flow/shared";
 import {
   connectorControls,
   connectorLayerBox,
@@ -16,8 +22,10 @@ import {
   trimConnectorBox,
   visibleCubicRuns,
   type FlowScene,
-} from "../flow/canvas";
-import { ConnectorCanvas, connectorColor, traceCubic } from "./canvas";
+} from "../../../flow/canvas";
+import { ConnectorCanvas } from "./ConnectorCanvas";
+import { connectorColor } from "../port-visuals";
+import { traceCubic } from "./connector-layer";
 
 /** The selected connector's stroke: one point thicker than the rest, so a
  * lit line reads as bold. */
