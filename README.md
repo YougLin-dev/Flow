@@ -102,7 +102,10 @@ src/                   the NSH app: its root, entry, config and assets
     FlowEdge.tsx       the connection preview, one canvas stroke
     GridBackground.tsx the dot-grid backdrop
     SelectionOverlay.tsx selection borders, resize handles and the marquee
-    NodeComposer.tsx   the native composer attached to the selected card
+    composer/
+      ComposerSheet.tsx  the shared prompt sheet both node kinds mount
+      TextComposer.tsx   the text node's prompt, model and counter
+      ImageComposer.tsx  the image node's prompt, model and image settings
     InlineTextEditor.tsx the screen-space text editor
     NodeToolbar.tsx    floating add-node buttons
     TitleBar.tsx       custom title bar (pin, drag, native window controls)

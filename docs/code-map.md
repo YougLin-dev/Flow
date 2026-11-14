@@ -73,8 +73,9 @@ an expiry.
 Phase 1a has started the source moves: `flow/shared` (the shared kernel and
 the native type seam), `components/primitives` (`Icon`, `icon-shape`) and
 `components/canvas` (`port-visuals`) exist, and the app harness lives in
-`src/test-support/app.ts`. The rest of the source tree is still the legacy
-flat layout. The old → new map is in
+`src/test-support/app.ts`. Phase 1b added `components/composer`
+(`ComposerSheet` with `TextComposer`/`ImageComposer` as configurations). The
+rest of the source tree is still the legacy flat layout. The old → new map is in
 [the plan's Appendix A](plans/code-organization.md#appendix-a--tsx-placement-map);
 `LEGACY_FLAT` in the manifest shrinks with every move and disappears in
 Phase 5. Do not add a new file at the `components/`, `flow/` or `pages/`

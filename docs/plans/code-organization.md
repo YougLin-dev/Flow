@@ -1,8 +1,8 @@
 # Code organization and architecture standard
 
-- **Status:** Accepted 2026-11-14; Phase 0 (standard, ownership and
-  report-only tooling) is complete; Phase 1a (shared kernel and first
-  reuse) is implemented on a stacked branch.
+- **Status:** Accepted 2026-11-14; Phases 0–1b are implemented on stacked
+  branches (standard and tooling, shared kernel and first reuse, composer
+  shell).
 - **Scope:** `src/` (TSX app) and `src/native/` (Rust document core).
 - **Related:** [standards](../standards.md), [architecture](../architecture.md),
   [conventions](../conventions.md), [testing](../testing.md),
@@ -1719,6 +1719,13 @@ seam; `check:structure` now reports only `src/flow/document-session.ts`'s
 runtime import, which moves with its area in Phase 2. `LEGACY_FLAT` is down
 to 78 modules; the shared kernel, `components/primitives`,
 `components/canvas` and `src/test-support/app.ts` are in place.
+
+Phase 1b extracted the composer shell into `components/composer`
+(`ComposerSheet`, `ComposerAttachments`, `ComposerFooter`) with
+`TextComposer` and `ImageComposer` as configurations; the
+`<If when={detail}>` mount boundary, `settingsOpen`, `settingsLabel`, every
+testID and the existing app tests are preserved, and `App.composer.test.tsx`
+pins the shared shell for both variants. `LEGACY_FLAT` is down to 76.
 
 ---
 

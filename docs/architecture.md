@@ -159,8 +159,9 @@ result batches and the assets.
   points toward the pointer while its connector anchor (the icon's centre)
   stays fixed, so a line meets the port circle rather than the card's border.
   A press on a port starts a connection from that specific port. Selecting a
-  card opens `NodeComposer`, a native panel anchored directly under the card
-  and centred on it; the placement follows the card and never flips or
+  card opens its composer (`TextComposer` or `ImageComposer`, both mounted
+  through the shared `ComposerSheet`), a native panel anchored directly under
+  the card and centred on it; the placement follows the card and never flips or
   clamps to stay inside the viewport. A text node's sheet is chat-style: an
   add-image button and the node's image inputs on top, the prompt with its
   character counter below, then the model select (DeepSeek V4.1 Flash, the
