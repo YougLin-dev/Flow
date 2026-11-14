@@ -96,7 +96,9 @@ mounted view. Step 5 moved the minimap mapping and drag controller to
 `flow/minimap`; `minimap-loader.ts` stays at the flow root until step 8 moves
 it to the document assets. Step 6 moved the composer draft and the placement
 half of the old `overlay.ts` to `flow/composer`; `composer-detail.ts` moves
-with the document step.
+with the document step. Step 7 split `flow/execution.ts` into
+`flow/execution/{runner,providers}.ts` behind the area facade, moving code
+without changes.
 The rest of the source tree is still the legacy flat layout.
 The old → new map is in
 [the plan's Appendix A](plans/code-organization.md#appendix-a--tsx-placement-map);

@@ -425,7 +425,7 @@ easiest observable: it is `—` before the first fit and `<n>%` afterwards.
   conversion — paths, circles, ellipses, rects with corner radii, lines,
   polylines/polygons and malformed values.
 - `flow/node-session.ts`, `flow/node-commands.ts`, `flow/inline-editor.ts`
-  and `flow/execution.ts`: `node-session.native.test.ts` drives the real Rust
+  and `flow/execution/`: `node-session.native.test.ts` drives the real Rust
   document through a mock picker and the mock providers: runs, stale
   propagation, manual text, copying a node (including an open composer's
   settings draft), deleting one with its draft, and uploads. The inline

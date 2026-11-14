@@ -124,6 +124,9 @@ src/                   the NSH app: its root, entry, config and assets
     composer/
       composer-state.ts the composer's settings draft
       placement.ts     the native composer's placement
+    execution/
+      runner.ts        starts and cancels one run per node
+      providers.ts     the mock text/image providers and cancellation
     minimap/
       minimap.ts       the panel's world-to-panel mapping
       minimap-controller.ts the minimap drag state

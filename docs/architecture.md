@@ -129,7 +129,7 @@ M1 adds one generic executable node shape: several named, typed input and
 output ports, and many-to-many directed connections carrying typed text and
 image items. A TSX kind registry (`flow/nodes/node-kinds.ts`) declares each kind's
 appearance, per-input capacity, defaults and settings schema, and resolves
-each node's ports from its settings (`portsOfNode`); `flow/execution.ts` owns
+each node's ports from its settings (`portsOfNode`); `flow/execution/` owns
 the provider for a runnable kind. An upload node has no inputs and derives
 one output per media kind it holds, so its output port appears with its
 first upload. Rust stores only `kind`, opaque `settings_json`, the immutable

@@ -1795,6 +1795,12 @@ Phase 2 step 6 moved `composer-state.ts` and the placement half of
 in step 3. `composer-detail.ts` stays for the document step. `LEGACY_FLAT` is
 down to 46 modules.
 
+Phase 2 step 7 split `flow/execution.ts` into `runner.ts` (the run lifecycle
+and cancellation) and `providers.ts` (the mock text/image providers and the
+wait/cancel primitives) behind the area facade. The split is a move only: the
+bodies are copied unchanged and `NodeRunner` is the only external export.
+`LEGACY_FLAT` is down to 45 modules.
+
 ---
 
 ## Appendix A — TSX placement map (non-test)

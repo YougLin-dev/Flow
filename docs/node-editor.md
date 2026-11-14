@@ -35,7 +35,7 @@ their items.
 
 Rust stores `kind` and `settings_json` opaquely. The TSX kind registry
 (`flow/nodes/node-kinds.ts`) owns each node's ports, default size and settings
-parsing, and `flow/execution.ts` owns the provider for each runnable kind.
+parsing, and `flow/execution/providers.ts` owns the provider for each runnable kind.
 M1 has `text`, `image` and `upload`. Text and image declare a `prompt` text
 input (capacity 1), a `references` image input (capacity 4 for text, 16 for
 image) and one output: `text` for the text kind, `image` for the image kind.
@@ -171,7 +171,7 @@ or `interrupted` (`input-not-ready` is reserved for a later dependency gate).
 
 ## Execution
 
-`flow/execution.ts` owns the run lifecycle: one run per node, status
+`flow/execution/runner.ts` owns the run lifecycle: one run per node, status
 `running`, input sync, provider call, asset import, batch save, cancellation
 and failure recording. `flow/node-session.ts` owns the document-facing
 composer state (settings, inputs, upload), and `flow/inline-editor.ts` owns
