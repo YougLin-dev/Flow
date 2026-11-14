@@ -1,6 +1,6 @@
 import { isAvailable } from "nsh/desktop";
 import { mount, View } from "nsh";
-import { TitleBar } from "./components/TitleBar";
+import { TitleBar } from "./components/app";
 import { FlowPage } from "./pages/FlowPage";
 import { isPinned, togglePinned } from "./store";
 

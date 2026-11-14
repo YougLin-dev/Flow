@@ -1,12 +1,11 @@
 import { cleanup, effect, host, keymap, Picker, platform, signal, untracked, View } from "nsh";
 import { isAvailable } from "nsh/desktop";
 import type { ChangeSet, Document, NodeBounds, SearchHit } from "../flow/shared";
-import { BrandCard } from "../components/BrandCard";
+import { BrandCard, FrameRate } from "../components/app";
 import { CanvasMenuLayer } from "../components/CanvasMenuLayer";
 import { ImageComposer, TextComposer } from "../components/composer";
 import { FlowCanvas } from "../components/FlowCanvas";
 import { ImageLoadProbe, imageProbeText } from "../components/FlowCard";
-import { FrameRate } from "../components/FrameRate";
 import { MiniMap } from "../components/MiniMap";
 import { MinimapDragOverlay } from "../components/MinimapDragOverlay";
 import { NodeToolbar } from "../components/NodeToolbar";

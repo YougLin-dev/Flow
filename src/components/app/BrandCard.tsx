@@ -1,5 +1,5 @@
 import { Text, View } from "nsh";
-import { PANEL } from "./primitives";
+import { PANEL } from "../primitives";
 
 /** The Flow wordmark used where the desktop title bar is not available. */
 export function BrandCard() {

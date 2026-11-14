@@ -1,10 +1,10 @@
 import { Button } from "nsh/base";
 import { colorScheme, Image, platform, Text, View } from "nsh";
 import { currentWindow, titleBar } from "nsh/desktop";
-import appIcon from "../assets/icons/32x32.png";
-import pinLight from "../assets/pin-light.png";
-import pinDark from "../assets/pin-dark.png";
-import pinActive from "../assets/pin-active.png";
+import appIcon from "../../assets/icons/32x32.png";
+import pinLight from "../../assets/pin-light.png";
+import pinDark from "../../assets/pin-dark.png";
+import pinActive from "../../assets/pin-active.png";
 
 /**
  * The app bar's height when the platform reports none: `nsh.json`'s

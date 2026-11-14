@@ -179,7 +179,6 @@ export const TEST_SUPPORT_FILES = new Set([
  * list shrinks with every move PR and disappears in Phase 5.
  */
 export const LEGACY_FLAT = new Set([
-  "src/components/BrandCard.tsx",
   "src/components/CanvasContextMenu.tsx",
   "src/components/CanvasMenuLayer.tsx",
   "src/components/CanvasProbe.tsx",
@@ -189,7 +188,6 @@ export const LEGACY_FLAT = new Set([
   "src/components/FlowCard.tsx",
   "src/components/FlowEdges.tsx",
   "src/components/FlowPreviews.tsx",
-  "src/components/FrameRate.tsx",
   "src/components/GridBackground.tsx",
   "src/components/InlineTextEditor.tsx",
   "src/components/MiniMap.tsx",
@@ -202,7 +200,6 @@ export const LEGACY_FLAT = new Set([
   "src/components/SelectionFrame.tsx",
   "src/components/SelectionOverlay.tsx",
   "src/components/SelectionPorts.tsx",
-  "src/components/TitleBar.tsx",
   "src/components/UploadButton.tsx",
   "src/components/ZoomControls.tsx",
   "src/flow/bindings.ts",

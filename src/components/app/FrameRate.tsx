@@ -1,5 +1,5 @@
 import { cleanup, signal, Text, View } from "nsh";
-import { PANEL_PILL } from "./primitives";
+import { PANEL_PILL } from "../primitives";
 
 /** How often the meter publishes what it counted. */
 const SAMPLE_MS = 500;
