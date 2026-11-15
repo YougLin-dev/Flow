@@ -6,6 +6,7 @@ import {
   connectorControls,
   cubicAt,
   distanceToConnection,
+  EDGE_PADDING,
   followPoint,
   magnetEndPoint,
   magnetIconPoint,
@@ -109,6 +110,59 @@ test("the control points bound the drawn cubic", () => {
     y: 0,
     width: 80,
     height: 10,
+  });
+});
+
+test("the v1 edge box uses port centres and stroke padding", () => {
+  // Port centres, as the scene resolves them from the card border plus
+  // PORT_CENTER_GAP; the box adds EDGE_PADDING exactly like edge_boxes.
+  const edgeBox = (from: { x: number; y: number }, to: { x: number; y: number }) => {
+    const box = connectionBounds(from, to);
+    return {
+      x: box.x - EDGE_PADDING,
+      y: box.y - EDGE_PADDING,
+      width: box.width + EDGE_PADDING * 2,
+      height: box.height + EDGE_PADDING * 2,
+    };
+  };
+
+  // The same five cards and edges as the v1 SQL/Rust parity matrix.
+  expect(edgeBox({ x: 214, y: 20 }, { x: 886, y: 170 })).toEqual({
+    x: 210,
+    y: 16,
+    width: 680,
+    height: 158,
+  });
+  expect(edgeBox({ x: 1_114, y: 150 }, { x: -14, y: 40 })).toEqual({
+    x: -278,
+    y: 36,
+    width: 1_656,
+    height: 118,
+  });
+  expect(edgeBox({ x: 294, y: 45 }, { x: -14, y: 10 })).toEqual({
+    x: -177.25,
+    y: 6,
+    width: 634.5,
+    height: 43,
+  });
+  // Raw reach 57 is lifted to the 60-point floor.
+  expect(edgeBox({ x: 214, y: 20 }, { x: 106, y: 40 })).toEqual({
+    x: 42,
+    y: 16,
+    width: 236,
+    height: 28,
+  });
+  expect(edgeBox({ x: 214, y: 0 }, { x: 4_986, y: 0 })).toEqual({
+    x: 210,
+    y: -4,
+    width: 4_780,
+    height: 8,
+  });
+  expect(edgeBox({ x: -86, y: -25 }, { x: 106, y: 95 })).toEqual({
+    x: -90,
+    y: -29,
+    width: 200,
+    height: 128,
   });
 });
 

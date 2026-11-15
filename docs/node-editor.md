@@ -50,7 +50,10 @@ upload card has no output port.
   even when the far card is outside the viewport. The line ends at the port
   icon's centre, 14 points outside the card's border, not on the border
   itself; an off-screen endpoint carried by the read is moved out by the
-  same gap. Ports are spread evenly over their card's side (`justify-evenly`),
+  same gap. The connector index bounds that port-centre cubic with the
+  60–260 reach and 4 points of stroke padding; v1's `edge_boxes` view, the
+  Rust index and the canvas geometry use the same formula. Ports are spread
+  evenly over their card's side (`justify-evenly`),
   and a visible edge resolves its endpoints from the ports' current layout,
   so a resize keeps the line on the port. Hovering a port springs its icon a
   few points toward the pointer, like the old plus handle; the connector

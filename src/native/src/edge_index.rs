@@ -3,8 +3,11 @@
 //! SQLite virtual tables have no ORM schema, so this module is the edge
 //! index's adapter. A scene read uses it to find a connector whose curve
 //! crosses the viewport while both of its cards are outside the node read.
-//! The box mirrors `connectionBounds` in `src/flow/canvas/geometry/connection.ts`; every edge
-//! or node write that changes it refreshes the row in the same transaction.
+//! The box mirrors the v1 `edge_boxes` view and the canvas connector box: it
+//! moves the edge DTO's card-edge points to the port centres
+//! (`PORT_CENTER_GAP` 14), encloses the cubic's control points with the
+//! 60–260 reach, and adds `EDGE_PADDING` 4 for the stroke; every edge or
+//! node write that changes it refreshes the row in the same transaction.
 
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 
@@ -18,18 +21,33 @@ use crate::constants::DOCUMENT_ID;
 use crate::entity::{edges, edges_rtree, nodes};
 use crate::types::{EdgePoint, Viewport};
 
+/// How far outside a card's border its port icon's centre sits. Mirrors
+/// `PORT_CENTER_GAP` in `src/flow/canvas/geometry/connection.ts`.
+pub const PORT_CENTER_GAP: f64 = 14.0;
+/// The room around a connector's cubic for its stroke. Mirrors
+/// `EDGE_PADDING` in the TSX geometry and the v1 `edge_boxes` view.
+pub const EDGE_PADDING: f64 = 4.0;
+
 /// The world box around a connector's whole cubic: `(min_x, max_x, min_y,
-/// max_y)`. The control handles reach sideways, so the box starts from all
-/// four of the cubic's points, exactly like the UI's `connectionBounds`.
+/// max_y)`. `from` and `to` are the card-edge points carried by the edge
+/// DTO; the box shifts them to the port icons' centres and adds the stroke
+/// padding, exactly like the v1 `edge_boxes` view.
 pub fn connection_bounds(from: EdgePoint, to: EdgePoint) -> (f64, f64, f64, f64) {
-    let dx = (to.x - from.x).abs();
+    let from_x = from.x + PORT_CENTER_GAP;
+    let to_x = to.x - PORT_CENTER_GAP;
+    let dx = (to_x - from_x).abs();
     let dy = (to.y - from.y).abs();
     let reach = (dx * 0.5 + dy * 0.15).clamp(60.0, 260.0);
-    let left = from.x.min(from.x + reach).min(to.x - reach).min(to.x);
-    let right = from.x.max(from.x + reach).max(to.x - reach).max(to.x);
+    let left = from_x.min(from_x + reach).min(to_x - reach).min(to_x);
+    let right = from_x.max(from_x + reach).max(to_x - reach).max(to_x);
     let top = from.y.min(to.y);
     let bottom = from.y.max(to.y);
-    (left, right, top, bottom)
+    (
+        left - EDGE_PADDING,
+        right + EDGE_PADDING,
+        top - EDGE_PADDING,
+        bottom + EDGE_PADDING,
+    )
 }
 
 /// The connectors whose curve boxes intersect the viewport read. This is the
@@ -351,13 +369,14 @@ mod tests {
 
     #[test]
     fn the_box_holds_the_cubic_of_a_forward_connector() {
-        // The handles sit between the ports, so the box is the ports' span.
+        // The handles sit between the ports, so the box is the port centres'
+        // span (card edge ±14) plus the stroke padding.
         let (min_x, max_x, min_y, max_y) = connection_bounds(
             EdgePoint { x: 200.0, y: 42.0 },
             EdgePoint { x: 900.0, y: 142.0 },
         );
-        assert_eq!((min_x, max_x), (200.0, 900.0));
-        assert_eq!((min_y, max_y), (42.0, 142.0));
+        assert_eq!((min_x, max_x), (210.0, 890.0));
+        assert_eq!((min_y, max_y), (38.0, 146.0));
     }
 
     #[test]
@@ -366,8 +385,8 @@ mod tests {
             EdgePoint { x: 200.0, y: 42.0 },
             EdgePoint { x: 250.0, y: 62.0 },
         );
-        assert_eq!((min_x, max_x), (190.0, 260.0));
-        assert_eq!((min_y, max_y), (42.0, 62.0));
+        assert_eq!((min_x, max_x), (172.0, 278.0));
+        assert_eq!((min_y, max_y), (38.0, 66.0));
     }
 
     #[test]
@@ -376,7 +395,7 @@ mod tests {
             EdgePoint { x: 900.0, y: 142.0 },
             EdgePoint { x: 200.0, y: 42.0 },
         );
-        assert_eq!((min_x, max_x), (-60.0, 1160.0));
-        assert_eq!((min_y, max_y), (42.0, 142.0));
+        assert_eq!((min_x, max_x), (-78.0, 1178.0));
+        assert_eq!((min_y, max_y), (38.0, 146.0));
     }
 }
