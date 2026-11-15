@@ -1,5 +1,5 @@
 import { cleanup, effect, host, keymap, platform, View } from "nsh";
-import { isAvailable } from "nsh/desktop";
+import { Application, isAvailable } from "nsh/desktop";
 import { BrandCard, FrameRate } from "../../components/app";
 import { ImageComposer, TextComposer } from "../../components/composer";
 import { CanvasMenuLayer, FlowCanvas, NodeToolbar, ZoomControls } from "../../components/canvas";
@@ -59,6 +59,12 @@ export function FlowPage() {
 
   effect(() => syncSelection(workspace));
   effect(() => syncComposerState(workspace));
+  // The quit listener is the only teardown NSH awaits, so the camera save and
+  // the package checkpoint happen there; a plain unmount still frees handles.
+  // Its type says `() => void`, but NSH awaits a returned promise for up to
+  // 200 ms, which is what lets the close finish.
+  // eslint-disable-next-line @typescript-eslint/no-misused-promises
+  cleanup(Application.on("quit", () => workspace.shutdown()));
   cleanup(() => workspace.dispose());
 
   return (

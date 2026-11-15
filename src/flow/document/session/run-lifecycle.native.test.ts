@@ -74,6 +74,29 @@ test("deleting a running node cancels its run", async () => {
   document.dispose();
 });
 
+test("stopping the runner settles a running batch before a close", async () => {
+  const document = await Document.open(":memory:");
+  await seedDocument(document);
+  const { session, runner, assets } = makeSession(document);
+
+  session.openComposer(TEXT_NODE_ID);
+  await until(() => session.detail()?.node.id === TEXT_NODE_ID);
+  const detail = session.detail();
+  if (!detail) throw new Error("the composer did not open");
+  const pending = session.run(parseSettings(detail.node.kind, detail.node.settingsJson));
+  await until(() => runner.isRunning(TEXT_NODE_ID));
+  await runner.stop();
+  await pending;
+
+  expect(runner.isRunning(TEXT_NODE_ID)).toBe(false);
+  const after = await document.nodeDetail(TEXT_NODE_ID);
+  expect(after?.node.status).toBe("cancelled");
+  expect(after?.latestBatch?.status).toBe("cancelled");
+  await document.close();
+  document.dispose();
+  assets.dispose();
+});
+
 test("disposing the runner mid-run leaves the batch for startup recovery", async () => {
   const document = await Document.open(":memory:");
   await seedDocument(document);

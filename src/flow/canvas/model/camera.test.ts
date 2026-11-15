@@ -175,6 +175,20 @@ test("ignores non-finite or non-positive camera values", () => {
   camera.dispose();
 });
 
+test("restores a saved view once and rejects invalid ones", () => {
+  const camera = new CanvasCamera();
+  try {
+    expect(camera.restore({ x: 120, y: -40, scale: 2 })).toBe(true);
+    expect(camera.view()).toEqual({ x: 120, y: -40, scale: 2 });
+    expect(camera.restore({ x: 120, y: -40, scale: 2 })).toBe(false);
+    expect(camera.restore({ x: Number.NaN, y: 0, scale: 1 })).toBe(false);
+    expect(camera.restore({ x: 0, y: 0, scale: 0 })).toBe(false);
+    expect(camera.view()).toEqual({ x: 120, y: -40, scale: 2 });
+  } finally {
+    camera.dispose();
+  }
+});
+
 test("marks camera writes and settles once through the fake scheduler", () => {
   const scheduler = new FakeCameraScheduler();
   const camera = new CanvasCamera({ scheduler });

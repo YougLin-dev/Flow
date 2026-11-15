@@ -173,6 +173,18 @@ export class CanvasCamera {
     return true;
   }
 
+  /**
+   * Restores a view saved by a previous session in one publish. Returns
+   * whether the visible view changed; an invalid or identical view writes
+   * nothing.
+   */
+  restore(view: CameraView): boolean {
+    const before = this.view();
+    this.publish(view);
+    const after = this.view();
+    return after.x !== before.x || after.y !== before.y || after.scale !== before.scale;
+  }
+
   /** Scales the camera (never past 1) and centers `bounds` in `size`. */
   fit(bounds: CameraBounds, size: CameraSize, padding = 48, maxScale = 1): number {
     if (

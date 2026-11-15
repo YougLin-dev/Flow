@@ -2,7 +2,12 @@
 export { AssetUrls } from "./assets/asset-urls";
 export { MinimapLoader } from "./assets/minimap-loader";
 export { PreviewLoader } from "./assets/preview-loader";
-export { openFlowDocument } from "./lifecycle/document-session";
+export {
+  closeDocumentQuietly,
+  openFlowDocument,
+  type OpenedFlowDocument,
+} from "./lifecycle/document-session";
+export { needsVerify, savedCamera, type SavedCamera } from "./lifecycle/open-report";
 export {
   CONTENT,
   IMAGE_NODE_ID,

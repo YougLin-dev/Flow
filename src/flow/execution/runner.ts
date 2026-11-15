@@ -25,7 +25,9 @@ export interface RunCallbacks {
 /** Starts and cancels node runs, at most one per node. */
 export class NodeRunner {
   private readonly runs = new Map<string, AbortController>();
+  private readonly idleWaiters: Array<() => void> = [];
   private disposed = false;
+  private stopping = false;
 
   constructor(
     private readonly document: Document,
@@ -46,9 +48,21 @@ export class NodeRunner {
     this.runs.clear();
   }
 
+  /**
+   * Aborts every run and resolves once each has settled its batch. A clean
+   * close calls this first, so no batch is left running; the crash path
+   * instead leaves it to the next open's recovery.
+   */
+  async stop(): Promise<void> {
+    this.stopping = true;
+    for (const controller of this.runs.values()) controller.abort();
+    if (this.runs.size === 0) return;
+    await new Promise<void>((resolve) => this.idleWaiters.push(resolve));
+  }
+
   async run(detail: NodeDetail, settings: NodeSettings): Promise<void> {
     const nodeId = detail.node.id;
-    if (this.disposed || this.runs.has(nodeId)) return;
+    if (this.disposed || this.stopping || this.runs.has(nodeId)) return;
     // An upload node has no provider; its output comes from the local file.
     // The kind registry keeps one from reaching a run, but settle the caller
     // if it ever does rather than leaving its Run state busy.
@@ -143,6 +157,9 @@ export class NodeRunner {
     } finally {
       this.runs.delete(nodeId);
       this.callbacks.onSettled(nodeId);
+      if (this.runs.size === 0) {
+        for (const resolve of this.idleWaiters.splice(0)) resolve();
+      }
     }
   }
 

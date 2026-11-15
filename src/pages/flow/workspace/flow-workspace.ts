@@ -17,7 +17,10 @@ import {
   NodeSession,
   PreviewLoader,
   ViewportController,
+  closeDocumentQuietly,
+  needsVerify,
   openFlowDocument,
+  savedCamera,
 } from "../../../flow/document";
 import { NodeRunner } from "../../../flow/execution";
 import { MinimapController } from "../../../flow/minimap";
@@ -63,6 +66,11 @@ export interface FlowWorkspace {
   readonly handleSize: (size: StageSize) => void;
   /** Releases every object in the page's cleanup order, once. */
   readonly dispose: () => void;
+  /**
+   * The quit path: stops runs, saves the camera, checkpoints and closes the
+   * package. Resolves when the document is closed; idempotent.
+   */
+  readonly shutdown: () => Promise<void>;
 }
 
 export function createFlowWorkspace(deps: FlowWorkspaceDeps): FlowWorkspace {
@@ -272,12 +280,13 @@ export function createFlowWorkspace(deps: FlowWorkspaceDeps): FlowWorkspace {
     try {
       const opened = await openFlowDocument();
       if (disposed) {
-        opened.dispose();
+        await closeDocumentQuietly(opened.document);
+        opened.document.dispose();
         return;
       }
-      document = opened;
-      assets = new AssetUrls(opened);
-      runner = new NodeRunner(opened, {
+      document = opened.document;
+      assets = new AssetUrls(opened.document);
+      runner = new NodeRunner(opened.document, {
         onChange: (changes) => {
           if (!disposed) applyChanges(changes);
         },
@@ -299,9 +308,26 @@ export function createFlowWorkspace(deps: FlowWorkspaceDeps): FlowWorkspace {
         }),
       );
       minimap.schedule();
-      await viewport.fitToDocument(false, false);
+      const saved = savedCamera(opened.info);
+      if (saved !== null) {
+        // A saved view wins over the startup fit, and a later resize must
+        // not replace it with an automatic fit.
+        viewport.userMoved();
+        camera.restore({ x: saved.x, y: saved.y, scale: saved.zoom });
+      } else {
+        await viewport.fitToDocument(false, false);
+      }
       await viewport.refresh();
-      if (!disposed) viewport.announceZoom(camera.scale);
+      if (!disposed) {
+        viewport.announceZoom(camera.scale);
+        // The recovery check is a post-open job: schedule it after the first
+        // scene read so the open's own reads keep the worker's queue.
+        if (needsVerify(opened.info)) {
+          void opened.document.verify().catch((error) => {
+            console.error("Flow could not verify its document", error);
+          });
+        }
+      }
     } catch (error) {
       console.error("Flow could not open its document", error);
       if (!disposed) camera.fit(CONTENT, stage());
@@ -359,7 +385,9 @@ export function createFlowWorkspace(deps: FlowWorkspaceDeps): FlowWorkspace {
     viewport.onResize(size.width, size.height);
   };
 
-  const dispose = (): void => {
+  let shuttingDown = false;
+
+  const stopLoaders = (): void => {
     canvasMenu.close();
     disposed = true;
     previews.dispose();
@@ -368,11 +396,46 @@ export function createFlowWorkspace(deps: FlowWorkspaceDeps): FlowWorkspace {
     viewport.dispose();
     runner?.dispose();
     assets?.dispose();
-    document?.dispose();
+    sessionState.set(null);
+  };
+
+  const forgetDocument = (): void => {
     document = null;
     assets = null;
     runner = null;
-    sessionState.set(null);
+  };
+
+  const dispose = (): void => {
+    if (shuttingDown) return;
+    shuttingDown = true;
+    stopLoaders();
+    document?.dispose();
+    forgetDocument();
+  };
+
+  const shutdown = async (): Promise<void> => {
+    if (shuttingDown) return;
+    shuttingDown = true;
+    const openDocument = document;
+    const activeRunner = runner;
+    // Settle or cancel running batches while the document is still writable.
+    await activeRunner?.stop();
+    // Without a stage size the camera carries no user view; saving it would
+    // overwrite the previous session's view with the startup default.
+    const view = sized ? camera.view() : null;
+    stopLoaders();
+    if (openDocument !== null) {
+      if (view !== null) {
+        try {
+          await openDocument.saveView(view.x, view.y, view.scale);
+        } catch (error) {
+          console.error("Flow could not save its view", error);
+        }
+      }
+      await closeDocumentQuietly(openDocument);
+      openDocument.dispose();
+    }
+    forgetDocument();
   };
 
   return {
@@ -406,5 +469,6 @@ export function createFlowWorkspace(deps: FlowWorkspaceDeps): FlowWorkspace {
     selectSearchHit,
     handleSize,
     dispose,
+    shutdown,
   };
 }
