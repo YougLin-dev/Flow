@@ -699,12 +699,23 @@ fn worker(path: &str, ready: Sender<Result<(), String>>, jobs: Receiver<Job>) {
             Job::Close(ack) => {
                 let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
                     conn.execute_unprepared("UPDATE document SET clean_shutdown = 1 WHERE id = 1")
-                        .map(|_| ())
-                        .map_err(|error| error.to_string())
+                        .map_err(|error| error.to_string())?;
+                    // Fold committed WAL frames back into the package file so
+                    // a copy made right after close is complete.
+                    conn.query_all_raw(sea_orm::Statement::from_string(
+                        conn.get_database_backend(),
+                        "PRAGMA wal_checkpoint(TRUNCATE)".to_owned(),
+                    ))
+                    .map(|_| ())
+                    .map_err(|error| error.to_string())
                 }))
                 .unwrap_or_else(|_| Err("the database job panicked".to_owned()));
+                // Release the file before acknowledging: a rename, delete or
+                // backup the caller starts after close must not race the
+                // connection.
+                drop(conn);
                 let _ = ack.send(result);
-                break;
+                return;
             }
         }
     }
@@ -7090,6 +7101,12 @@ mod tests {
             );
             db.close().expect("a second close is a no-op");
         }
+
+        // close() acknowledges only after the worker released the file, so a
+        // rename (or delete/backup) can follow immediately.
+        let renamed = format!("{database}.closed");
+        std::fs::rename(&database, &renamed).expect("close releases the package file");
+        std::fs::rename(&renamed, &database).expect("restore the package file");
 
         let url = sqlite_url(&database).expect("raw URL");
         let conn = sea_orm::Database::connect(url.as_str()).expect("reopen raw database");
