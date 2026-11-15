@@ -99,16 +99,24 @@ canvas stays in TSX and owns only the scene model and its views.
   runs (their batches settle cancelled), then saves the camera and
   checkpoints in one `closeWithView` job: the WAL is checkpointed,
   `clean_shutdown` is set and the file is released before the call resolves.
-  A close requested while reads sit in the worker queue lets those reads
-  answer without touching SQLite, so a quit does not wait for stale work.
-  `projectInfo` reports the flag the package had before this open; a `false`
-  (unclean) value schedules `verify()` once the first scene read has settled
-  and the shell has been responsive briefly, while a new or cleanly closed
-  package does no integrity scan. `verify()` runs SQLite's integrity and
-  foreign-key checks, compares and rebuilds the FTS index and both RTrees
-  when they drifted, flushes leftover connector markers and compacts the
-  document bounds; a failed verify leaves the package due for recovery even
-  after close. A saved camera is restored instead of fitting. The frozen
+  A close marks the database closing: a read still in the worker queue is
+  skipped and answered with "the database is closed" without touching
+  SQLite, while a command accepted before the close request still runs in
+  FIFO order, so a quit neither waits for stale reads nor drops an accepted
+  write. The recovery state starts as `!openedClean`, the verify job stores
+  its outcome on the worker, and the close job reads it there, so a failed
+  verify keeps the next open due for recovery even when the user quit after
+  it. `projectInfo` reports the flag the package had before this open; a
+  `false` (unclean) value schedules `verify()` once the first scene read has
+  settled and the shell has been responsive briefly, while a new or cleanly
+  closed package does no integrity scan. `verify()` runs SQLite's integrity
+  and foreign-key checks, compares and rebuilds the FTS index and both
+  RTrees when they drifted, flushes leftover connector markers and compacts
+  the document bounds. It checks for a pending close between its phases and
+  aborts; a phase already running still holds the worker until it ends, so a
+  quit that lands mid-phase can exhaust the shell's 200 ms quit budget. That
+  exit leaves `clean_shutdown=0`, which the next open already treats as an
+  unclean package. A saved camera is restored instead of fitting. The frozen
   schema has no saved-view marker, so the `0, 0, 1` default is the
   never-saved sentinel; a view saved at exactly that value is
   indistinguishable and refits.
