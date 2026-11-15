@@ -659,6 +659,52 @@ frame and pluses are covered by the camera effect test
 `scale-only readers do not wake on pan`, which proves a pan wakes no reader
 of the scale-only accessor.
 
+### v1 core fixture: `100k-grid-edges-images-v2-typed-ports`
+
+Measured 2026-11-15 on branch `feat/database-v1` after the indexed read-path
+step, release build, same machine and profile as the full-fixture table
+above. The fixture version changed with the v1 schema and typed ports, so
+these numbers are not comparable with the v1-fixture rows; they are the new
+baseline. The lines below are copied verbatim from `bun run test:bench`
+(`cargo test --release`, ignored benchmark). The fixture had 100,000 nodes,
+99,000 edges, 2,000 image nodes with 2,000 batches, 8,000 image items and
+2,000 assets.
+
+```text
+100k fixture version=100k-grid-edges-images-v2-typed-ports include_images=true nodes=100000 edges=99000 image_nodes=2000 image_batches=2000 image_items=8000 image_assets=2000
+100k fixture seed (open+insert+assets+batches)=41000.26ms
+startup emptiness is_empty: n=5 avg=0.03ms p95=0.05ms max=0.05ms fixture nodes=100000 edges=99000 unchanged
+bounds (Fit source): read=0.07ms
+overview (minimap, bounds cached): cards=400 read=2.94ms
+legacy viewport scale=1.0000 (reference; edges and images present): n=5 avg=0.31ms p95=0.37ms max=0.37ms rect=(0.0,0.0,1920.0,1080.0) margin=120.0 nodes=90
+legacy scene scale=1.0000 (reference; edges and images present): n=5 avg=0.87ms p95=0.95ms max=0.95ms scale=1.0000 rect=(0.0,0.0,1920.0,1080.0) margin=120.0 nodes=90 edges=90
+scene fit=0.0500: n=5 avg=13.92ms p95=14.25ms max=14.25ms scale=0.0500 rect=(-9170.0,58212.0,40320.0,23520.0) margin=10080.0 nodes=300 edges=595
+scene scale=0.15: n=5 avg=13.30ms p95=13.97ms max=13.97ms scale=0.1500 rect=(4270.0,66052.0,13440.0,7840.0) margin=3360.0 nodes=800 edges=1600
+scene scale=0.40: n=5 avg=14.09ms p95=14.23ms max=14.23ms scale=0.4000 rect=(8470.0,68502.0,5040.0,2940.0) margin=1260.0 nodes=1440 edges=1480
+previews images=2000: n=5 avg=40.07ms p95=41.36ms max=41.36ms rows=2000 items=8000 assets=2000
+old_preview_reader: n=5 avg=38.67ms p95=39.00ms max=39.00ms images=2000 rows=2000 items=8000 assets=2000
+bounded_preview_reader: n=5 avg=41.13ms p95=42.61ms max=42.61ms images=2000 rows=2000 items=8000 assets=2000
+setNodeBounds moved=1000: n=3 avg=69.89ms p95=79.65ms max=79.65ms nodes=1000 samples=3
+undo moved=1000: n=3 avg=92.31ms p95=101.61ms max=101.61ms nodes=1000 samples=3
+redo moved=1000: n=3 avg=86.29ms p95=89.87ms max=89.87ms nodes=1000 samples=3
+search generator: n=20 avg=88.81ms p95=91.47ms max=91.90ms hits=20 query=generator
+search Node 99999: n=5 avg=6.41ms p95=6.73ms max=6.73ms hits=1 query=Node 99999
+search 图片: n=5 avg=14.42ms p95=15.35ms max=15.35ms hits=20 query=图片
+search 生成器: n=5 avg=25.57ms p95=27.35ms max=27.35ms hits=20 query=生成器
+recover_runs populated-running: n=2 avg=10.11ms p95=10.16ms max=10.16ms 100 row-end nodes marked running before each fresh reopen; the clean second call is not compared
+```
+
+Against the 11.3 targets: viewport p95 is under 20 ms; bounds is one
+document read; selective, short-CJK and common-term search are under their
+budgets (the v1-fixture common-term miss at 265.59 ms is gone on this
+fixture); recovery is ~10 ms. Previews remain a miss at 40.07 ms against
+the 25 ms target, and the three readers are within run noise of each other,
+so the v2 fixture does not reproduce the earlier 11-20 ms estimate. The
+1,000-node move stays above the 50 ms target at 79.65 ms p95, and the
+overview read is 2.94 ms against a 1 ms target; both are recorded rather
+than claimed. The crossing-edge cap and `gc`/`compactBounds` timings are
+not isolated by this run; GC is not implemented yet.
+
 ## Phases
 
 ### P0 — mixed scaffold and storage spike (done)
