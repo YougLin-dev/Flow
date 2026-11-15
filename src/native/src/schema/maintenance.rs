@@ -78,6 +78,11 @@ pub(crate) fn repair_rtrees(conn: &impl ConnectionTrait) -> Result<(), DbErr> {
              SELECT seq, x - 2.0, x + width + 2.0, y - 2.0, y + height + 2.0 \
                FROM nodes",
         )?;
+        if !rtree_healthy(conn, NODES_RTREE_CHECK, NODES_RTREE_PARITY)? {
+            return Err(DbErr::Custom(
+                "the nodes RTree is still inconsistent after a rebuild".to_owned(),
+            ));
+        }
     }
     if !rtree_healthy(conn, EDGES_RTREE_CHECK, EDGES_RTREE_PARITY)? {
         conn.execute_unprepared("DELETE FROM edges_rtree")?;
@@ -85,6 +90,11 @@ pub(crate) fn repair_rtrees(conn: &impl ConnectionTrait) -> Result<(), DbErr> {
             "INSERT INTO edges_rtree (id, min_x, max_x, min_y, max_y) \
              SELECT id, min_x, max_x, min_y, max_y FROM edge_boxes",
         )?;
+        if !rtree_healthy(conn, EDGES_RTREE_CHECK, EDGES_RTREE_PARITY)? {
+            return Err(DbErr::Custom(
+                "the edges RTree is still inconsistent after a rebuild".to_owned(),
+            ));
+        }
     }
     Ok(())
 }
