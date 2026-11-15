@@ -643,10 +643,11 @@ pub fn update_edge(conn: &DatabaseConnection, input: EdgeInput) -> Result<Mutati
 pub fn add_input(conn: &DatabaseConnection, input: InputItemInput) -> Result<Mutation, String> {
     conn.transaction::<_, _, DbErr>(|txn| {
         find_node_tx(txn, &input.node_id)?;
+        let position = max_input_position_tx(txn, &input.node_id, &input.port_id)?;
         let row = InputRow {
             id: input.id,
             node_id: input.node_id,
-            position: input.position.max(0.0) as i32,
+            position,
             port_id: input.port_id,
             kind: input.kind,
             origin: input.origin,
@@ -717,8 +718,9 @@ pub fn remove_input(conn: &DatabaseConnection, id: String) -> Result<Mutation, S
     .map_err(|error| error.to_string())
 }
 
-/// Persists a drag-reordered input list. Every input of the node is given a
-/// new position; ids the caller omitted keep their relative order at the end.
+/// Persists a drag-reordered input list. Positions are per port, so each
+/// port is renumbered independently; ids the caller omitted keep their
+/// relative order at the end of their port.
 pub fn reorder_inputs(
     conn: &DatabaseConnection,
     node_id: String,
@@ -727,28 +729,72 @@ pub fn reorder_inputs(
     conn.transaction::<_, _, DbErr>(|txn| {
         find_node_tx(txn, &node_id)?;
         let current = inputs_for_node_tx(txn, &node_id)?;
-        let before: Vec<(String, i32)> = current
+        let before: BTreeMap<String, i32> = current
             .iter()
             .map(|row| (row.id.clone(), row.position))
             .collect();
-        let mut after = Vec::with_capacity(current.len());
-        for (index, id) in ids.iter().enumerate() {
-            if current.iter().any(|row| &row.id == id) && !after.iter().any(|(seen, _)| seen == id)
-            {
-                after.push((id.clone(), index as i32));
-            }
-        }
+
+        let mut by_port: BTreeMap<String, Vec<&InputRow>> = BTreeMap::new();
         for row in &current {
-            if !after.iter().any(|(seen, _)| seen == &row.id) {
-                let position = after.len() as i32;
-                after.push((row.id.clone(), position));
+            by_port.entry(row.port_id.clone()).or_default().push(row);
+        }
+        let mut after: BTreeMap<String, Vec<(String, i32)>> = BTreeMap::new();
+        for (port_id, rows) in &by_port {
+            let mut ordered: Vec<&InputRow> = Vec::new();
+            for id in &ids {
+                if let Some(row) = rows.iter().find(|row| &row.id == id)
+                    && !ordered.iter().any(|seen| seen.id == row.id)
+                {
+                    ordered.push(row);
+                }
+            }
+            for row in rows {
+                if !ordered.iter().any(|seen| seen.id == row.id) {
+                    ordered.push(row);
+                }
+            }
+            after.insert(
+                port_id.clone(),
+                ordered
+                    .iter()
+                    .enumerate()
+                    .map(|(index, row)| (row.id.clone(), index as i32))
+                    .collect(),
+            );
+        }
+
+        let mut after_positions = BTreeMap::new();
+        for order in after.values() {
+            for (id, position) in order {
+                after_positions.insert(id.clone(), *position);
             }
         }
-        if after == before {
+        if after_positions == before {
             return no_op(txn);
         }
 
-        set_input_positions_tx(txn, &node_id, &after)?;
+        let mut forward = Vec::new();
+        let mut inverse = Vec::new();
+        for (port_id, order) in &after {
+            let before_order: Vec<(String, i32)> = order
+                .iter()
+                .map(|(id, _)| (id.clone(), before[id]))
+                .collect();
+            if before_order == *order {
+                continue;
+            }
+            write_input_port_positions_tx(txn, &node_id, port_id, order)?;
+            forward.push(HistoryOp::InputOrder {
+                node_id: node_id.clone(),
+                port_id: port_id.clone(),
+                order: order.clone(),
+            });
+            inverse.push(HistoryOp::InputOrder {
+                node_id: node_id.clone(),
+                port_id: port_id.clone(),
+                order: before_order,
+            });
+        }
         let changed = vec![node_row(&touch_node_tx(txn, &node_id)?).summary()];
 
         let rev = bump_document_rev(txn)?;
@@ -760,14 +806,8 @@ pub fn reorder_inputs(
                 edges_changed: Vec::new(),
                 edges_removed: Vec::new(),
             },
-            forward: vec![HistoryOp::InputOrder {
-                node_id: node_id.clone(),
-                order: after,
-            }],
-            inverse: vec![HistoryOp::InputOrder {
-                node_id,
-                order: before,
-            }],
+            forward,
+            inverse,
             refs: HistoryRefs::default(),
         })
     })
@@ -784,25 +824,20 @@ pub fn sync_inputs(conn: &DatabaseConnection, node_id: String) -> Result<History
         let mut refs = HistoryRefs::default();
         refs.node(node_id.clone());
         let current = inputs_for_node_tx(txn, &node_id)?;
-        let mut locals = Vec::new();
+        let mut locals_by_port: BTreeMap<String, Vec<InputRow>> = BTreeMap::new();
         let mut edge_rows = Vec::new();
         for row in current {
             if row.origin == "edge" {
                 edge_rows.push(row.id);
             } else {
-                locals.push(row);
+                locals_by_port
+                    .entry(row.port_id.clone())
+                    .or_default()
+                    .push(row);
             }
         }
         for id in &edge_rows {
             delete_input_tx(txn, id)?;
-        }
-
-        let mut order: Vec<(String, i32)> = Vec::new();
-        let mut next: BTreeMap<String, i32> = BTreeMap::new();
-        for row in &locals {
-            let position = next.entry(row.port_id.clone()).or_insert(0);
-            order.push((row.id.clone(), *position));
-            *position += 1;
         }
 
         let incoming = edges::Entity::find()
@@ -810,6 +845,7 @@ pub fn sync_inputs(conn: &DatabaseConnection, node_id: String) -> Result<History
             .filter(edges::Column::ToId.eq(&node_id))
             .order_by_asc(edges::Column::Id)
             .all(txn)?;
+        let mut rebuilt: BTreeMap<String, Vec<InputRow>> = BTreeMap::new();
         for edge in incoming {
             let source = find_node_tx(txn, &edge.from_id)?;
             let Some(batch_id) = source.output_batch_id else {
@@ -819,11 +855,10 @@ pub fn sync_inputs(conn: &DatabaseConnection, node_id: String) -> Result<History
                 if item.port_id != edge.from_port {
                     continue;
                 }
-                let position = next.entry(edge.to_port.clone()).or_insert(0);
                 let row = InputRow {
                     id: format!("input-{}-{}", edge.id, item.id),
                     node_id: node_id.clone(),
-                    position: *position,
+                    position: 0,
                     port_id: edge.to_port.clone(),
                     kind: item.kind.clone(),
                     origin: "edge".to_owned(),
@@ -834,13 +869,43 @@ pub fn sync_inputs(conn: &DatabaseConnection, node_id: String) -> Result<History
                     meta_json: item.meta_json.clone(),
                     created_at: now_ms(),
                 };
-                insert_input_row_tx(txn, &row)?;
-                order.push((row.id, row.position));
-                *position += 1;
+                rebuilt.entry(row.port_id.clone()).or_default().push(row);
             }
         }
 
-        set_input_positions_tx(txn, &node_id, &order)?;
+        // New snapshots go above the current port range first, so the
+        // immediate UNIQUE(node, port, position) holds until the whole port
+        // is renumbered.
+        let mut ports: BTreeSet<String> = locals_by_port.keys().cloned().collect();
+        ports.extend(rebuilt.keys().cloned());
+        for port_id in &ports {
+            let base = max_input_position_tx(txn, &node_id, port_id)?;
+            if let Some(rows) = rebuilt.get_mut(port_id) {
+                for (index, row) in rows.iter_mut().enumerate() {
+                    row.position = base + index as i32;
+                    insert_input_row_tx(txn, row)?;
+                }
+            }
+        }
+
+        // Local inputs keep their relative order per port; the rebuilt edge
+        // groups follow in that port.
+        for port_id in &ports {
+            let mut ordered: Vec<InputRow> = Vec::new();
+            if let Some(locals) = locals_by_port.get(port_id) {
+                ordered.extend(locals.iter().cloned());
+            }
+            if let Some(rows) = rebuilt.get(port_id) {
+                ordered.extend(rows.iter().cloned());
+            }
+            let positions: Vec<(String, i32)> = ordered
+                .iter()
+                .enumerate()
+                .map(|(index, row)| (row.id.clone(), index as i32))
+                .collect();
+            write_input_port_positions_tx(txn, &node_id, port_id, &positions)?;
+        }
+
         touch_node_tx(txn, &node_id)?;
         bump_document_rev(txn)?;
         Ok(refs)
@@ -1713,19 +1778,10 @@ pub fn apply_ops(conn: &DatabaseConnection, ops: &[HistoryOp]) -> Result<ApplyOu
                     edges_removed.push(edge.id);
                     dirty = true;
                 }
-                HistoryOp::InsertInput(row) => {
-                    // A provider run's input sync may already have recreated
-                    // this snapshot: runs are not history, so restoring an
-                    // input is idempotent.
-                    let exists = node_inputs::Entity::find_by_id(row.id.clone())
-                        .one(txn)?
-                        .is_some();
-                    if !exists {
-                        insert_input_row_tx(txn, row)?;
-                    }
-                    if touched.insert(row.node_id.clone()) {
-                        changed.push(node_row(&touch_node_tx(txn, &row.node_id)?).summary());
-                    }
+                HistoryOp::InsertInput(_) => {
+                    // Restored in one pass per port after the whole entry has
+                    // applied, so every node and edge the rows depend on is
+                    // in place and the result cannot depend on op order.
                     dirty = true;
                 }
                 HistoryOp::DeleteInput { id } => {
@@ -1741,8 +1797,12 @@ pub fn apply_ops(conn: &DatabaseConnection, ops: &[HistoryOp]) -> Result<ApplyOu
                     }
                     dirty = true;
                 }
-                HistoryOp::InputOrder { node_id, order } => {
-                    set_input_positions_tx(txn, node_id, order)?;
+                HistoryOp::InputOrder {
+                    node_id,
+                    port_id,
+                    order,
+                } => {
+                    write_input_port_positions_tx(txn, node_id, port_id, order)?;
                     if touched.insert(node_id.clone()) {
                         changed.push(node_row(&touch_node_tx(txn, node_id)?).summary());
                     }
@@ -1758,6 +1818,22 @@ pub fn apply_ops(conn: &DatabaseConnection, ops: &[HistoryOp]) -> Result<ApplyOu
             }
             for row in rows {
                 changed.push(row.summary());
+            }
+        }
+
+        let mut restored: BTreeMap<(String, String), Vec<&InputRow>> = BTreeMap::new();
+        for op in ops {
+            if let HistoryOp::InsertInput(row) = op {
+                restored
+                    .entry((row.node_id.clone(), row.port_id.clone()))
+                    .or_default()
+                    .push(row);
+            }
+        }
+        for ((node_id, port_id), rows) in &restored {
+            restore_input_group_tx(txn, node_id, port_id, rows)?;
+            if touched.insert(node_id.clone()) {
+                changed.push(node_row(&touch_node_tx(txn, node_id)?).summary());
             }
         }
 
@@ -2481,22 +2557,156 @@ fn max_input_position_tx(
     Ok(row.map_or(0, |row| row.position + 1))
 }
 
-fn set_input_positions_tx(
+fn inputs_for_port_tx(
     txn: &DatabaseTransaction,
     node_id: &str,
+    port_id: &str,
+) -> Result<Vec<InputRow>, DbErr> {
+    node_inputs::Entity::find()
+        .filter(node_inputs::Column::NodeId.eq(node_id))
+        .filter(node_inputs::Column::PortId.eq(port_id))
+        .order_by_asc(node_inputs::Column::Position)
+        .order_by_asc(node_inputs::Column::Id)
+        .all(txn)
+        .map(|rows| rows.iter().map(input_row).collect())
+}
+
+/// Moves every row of one port above both its current range and
+/// `minimum_offset`. The immediate `UNIQUE(node_id, port_id, position)` then
+/// has no row in the target range, so a reorder or restore can write its
+/// positions without a collision.
+fn lift_input_port_tx(
+    txn: &DatabaseTransaction,
+    node_id: &str,
+    port_id: &str,
+    minimum_offset: i32,
+) -> Result<(), DbErr> {
+    let offset = std::cmp::max(
+        max_input_position_tx(txn, node_id, port_id)?,
+        minimum_offset,
+    );
+    if offset == 0 {
+        return Ok(());
+    }
+    node_inputs::Entity::update_many()
+        .col_expr(
+            node_inputs::Column::Position,
+            Expr::col(node_inputs::Column::Position).add(offset),
+        )
+        .filter(node_inputs::Column::NodeId.eq(node_id))
+        .filter(node_inputs::Column::PortId.eq(port_id))
+        .exec(txn)?;
+    Ok(())
+}
+
+/// Writes target positions after `lift_input_port_tx`. The caller supplies
+/// every row that should end in the low range; a row it omitted stays at the
+/// end of the port instead of leaking a lifted position.
+fn write_input_port_positions_tx(
+    txn: &DatabaseTransaction,
+    node_id: &str,
+    port_id: &str,
     order: &[(String, i32)],
 ) -> Result<(), DbErr> {
+    let current = inputs_for_port_tx(txn, node_id, port_id)?;
+    let mut positions = Vec::with_capacity(current.len().max(order.len()));
+    let mut seen = BTreeSet::new();
+    let mut next = 0;
     for (id, position) in order {
+        if current.iter().any(|row| &row.id == id) && seen.insert(id.clone()) {
+            positions.push((id.clone(), *position));
+            next = std::cmp::max(next, *position + 1);
+        }
+    }
+    for row in current {
+        if seen.insert(row.id.clone()) {
+            positions.push((row.id.clone(), next));
+            next += 1;
+        }
+    }
+    let highest = positions.iter().map(|(_, position)| *position).max();
+    lift_input_port_tx(
+        txn,
+        node_id,
+        port_id,
+        highest.map_or(0, |position| position + 1),
+    )?;
+    assign_input_positions_tx(txn, node_id, port_id, &positions)
+}
+
+fn assign_input_positions_tx(
+    txn: &DatabaseTransaction,
+    node_id: &str,
+    port_id: &str,
+    positions: &[(String, i32)],
+) -> Result<(), DbErr> {
+    for (id, position) in positions {
         node_inputs::Entity::update_many()
-            .col_expr(
-                node_inputs::Column::Position,
-                sea_orm::sea_query::Expr::value(*position),
-            )
+            .col_expr(node_inputs::Column::Position, Expr::value(*position))
             .filter(node_inputs::Column::Id.eq(id))
             .filter(node_inputs::Column::NodeId.eq(node_id))
+            .filter(node_inputs::Column::PortId.eq(port_id))
             .exec(txn)?;
     }
     Ok(())
+}
+
+/// Restores one entry's fresh input rows for a port in one pass. The rows
+/// are inserted above the current range, then merged with the port's
+/// current rows by stored position; a restored row wins an exact tie, so
+/// it takes the historical slot and the existing row follows it. The whole
+/// port is renumbered densely, making the result independent of the order
+/// the entry's ops happen to have.
+fn restore_input_group_tx(
+    txn: &DatabaseTransaction,
+    node_id: &str,
+    port_id: &str,
+    rows: &[&InputRow],
+) -> Result<(), DbErr> {
+    let current = inputs_for_port_tx(txn, node_id, port_id)?;
+    let existing: BTreeSet<String> = current.iter().map(|row| row.id.clone()).collect();
+    let fresh: Vec<&InputRow> = rows
+        .iter()
+        .copied()
+        .filter(|row| !existing.contains(&row.id))
+        .collect();
+    if fresh.is_empty() {
+        return Ok(());
+    }
+
+    let base = max_input_position_tx(txn, node_id, port_id)?;
+    for (position, row) in (base..).zip(fresh.iter()) {
+        let mut inserted = (*row).clone();
+        inserted.position = position;
+        insert_input_row_tx(txn, &inserted)?;
+    }
+
+    let fresh_positions: BTreeMap<&str, i32> = fresh
+        .iter()
+        .map(|row| (row.id.as_str(), row.position))
+        .collect();
+    let current = inputs_for_port_tx(txn, node_id, port_id)?;
+    let mut merged: Vec<(i32, bool, String)> = current
+        .iter()
+        .map(|row| match fresh_positions.get(row.id.as_str()) {
+            Some(position) => (*position, true, row.id.clone()),
+            None => (row.position, false, row.id.clone()),
+        })
+        .collect();
+    merged.sort_by(|left, right| {
+        left.0
+            .cmp(&right.0)
+            .then_with(|| right.1.cmp(&left.1))
+            .then_with(|| left.2.cmp(&right.2))
+    });
+    let positions: Vec<(String, i32)> = merged
+        .into_iter()
+        .enumerate()
+        .map(|(index, (_, _, id))| (id, index as i32))
+        .collect();
+    let offset = positions.len() as i32;
+    lift_input_port_tx(txn, node_id, port_id, offset)?;
+    assign_input_positions_tx(txn, node_id, port_id, &positions)
 }
 
 /// Records an input-list change on a node. The node is always returned so

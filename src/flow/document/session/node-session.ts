@@ -252,17 +252,12 @@ export class NodeSession {
         maxDimension: 2048,
         quality: 0.9,
       });
-      // Inputs may have gaps after removals, so append past the highest
-      // position instead of counting rows; a duplicate position would make
-      // the order ambiguous. Read the current list: the composer may have
-      // closed while the picker was open.
-      const current = await document.nodeDetail(id);
-      const base =
-        current?.inputs.reduce((next, input) => Math.max(next, input.position + 1), 0) ?? 0;
-      // Upload concurrently; each image gets its own position, and a failure
-      // is isolated so the images that did upload still commit.
-      const results = await Promise.allSettled(
-        picked.map(async (image, index) => {
+      // Read and import concurrently, then append in picker order: the
+      // document assigns each input the next position on its port, so the
+      // worker order is the display order. A failed import or append is
+      // isolated so the images that did import still commit.
+      const imports = await Promise.allSettled(
+        picked.map(async (image) => {
           const bytes = new Uint8Array(await image.file.arrayBuffer());
           const metaJson = JSON.stringify({
             width: image.size.width,
@@ -276,24 +271,37 @@ export class NodeSession {
             bytes,
             metaJson,
           });
-          return document.addInput({
-            id: `input-${crypto.randomUUID()}`,
-            nodeId: id,
-            position: base + index,
-            portId: "references",
-            kind: "image",
-            origin: "local",
-            assetId: asset.id,
-            text: "",
-            metaJson,
-          });
+          return { asset, metaJson };
         }),
       );
       if (this.host.isDisposed()) return;
-      for (const result of results) {
-        if (result.status === "fulfilled") this.host.applyChanges(result.value);
-        else console.error("Flow could not upload an image", result.reason);
+      let appends = Promise.resolve();
+      for (const result of imports) {
+        if (result.status === "rejected") {
+          console.error("Flow could not upload an image", result.reason);
+          continue;
+        }
+        appends = appends.then(async () => {
+          if (this.host.isDisposed()) return;
+          try {
+            const changes = await document.addInput({
+              id: `input-${crypto.randomUUID()}`,
+              nodeId: id,
+              portId: "references",
+              kind: "image",
+              origin: "local",
+              assetId: result.value.asset.id,
+              text: "",
+              metaJson: result.value.metaJson,
+            });
+            if (!this.host.isDisposed()) this.host.applyChanges(changes);
+          } catch (error) {
+            console.error("Flow could not upload an image", error);
+          }
+        });
       }
+      await appends;
+      if (this.host.isDisposed()) return;
       this.host.schedulePreviews();
     } catch (error) {
       console.error("Flow could not upload an image", error);

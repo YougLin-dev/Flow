@@ -195,12 +195,12 @@ pub struct ResultBatchSummary {
     pub items: Vec<ResultItemSummary>,
 }
 
-/// One input item of a node, to add.
+/// One input item of a node, to add. Its position is assigned by the
+/// document: the next free slot on its port.
 #[derive(Debug, Clone, PartialEq, JsObject)]
 pub struct InputItemInput {
     pub id: String,
     pub node_id: String,
-    pub position: f64,
     pub port_id: String,
     pub kind: String,
     /// `edge` or `local`.

@@ -150,8 +150,11 @@ pub enum HistoryOp {
     DeleteInput {
         id: String,
     },
+    /// The dense order of one input port. Positions are per `(node, port)`,
+    /// so an undo must renumber only that port.
     InputOrder {
         node_id: String,
+        port_id: String,
         order: Vec<(String, i32)>,
     },
 }
@@ -328,8 +331,12 @@ fn op_byte_size(op: &HistoryOp) -> usize {
                 + row.text.len()
                 + row.meta_json.len()
         }
-        HistoryOp::InputOrder { node_id, order } => {
-            node_id.len() + order.iter().map(|(id, _)| id.len() + 4).sum::<usize>()
+        HistoryOp::InputOrder {
+            node_id,
+            port_id,
+            order,
+        } => {
+            node_id.len() + port_id.len() + order.iter().map(|(id, _)| id.len() + 4).sum::<usize>()
         }
     };
     OP_OVERHEAD + payload

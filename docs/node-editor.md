@@ -84,7 +84,9 @@ upload card has no output port.
   port.
 - Positions are per `(node, port)`; the composer groups items by input port
   and shows the edge slots in use, such as `3 / 16`. Reorder and remove act
-  within a group.
+  within a group. The document assigns an appended input the next position on
+  its port, and reorder, undo and input sync renumber each port independently,
+  so the immediate unique position never blocks a restore.
 - Pressing a port starts a connection from that specific port, in either
   direction; a release on a compatible port joins them. Dragging the selected
   edge's endpoint moves that end and revalidates its type and capacity,
