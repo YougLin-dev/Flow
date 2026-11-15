@@ -698,16 +698,36 @@ fn worker(path: &str, ready: Sender<Result<(), String>>, jobs: Receiver<Job>) {
             }
             Job::Close(ack) => {
                 let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                    conn.execute_unprepared("UPDATE document SET clean_shutdown = 1 WHERE id = 1")
+                    // Fold committed WAL frames back into the package file
+                    // first, and inspect the result row: a concurrent reader
+                    // makes TRUNCATE report busy/checkpointed < log without
+                    // an SQL error. Only a complete checkpoint may be called
+                    // a clean close; the flag stays 0 otherwise.
+                    let checkpoint = conn
+                        .query_one_raw(sea_orm::Statement::from_string(
+                            conn.get_database_backend(),
+                            "PRAGMA wal_checkpoint(TRUNCATE)".to_owned(),
+                        ))
+                        .map_err(|error| error.to_string())?
+                        .ok_or_else(|| "wal_checkpoint returned no row".to_owned())?;
+                    let busy = checkpoint
+                        .try_get_by_index::<i64>(0)
                         .map_err(|error| error.to_string())?;
-                    // Fold committed WAL frames back into the package file so
-                    // a copy made right after close is complete.
-                    conn.query_all_raw(sea_orm::Statement::from_string(
-                        conn.get_database_backend(),
-                        "PRAGMA wal_checkpoint(TRUNCATE)".to_owned(),
-                    ))
-                    .map(|_| ())
-                    .map_err(|error| error.to_string())
+                    let log = checkpoint
+                        .try_get_by_index::<i64>(1)
+                        .map_err(|error| error.to_string())?;
+                    let checkpointed = checkpoint
+                        .try_get_by_index::<i64>(2)
+                        .map_err(|error| error.to_string())?;
+                    if checkpointed != log {
+                        return Err(format!(
+                            "the package's write-ahead log is still busy \
+                             (busy={busy}, checkpointed={checkpointed} of {log})"
+                        ));
+                    }
+                    conn.execute_unprepared("UPDATE document SET clean_shutdown = 1 WHERE id = 1")
+                        .map(|_| ())
+                        .map_err(|error| error.to_string())
                 }))
                 .unwrap_or_else(|_| Err("the database job panicked".to_owned()));
                 // Release the file before acknowledging: a rename, delete or
@@ -897,7 +917,7 @@ fn configure(conn: &DatabaseConnection, path: &str) -> Result<(), String> {
 
 #[cfg(test)]
 mod tests {
-    use std::collections::BTreeSet;
+    use std::collections::{BTreeMap, BTreeSet};
     use std::sync::atomic::{AtomicU64, Ordering};
 
     use super::*;
@@ -7143,6 +7163,50 @@ mod tests {
     }
 
     #[test]
+    fn close_refuses_a_blocked_checkpoint() {
+        use sea_orm::TransactionTrait;
+
+        let (path, database) = temp_database("close-busy");
+        let db = Database::open(&database).expect("open");
+
+        // A reader whose snapshot predates the next commit keeps that frame
+        // out of the main file, so TRUNCATE reports busy with
+        // checkpointed < log.
+        let url = sqlite_url(&database).expect("raw URL");
+        let reader = sea_orm::Database::connect(url.as_str()).expect("open reader");
+        let snapshot = reader.begin().expect("begin read transaction");
+        snapshot
+            .query_one_raw(sea_orm::Statement::from_string(
+                sea_orm::DbBackend::Sqlite,
+                "SELECT count(*) FROM document".to_owned(),
+            ))
+            .expect("pin the snapshot");
+
+        db.insert_nodes(vec![node("late", "Late", "", &[], 0.0, 0.0)])
+            .expect("commit after the snapshot");
+        let error = db
+            .close()
+            .expect_err("a blocked checkpoint is not a clean close");
+        assert!(error.contains("write-ahead log"), "{error}");
+
+        // The failed close leaves the package marked dirty, so the next open
+        // schedules verification instead of skipping it.
+        drop(snapshot);
+        let clean = reader
+            .query_one_raw(sea_orm::Statement::from_string(
+                sea_orm::DbBackend::Sqlite,
+                "SELECT clean_shutdown FROM document WHERE id = 1".to_owned(),
+            ))
+            .expect("read clean flag")
+            .expect("document row")
+            .try_get_by_index::<i64>(0)
+            .expect("clean flag");
+        assert_eq!(clean, 0, "a refused checkpoint stays dirty");
+        drop(reader);
+        remove_database_files(&path);
+    }
+
+    #[test]
     fn save_view_persists_without_bumping_the_revision() {
         let db = Database::open(":memory:").expect("open");
         let before = current_rev(&db);
@@ -7615,6 +7679,168 @@ mod tests {
         );
     }
 
+    #[test]
+    fn settling_a_run_for_a_missing_or_replaced_node_cancels_it() {
+        let db = Database::open(":memory:").expect("open");
+        let remove_node = |id: &str| {
+            let id = id.to_owned();
+            db.run(move |conn| {
+                nodes::Entity::delete_many()
+                    .filter(nodes::Column::Id.eq(id))
+                    .exec(conn)
+                    .map(|_| ())
+                    .map_err(|error| error.to_string())
+            })
+            .expect("remove the node out of band");
+        };
+        let batch_state = |id: &str| {
+            let id = id.to_owned();
+            db.run(move |conn| {
+                result_batches::Entity::find()
+                    .filter(result_batches::Column::Id.eq(id))
+                    .one(conn)
+                    .map(|row| {
+                        row.map(|row| {
+                            (
+                                row.status,
+                                row.item_count,
+                                row.finished_at,
+                                row.error.unwrap_or_default(),
+                            )
+                        })
+                    })
+                    .map_err(|error| error.to_string())
+            })
+            .expect("read batch")
+            .expect("batch row")
+        };
+
+        // The node row disappears while its batch still runs.
+        db.insert_nodes(vec![node("a", "A", "", &[], 0.0, 0.0)])
+            .expect("insert");
+        db.begin_run(run_batch("batch-missing", "a", "running", None))
+            .expect("begin run");
+        remove_node("a");
+        let missing = db
+            .settle_run(
+                run_batch("batch-missing", "a", "done", None),
+                vec![text_item("late-item", "late result")],
+            )
+            .expect("settle against a missing node");
+        assert!(missing.changed.is_empty());
+        let (status, item_count, finished_at, error) = batch_state("batch-missing");
+        assert_eq!(status, "cancelled");
+        assert_eq!(item_count, 0, "an orphan settle writes no items");
+        assert!(finished_at.is_some(), "the orphan batch is finished");
+        assert!(error.contains("deleted"), "{error}");
+
+        // The id comes back as a new incarnation (new seq) while the old
+        // batch still runs: the old run must not attach to it.
+        db.insert_nodes(vec![node("a", "A", "", &[], 0.0, 0.0)])
+            .expect("new incarnation");
+        db.begin_run(run_batch("batch-incarnation", "a", "running", None))
+            .expect("begin run");
+        remove_node("a");
+        db.insert_nodes(vec![node("a", "A", "", &[], 0.0, 0.0)])
+            .expect("third incarnation");
+        let replaced = db
+            .settle_run(
+                run_batch("batch-incarnation", "a", "done", None),
+                vec![text_item("wrong-item", "wrong")],
+            )
+            .expect("settle against a replaced node");
+        assert!(replaced.changed.is_empty());
+        let (status, item_count, _, _) = batch_state("batch-incarnation");
+        assert_eq!(status, "cancelled");
+        assert_eq!(item_count, 0, "a dead incarnation's run writes no items");
+        let live = db
+            .node_detail("a".to_owned())
+            .expect("detail")
+            .expect("the live node");
+        assert!(live.batch.is_none(), "the new incarnation has no output");
+        assert!(live.latest_batch.is_none());
+    }
+
+    #[test]
+    fn deleting_several_nodes_settles_only_the_running_ones() {
+        let db = Database::open(":memory:").expect("open");
+        db.insert_nodes(vec![
+            node("a", "A", "", &[], 0.0, 0.0),
+            node("b", "B", "", &[], 300.0, 0.0),
+        ])
+        .expect("insert");
+        db.save_run(
+            run_batch("batch-done", "b", "done", None),
+            vec![text_item("item-done", "done result")],
+        )
+        .expect("settle b");
+        db.begin_run(run_batch("batch-live", "a", "running", None))
+            .expect("begin on a");
+
+        let deleted = db
+            .delete_nodes(vec!["a".to_owned(), "b".to_owned()])
+            .expect("delete both");
+        assert_eq!(deleted.changes.removed.len(), 2);
+        let running = db
+            .run(|conn| {
+                result_batches::Entity::find()
+                    .filter(result_batches::Column::Status.eq("running"))
+                    .all(conn)
+                    .map(|rows| rows.len())
+                    .map_err(|error| error.to_string())
+            })
+            .expect("count running batches");
+        assert_eq!(running, 0, "no batch outlives its node");
+        let done = db
+            .run(|conn| {
+                result_batches::Entity::find()
+                    .filter(result_batches::Column::Id.eq("batch-done"))
+                    .one(conn)
+                    .map(|row| row.map(|row| row.status))
+                    .map_err(|error| error.to_string())
+            })
+            .expect("read done batch")
+            .expect("done batch");
+        assert_eq!(done, "done", "a settled batch is left untouched");
+
+        let undone = db.undo().expect("undo the delete");
+        let mut statuses: BTreeMap<&str, &str> = BTreeMap::new();
+        for changed in &undone.changed {
+            statuses.insert(changed.id.as_str(), changed.status.as_str());
+        }
+        assert_eq!(statuses.get("a"), Some(&"cancelled"));
+        assert_eq!(statuses.get("b"), Some(&"done"));
+        let b = db
+            .node_detail("b".to_owned())
+            .expect("detail")
+            .expect("b returned");
+        assert_eq!(b.batch.expect("output batch").id, "batch-done");
+    }
+
+    #[test]
+    fn applying_a_delete_op_cancels_a_running_batch() {
+        let db = Database::open(":memory:").expect("open");
+        db.insert_nodes(vec![node("a", "A", "", &[], 0.0, 0.0)])
+            .expect("insert");
+        db.begin_run(run_batch("batch-live", "a", "running", None))
+            .expect("begin");
+        let changes = db
+            .apply_ops(&[HistoryOp::Delete { id: "a".to_owned() }])
+            .expect("apply a delete op");
+        assert_eq!(changes.removed, ["a"]);
+        let status = db
+            .run(|conn| {
+                result_batches::Entity::find()
+                    .filter(result_batches::Column::Id.eq("batch-live"))
+                    .one(conn)
+                    .map(|row| row.map(|row| row.status))
+                    .map_err(|error| error.to_string())
+            })
+            .expect("read batch")
+            .expect("batch row");
+        assert_eq!(status, "cancelled");
+    }
+
     fn seed_input() -> SeedDocumentInput {
         let mut text = node("seed-text", "Text", "", &["text"], 80.0, 120.0);
         text.settings_json = Some(r#"{"version":1,"prompt":"Describe a lake."}"#.to_owned());
@@ -7659,6 +7885,14 @@ mod tests {
     #[test]
     fn seed_document_writes_the_example_and_only_once() {
         let db = Database::open(":memory:").expect("open");
+        // Populate the undo stack on an empty document first: a successful
+        // seed must clear it, so undo cannot revive the scratch node or
+        // remove the demo.
+        db.insert_nodes(vec![node("scratch", "Scratch", "", &[], 0.0, 0.0)])
+            .expect("scratch node");
+        db.delete_nodes(vec!["scratch".to_owned()])
+            .expect("delete the scratch node");
+        assert_eq!(db.count().expect("empty again"), 0);
         let changes = db.seed_document(seed_input()).expect("seed");
         assert_eq!(db.count().expect("nodes"), 2);
         assert_eq!(db.edge_count().expect("edges"), 1);

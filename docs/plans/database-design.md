@@ -882,7 +882,7 @@ GC policy at open/maintenance (never during a session): keep batches referenced 
 
 ### 8.6 Seeding
 
-`seedDocument` is one worker command in one transaction: if `demo_seeded=1`, no-op; if the document has nodes/edges, set `demo_seeded=1` and no-op (prevents seeding over data); otherwise insert the two fixed-id nodes, insert a `running` manual batch, insert its item, settle it `done`, set the node output pointer/status, insert the seed edge, insert the edge snapshot input, bump rev once, clear history, set `demo_seeded=1`. Old seed batches (only possible after a partial/legacy state) are deleted before insertion; with an empty document there are no input references, so RESTRICT is satisfied. Deleting all nodes later does **not** reseed (behavior change; reset does).
+`seedDocument` is one worker command in one transaction: if `demo_seeded=1`, no-op; if the document has nodes or edges, return an error and leave `demo_seeded=0` (seeding never writes over data; the frozen v1 schema has no pre-v1 packages, so a partial/legacy row state is not a supported input); otherwise insert the two fixed-id nodes, insert a `running` manual batch, insert its item, settle it `done`, set the node output pointer/status, insert the seed edge, insert the edge snapshot input, bump rev once, clear history, set `demo_seeded=1`. Deleting all nodes later does **not** reseed (behavior change; reset does).
 
 ### 8.7 Project package and the project layer
 
