@@ -190,11 +190,23 @@ fn input_asset_ids() -> SelectStatement {
 /// alone: the directory is a package resource, not a dumping ground, but GC
 /// only claims files it can prove it wrote.
 fn sweep_files(conn: &impl ConnectionTrait, assets_dir: &Path) -> Result<u64, String> {
-    let entries = match fs::read_dir(assets_dir) {
-        Ok(entries) => entries,
+    let canonical_assets = match fs::canonicalize(assets_dir) {
+        Ok(path) => path,
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(0),
         Err(error) => return Err(error.to_string()),
     };
+    // The sweep assumes this directory belongs to this package. A symlink or
+    // junction that resolves outside the package would make it unlink another
+    // package's content-addressed files, so it is skipped rather than
+    // followed.
+    let Some(parent) = assets_dir.parent() else {
+        return Ok(0);
+    };
+    let canonical_package = fs::canonicalize(parent).map_err(|error| error.to_string())?;
+    if !canonical_assets.starts_with(&canonical_package) {
+        return Ok(0);
+    }
+    let entries = fs::read_dir(&canonical_assets).map_err(|error| error.to_string())?;
     let stored: BTreeSet<String> = assets::Entity::find()
         .all(conn)
         .map_err(|error| error.to_string())?

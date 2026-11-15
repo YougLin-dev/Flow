@@ -2054,6 +2054,7 @@ panel.ts}`, `components/probes/{ImageLoadProbe,ZoomProbe}.tsx`,
 | `search.rs`                         | `reads/search.rs`                                                                                                     |
 | `schema.rs`                         | `store/schema.rs`                                                                                                     |
 | `edge_index.rs`                     | `store/edge_index.rs`                                                                                                 |
+| `gc.rs`                             | `store/gc.rs`                                                                                                         |
 | `history.rs` row snapshots          | stay in `history.rs` (referenced by `HistoryOp`)                                                                      |
 | `detail.rs`/`viewport.rs` test data | `db/tests/*`; keep reference oracles in place                                                                         |
 | `entity/mod.rs` ownership comment   | update to `store/schema.rs`                                                                                           |

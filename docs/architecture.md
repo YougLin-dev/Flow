@@ -121,8 +121,9 @@ canvas stays in TSX and owns only the scene model and its views.
   outputs, no input snapshots and that are not the newest batch of a live
   node incarnation, then unreferenced asset rows, then asset files with no
   row (after the row transaction commits, so a rollback can never leave a
-  live row without bytes). The command refuses while history holds an entry;
-  a sweep failure is reported but does not block the open. A saved camera is
+  live row without bytes; a directory that resolves outside the package is
+  never swept). The command refuses while history holds an entry; a sweep
+  failure is reported but does not block the open. A saved camera is
   restored instead of fitting. The frozen schema has no saved-view marker,
   so the `0, 0, 1` default is the never-saved sentinel; a view saved at
   exactly that value is indistinguishable and refits.

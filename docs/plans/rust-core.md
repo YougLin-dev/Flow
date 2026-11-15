@@ -715,9 +715,10 @@ maintenance compactBounds: elapsed=9.51ms
 ```
 
 The collection deleted the previous recovery iteration's 100 terminal
-batches; a package with nothing collectable pays only the index-bounded
-scans. GC runs once at open, before seeding, and refuses while the undo
-history holds an entry.
+batches. The batch probes are index-bounded, but every run also reads the
+asset rows and sweeps the assets directory, so a package with nothing
+collectable still pays O(assets + files). GC runs once at open, before
+seeding, and refuses while the undo history holds an entry.
 
 ## Phases
 

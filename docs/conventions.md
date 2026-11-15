@@ -105,13 +105,15 @@ Decision tree:
   crate.
 - SeaORM entities are one file per table under `src/native/src/entity/`, named
   after the table. Today commands live in `mutation.rs`; reads in `search.rs`,
-  `viewport.rs`, `scene.rs` or `detail.rs`; asset bytes in `asset.rs`; `db.rs`
-  owns the worker handle, history and startup, and `schema.rs` owns table
-  creation. Raw SQLITE SQL belongs only in `schema.rs`/`search.rs` for virtual
-  tables. The Phase 6 target is `db/{mod,worker,startup,undo,tests}`,
+  `viewport.rs`, `scene.rs` or `detail.rs`; asset bytes in `asset.rs`; package
+  collection in `gc.rs`; `db.rs` owns the worker handle, history and startup,
+  and `schema.rs` owns table creation. Raw SQLITE SQL belongs only in
+  `schema.rs`/`search.rs` for virtual tables. The Phase 6 target is
+  `db/{mod,worker,startup,undo,tests}`,
   `mutation/{mod,nodes,edges,inputs,runs,apply,support,tx}`,
   `reads/{mod,viewport,scene,detail,search,metadata}` and
-  `store/{mod,schema,edge_index,document,queries,rows}`; FFI stays unchanged.
+  `store/{mod,schema,edge_index,document,queries,rows,gc}`; FFI stays
+  unchanged.
   The exact map is in [the plan](plans/code-organization.md) Appendix B.
 
 ## Imports
