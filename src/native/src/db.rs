@@ -35,6 +35,30 @@ enum Job {
     Run(Box<dyn FnOnce(&DatabaseConnection) + Send + 'static>),
 }
 
+/// The asset directory shared by a database's clones. An in-memory database
+/// gets a private temporary directory; removing it on the last drop keeps
+/// the test temp root from accumulating.
+struct AssetsDir {
+    path: PathBuf,
+    temporary: bool,
+}
+
+impl std::ops::Deref for AssetsDir {
+    type Target = Path;
+
+    fn deref(&self) -> &Path {
+        &self.path
+    }
+}
+
+impl Drop for AssetsDir {
+    fn drop(&mut self) {
+        if self.temporary {
+            let _ = fs::remove_dir_all(&self.path);
+        }
+    }
+}
+
 /// A handle to the database worker.
 ///
 /// SeaORM's sync Rusqlite connection is deliberately not `Send` (it holds a
@@ -49,7 +73,7 @@ enum Job {
 pub struct Database {
     tx: Arc<Mutex<Sender<Job>>>,
     history: Arc<Mutex<History>>,
-    assets_dir: Arc<PathBuf>,
+    assets_dir: Arc<AssetsDir>,
     /// The last document bounds, tagged with the revision they describe:
     /// Fit and the minimap's overview ask at the same revision at startup.
     bounds_cache: Arc<Mutex<Option<(i64, Viewport)>>>,
@@ -60,7 +84,10 @@ impl Database {
         let (ready_tx, ready_rx) = mpsc::channel();
         let (job_tx, job_rx) = mpsc::channel::<Job>();
         let path = path.to_owned();
-        let assets_dir = Arc::new(asset::assets_dir_for(&path));
+        let assets_dir = Arc::new(AssetsDir {
+            path: asset::assets_dir_for(&path),
+            temporary: path == ":memory:",
+        });
 
         std::thread::Builder::new()
             .name("flow-db".to_owned())
@@ -677,6 +704,26 @@ mod tests {
     fn current_rev(db: &Database) -> i64 {
         db.run(|conn| document::current_rev(conn).map_err(|error| error.to_string()))
             .expect("read the document revision")
+    }
+
+    /// Removes a test path, retrying while the worker still closes its
+    /// SQLite handles. Windows refuses to unlink a file the worker holds.
+    fn remove_path_retrying(path: &std::path::Path) {
+        for _ in 0..100 {
+            if !path.exists() {
+                return;
+            }
+            let result = if path.is_dir() {
+                std::fs::remove_dir_all(path)
+            } else {
+                std::fs::remove_file(path)
+            };
+            if result.is_ok() && !path.exists() {
+                return;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+        assert!(!path.exists(), "could not remove {}", path.display());
     }
 
     fn direct_write(db: &Database, sql: &str) {
@@ -2372,9 +2419,9 @@ mod tests {
         }
 
         for suffix in ["", "-wal", "-shm"] {
-            let _ = std::fs::remove_file(format!("{path}{suffix}"));
+            remove_path_retrying(std::path::Path::new(&format!("{path}{suffix}")));
         }
-        let _ = std::fs::remove_dir(&dir);
+        remove_path_retrying(&dir);
     }
 
     #[test]
@@ -3608,6 +3655,295 @@ mod tests {
             .expect("reimport");
         assert_eq!(second.id, first.id);
         assert_eq!(db.asset_bytes(first.id).expect("read back"), bytes);
+    }
+
+    #[test]
+    fn a_stored_size_mismatch_rejects_the_import_and_does_not_write() {
+        let db = Database::open(":memory:").expect("open");
+        let bytes = b"<svg/>".to_vec();
+        let first = db
+            .import_asset(AssetInput {
+                id: "asset-1".to_owned(),
+                kind: "image".to_owned(),
+                name: "one.svg".to_owned(),
+                mime: "image/svg+xml".to_owned(),
+                bytes: bytes.clone(),
+                meta_json: None,
+            })
+            .expect("import");
+        std::fs::remove_file(db.assets_dir.join(&first.hash)).expect("remove the stored bytes");
+        direct_write(&db, "UPDATE assets SET size = 99 WHERE id = 'asset-1'");
+
+        let error = db
+            .import_asset(AssetInput {
+                id: "asset-2".to_owned(),
+                kind: "image".to_owned(),
+                name: "two.svg".to_owned(),
+                mime: "image/svg+xml".to_owned(),
+                bytes,
+                meta_json: None,
+            })
+            .expect_err("a size mismatch must be rejected");
+        assert!(error.contains("imported bytes are 6"), "{error}");
+        assert!(
+            !db.assets_dir.join(&first.hash).exists(),
+            "mismatched bytes must not be written"
+        );
+    }
+
+    #[test]
+    fn a_reimport_repairs_a_corrupt_file_and_keeps_the_first_metadata() {
+        let db = Database::open(":memory:").expect("open");
+        let bytes = b"<svg/>".to_vec();
+        let first = db
+            .import_asset(AssetInput {
+                id: "asset-1".to_owned(),
+                kind: "image".to_owned(),
+                name: "one.svg".to_owned(),
+                mime: "image/svg+xml".to_owned(),
+                bytes: bytes.clone(),
+                meta_json: None,
+            })
+            .expect("import");
+        let path = db.assets_dir.join(&first.hash);
+
+        // A same-length corruption is caught by the content hash.
+        std::fs::write(&path, b"XXXXXX").expect("tamper the stored bytes");
+        let second = db
+            .import_asset(AssetInput {
+                id: "asset-2".to_owned(),
+                kind: "image".to_owned(),
+                name: "two.svg".to_owned(),
+                mime: "image/png".to_owned(),
+                bytes: bytes.clone(),
+                meta_json: Some("{\"changed\":true}".to_owned()),
+            })
+            .expect("reimport over same-length corruption");
+        assert_eq!(second.id, "asset-1");
+        assert_eq!(second.kind, "image");
+        assert_eq!(second.name, "one.svg");
+        assert_eq!(second.mime, "image/svg+xml");
+        assert_eq!(second.meta_json, "{}");
+        assert_eq!(second.hash, first.hash);
+        assert_eq!(std::fs::read(&path).expect("read the file"), bytes);
+
+        // A truncated file is caught by its size and repaired the same way.
+        std::fs::write(&path, b"<sv").expect("truncate the stored bytes");
+        db.import_asset(AssetInput {
+            id: "asset-3".to_owned(),
+            kind: "image".to_owned(),
+            name: "three.svg".to_owned(),
+            mime: "image/svg+xml".to_owned(),
+            bytes: bytes.clone(),
+            meta_json: None,
+        })
+        .expect("reimport over truncation");
+        assert_eq!(std::fs::read(&path).expect("read the file"), bytes);
+    }
+
+    #[test]
+    fn an_in_memory_database_removes_its_temporary_assets_on_drop() {
+        let bytes = b"<svg/>".to_vec();
+        let dir = {
+            let db = Database::open(":memory:").expect("open");
+            let asset = db
+                .import_asset(AssetInput {
+                    id: "asset-1".to_owned(),
+                    kind: "image".to_owned(),
+                    name: "one.svg".to_owned(),
+                    mime: "image/svg+xml".to_owned(),
+                    bytes: bytes.clone(),
+                    meta_json: None,
+                })
+                .expect("import");
+            let dir = db.assets_dir.to_path_buf();
+            let clone = db.clone();
+            drop(db);
+            assert!(dir.exists(), "a live clone keeps the directory");
+            assert_eq!(
+                clone.asset_bytes(asset.id).expect("read through the clone"),
+                bytes
+            );
+            drop(clone);
+            dir
+        };
+        assert!(!dir.exists(), "the temporary directory is removed on drop");
+    }
+
+    #[test]
+    fn a_file_database_keeps_its_assets_after_drop_and_reopen() {
+        let dir =
+            std::env::temp_dir().join(format!("flow assets {} {}", std::process::id(), now_ms()));
+        std::fs::create_dir_all(&dir).expect("create directory");
+        let path = dir.join("flow.db");
+        let path = path.to_string_lossy().into_owned();
+        let bytes = b"<svg/>".to_vec();
+
+        let (id, hash) = {
+            let db = Database::open(&path).expect("open");
+            let asset = db
+                .import_asset(AssetInput {
+                    id: "asset-1".to_owned(),
+                    kind: "image".to_owned(),
+                    name: "one.svg".to_owned(),
+                    mime: "image/svg+xml".to_owned(),
+                    bytes: bytes.clone(),
+                    meta_json: None,
+                })
+                .expect("import");
+            assert!(db.assets_dir.join(&asset.hash).exists());
+            (asset.id, asset.hash)
+        };
+        let stored = dir.join("assets").join(&hash);
+        assert!(
+            stored.exists(),
+            "a file database must keep its assets directory"
+        );
+        {
+            let db = Database::open(&path).expect("reopen");
+            assert_eq!(
+                db.asset_bytes(id).expect("read after reopen"),
+                bytes,
+                "the stored bytes survive the close"
+            );
+        }
+        assert!(stored.exists());
+
+        for suffix in ["", "-wal", "-shm"] {
+            remove_path_retrying(std::path::Path::new(&format!("{path}{suffix}")));
+        }
+        remove_path_retrying(&dir);
+    }
+
+    #[test]
+    fn asset_bytes_rejects_a_malformed_stored_hash() {
+        let db = Database::open(":memory:").expect("open");
+        db.import_asset(AssetInput {
+            id: "asset-1".to_owned(),
+            kind: "image".to_owned(),
+            name: "one.svg".to_owned(),
+            mime: "image/svg+xml".to_owned(),
+            bytes: b"<svg/>".to_vec(),
+            meta_json: None,
+        })
+        .expect("import");
+        direct_write(
+            &db,
+            "UPDATE assets SET hash = '../escape' WHERE id = 'asset-1'",
+        );
+
+        let error = db
+            .asset_bytes("asset-1".to_owned())
+            .expect_err("a malformed hash must not be read");
+        assert!(error.contains("malformed hash"), "{error}");
+    }
+
+    #[test]
+    fn asset_bytes_rejects_bytes_that_do_not_match_the_row_size() {
+        let db = Database::open(":memory:").expect("open");
+        let asset = db
+            .import_asset(AssetInput {
+                id: "asset-1".to_owned(),
+                kind: "image".to_owned(),
+                name: "one.svg".to_owned(),
+                mime: "image/svg+xml".to_owned(),
+                bytes: b"<svg/>".to_vec(),
+                meta_json: None,
+            })
+            .expect("import");
+        std::fs::write(db.assets_dir.join(&asset.hash), b"a longer file")
+            .expect("tamper the stored bytes");
+
+        let error = db
+            .asset_bytes(asset.id)
+            .expect_err("a file whose size disagrees with its row must be rejected");
+        assert!(error.contains("its row says 6"), "{error}");
+    }
+
+    #[test]
+    fn asset_bytes_rejects_a_same_length_corrupt_file() {
+        let db = Database::open(":memory:").expect("open");
+        let asset = db
+            .import_asset(AssetInput {
+                id: "asset-1".to_owned(),
+                kind: "image".to_owned(),
+                name: "one.svg".to_owned(),
+                mime: "image/svg+xml".to_owned(),
+                bytes: b"<svg/>".to_vec(),
+                meta_json: None,
+            })
+            .expect("import");
+        std::fs::write(db.assets_dir.join(&asset.hash), b"broken")
+            .expect("tamper the stored bytes");
+
+        let error = db
+            .asset_bytes(asset.id)
+            .expect_err("a file whose content hash disagrees with its row must be rejected");
+        assert!(error.contains("stored hash"), "{error}");
+    }
+
+    #[test]
+    fn a_failed_insert_returns_and_validates_the_winning_asset() {
+        let db = Database::open(":memory:").expect("open");
+        let bytes = b"<svg/>".to_vec();
+        let first = db
+            .import_asset(AssetInput {
+                id: "asset-1".to_owned(),
+                kind: "image".to_owned(),
+                name: "one.svg".to_owned(),
+                mime: "image/svg+xml".to_owned(),
+                bytes: bytes.clone(),
+                meta_json: None,
+            })
+            .expect("import");
+
+        let assets_dir = Arc::clone(&db.assets_dir);
+        let hash = first.hash.clone();
+        let import_bytes = bytes.clone();
+        let winner = db
+            .run(move |conn| {
+                asset::conflict_asset(
+                    conn,
+                    &assets_dir,
+                    &hash,
+                    &import_bytes,
+                    sea_orm::DbErr::Custom("the insert failed".to_owned()),
+                )
+            })
+            .expect("the conflict winner");
+        assert_eq!(winner.id, first.id);
+
+        direct_write(&db, "UPDATE assets SET size = 99 WHERE id = 'asset-1'");
+        let assets_dir = Arc::clone(&db.assets_dir);
+        let hash = first.hash.clone();
+        let import_bytes = bytes.clone();
+        let error = db
+            .run(move |conn| {
+                asset::conflict_asset(
+                    conn,
+                    &assets_dir,
+                    &hash,
+                    &import_bytes,
+                    sea_orm::DbErr::Custom("the insert failed".to_owned()),
+                )
+            })
+            .expect_err("a corrupt winner must be rejected");
+        assert!(error.contains("imported bytes are 6"), "{error}");
+
+        let assets_dir = Arc::clone(&db.assets_dir);
+        let import_bytes = bytes.clone();
+        let error = db
+            .run(move |conn| {
+                asset::conflict_asset(
+                    conn,
+                    &assets_dir,
+                    &"f".repeat(64),
+                    &import_bytes,
+                    sea_orm::DbErr::Custom("the insert failed".to_owned()),
+                )
+            })
+            .expect_err("without a winner the insert error is returned");
+        assert!(error.contains("the insert failed"), "{error}");
     }
 
     #[test]

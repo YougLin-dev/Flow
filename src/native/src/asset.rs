@@ -5,7 +5,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 
-use sea_orm::{ColumnTrait, DatabaseConnection, EntityTrait, QueryFilter};
+use sea_orm::{ColumnTrait, DatabaseConnection, DbErr, EntityTrait, QueryFilter};
 use sha2::{Digest, Sha256};
 
 use crate::clock::now_ms;
@@ -40,17 +40,15 @@ pub fn import_asset(
     input: AssetInput,
 ) -> Result<AssetSummary, String> {
     let hash = hash_bytes(&input.bytes);
+    if !is_sha256_hex(&hash) {
+        return Err("the asset hash is malformed".to_owned());
+    }
     if let Some(existing) = assets::Entity::find()
         .filter(assets::Column::Hash.eq(&hash))
         .one(conn)
         .map_err(|error| error.to_string())?
     {
-        // The row may outlive its file (manual cleanup, a truncated copy, a
-        // database copied without the assets directory); the content is at
-        // hand, so make the bytes exist again instead of returning a broken
-        // asset.
-        write_bytes(assets_dir, &existing.hash, &input.bytes)?;
-        return Ok(asset_summary(&existing));
+        return existing_asset(assets_dir, &existing, &input.bytes);
     }
 
     let meta_json = input.meta_json.unwrap_or_else(|| "{}".to_owned());
@@ -74,13 +72,71 @@ pub fn import_asset(
             .one(conn)
             .map_err(|error| error.to_string())?
             .ok_or_else(|| "the imported asset disappeared".to_owned())?,
-        Err(error) => assets::Entity::find()
-            .filter(assets::Column::Hash.eq(&hash))
-            .one(conn)
-            .map_err(|find_error| find_error.to_string())?
-            .ok_or_else(|| error.to_string())?,
+        Err(error) => return conflict_asset(conn, assets_dir, &hash, &input.bytes, error),
     };
     Ok(asset_summary(&stored))
+}
+
+/// A returned row's stored hash and size are checked before the file is used
+/// or recreated, so a corrupt row is rejected rather than returned as a
+/// broken asset. A matching file is never rewritten; a missing or corrupt
+/// one is replaced with the verified imported bytes.
+fn existing_asset(
+    assets_dir: &Path,
+    existing: &assets::Model,
+    bytes: &[u8],
+) -> Result<AssetSummary, String> {
+    asset_path(assets_dir, existing)?;
+    if hash_bytes(bytes) != existing.hash {
+        return Err(format!(
+            "asset {} does not match the imported bytes' hash",
+            existing.id
+        ));
+    }
+    if existing.size as usize != bytes.len() {
+        return Err(format!(
+            "asset {} is {} bytes but the imported bytes are {}",
+            existing.id,
+            existing.size,
+            bytes.len()
+        ));
+    }
+    // A valid file is left untouched; a missing or corrupt one is replaced
+    // with the bytes whose hash and size were just verified.
+    write_bytes(assets_dir, &existing.hash, bytes)?;
+    Ok(asset_summary(existing))
+}
+
+/// The failed-insert fallback: another writer may have won the hash between
+/// the lookup and the insert. The winner is returned only after the same
+/// validation as a hash hit.
+pub(crate) fn conflict_asset(
+    conn: &DatabaseConnection,
+    assets_dir: &Path,
+    hash: &str,
+    bytes: &[u8],
+    error: DbErr,
+) -> Result<AssetSummary, String> {
+    match assets::Entity::find()
+        .filter(assets::Column::Hash.eq(hash))
+        .one(conn)
+        .map_err(|find_error| find_error.to_string())?
+    {
+        Some(existing) => existing_asset(assets_dir, &existing, bytes),
+        None => Err(error.to_string()),
+    }
+}
+
+/// The only place a stored hash becomes a filesystem path. A malformed or
+/// negative-size row is rejected before any join or read.
+fn asset_path(assets_dir: &Path, asset: &assets::Model) -> Result<PathBuf, String> {
+    if !is_sha256_hex(&asset.hash) {
+        return Err(format!("asset {} has a malformed hash", asset.id));
+    }
+    if asset.size < 0 {
+        return Err(format!("asset {} has a negative size", asset.id));
+    }
+    Ok(assets_dir.join(&asset.hash))
 }
 
 pub fn asset_bytes(
@@ -92,8 +148,20 @@ pub fn asset_bytes(
         .one(conn)
         .map_err(|error| error.to_string())?
         .ok_or_else(|| format!("asset {id} was not found"))?;
-    fs::read(assets_dir.join(&asset.hash))
-        .map_err(|error| format!("asset {id} could not be read: {error}"))
+    let path = asset_path(assets_dir, &asset)?;
+    let bytes =
+        fs::read(&path).map_err(|error| format!("asset {id} could not be read: {error}"))?;
+    if bytes.len() as i64 != asset.size {
+        return Err(format!(
+            "asset {id} holds {} bytes but its row says {}",
+            bytes.len(),
+            asset.size
+        ));
+    }
+    if hash_bytes(&bytes) != asset.hash {
+        return Err(format!("asset {id} does not match its stored hash"));
+    }
+    Ok(bytes)
 }
 fn hash_bytes(bytes: &[u8]) -> String {
     let mut hasher = Sha256::new();
@@ -101,25 +169,58 @@ fn hash_bytes(bytes: &[u8]) -> String {
     format!("{:x}", hasher.finalize())
 }
 
+/// A content hash must be exactly what `hash_bytes` produces: 64 lowercase
+/// hexadecimal characters. A malformed stored hash is not used as a path.
+fn is_sha256_hex(hash: &str) -> bool {
+    hash.len() == 64
+        && hash
+            .bytes()
+            .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+}
+
 fn write_bytes(dir: &Path, hash: &str, bytes: &[u8]) -> Result<(), String> {
     fs::create_dir_all(dir).map_err(|error| error.to_string())?;
     let target = dir.join(hash);
-    if target.exists() {
+    if file_matches(&target, hash, bytes.len())? {
         return Ok(());
     }
     let temp = dir.join(format!(".{hash}.tmp-{}", std::process::id()));
     fs::write(&temp, bytes).map_err(|error| error.to_string())?;
-    match fs::rename(&temp, &target) {
-        Ok(()) => Ok(()),
-        Err(_) if target.exists() => {
-            let _ = fs::remove_file(&temp);
-            Ok(())
-        }
+    match fs::remove_file(&target) {
+        Ok(()) => {}
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
         Err(error) => {
             let _ = fs::remove_file(&temp);
-            Err(error.to_string())
+            return Err(error.to_string());
         }
     }
+    match fs::rename(&temp, &target) {
+        Ok(()) => Ok(()),
+        Err(error) => {
+            let _ = fs::remove_file(&temp);
+            // Another writer may have installed valid bytes after the remove.
+            if file_matches(&target, hash, bytes.len())? {
+                Ok(())
+            } else {
+                Err(error.to_string())
+            }
+        }
+    }
+}
+
+/// Whether a stored file is exactly the bytes its content-addressed name
+/// promises. A missing file is a mismatch, not an error.
+fn file_matches(path: &Path, hash: &str, size: usize) -> Result<bool, String> {
+    let metadata = match fs::metadata(path) {
+        Ok(metadata) => metadata,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(false),
+        Err(error) => return Err(error.to_string()),
+    };
+    if metadata.len() != size as u64 {
+        return Ok(false);
+    }
+    let bytes = fs::read(path).map_err(|error| error.to_string())?;
+    Ok(hash_bytes(&bytes) == hash)
 }
 
 fn asset_summary(asset: &assets::Model) -> AssetSummary {
@@ -132,5 +233,67 @@ fn asset_summary(asset: &assets::Model) -> AssetSummary {
         size: asset.size as f64,
         meta_json: asset.meta_json.clone(),
         created_at: asset.created_at as f64,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::path::Path;
+
+    use crate::entity::assets;
+
+    use super::{existing_asset, is_sha256_hex};
+
+    fn stored(hash: &str, size: i64) -> assets::Model {
+        assets::Model {
+            id: "asset".to_owned(),
+            hash: hash.to_owned(),
+            kind: "image".to_owned(),
+            name: "one.png".to_owned(),
+            mime: "image/png".to_owned(),
+            size,
+            meta_json: "{}".to_owned(),
+            created_at: 0,
+        }
+    }
+
+    #[test]
+    fn a_content_hash_is_64_lowercase_hex_characters() {
+        assert!(is_sha256_hex(&"a".repeat(64)));
+        assert!(is_sha256_hex(&"0123456789abcdef".repeat(4)));
+        assert!(!is_sha256_hex(&"A".repeat(64)));
+        assert!(!is_sha256_hex(&"a".repeat(63)));
+        assert!(!is_sha256_hex(&format!("{}g", "a".repeat(63))));
+        assert!(!is_sha256_hex(""));
+    }
+
+    #[test]
+    fn a_malformed_stored_hash_is_rejected_before_any_file_use() {
+        let error = existing_asset(Path::new("."), &stored("../escape", 3), b"abc")
+            .expect_err("a malformed hash must not be used as a path");
+        assert!(error.contains("malformed hash"), "{error}");
+    }
+
+    #[test]
+    fn a_stored_size_mismatch_is_rejected_before_the_file_is_recreated() {
+        let hash = super::hash_bytes(b"abc");
+        let error = existing_asset(Path::new("."), &stored(&hash, 4), b"abc")
+            .expect_err("a size mismatch must be rejected");
+        assert!(error.contains("imported bytes are 3"), "{error}");
+    }
+
+    #[test]
+    fn a_stored_hash_that_does_not_match_the_bytes_is_rejected() {
+        let error = existing_asset(Path::new("."), &stored(&"a".repeat(64), 3), b"abc")
+            .expect_err("a content hash mismatch must be rejected");
+        assert!(error.contains("does not match"), "{error}");
+    }
+
+    #[test]
+    fn a_negative_stored_size_is_rejected_after_the_hash_check() {
+        let hash = super::hash_bytes(b"abc");
+        let error = existing_asset(Path::new("."), &stored(&hash, -1), b"abc")
+            .expect_err("a negative stored size must be rejected");
+        assert!(error.contains("negative size"), "{error}");
     }
 }

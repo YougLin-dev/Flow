@@ -154,9 +154,13 @@ or `interrupted` (`input-not-ready` is reserved for a later dependency gate).
 - Image nodes show up to four thumbnails in the card body and their latest
   images in the composer.
 - Assets are stored in Rust as `sha256`-named files next to the database and
-  read over the FFI. TSX turns the bytes into one cached `blob:` URL per
-  asset (NSH resolves the blob's native image bytes once) and owns its
-  revocation until the page closes.
+  read over the FFI. The first import of a hash wins: a later import with the
+  same bytes returns that row and metadata and does not rewrite a matching
+  file. A stored size or hash mismatch is rejected, and a missing or corrupt
+  file is repaired only from bytes whose hash and size match. Reads verify
+  both the file's size and its stored hash. TSX turns the bytes into one
+  cached `blob:` URL per asset (NSH resolves the blob's native image bytes
+  once) and owns its revocation until the page closes.
 - Uploads use the NSH image picker (`"picker": true` in `nsh.json`); the
   composer appends them as local inputs.
 - An Upload node writes its file as its **output**, not as an input: the
