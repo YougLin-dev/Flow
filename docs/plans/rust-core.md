@@ -702,8 +702,21 @@ the 25 ms target, and the three readers are within run noise of each other,
 so the v2 fixture does not reproduce the earlier 11-20 ms estimate. The
 1,000-node move stays above the 50 ms target at 79.65 ms p95, and the
 overview read is 2.94 ms against a 1 ms target; both are recorded rather
-than claimed. The crossing-edge cap and `gc`/`compactBounds` timings are
-not isolated by this run; GC is not implemented yet.
+than claimed. The crossing-edge cap is not isolated by this run.
+
+A later run of the same benchmark on the same fixture, after `gc()` landed,
+measured the two maintenance commands; the read lines stayed within run
+noise:
+
+```text
+maintenance gc: elapsed=54.18ms batches=100 items=0 assets=0 files=0
+maintenance compactBounds: elapsed=9.51ms
+```
+
+The collection deleted the previous recovery iteration's 100 terminal
+batches; a package with nothing collectable pays only the index-bounded
+scans. GC runs once at open, before seeding, and refuses while the undo
+history holds an entry.
 
 ## Phases
 
