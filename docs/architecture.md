@@ -126,29 +126,36 @@ canvas stays in TSX and owns only the scene model and its views.
   rectangle, never transformed bounds.
 - Viewport reads are throttled to 80 ms and capped at low zoom (300/800/2000
   cards); selected cards stay in the scene when they leave the viewport.
-  A connector is read when either of its cards is loaded; an uncapped read
+  A connector is read when either of its cards is loaded; a complete read
   also reads the ones whose cubic box intersects the viewport, so a curve
   crossing the visible area stays drawn when both its cards are beyond the
-  read. A capped low-zoom read (300/800/2000 cards) skips that second half,
-  because its RTree matches can exceed the card budget. Every read edge
-  carries both endpoint ports; the
-  far cards are not instantiated as views. A selected card pinned in the
-  scene keeps its connectors even when a read omits them, so a mid-drag
-  read, which sees only committed geometry, cannot blank the line. The
-  connector index
-  (`edge_index.rs`) is maintained in the same transaction as every edge
-  write and every node move, resize or undo, and mirrors the UI's
-  `connectionBounds` in `flow/canvas/geometry/connection.ts`. Nodes inside `rect` sort
-  before margin-only nodes so prefetching cannot consume the budget, and a
-  deterministic hash of the internal sequence spreads a capped low-zoom
-  sample across the rectangle instead of one insertion strip. `bounds()`
-  serves Fit without reading every node into TSX.
+  read. The read fetches one row past its card budget: a truncated low-zoom
+  read (300/800/2000 cards) skips that second half, because its RTree
+  matches can exceed the card budget, while a read that exactly fills its
+  budget did not drop a card and keeps crossing connectors. The crossing
+  half is itself capped at 4,000 connectors. Every read edge carries both
+  endpoint ports; the far cards are not instantiated as views. A selected
+  card pinned in the scene keeps its connectors even when a read omits them,
+  so a mid-drag read, which sees only committed geometry, cannot blank the
+  line. The connector index (`edge_index.rs`) is maintained in the same
+  transaction as every edge write and every node move, resize or undo, and
+  mirrors the UI's `connectionBounds` in
+  `flow/canvas/geometry/connection.ts`. The RTree cell is only a prefilter:
+  it is padded and 32-bit, so the exact f64 rectangle decides membership and
+  the in-view ordering and rounding cannot add or promote a card outside the
+  read. Nodes inside `rect` sort before margin-only nodes so prefetching
+  cannot consume the budget, and a deterministic hash of the internal
+  sequence spreads a truncated low-zoom sample across the rectangle instead
+  of one insertion strip. `bounds()` serves Fit without reading every node
+  into TSX.
 - The search palette (`components/search/SearchPalette.tsx`) is mounted only while
   open. It debounces input, calls `Document.search` with the selected kind
   filter, and renders FTS snippets; opening a hit calls `getNode(id)`, fits
-  the camera to that card, reads the viewport and selects it. Its arrow-key
-  bindings live with the mounted palette, so canvas shortcuts return when it
-  closes.
+  the camera to that card, reads the viewport and selects it. Terms of three
+  or more characters use the FTS index; shorter terms are `LIKE` post-filters
+  on a mixed query, and an all-short query falls back to a capped scan of at
+  most eight terms. Its arrow-key bindings live with the mounted palette, so
+  canvas shortcuts return when it closes.
 - The decision and the phased migration are recorded in
   [ADR 0002](adr/0002-rust-document-core.md),
   [ADR 0003](adr/0003-orm-seaorm.md) and
