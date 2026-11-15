@@ -13,6 +13,8 @@ const FTS_REBUILD: &str = "INSERT INTO nodes_fts(nodes_fts) VALUES('rebuild')";
 
 const NODES_RTREE_CHECK: &str = "SELECT rtreecheck('nodes_rtree')";
 const EDGES_RTREE_CHECK: &str = "SELECT rtreecheck('edges_rtree')";
+// RTree cells are 32-bit floats; the tolerance follows their relative
+// precision instead of demanding an exact f64 match.
 const NODES_RTREE_PARITY: &str = "SELECT EXISTS ( \
        SELECT 1 FROM nodes AS n \
         LEFT JOIN nodes_rtree AS r ON r.id = n.seq \
@@ -20,7 +22,18 @@ const NODES_RTREE_PARITY: &str = "SELECT EXISTS ( \
        UNION ALL \
        SELECT 1 FROM nodes_rtree AS r \
         LEFT JOIN nodes AS n ON n.seq = r.id \
-        WHERE n.seq IS NULL)";
+        WHERE n.seq IS NULL \
+       UNION ALL \
+       SELECT 1 FROM nodes AS n \
+        JOIN nodes_rtree AS r ON r.id = n.seq \
+        WHERE abs(r.min_x - (n.x - 2.0)) \
+                > 0.0000002 * max(1.0, abs(n.x - 2.0)) + 0.0001 \
+           OR abs(r.max_x - (n.x + n.width + 2.0)) \
+                > 0.0000002 * max(1.0, abs(n.x + n.width + 2.0)) + 0.0001 \
+           OR abs(r.min_y - (n.y - 2.0)) \
+                > 0.0000002 * max(1.0, abs(n.y - 2.0)) + 0.0001 \
+           OR abs(r.max_y - (n.y + n.height + 2.0)) \
+                > 0.0000002 * max(1.0, abs(n.y + n.height + 2.0)) + 0.0001)";
 const EDGES_RTREE_PARITY: &str = "SELECT EXISTS ( \
        SELECT 1 FROM edges AS e \
         LEFT JOIN edges_rtree AS r ON r.id = e.seq \
@@ -28,7 +41,18 @@ const EDGES_RTREE_PARITY: &str = "SELECT EXISTS ( \
        UNION ALL \
        SELECT 1 FROM edges_rtree AS r \
         LEFT JOIN edges AS e ON e.seq = r.id \
-        WHERE e.seq IS NULL)";
+        WHERE e.seq IS NULL \
+       UNION ALL \
+       SELECT 1 FROM edge_boxes AS b \
+        JOIN edges_rtree AS r ON r.id = b.id \
+        WHERE abs(r.min_x - b.min_x) \
+                > 0.0000002 * max(1.0, abs(b.min_x)) + 0.0001 \
+           OR abs(r.max_x - b.max_x) \
+                > 0.0000002 * max(1.0, abs(b.max_x)) + 0.0001 \
+           OR abs(r.min_y - b.min_y) \
+                > 0.0000002 * max(1.0, abs(b.min_y)) + 0.0001 \
+           OR abs(r.max_y - b.max_y) \
+                > 0.0000002 * max(1.0, abs(b.max_y)) + 0.0001)";
 
 /// Checks the FTS index against `nodes` and rebuilds it when the parity check
 /// fails. The hidden `rank` argument makes FTS5 compare against the external
@@ -42,9 +66,10 @@ pub(crate) fn repair_fts(conn: &impl ConnectionTrait) -> Result<(), DbErr> {
     Ok(())
 }
 
-/// Checks both RTrees and rebuilds the ones whose structure or row set drifted
-/// from `nodes`/`edges`. `rtreecheck` validates the virtual table's own cells;
-/// the parity query catches a missing or extra box.
+/// Checks both RTrees and rebuilds the ones whose structure, row set or cell
+/// values drifted from `nodes`/`edges`. `rtreecheck` validates the virtual
+/// table's own layout; the parity query catches a missing or extra box and a
+/// stale cell.
 pub(crate) fn repair_rtrees(conn: &impl ConnectionTrait) -> Result<(), DbErr> {
     if !rtree_healthy(conn, NODES_RTREE_CHECK, NODES_RTREE_PARITY)? {
         conn.execute_unprepared("DELETE FROM nodes_rtree")?;

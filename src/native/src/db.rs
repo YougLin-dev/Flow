@@ -32,8 +32,14 @@ use crate::viewport;
 /// A unit of work for the database thread.
 enum Job {
     Run(Box<dyn FnOnce(&DatabaseConnection) + Send + 'static>),
-    /// Marks the package cleanly closed, acknowledges, and stops the worker.
-    Close(Sender<Result<(), String>>),
+    /// Saves the camera (when given), checkpoints, records the shutdown
+    /// state, acknowledges, and stops the worker.
+    Close {
+        ack: Sender<Result<(), String>>,
+        camera: Option<(f64, f64, f64)>,
+        /// False after a failed verify: the package stays due for recovery.
+        mark_clean: bool,
+    },
 }
 
 /// The asset directory shared by a database's clones. An in-memory database
@@ -79,6 +85,13 @@ pub struct Database {
     /// Fit and the minimap's overview ask at the same revision at startup.
     bounds_cache: Arc<Mutex<Option<(i64, Viewport)>>>,
     closed: Arc<AtomicBool>,
+    /// Set as soon as a close is requested. Jobs already queued behind it
+    /// answer "closed" without touching SQLite, so a quit does not wait for
+    /// stale reads.
+    closing: Arc<AtomicBool>,
+    /// Set when verify reports a defect: the next close leaves the package
+    /// due for recovery instead of marking it clean.
+    verify_failed: Arc<AtomicBool>,
     /// Whether the package was clean before this open marked it dirty. A new
     /// package counts as clean: there is nothing from a previous session.
     opened_clean: bool,
@@ -109,6 +122,8 @@ impl Database {
             assets_dir,
             bounds_cache: Arc::new(Mutex::new(None)),
             closed: Arc::new(AtomicBool::new(false)),
+            closing: Arc::new(AtomicBool::new(false)),
+            verify_failed: Arc::new(AtomicBool::new(false)),
             opened_clean,
         })
     }
@@ -166,6 +181,7 @@ impl Database {
             })
             .map_err(|error| format!("the document repair failed: {error}"))
         });
+        self.verify_failed.store(result.is_err(), Ordering::SeqCst);
         if result.is_ok() {
             self.clear_bounds_cache();
         }
@@ -192,17 +208,39 @@ impl Database {
     }
 
     /// Marks the package cleanly closed and stops the worker. Idempotent: a
-    /// second call (or a call after the worker stopped) does nothing.
+    /// second call (or a call after the worker stopped) does nothing. A
+    /// failed `verify` keeps the package due for recovery: the checkpoint
+    /// still runs, but `clean_shutdown` stays 0.
     pub fn close(&self) -> Result<(), String> {
+        self.close_with_camera(None)
+    }
+
+    /// Saves the camera, then closes like `close`. Folding both into one
+    /// worker job lets a quit reach the checkpoint without a second round
+    /// trip and without a chained await that a short quit budget can cut.
+    pub fn close_with_view(&self, x: f64, y: f64, zoom: f64) -> Result<(), String> {
+        if !schema::v1::is_valid_camera(x, y, zoom) {
+            return Err("the camera is outside the supported range".to_owned());
+        }
+        self.close_with_camera(Some((x, y, zoom)))
+    }
+
+    fn close_with_camera(&self, camera: Option<(f64, f64, f64)>) -> Result<(), String> {
         if self.closed.swap(true, Ordering::SeqCst) {
             return Ok(());
         }
+        self.closing.store(true, Ordering::SeqCst);
+        let mark_clean = !self.verify_failed.load(Ordering::SeqCst);
         let (result_tx, result_rx) = mpsc::channel();
         let sent = self
             .tx
             .lock()
             .map_err(|_| "the database worker lock is poisoned".to_owned())?
-            .send(Job::Close(result_tx));
+            .send(Job::Close {
+                ack: result_tx,
+                camera,
+                mark_clean,
+            });
         if sent.is_err() {
             return Ok(());
         }
@@ -609,8 +647,15 @@ impl Database {
         if self.closed.load(Ordering::SeqCst) {
             return Err("the database is closed".to_owned());
         }
+        let closing = Arc::clone(&self.closing);
         let (result_tx, result_rx) = mpsc::channel();
         let job = Job::Run(Box::new(move |conn| {
+            // A close requested while this job sat in the queue must reach
+            // the checkpoint first: answer without touching SQLite.
+            if closing.load(Ordering::SeqCst) {
+                let _ = result_tx.send(Err("the database is closed".to_owned()));
+                return;
+            }
             // A panic that unwinds through a SeaORM transaction can still
             // abort if its rollback also fails; this covers the job body.
             let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| work(conn)));
@@ -651,8 +696,23 @@ fn worker(path: &str, ready: Sender<Result<bool, String>>, jobs: Receiver<Job>) 
             Job::Run(run) => {
                 let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| run(&conn)));
             }
-            Job::Close(ack) => {
+            Job::Close {
+                ack,
+                camera,
+                mark_clean,
+            } => {
                 let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                    if let Some((x, y, zoom)) = camera {
+                        document_row::Entity::update(document_row::ActiveModel {
+                            id: Unchanged(document::ROW_ID),
+                            camera_x: Set(x),
+                            camera_y: Set(y),
+                            camera_zoom: Set(zoom),
+                            ..Default::default()
+                        })
+                        .exec(&conn)
+                        .map_err(|error| error.to_string())?;
+                    }
                     // Fold committed WAL frames back into the package file
                     // first, and inspect the result row: a concurrent reader
                     // makes TRUNCATE report busy/checkpointed < log without
@@ -680,9 +740,14 @@ fn worker(path: &str, ready: Sender<Result<bool, String>>, jobs: Receiver<Job>) 
                              (busy={busy}, checkpointed={checkpointed} of {log})"
                         ));
                     }
-                    conn.execute_unprepared("UPDATE document SET clean_shutdown = 1 WHERE id = 1")
+                    if mark_clean {
+                        conn.execute_unprepared(
+                            "UPDATE document SET clean_shutdown = 1 WHERE id = 1",
+                        )
                         .map(|_| ())
-                        .map_err(|error| error.to_string())
+                        .map_err(|error| error.to_string())?;
+                    }
+                    Ok(())
                 }))
                 .unwrap_or_else(|_| Err("the database job panicked".to_owned()));
                 // Release the file before acknowledging: a rename, delete or
@@ -7254,6 +7319,86 @@ mod tests {
     }
 
     #[test]
+    fn close_with_view_saves_the_camera_and_a_clean_state() {
+        let (path, database) = temp_database("close-view");
+        {
+            let db = Database::open(&database).expect("open");
+            let error = db
+                .close_with_view(f64::NAN, 0.0, 1.0)
+                .expect_err("an invalid camera must not close the package");
+            assert!(error.contains("camera"), "{error}");
+            db.close_with_view(120.0, -40.0, 2.5)
+                .expect("close with the view");
+        }
+        {
+            let db = Database::open(&database).expect("reopen");
+            let info = db.project_info().expect("info");
+            assert!(info.opened_clean, "the combined close is clean");
+            assert_eq!(
+                (info.camera_x, info.camera_y, info.camera_zoom),
+                (120.0, -40.0, 2.5),
+                "the camera was saved before the checkpoint"
+            );
+            db.close().expect("close");
+        }
+        remove_database_files(&path);
+    }
+
+    #[test]
+    fn a_failed_verify_keeps_the_package_due_for_recovery() {
+        let dir = std::env::temp_dir().join(format!(
+            "flow-verify-dirty-{}-{}",
+            std::process::id(),
+            now_ms()
+        ));
+        std::fs::create_dir_all(&dir).expect("create package directory");
+        let path = dir.join("flow.db");
+        let database = path.to_string_lossy().into_owned();
+        {
+            let db = Database::open(&database).expect("open");
+            test_asset(&db, "asset-orphan");
+            db.run(|conn| {
+                conn.execute_unprepared("PRAGMA foreign_keys = OFF")
+                    .map_err(|error| error.to_string())?;
+                let inserted = conn.execute_unprepared(
+                    "INSERT INTO node_inputs \
+                     (id, node_id, position, port_id, kind, origin, asset_id, \
+                      text, meta_json, created_at) \
+                     VALUES ('orphan', 'missing', 0, 'references', 'image', 'local', \
+                             'asset-orphan', '', '{}', 0)",
+                );
+                conn.execute_unprepared("PRAGMA foreign_keys = ON")
+                    .map_err(|error| error.to_string())?;
+                inserted.map(|_| ()).map_err(|error| error.to_string())
+            })
+            .expect("insert an orphan input");
+            db.verify().expect_err("verify reports the orphan");
+            db.close().expect("close after a failed verify");
+        }
+        {
+            let db = Database::open(&database).expect("reopen");
+            assert!(
+                !db.project_info().expect("info").opened_clean,
+                "a failed verify leaves the package due for recovery"
+            );
+            db.close().expect("close");
+        }
+        remove_path_retrying(&dir);
+    }
+
+    #[test]
+    fn a_close_request_makes_a_queued_job_skip_the_database() {
+        let db = Database::open(":memory:").expect("open");
+        db.closing.store(true, Ordering::SeqCst);
+        let error = db
+            .run(|_| -> Result<(), String> {
+                panic!("a job after the close request must not touch SQLite")
+            })
+            .expect_err("the queued job answers closed");
+        assert!(error.contains("closed"), "{error}");
+    }
+
+    #[test]
     fn save_view_persists_without_bumping_the_revision() {
         let db = Database::open(":memory:").expect("open");
         let before = current_rev(&db);
@@ -7427,6 +7572,48 @@ mod tests {
             db.viewport(rect, 0.0).expect("viewport after verify").len(),
             1
         );
+    }
+
+    #[test]
+    fn verify_rebuilds_a_stale_node_box() {
+        let db = Database::open(":memory:").expect("open");
+        db.insert_nodes(vec![node("a", "A", "", &[], 10.0, 20.0)])
+            .expect("insert");
+        let seq = node_seq(&db, "a");
+        let min_x = |db: &Database| {
+            db.run(move |conn| {
+                conn.query_one_raw(sea_orm::Statement::from_sql_and_values(
+                    sea_orm::DbBackend::Sqlite,
+                    "SELECT min_x FROM nodes_rtree WHERE id = ?",
+                    [seq.into()],
+                ))
+                .map_err(|error| error.to_string())?
+                .ok_or_else(|| "the box row is missing".to_owned())?
+                .try_get_by_index::<f64>(0)
+                .map_err(|error| error.to_string())
+            })
+            .expect("read the box")
+        };
+        assert!((min_x(&db) - 8.0).abs() < 0.01);
+        db.run(move |conn| {
+            conn.execute_raw(sea_orm::Statement::from_sql_and_values(
+                sea_orm::DbBackend::Sqlite,
+                "UPDATE nodes_rtree \
+                    SET min_x = min_x + 1000, max_x = max_x + 1000 \
+                  WHERE id = ?",
+                [seq.into()],
+            ))
+            .map(|_| ())
+            .map_err(|error| error.to_string())
+        })
+        .expect("move the box away from the node");
+        assert!(
+            (min_x(&db) - 8.0).abs() > 100.0,
+            "the box no longer matches the node"
+        );
+
+        db.verify().expect("verify rebuilds a stale box");
+        assert!((min_x(&db) - 8.0).abs() < 0.01);
     }
 
     #[test]

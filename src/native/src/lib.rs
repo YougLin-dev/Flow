@@ -263,7 +263,9 @@ impl Document {
         off_thread(move || db.save_view(x, y, zoom)).await
     }
 
-    /// Runs SQLite's quick integrity check and foreign-key check.
+    /// The package recovery check: SQLite's quick integrity and foreign-key
+    /// checks, then an FTS/RTree parity repair, a dirty-connector flush and
+    /// exact bounds. A maintenance write, not a read-only check.
     pub async fn verify(this: Instance<Self>) -> Result<(), String> {
         let db = this.with(|document| document.db.clone());
         off_thread(move || db.verify()).await
@@ -276,10 +278,23 @@ impl Document {
     }
 
     /// Marks the package cleanly closed and stops the worker. Later calls on
-    /// this handle fail; repeated closes are harmless.
+    /// this handle fail; repeated closes are harmless. A failed verify keeps
+    /// the package due for recovery instead of marking it clean.
     pub async fn close(this: Instance<Self>) -> Result<(), String> {
         let db = this.with(|document| document.db.clone());
         off_thread(move || db.close()).await
+    }
+
+    /// Saves the camera, then closes: one worker job for the quit path, so
+    /// the checkpoint cannot be stranded behind a separate camera write.
+    pub async fn close_with_view(
+        this: Instance<Self>,
+        x: f64,
+        y: f64,
+        zoom: f64,
+    ) -> Result<(), String> {
+        let db = this.with(|document| document.db.clone());
+        off_thread(move || db.close_with_view(x, y, zoom)).await
     }
 
     /// Sets a node's run status without touching its results.
