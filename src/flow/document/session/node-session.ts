@@ -535,7 +535,11 @@ export class NodeSession {
       // that resolves late must still notify the composer's readers.
       await this.ensureAssets(detail);
     } catch (error) {
-      console.error("Flow could not read the node detail", error);
+      // A read in flight at quit rejects because the document closed; the
+      // composer is gone with it, so only a live session reports the failure.
+      if (!this.host.isDisposed()) {
+        console.error("Flow could not read the node detail", error);
+      }
     }
   }
 

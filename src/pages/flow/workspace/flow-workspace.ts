@@ -98,6 +98,7 @@ export function createFlowWorkspace(deps: FlowWorkspaceDeps): FlowWorkspace {
   let verifyTimer: ReturnType<typeof setTimeout> | null = null;
   let sized = false;
   let cameraReady = false;
+  let shuttingDown = false;
 
   const scene = new FlowScene();
   const camera = new CanvasCamera();
@@ -296,7 +297,9 @@ export function createFlowWorkspace(deps: FlowWorkspaceDeps): FlowWorkspace {
     if (!needsVerify(report)) return;
     verifyTimer = setTimeout(() => {
       verifyTimer = null;
-      if (disposed) return;
+      // A quit may start before the timer fires; the check would otherwise
+      // hold the single worker ahead of the close job.
+      if (disposed || shuttingDown) return;
       void doc
         .verify()
         .then(() => {
@@ -307,7 +310,10 @@ export function createFlowWorkspace(deps: FlowWorkspaceDeps): FlowWorkspace {
           minimap.schedule();
         })
         .catch((error) => {
-          console.error("Flow could not verify its document", error);
+          // Quit aborts or skips the check; that is not a failure to report.
+          if (!disposed && !shuttingDown) {
+            console.error("Flow could not verify its document", error);
+          }
         });
     }, VERIFY_DELAY_MS);
   };
@@ -421,8 +427,6 @@ export function createFlowWorkspace(deps: FlowWorkspaceDeps): FlowWorkspace {
     }
     viewport.onResize(size.width, size.height);
   };
-
-  let shuttingDown = false;
 
   const stopLoaders = (): void => {
     canvasMenu.close();
