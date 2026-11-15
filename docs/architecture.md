@@ -86,15 +86,21 @@ The canvas stays in TSX and owns only the scene model and its views.
   connection across threads. The in-memory undo/redo history lives in the same
   worker and is updated inside each command's job, so history order always
   matches write order.
-- `FlowPage` opens the document at `host.params.databasePath`, then
-  `FLOW_DB_PATH`, then `process.dataDir/flow.db`, falling back to `:memory:`
-  in headless tests. `bun run dev` sets `FLOW_DB_PATH` to `.nsh/dev/flow.db`,
-  so development data survives restarts; `src/nsh.json` grants exactly that
-  one environment variable. A new, unseeded project is seeded from the demo
-  flow in one transaction; the `demo_seeded` flag keeps an emptied project
-  from being reseeded. The v1 guard deliberately refuses a pre-v1 development
-  database: before the first launch of this build, delete `.nsh/dev/flow.db`
-  (and its `-wal`/`-shm` files) and `.nsh/dev/assets`.
+- The app starts on the project list when it has a managed root, chosen in
+  this order: `host.params.projectsRoot`, `FLOW_PROJECTS_ROOT`, then
+  `<dataDir>/projects`. An explicit document path (`host.params.databasePath`
+  or `FLOW_DB_PATH`) keeps the legacy single-document canvas for that launch;
+  the legacy path falls back to `process.dataDir/flow.db`, then `:memory:` in
+  headless tests. `bun run dev` points `FLOW_PROJECTS_ROOT` at
+  `.nsh/dev/projects`, so development data survives restarts and the dev host
+  opens on the project list; an explicit `FLOW_DB_PATH` still selects the
+  legacy document. `src/nsh.json` grants exactly those path variables and
+  `FLOW_FPS`. A new, unseeded legacy document is seeded from the demo flow in
+  one transaction; a managed project makes that decision at creation (a blank
+  project records `demo_seeded=1`), and the `demo_seeded` flag keeps an
+  emptied project from being reseeded. The v1 guard deliberately refuses a
+  pre-v1 development database: before the first launch of this build, delete
+  `.nsh/dev/flow.db` (and its `-wal`/`-shm` files) and `.nsh/dev/assets`.
 - The package records its lifecycle. On quit the workspace stops in-flight
   runs (their batches settle cancelled), then saves the camera and
   checkpoints in one `closeWithView` job: the WAL is checkpointed,
@@ -176,7 +182,9 @@ The canvas stays in TSX and owns only the scene model and its views.
   doubt rebuilds it from the directories, unreadable packages and packages
   whose document identity disagrees with their directory stay visible as
   fallback rows keyed by the directory, and a valid catalog is reconciled
-  without reopening known packages. The lock lives in `<root>/.locks/<id>.lock`, not inside
+  without reopening readable known packages (a fallback row or one whose
+  identity disagrees with its directory is re-read on every list, and an
+  explicit catalog refresh reopens them all). The lock lives in `<root>/.locks/<id>.lock`, not inside
   the package, because Windows refuses to rename a directory while any
   handle inside it is open; its owner is the OS lock, so process death
   frees it and no stale-lock protocol exists. `ProjectStore` hands out one
@@ -197,8 +205,14 @@ The canvas stays in TSX and owns only the scene model and its views.
   identity. Rename is closed-package only in this slice, changes only
   title/`updated_at`, and never moves the directory;
   imports accept an unpacked package directory, not an archive; pre-v1
-  packages are refused rather than migrated. The project-list UI and the
-  app's default startup still use the legacy `flow.db` path.
+  packages are refused rather than migrated. The app starts on the projects
+  screen (`pages/projects`) when it has a managed root: the list shows
+  recency, an open-in-another-window badge and unreadable fallback rows, and
+  creates and opens projects through the same store. Opening a project hands
+  its lease to the flow workspace, which closes the document before releasing
+  the package; the canvas's leading `Projects` control returns to the list,
+  and the window title bar names the open project. Rename, duplicate, delete
+  and import from the list, and a catalog watch policy, remain.
 - The decision and the phased migration are recorded in
   [ADR 0002](adr/0002-rust-document-core.md),
   [ADR 0003](adr/0003-orm-seaorm.md) and
@@ -555,8 +569,9 @@ own bundled assets (`asset:` is always allowed) but may reach no remote host.
 window: the pin changes the window's `level`, and NSH gates every main-window
 desktop command behind that capability (the hidden title bar itself is
 declared in `window.titleBar`, which the platform applies at launch). Its
-`capabilities.process.env` allow-list contains only
-`FLOW_DB_PATH`, the development and smoke-test database override;
+`capabilities.process.env` allow-list contains `FLOW_DB_PATH` and
+`FLOW_PROJECTS_ROOT`, the development, test and smoke path overrides, and
+`FLOW_FPS`, the frame-rate probe switch;
 `capabilities.windows.levels` grants the `floating` level the pin sets on the
 main window, and `capabilities.picker` is granted for local image uploads.
 NSH denies every capability not listed, so a new integration that fetches or

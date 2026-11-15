@@ -54,6 +54,8 @@ const tree = {
   "src/components/canvas/type-only.ts": 'import type { NodeSummary } from "@flow/native";',
   "src/components/Widget.tsx": "",
   "src/pages/FlowPage.tsx": "",
+  "src/pages/projects/index.ts": "",
+  "src/pages/projects/ProjectsPage.tsx": "",
 };
 
 test("code map mirrors the manifest areas and facades", () => {

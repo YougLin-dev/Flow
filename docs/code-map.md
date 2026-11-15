@@ -45,8 +45,9 @@ same-feature deep import is the sibling area in the other layer.
 | `components/minimap`    | component  | `src/components/minimap/index.ts`    | `components/primitives`, `flow/shared`, `flow/canvas`, `flow/minimap` (same feature) | `@YougLin-dev` |
 | `components/search`     | component  | `src/components/search/index.ts`     | `components/primitives`, `flow/shared`                                               | `@YougLin-dev` |
 | `pages/flow`            | page       | `src/pages/flow/index.ts`            | any area (composition root, deep imports allowed)                                    | `@YougLin-dev` |
+| `pages/projects`        | page       | `src/pages/projects/index.ts`        | any area (composition root, deep imports allowed)                                    | `@YougLin-dev` |
 | `store`                 | store      | `src/store.ts`                       | `flow/shared` only if a pure helper is needed                                        | `@YougLin-dev` |
-| `shell`                 | shell      | `src/App.tsx`                        | `pages/flow`, `components/app`, `store`                                              | `@YougLin-dev` |
+| `shell`                 | shell      | `src/App.tsx`                        | `pages/flow`, `pages/projects`, `components/app`, `flow/projects`, `store`           | `@YougLin-dev` |
 
 Cross-feature component imports (for example `components/canvas` importing
 `components/composer`) are not allowed; the page composes them. A pair not
@@ -134,7 +135,9 @@ fails above 20. The old → new map is in
 [the plan's Appendix A](plans/code-organization.md#appendix-a--tsx-placement-map).
 The project layer added `flow/projects` (managed root, store adapter, lease
 session and pure list helpers) over the Rust `ProjectStore`; it imports
-`flow/document` through its facade and remains unwired from the page until
-the project UI lands. Do not add a new file at the `components/`, `flow/` or
-`pages/` root:
+`flow/document` through its facade. The next slice added `pages/projects`
+(the projects screen and its app-lifetime home state) and mounted the session
+in `pages/flow`: the shell chooses the project list or the canvas, and the
+workspace leases and opens the chosen package. Do not add a new file at the
+`components/`, `flow/` or `pages/` root:
 `scripts/structure.mjs` fails it.

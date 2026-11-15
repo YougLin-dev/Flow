@@ -8,6 +8,19 @@ All notable changes to Flow are recorded here. The format follows
 
 ### Added
 
+- The app opens on a projects screen when it has a managed projects root:
+  projects are listed newest-opened first with their recent activity, an
+  "Open in another window" badge, and an "Unavailable project" row for a
+  package that cannot be read. New project creates one through a named
+  dialog, exactly one project is open per window, and the canvas's leading
+  Projects control closes the document before releasing the package; closing
+  a project or quitting saves the open composer's draft and the inline
+  editor's text before the close, and dismissing the New project dialog while
+  a create is still writing leaves that row in the list instead of trapping
+  the dialog. The window title bar names the open project. `bun run dev` now keeps
+  development data in `.nsh/dev/projects`; `FLOW_DB_PATH` still opens the
+  legacy single document, and `FLOW_PROJECTS_ROOT` points the list at
+  another root.
 - An Upload node turns a local image into a source: it has no inputs, and an
   Image output port appears once its card holds an upload. The card shows an
   upload empty state with a bottom-right Upload pill and its image-upload

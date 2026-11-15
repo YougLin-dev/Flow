@@ -151,6 +151,14 @@ export const AREAS = {
     deepSameFeature: [],
     compositionRoot: true,
   },
+  "pages/projects": {
+    layer: "page",
+    feature: "projects",
+    facade: "src/pages/projects/index.ts",
+    mayImport: [],
+    deepSameFeature: [],
+    compositionRoot: true,
+  },
   store: {
     layer: "store",
     feature: "store",
@@ -162,7 +170,7 @@ export const AREAS = {
     layer: "shell",
     feature: "shell",
     facade: "src/App.tsx",
-    mayImport: ["pages/flow", "components/app", "store"],
+    mayImport: ["pages/flow", "pages/projects", "components/app", "flow/projects", "store"],
     deepSameFeature: [],
   },
 };

@@ -9,14 +9,14 @@ export interface SearchButtonProps {
   onPress: () => void;
 }
 
-/** The floating search entry point at the canvas' top-left corner. */
+/** The search entry point in the canvas' top-left control row. */
 export function SearchButton(props: SearchButtonProps) {
   return (
     <Button
       testID="search-button"
       accessibilityLabel="Search"
       onPress={props.onPress}
-      class={`absolute top-4 left-4 flex-row items-center gap-2 ${PANEL_PILL} active:bg-muted focus:bg-accent`}
+      class={`flex-row items-center gap-2 ${PANEL_PILL} active:bg-muted focus:bg-accent`}
     >
       <Icon icon={Search} size={15} tint={() => token("card-foreground")} />
       <Text class="text-sm text-card-foreground">Search</Text>

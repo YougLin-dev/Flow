@@ -25,11 +25,16 @@ bun install
 bun run dev        # opens the app on this machine's development host
 ```
 
-`bun run dev` sets `FLOW_DB_PATH` to `.nsh/dev/flow.db`, so development data
-survives restarts; delete that file to start from the demo document again.
-Other runs open `host.params.databasePath`, then `FLOW_DB_PATH`, then
-`process.dataDir/flow.db`, falling back to an in-memory database. The
-`process.env` capability in `src/nsh.json` grants only `FLOW_DB_PATH`.
+`bun run dev` points `FLOW_PROJECTS_ROOT` at `.nsh/dev/projects`, so
+development data survives restarts and the app opens on its project list;
+create a project to start a canvas. Each project is one self-contained
+package (a SQLite database plus its `assets/` directory). Set `FLOW_DB_PATH`
+to open the legacy single document at that path for a run instead. The app
+otherwise prefers `host.params.databasePath`/`FLOW_DB_PATH`, then
+`host.params.projectsRoot`/`FLOW_PROJECTS_ROOT`, then
+`process.dataDir/projects`, falling back to an in-memory legacy document.
+The `process.env` capability in `src/nsh.json` grants exactly
+`FLOW_DB_PATH`, `FLOW_PROJECTS_ROOT` and `FLOW_FPS`.
 
 The first `nsh` command writes `src/.nsh/types` (NSH's TypeScript
 declarations) and `src/.nsh/tsconfig.json`. They are generated, git-ignored and

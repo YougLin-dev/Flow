@@ -1,8 +1,11 @@
 /** The projects area facade: the managed root, store adapter and session. */
 export {
   filterProjects,
+  projectDisplayTitle,
   projectStatus,
   projectStatusLabel,
+  projectSubtitle,
+  relativeTime,
   sortProjects,
   type ProjectStatus,
 } from "./project-list";
@@ -28,4 +31,4 @@ export {
   type OpenProject,
   type ProjectSessionDeps,
 } from "./project-session";
-export { projectsRoot } from "./projects-root";
+export { projectsRoot, projectsRootForLaunch, type ProjectsRootSources } from "./projects-root";

@@ -746,8 +746,10 @@ boundary is not workable.
   use `:memory:`. The Rust URL adapter percent-encodes paths, so a macOS
   "Application Support" directory works. An explicit
   `host.params.databasePath` or the declared `FLOW_DB_PATH` environment
-  variable overrides the data directory; `bun run dev` uses it to keep
-  development data in `.nsh/dev/flow.db`.
+  variable overrides the data directory. (The project layer later made the
+  managed project list the default; `bun run dev` now points
+  `FLOW_PROJECTS_ROOT` at `.nsh/dev/projects`, and `FLOW_DB_PATH` still
+  selects this legacy document for a run.)
 - Seed `flow/data.ts` into an empty document; every later scene read comes
   from SQLite.
 - Replace the static `buildScene` with `flow/scene.ts`'s `FlowScene`: cards

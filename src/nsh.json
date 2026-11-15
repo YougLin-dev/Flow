@@ -19,7 +19,7 @@
       "hosts": []
     },
     "process": {
-      "env": ["FLOW_DB_PATH", "FLOW_FPS"]
+      "env": ["FLOW_DB_PATH", "FLOW_PROJECTS_ROOT", "FLOW_FPS"]
     },
     "windows": {
       "levels": ["floating"]

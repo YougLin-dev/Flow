@@ -1,7 +1,14 @@
 import { expect, test } from "nsh/test";
 import type { ProjectEntry } from "../shared";
-import { filterProjects, projectStatusLabel, sortProjects } from "./project-list";
-import { projectsRoot } from "./projects-root";
+import {
+  filterProjects,
+  projectDisplayTitle,
+  projectStatusLabel,
+  projectSubtitle,
+  relativeTime,
+  sortProjects,
+} from "./project-list";
+import { projectsRoot, projectsRootForLaunch } from "./projects-root";
 
 function entry(
   projectId: string,
@@ -10,6 +17,7 @@ function entry(
   lastOpenedAt: number | null,
   openHere = false,
   openElsewhere = false,
+  unreadable = false,
 ): ProjectEntry {
   return {
     projectId,
@@ -19,6 +27,7 @@ function entry(
     lastOpenedAt,
     openHere,
     openElsewhere,
+    unreadable,
   };
 }
 
@@ -56,8 +65,75 @@ test("labels the open states and keeps a closed row quiet", () => {
   expect(projectStatusLabel(entry("c", "C", 1, null))).toBe("");
 });
 
+test("names an unreadable package and explains why it cannot open", () => {
+  const broken = entry("a".repeat(32), "a".repeat(32), 0, null, false, false, true);
+  expect(projectDisplayTitle(broken)).toBe("Unavailable project");
+  expect(projectSubtitle(broken, 1_000)).toBe("This project can’t be opened");
+  expect(projectDisplayTitle(entry("b", "Lake", 5, null))).toBe("Lake");
+});
+
+test("the row subtitle prefers the last open, then the update time", () => {
+  const now = 100 * 60_000;
+  expect(projectSubtitle(entry("a", "A", 0, now - 30_000), now)).toBe("Opened just now");
+  expect(projectSubtitle(entry("b", "B", now - 2 * 60_000, null), now)).toBe("Updated 2 min ago");
+  expect(projectSubtitle(entry("c", "C", now, now - 3 * 3_600_000), now)).toBe("Opened 3 hr ago");
+});
+
+test("relative time stays short and resolves old projects by date", () => {
+  const now = 100 * 24 * 3_600_000;
+  expect(relativeTime(now - 1, now)).toBe("just now");
+  expect(relativeTime(now - 60_000, now)).toBe("1 min ago");
+  expect(relativeTime(now - 59 * 60_000, now)).toBe("59 min ago");
+  expect(relativeTime(now - 3_600_000, now)).toBe("1 hr ago");
+  expect(relativeTime(now - 24 * 3_600_000, now)).toBe("yesterday");
+  expect(relativeTime(now - 3 * 24 * 3_600_000, now)).toBe("3 days ago");
+  expect(relativeTime(now - 31 * 24 * 3_600_000, now)).toBe("on 1970-03-11");
+  // A clock that moved backwards clamps instead of showing a negative age.
+  expect(relativeTime(now + 5_000, now)).toBe("just now");
+});
+
 test("the projects root lives beside the legacy database", () => {
   expect(projectsRoot("/data/Flow")).toBe("/data/Flow/projects");
   expect(projectsRoot(null)).toBe(null);
   expect(projectsRoot("")).toBe(null);
+});
+
+test("an explicit document path keeps the legacy launch; projects are the default", () => {
+  const sources = {
+    dataDir: "/data/Flow",
+    hostProjectsRoot: undefined,
+    hostDocumentPath: undefined,
+    envDocumentPath: undefined,
+    envProjectsRoot: undefined,
+  };
+  expect(projectsRootForLaunch(sources)).toBe("/data/Flow/projects");
+  expect(projectsRootForLaunch({ ...sources, hostProjectsRoot: " /tmp/projects " })).toBe(
+    "/tmp/projects",
+  );
+  expect(projectsRootForLaunch({ ...sources, envProjectsRoot: " /tmp/dev-projects " })).toBe(
+    "/tmp/dev-projects",
+  );
+  expect(
+    projectsRootForLaunch({
+      ...sources,
+      hostProjectsRoot: "/tmp/host",
+      envProjectsRoot: "/tmp/env",
+    }),
+  ).toBe("/tmp/host");
+  expect(projectsRootForLaunch({ ...sources, hostDocumentPath: "/tmp/one.db" })).toBe(null);
+  expect(projectsRootForLaunch({ ...sources, envDocumentPath: "/tmp/env.db" })).toBe(null);
+  expect(
+    projectsRootForLaunch({
+      ...sources,
+      hostDocumentPath: "/tmp/one.db",
+      envProjectsRoot: "/tmp/env",
+    }),
+  ).toBe(null);
+  expect(
+    projectsRootForLaunch({
+      ...sources,
+      dataDir: null,
+      hostProjectsRoot: undefined,
+    }),
+  ).toBe(null);
 });

@@ -1,21 +1,56 @@
+import { cleanup, host, mount, View } from "nsh";
 import { isAvailable } from "nsh/desktop";
-import { mount, View } from "nsh";
 import { TitleBar } from "./components/app";
+import { projectsRootForLaunch } from "./flow/projects";
 import { FlowPage } from "./pages/flow";
+import { createProjectsHome, ProjectsPage } from "./pages/projects";
 import { isPinned, togglePinned } from "./store";
 
 /**
  * Flow — an infinite canvas built with NSH's native view tree.
  *
- * The shell owns the window chrome and composes the page; the workspace and
- * its interactions live in `pages/flow/FlowPage.tsx`, and its shared state in
- * `store.ts`.
+ * The shell owns the window chrome and the launch navigation: with a managed
+ * projects root it shows the project list or the chosen project's canvas;
+ * with an explicit document path (tests, the dev script, an embedding host)
+ * it keeps the single-document canvas. Page internals live in `pages/` and
+ * the shared zoom/pin state in `store.ts`.
  */
 function App() {
+  const root = projectsRootForLaunch({
+    dataDir: process.dataDir ?? null,
+    hostProjectsRoot: host.params.projectsRoot,
+    hostDocumentPath: host.params.databasePath,
+    envDocumentPath: process.env.FLOW_DB_PATH,
+    envProjectsRoot: process.env.FLOW_PROJECTS_ROOT,
+  });
+  const home = root === null ? null : createProjectsHome(root);
+  cleanup(() => home?.dispose());
+
   return (
     <View class="flex-1 bg-background">
-      {isAvailable && <TitleBar pinned={isPinned()} onTogglePinned={togglePinned} />}
-      <FlowPage />
+      {isAvailable && (
+        <TitleBar
+          pinned={isPinned()}
+          onTogglePinned={togglePinned}
+          title={home?.current()?.title}
+        />
+      )}
+      {home === null ? (
+        <FlowPage />
+      ) : (
+        <If when={home.current()} else={<ProjectsPage home={home} />}>
+          {(project) => (
+            <FlowPage
+              project={project()}
+              onClose={() => {
+                home.showProjects();
+                void home.refresh();
+              }}
+              onOpenError={(error) => home.reportOpenError(error)}
+            />
+          )}
+        </If>
+      )}
     </View>
   );
 }

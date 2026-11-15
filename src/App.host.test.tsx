@@ -19,13 +19,22 @@ const selectSeed = async (app: App, query: string, testId: string): Promise<void
   await app.submit("id:search-input");
 };
 
-/** Opens the app with the probe a test reads the camera scale from. */
+/**
+ * Opens the app with the probe a test reads the camera scale from. The real
+ * host has a data directory, which now starts on the project list; these
+ * tests cover the legacy single-document canvas, so they name its database.
+ */
 const openApp = (options: OpenOptions = {}): Promise<App> =>
   open("./App.tsx", {
     ...options,
     host: {
       ...options.host,
-      params: { ...options.host?.params, flowZoomProbe: 1, flowSelectionProbe: 1 },
+      params: {
+        ...options.host?.params,
+        databasePath: process.dataDir ? `${process.dataDir}/flow.db` : ":memory:",
+        flowZoomProbe: 1,
+        flowSelectionProbe: 1,
+      },
     },
   });
 

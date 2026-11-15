@@ -61,6 +61,8 @@ const areaTree = {
   "src/components/probes/ImageLoadProbe.tsx": "",
   "src/pages/flow/index.ts": "",
   "src/pages/flow/FlowPage.tsx": "",
+  "src/pages/projects/index.ts": "",
+  "src/pages/projects/ProjectsPage.tsx": "",
   "src/App.tsx": "",
 };
 
@@ -123,6 +125,7 @@ test("classifies files and bare directory imports", () => {
   expect(areaOf("src/components/canvas/world/Card.tsx")).toBe("components/canvas");
   expect(areaOf("src/flow/legacy-bindings.ts")).toBeNull();
   expect(areaOf("src/pages/flow/FlowPage.tsx")).toBe("pages/flow");
+  expect(areaOf("src/pages/projects/ProjectsPage.tsx")).toBe("pages/projects");
   expect(areaOf("src/pages/legacy-page.tsx")).toBeNull();
   expect(areaOf("src/App.tsx")).toBe("shell");
   expect(segmentOf("src/flow/canvas/model/scene/scene.ts")).toBe("model");

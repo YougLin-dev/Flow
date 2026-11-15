@@ -25,19 +25,36 @@ import {
   PreviewLoader,
   ViewportController,
   applyOpenView,
-  closeDocumentQuietly,
   needsVerify,
   openFlowDocument,
   shutdownWorkspace,
+  type OpenedFlowDocument,
 } from "../../../flow/document";
 import { NodeRunner } from "../../../flow/execution";
 import { MinimapController } from "../../../flow/minimap";
 import type { NodeKindId } from "../../../flow/nodes";
+import {
+  openFlowProject,
+  type OpenProject,
+  type ProjectLeasePort,
+  type ProjectStorePort,
+} from "../../../flow/projects";
+import { saveOpenDrafts } from "./save-drafts";
 import { revealSearchHit } from "./search-navigation";
+
+/** The managed project this workspace leases and opens. */
+export interface WorkspaceProject {
+  readonly store: ProjectStorePort;
+  readonly projectId: string;
+}
 
 export interface FlowWorkspaceDeps {
   /** Publishes the camera's scale to the store's zoom readout. */
   readonly publishZoom: (percent: number) => void;
+  /** The managed project to open; absent on the legacy single-document path. */
+  readonly project?: WorkspaceProject | null | undefined;
+  /** A managed open failed before a document existed; the shell leaves. */
+  readonly onOpenError?: ((error: unknown) => void) | undefined;
 }
 
 export interface FlowWorkspace {
@@ -93,6 +110,8 @@ export function createFlowWorkspace(deps: FlowWorkspaceDeps): FlowWorkspace {
   let document: Document | null = null;
   let assets: AssetUrls | null = null;
   let runner: NodeRunner | null = null;
+  // The managed session: its lease is released only after the worker closed.
+  let project: OpenProject | null = null;
   let disposed = false;
   let opening = false;
   let openingTask: Promise<void> | null = null;
@@ -324,13 +343,42 @@ export function createFlowWorkspace(deps: FlowWorkspaceDeps): FlowWorkspace {
   };
 
   const openFlow = async (): Promise<void> => {
-    if (document || opening || disposed) return;
+    if (document || opening || disposed || shuttingDown) return;
     opening = true;
+    const managed = deps.project ?? null;
     try {
-      const opened = await openFlowDocument();
+      let opened: OpenedFlowDocument;
+      let lease: ProjectLeasePort | null = null;
+      if (managed === null) {
+        opened = await openFlowDocument();
+      } else {
+        // The session takes the package lock and opens the package; it
+        // releases the lease itself when the open fails.
+        const session = await openFlowProject(
+          {
+            store: managed.store,
+            shutdown: () => shutdown(),
+            openDocument: (path, options) => openFlowDocument(path, options),
+          },
+          managed.projectId,
+        );
+        project = session;
+        lease = session.lease;
+        opened = session;
+      }
       if (disposed) {
-        await closeDocumentQuietly(opened.document);
-        opened.document.dispose();
+        // The page went away while the package opened: close it before
+        // letting the lease go, and keep the lease if the close failed.
+        const result = await shutdownWorkspace({
+          runner: null,
+          document: opened.document,
+          view: null,
+          stopConsumers: () => {},
+        });
+        if (lease !== null && result.closed) {
+          lease.release();
+          project = null;
+        }
         return;
       }
       document = opened.document;
@@ -370,7 +418,10 @@ export function createFlowWorkspace(deps: FlowWorkspaceDeps): FlowWorkspace {
       }
     } catch (error) {
       console.error("Flow could not open its document", error);
-      if (!disposed) camera.fit(CONTENT, stage());
+      if (!disposed) {
+        if (managed === null) camera.fit(CONTENT, stage());
+        else deps.onOpenError?.(error);
+      }
     } finally {
       opening = false;
     }
@@ -474,6 +525,16 @@ export function createFlowWorkspace(deps: FlowWorkspaceDeps): FlowWorkspace {
       // leaving that package neither closed nor disposed.
       const task = openingTask;
       if (task !== null) await task;
+      if (document === null && project === null) {
+        // Nothing was ever opened (a close before the first layout, or an
+        // open refused because shutdown began): there is nothing to close.
+        shutdownResult = { closed: true };
+        return shutdownResult;
+      }
+      // The editors' drafts are document state too: write them before the
+      // close job so the FIFO worker lands them first. This covers both the
+      // Projects button and a quit.
+      await saveOpenDrafts(currentSession(), composerState);
       // Before the camera has been fitted or restored it carries no view the
       // user saw; saving it would overwrite the previous session's camera.
       const view = cameraReady ? camera.view() : null;
@@ -483,6 +544,14 @@ export function createFlowWorkspace(deps: FlowWorkspaceDeps): FlowWorkspace {
         view: view === null ? null : { x: view.x, y: view.y, zoom: view.scale },
         stopConsumers: stopLoaders,
       });
+      // Release the package only after the worker acknowledged the close. A
+      // close that failed before its job ran keeps the lease: a leaked lock
+      // is better than two writers. The recovery-warning close counts as
+      // closed, and its dirty package verifies on the next open.
+      if (shutdownResult.closed && project !== null) {
+        project.lease.release();
+        project = null;
+      }
       forgetDocument();
       return shutdownResult;
     })();
