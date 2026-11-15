@@ -188,10 +188,18 @@ fn document_cards_query(rect: &Viewport, margin: f64) -> SelectStatement {
 /// Ids cluster by insertion row, so taking the first N after a limit would
 /// show one strip of a low-zoom viewport. A deterministic hash of the
 /// internal seq spreads the sample over the whole rectangle.
+///
+/// The inner modulo mirrors the frozen `nodes_sample` expression exactly:
+/// SQLite matches expression indexes structurally, so
+/// `(seq * C) % M` would scan and sort the whole table even though the
+/// values are identical for the non-negative seq (`(seq % M) * C % M`).
+/// The constants are raw SQL, not bound values: a parameterized expression
+/// does not match the index either.
 fn sample_order() -> SimpleExpr {
     Expr::col((nodes::Entity, nodes::Column::Seq))
-        .mul(2_654_435_761_i64)
-        .modulo(2_147_483_647_i64)
+        .modulo(Expr::cust("2147483647"))
+        .mul(Expr::cust("2654435761"))
+        .modulo(Expr::cust("2147483647"))
 }
 
 /// The largest value `sample_order` can return.
@@ -207,6 +215,26 @@ pub(crate) fn overview_cards(
     total: u64,
     limit: u64,
 ) -> Result<Vec<OverviewCard>, String> {
+    let rows = conn
+        .query_all(&overview_statement(total, limit))
+        .map_err(|error| error.to_string())?;
+    rows.iter()
+        .map(|row| {
+            let row = OverviewRow::from_query_result(row, "").map_err(|error| error.to_string())?;
+            Ok(OverviewCard {
+                id: row.id,
+                x: row.x,
+                y: row.y,
+                width: row.width,
+                height: row.height,
+            })
+        })
+        .collect()
+}
+
+/// The minimap query, kept separate from its execution so the plan test can
+/// prove the frozen `nodes_sample` index serves the filtered ordering.
+pub(crate) fn overview_statement(total: u64, limit: u64) -> SelectStatement {
     let limit = std::cmp::min(limit, NODE_LIMIT);
     let mut statement = Query::select();
     statement
@@ -229,21 +257,7 @@ pub(crate) fn overview_cards(
             .order_by((nodes::Entity, nodes::Column::Id), Order::Asc)
             .limit(limit);
     }
-    let rows = conn
-        .query_all(&statement)
-        .map_err(|error| error.to_string())?;
-    rows.iter()
-        .map(|row| {
-            let row = OverviewRow::from_query_result(row, "").map_err(|error| error.to_string())?;
-            Ok(OverviewCard {
-                id: row.id,
-                x: row.x,
-                y: row.y,
-                width: row.width,
-                height: row.height,
-            })
-        })
-        .collect()
+    statement
 }
 
 /// Phase 2: the summary columns for one `IN` chunk of kept seqs. Ordinary

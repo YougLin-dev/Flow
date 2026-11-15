@@ -129,26 +129,48 @@ pub(crate) fn viewport_statement(rect: &Viewport, margin: f64) -> SelectStatemen
     statement
 }
 
-/// Rebuilds the connector boxes of every edge touching a moved or resized
-/// node and clears the markers. Runs once per command transaction; with no
-/// dirty nodes it is three cheap statements.
-pub fn flush_geometry_tx(txn: &impl ConnectionTrait) -> Result<(), DbErr> {
-    txn.execute_unprepared(
-        "DELETE FROM edges_rtree \
-         WHERE id IN (SELECT e.seq FROM edges AS e \
-                      JOIN nodes_geometry_dirty AS d \
-                        ON d.node_id = e.from_id OR d.node_id = e.to_id)",
-    )?;
-    txn.execute_unprepared(
+/// The edges touching a dirty node. The two `IN` subqueries are what let
+/// SQLite plan a MULTI-INDEX OR over `edges_port_pair` and `edges_to`; a
+/// `JOIN ... ON d.node_id = e.from_id OR d.node_id = e.to_id` cannot be
+/// driven from the marker table and scans every edge on every command.
+const DIRTY_EDGE_SEQS: &str = "SELECT e.seq FROM edges AS e \
+     WHERE e.from_id IN (SELECT node_id FROM nodes_geometry_dirty) \
+        OR e.to_id IN (SELECT node_id FROM nodes_geometry_dirty)";
+
+pub(crate) fn dirty_edge_delete_statement() -> String {
+    format!("DELETE FROM edges_rtree WHERE id IN ({DIRTY_EDGE_SEQS})")
+}
+
+pub(crate) fn dirty_edge_insert_statement() -> String {
+    format!(
         "INSERT INTO edges_rtree (id, min_x, max_x, min_y, max_y) \
          SELECT b.id, b.min_x, b.max_x, b.min_y, b.max_y \
            FROM edge_boxes AS b \
-          WHERE b.id IN (SELECT e.seq FROM edges AS e \
-                         JOIN nodes_geometry_dirty AS d \
-                           ON d.node_id = e.from_id OR d.node_id = e.to_id)",
-    )?;
+          WHERE b.id IN ({DIRTY_EDGE_SEQS})"
+    )
+}
+
+/// Rebuilds the connector boxes of every edge touching a moved or resized
+/// node and clears the markers. Runs once per command transaction; with no
+/// dirty nodes it returns after one marker lookup, before touching the index.
+pub fn flush_geometry_tx(txn: &impl ConnectionTrait) -> Result<(), DbErr> {
+    if !has_dirty_geometry(txn)? {
+        return Ok(());
+    }
+    txn.execute_unprepared(&dirty_edge_delete_statement())?;
+    txn.execute_unprepared(&dirty_edge_insert_statement())?;
     txn.execute_unprepared("DELETE FROM nodes_geometry_dirty")?;
     Ok(())
+}
+
+fn has_dirty_geometry(txn: &impl ConnectionTrait) -> Result<bool, DbErr> {
+    let row = txn.query_one_raw(sea_orm::Statement::from_string(
+        txn.get_database_backend(),
+        "SELECT EXISTS (SELECT 1 FROM nodes_geometry_dirty)".to_owned(),
+    ))?;
+    row.ok_or_else(|| DbErr::Custom("the dirty marker check returned no row".to_owned()))?
+        .try_get_by_index::<i64>(0)
+        .map(|found| found != 0)
 }
 
 #[cfg(test)]
