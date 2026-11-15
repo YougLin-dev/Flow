@@ -116,10 +116,16 @@ canvas stays in TSX and owns only the scene model and its views.
   aborts; a phase already running still holds the worker until it ends, so a
   quit that lands mid-phase can exhaust the shell's 200 ms quit budget. That
   exit leaves `clean_shutdown=0`, which the next open already treats as an
-  unclean package. A saved camera is restored instead of fitting. The frozen
-  schema has no saved-view marker, so the `0, 0, 1` default is the
-  never-saved sentinel; a view saved at exactly that value is
-  indistinguishable and refits.
+  unclean package. Open also runs one collection command before the first
+  read: with the undo history empty it deletes terminal batches no node
+  outputs, no input snapshots and that are not the newest batch of a live
+  node incarnation, then unreferenced asset rows, then asset files with no
+  row (after the row transaction commits, so a rollback can never leave a
+  live row without bytes). The command refuses while history holds an entry;
+  a sweep failure is reported but does not block the open. A saved camera is
+  restored instead of fitting. The frozen schema has no saved-view marker,
+  so the `0, 0, 1` default is the never-saved sentinel; a view saved at
+  exactly that value is indistinguishable and refits.
 - `FlowScene` is driven from `scene(rect, margin)` snapshots. Drag/resize,
   add, delete and connect each send one command; undo/redo return change sets.
   A card is stored as an axis-aligned world rectangle, so gestures commit a
