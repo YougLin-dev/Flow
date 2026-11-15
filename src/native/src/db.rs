@@ -17,7 +17,7 @@ use crate::document;
 use crate::entity::{documents, edges, nodes};
 #[cfg(test)]
 use crate::history::HistoryOp;
-use crate::history::{History, HistoryEntry};
+use crate::history::{History, HistoryEntry, HistoryRefs};
 use crate::mutation::{self, Mutation};
 use crate::scene;
 use crate::schema;
@@ -91,10 +91,9 @@ impl Database {
         &self,
         id: String,
         title: String,
-        body: String,
         tags: Vec<String>,
     ) -> Result<Mutation, String> {
-        self.run_mutation(move |conn| mutation::set_node_text(conn, id, title, body, tags))
+        self.run_mutation(move |conn| mutation::set_node_text(conn, id, title, tags))
     }
 
     pub fn set_node_settings(&self, id: String, settings_json: String) -> Result<Mutation, String> {
@@ -170,8 +169,10 @@ impl Database {
 
     /// Rebuilds edge inputs from the sources' current batches, before a run.
     pub fn sync_inputs(&self, node_id: String) -> Result<Vec<InputItemSummary>, String> {
+        let history = Arc::clone(&self.history);
         self.run(move |conn| {
-            mutation::sync_inputs(conn, node_id.clone())?;
+            let refs = mutation::sync_inputs(conn, node_id.clone())?;
+            invalidate_history(&history, &refs);
             detail::inputs(conn, &node_id)
         })
     }
@@ -182,16 +183,31 @@ impl Database {
         batch: ResultBatchInput,
         items: Vec<ResultItemInput>,
     ) -> Result<ChangeSet, String> {
-        self.run(move |conn| mutation::save_run(conn, batch, items))
+        let history = Arc::clone(&self.history);
+        self.run(move |conn| {
+            let (changes, refs) = mutation::save_run(conn, batch, items)?;
+            invalidate_history(&history, &refs);
+            Ok(changes)
+        })
     }
 
     pub fn set_node_status(&self, id: String, status: String) -> Result<ChangeSet, String> {
-        self.run(move |conn| mutation::set_node_status(conn, id, status))
+        let history = Arc::clone(&self.history);
+        self.run(move |conn| {
+            let (changes, refs) = mutation::set_node_status(conn, id, status)?;
+            invalidate_history(&history, &refs);
+            Ok(changes)
+        })
     }
 
     /// Marks runs left running by a previous process as interrupted.
     pub fn recover_runs(&self) -> Result<u32, String> {
-        self.run(mutation::recover_runs)
+        let history = Arc::clone(&self.history);
+        self.run(move |conn| {
+            let (count, refs) = mutation::recover_runs(conn)?;
+            invalidate_history(&history, &refs);
+            Ok(count)
+        })
     }
 
     /// A node with its output batch and input list.
@@ -206,7 +222,14 @@ impl Database {
 
     pub fn import_asset(&self, input: AssetInput) -> Result<AssetSummary, String> {
         let assets_dir = Arc::clone(&self.assets_dir);
-        self.run(move |conn| asset::import_asset(conn, &assets_dir, input))
+        let history = Arc::clone(&self.history);
+        self.run(move |conn| {
+            let summary = asset::import_asset(conn, &assets_dir, input)?;
+            let mut refs = HistoryRefs::default();
+            refs.asset(Some(&summary.id));
+            invalidate_history(&history, &refs);
+            Ok(summary)
+        })
     }
 
     pub fn asset_bytes(&self, id: String) -> Result<Vec<u8>, String> {
@@ -233,7 +256,10 @@ impl Database {
     #[cfg(test)]
     pub fn apply_ops(&self, ops: &[HistoryOp]) -> Result<ChangeSet, String> {
         let ops = ops.to_vec();
-        self.run(move |conn| mutation::apply_ops(conn, &ops))
+        self.run(move |conn| match mutation::apply_ops(conn, &ops)? {
+            mutation::ApplyOutcome::Applied(changes) => Ok(changes),
+            mutation::ApplyOutcome::Stale => empty_change(conn),
+        })
     }
 
     /// Reverts the last command. The history entry is taken and returned in
@@ -251,7 +277,7 @@ impl Database {
             let mut ops = entry.inverse.clone();
             ops.reverse();
             match mutation::apply_ops(conn, &ops) {
-                Ok(changes) => {
+                Ok(mutation::ApplyOutcome::Applied(changes)) => {
                     // The undo is committed. A poisoned lock loses the redo
                     // entry rather than reporting a failure and inviting a
                     // duplicate retry.
@@ -259,6 +285,11 @@ impl Database {
                         history.push_redo(entry);
                     }
                     Ok(changes)
+                }
+                Ok(mutation::ApplyOutcome::Stale) => {
+                    // The entry can never apply again; drop it rather than
+                    // leaving it on the redo stack.
+                    empty_change(conn)
                 }
                 Err(error) => {
                     if let Ok(mut history) = history.lock() {
@@ -283,12 +314,13 @@ impl Database {
             };
             let ops = entry.forward.clone();
             match mutation::apply_ops(conn, &ops) {
-                Ok(changes) => {
+                Ok(mutation::ApplyOutcome::Applied(changes)) => {
                     if let Ok(mut history) = history.lock() {
                         history.push_undo_after_redo(entry);
                     }
                     Ok(changes)
                 }
+                Ok(mutation::ApplyOutcome::Stale) => empty_change(conn),
                 Err(error) => {
                     if let Ok(mut history) = history.lock() {
                         history.push_redo(entry);
@@ -380,10 +412,11 @@ impl Database {
             // preflight and here, lose this undo entry rather than report a
             // failure that invites a duplicate retry.
             if let Ok(mut history) = history.lock() {
-                history.push(HistoryEntry {
-                    forward: mutation.forward.clone(),
-                    inverse: mutation.inverse.clone(),
-                });
+                history.push(HistoryEntry::new(
+                    mutation.forward.clone(),
+                    mutation.inverse.clone(),
+                    &mutation.refs,
+                ));
             }
             Ok(mutation)
         })
@@ -475,6 +508,15 @@ fn lock_history(
 
 fn ensure_history(history: &Arc<Mutex<History>>) -> Result<(), String> {
     lock_history(history).map(drop)
+}
+
+/// A non-history write has committed; drop the entries it made stale. A
+/// poisoned lock is ignored here because the write already happened and an
+/// error would invite a duplicate retry.
+fn invalidate_history(history: &Arc<Mutex<History>>, refs: &HistoryRefs) {
+    if let Ok(mut history) = history.lock() {
+        history.invalidate(refs);
+    }
 }
 
 /// The document bounds at the current revision, reusing the last read.
@@ -625,6 +667,52 @@ mod tests {
     use crate::entity::{result_batches, result_items};
     use crate::types::EdgePoint;
 
+    fn current_rev(db: &Database) -> i64 {
+        db.run(|conn| document::current_rev(conn).map_err(|error| error.to_string()))
+            .expect("read the document revision")
+    }
+
+    fn direct_write(db: &Database, sql: &str) {
+        let sql = sql.to_owned();
+        db.run(move |conn| {
+            conn.execute_unprepared(&sql)
+                .map(|_| ())
+                .map_err(|error| error.to_string())
+        })
+        .expect("direct write");
+    }
+
+    fn manual_text_db() -> Database {
+        let db = Database::open(":memory:").expect("open");
+        db.insert_nodes(vec![node("n", "N", "before", &[], 0.0, 0.0)])
+            .expect("insert");
+        db.set_manual_text(
+            "n".to_owned(),
+            "after".to_owned(),
+            ResultBatchInput {
+                id: "batch-manual".to_owned(),
+                node_id: "n".to_owned(),
+                trigger: "manual".to_owned(),
+                provider: "manual".to_owned(),
+                model: String::new(),
+                params_json: "{}".to_owned(),
+                status: "done".to_owned(),
+                error: None,
+            },
+            ResultItemInput {
+                id: "item-manual".to_owned(),
+                position: 0.0,
+                port_id: "out".to_owned(),
+                kind: "text".to_owned(),
+                text: "after".to_owned(),
+                asset_id: None,
+                meta_json: None,
+            },
+        )
+        .expect("manual edit");
+        db
+    }
+
     fn node(id: &str, title: &str, body: &str, tags: &[&str], x: f64, y: f64) -> NodeInput {
         NodeInput {
             id: id.to_owned(),
@@ -664,12 +752,13 @@ mod tests {
             job_db.run(move |_| {
                 started_tx.send(()).expect("signal the job started");
                 release_rx.recv().expect("wait for release");
-                lock_history(&history)?.push(HistoryEntry {
-                    forward: vec![HistoryOp::Delete {
+                lock_history(&history)?.push(HistoryEntry::new(
+                    vec![HistoryOp::Delete {
                         id: "pending".to_owned(),
                     }],
-                    inverse: Vec::new(),
-                });
+                    Vec::new(),
+                    &HistoryRefs::default(),
+                ));
                 Ok(())
             })
         });
@@ -1173,18 +1262,28 @@ mod tests {
     #[test]
     fn updates_searchable_text_and_undoes_the_index_change() {
         let db = Database::open(":memory:").expect("open");
-        db.insert_nodes(vec![node("a", "Old title", "Old body", &["old"], 0.0, 0.0)])
-            .expect("insert");
+        db.insert_nodes(vec![node(
+            "a",
+            "Old title",
+            "Body text",
+            &["old"],
+            0.0,
+            0.0,
+        )])
+        .expect("insert");
 
         let changed = db
             .set_node_text(
                 "a".to_owned(),
                 "New title".to_owned(),
-                "New body".to_owned(),
                 vec!["new".to_owned()],
             )
             .expect("set text");
         assert_eq!(changed.changes.changed[0].title, "New title");
+        assert_eq!(
+            changed.changes.changed[0].body, "Body text",
+            "a title/tags edit leaves the output-derived body alone"
+        );
         assert_eq!(
             db.search("New title".to_owned(), SearchFilters::default(), 20)
                 .expect("new search")
@@ -1196,11 +1295,29 @@ mod tests {
                 .expect("old search")
                 .is_empty()
         );
+        assert_eq!(
+            db.search("Body text".to_owned(), SearchFilters::default(), 20)
+                .expect("body search")
+                .len(),
+            1,
+            "the untouched body stays searchable"
+        );
 
         db.undo().expect("undo text");
         assert_eq!(
             db.search("Old title".to_owned(), SearchFilters::default(), 20)
                 .expect("restored search")
+                .len(),
+            1
+        );
+        assert!(
+            db.search("New title".to_owned(), SearchFilters::default(), 20)
+                .expect("new title removed")
+                .is_empty()
+        );
+        assert_eq!(
+            db.search("Body text".to_owned(), SearchFilters::default(), 20)
+                .expect("body search after undo")
                 .len(),
             1
         );
@@ -1870,7 +1987,7 @@ mod tests {
         );
 
         let [
-            HistoryOp::Bounds {
+            HistoryOp::NodeGeometry {
                 id,
                 x,
                 y,
@@ -1879,7 +1996,7 @@ mod tests {
             },
         ] = result.forward.as_slice()
         else {
-            panic!("one forward Bounds op, got {:?}", result.forward);
+            panic!("one forward NodeGeometry op, got {:?}", result.forward);
         };
         assert_eq!(id.as_str(), "styled");
         assert_eq!(
@@ -1887,7 +2004,7 @@ mod tests {
             (target.x, target.y, target.width, target.height)
         );
         let [
-            HistoryOp::Bounds {
+            HistoryOp::NodeGeometry {
                 id,
                 x,
                 y,
@@ -1896,7 +2013,7 @@ mod tests {
             },
         ] = result.inverse.as_slice()
         else {
-            panic!("one inverse Bounds op, got {:?}", result.inverse);
+            panic!("one inverse NodeGeometry op, got {:?}", result.inverse);
         };
         assert_eq!(id.as_str(), "styled");
         assert_eq!(
@@ -1923,6 +2040,8 @@ mod tests {
 
         let undone = db.undo().expect("undo bounds");
         assert_eq!(undone.changed.len(), 1);
+        assert_eq!(undone.rev, result.changes.rev + 1.0);
+        assert_eq!(undone.changed[0].rev, before.rev + 2.0);
         assert_eq!(
             (
                 undone.changed[0].x,
@@ -1934,9 +2053,14 @@ mod tests {
         );
         assert_eq!(undone.changed[0].status, before.status);
         assert_eq!(undone.changed[0].output_batch_id, before.output_batch_id);
+        let undone_row = read_stored();
+        assert_eq!(undone_row.rev, before_row.rev + 2);
+        assert!(undone_row.updated_at >= after_row.updated_at);
 
         let redone = db.redo().expect("redo bounds");
         assert_eq!(redone.changed.len(), 1);
+        assert_eq!(redone.rev, undone.rev + 1.0);
+        assert_eq!(redone.changed[0].rev, before.rev + 3.0);
         assert_eq!(
             (
                 redone.changed[0].x,
@@ -1948,6 +2072,9 @@ mod tests {
         );
         assert_eq!(redone.changed[0].status, before.status);
         assert_eq!(redone.changed[0].output_batch_id, before.output_batch_id);
+        let redone_row = read_stored();
+        assert_eq!(redone_row.rev, before_row.rev + 3);
+        assert!(redone_row.updated_at >= undone_row.updated_at);
     }
 
     #[test]
@@ -2276,16 +2403,80 @@ mod tests {
         assert_eq!(after.inputs.len(), 1);
         assert_eq!(after.inputs[0].item_id.as_deref(), Some("item-b"));
 
-        // A run's input sync clears removals and recreates the snapshots;
-        // undoing the earlier removal must still succeed idempotently.
-        db.sync_inputs("image".to_owned()).expect("sync after run");
-        let undone = db.undo().expect("undo input removal");
-        assert!(undone.changed.iter().any(|node| node.id == "image"));
+        db.undo().expect("undo input removal");
         let restored = db
             .node_detail("image".to_owned())
             .expect("detail")
             .expect("image detail");
         assert_eq!(restored.inputs.len(), 2);
+        assert_eq!(restored.inputs[0].item_id.as_deref(), Some("item-a"));
+
+        db.redo().expect("redo input removal");
+        let after_redo = db
+            .node_detail("image".to_owned())
+            .expect("detail")
+            .expect("image detail");
+        assert_eq!(after_redo.inputs.len(), 1);
+
+        // A run's input sync clears removals and recreates the snapshots; it
+        // is not history, so it invalidates the pending removal entry.
+        db.sync_inputs("image".to_owned()).expect("sync after run");
+        let undone = db.undo().expect("undo after sync");
+        assert!(
+            undone.changed.is_empty(),
+            "sync invalidates the input removal entry"
+        );
+        let restored = db
+            .node_detail("image".to_owned())
+            .expect("detail")
+            .expect("image detail");
+        assert_eq!(restored.inputs.len(), 2);
+    }
+
+    #[test]
+    fn input_restores_tolerate_a_missing_or_existing_row() {
+        let db = Database::open(":memory:").expect("open");
+        db.insert_nodes(vec![node("n", "N", "", &[], 0.0, 0.0)])
+            .expect("insert");
+        let row = crate::history::InputRow {
+            id: "input-1".to_owned(),
+            node_id: "n".to_owned(),
+            position: 0,
+            port_id: "out".to_owned(),
+            kind: "text".to_owned(),
+            origin: "local".to_owned(),
+            edge_id: None,
+            item_id: None,
+            asset_id: None,
+            text: "one".to_owned(),
+            meta_json: "{}".to_owned(),
+            created_at: 0,
+        };
+
+        db.apply_ops(&[HistoryOp::InsertInput(row.clone())])
+            .expect("insert the input");
+        db.apply_ops(&[HistoryOp::InsertInput(row.clone())])
+            .expect("an existing input is tolerated");
+        let inputs = db
+            .node_detail("n".to_owned())
+            .expect("detail")
+            .expect("node detail")
+            .inputs;
+        assert_eq!(inputs.len(), 1);
+
+        db.apply_ops(&[HistoryOp::DeleteInput {
+            id: "missing".to_owned(),
+        }])
+        .expect("a missing input is tolerated");
+        db.apply_ops(&[HistoryOp::DeleteInput { id: row.id }])
+            .expect("delete the input");
+        assert!(
+            db.node_detail("n".to_owned())
+                .expect("detail")
+                .expect("node detail")
+                .inputs
+                .is_empty()
+        );
     }
 
     #[test]
@@ -2707,6 +2898,172 @@ mod tests {
     }
 
     #[test]
+    fn an_intervening_settings_edit_does_not_block_an_upload_undo() {
+        let db = Database::open(":memory:").expect("open");
+        let mut upload = node("upload", "Upload", "", &["upload"], 0.0, 0.0);
+        upload.kind = "upload".to_owned();
+        upload.settings_json = Some("{}".to_owned());
+        db.insert_nodes(vec![upload]).expect("insert");
+        db.set_manual_upload(
+            "upload".to_owned(),
+            r#"{"version":1,"media":["image"]}"#.to_owned(),
+            "cat.png".to_owned(),
+            ResultBatchInput {
+                id: "batch-upload".to_owned(),
+                node_id: "upload".to_owned(),
+                trigger: "upload".to_owned(),
+                provider: "local".to_owned(),
+                model: String::new(),
+                params_json: "{}".to_owned(),
+                status: "done".to_owned(),
+                error: None,
+            },
+            vec![ResultItemInput {
+                id: "item-upload".to_owned(),
+                position: 0.0,
+                port_id: "image".to_owned(),
+                kind: "image".to_owned(),
+                text: String::new(),
+                asset_id: Some("asset-cat".to_owned()),
+                meta_json: None,
+            }],
+            Some(NodeBounds {
+                id: "upload".to_owned(),
+                x: 40.0,
+                y: 10.0,
+                width: 320.0,
+                height: 160.0,
+            }),
+        )
+        .expect("upload");
+        db.set_node_settings(
+            "upload".to_owned(),
+            r#"{"version":1,"media":["image"],"edited":true}"#.to_owned(),
+        )
+        .expect("settings");
+        // Undoing the settings edit restores settings but leaves the stale
+        // marker; the upload's batch and body are unchanged, so its undo must
+        // still apply as one whole entry.
+        db.undo().expect("undo settings");
+        db.undo().expect("undo upload");
+
+        let detail = db
+            .node_detail("upload".to_owned())
+            .expect("detail")
+            .expect("upload detail");
+        assert_eq!(detail.node.settings_json, "{}");
+        assert_eq!(detail.node.body, "");
+        assert_eq!(detail.node.output_batch_id, None);
+        assert_eq!(detail.node.status, "idle");
+        assert_eq!(
+            (
+                detail.node.x,
+                detail.node.y,
+                detail.node.width,
+                detail.node.height
+            ),
+            (0.0, 0.0, 200.0, 84.0)
+        );
+    }
+
+    #[test]
+    fn a_second_upload_replaces_and_undoes_the_first_output() {
+        let db = Database::open(":memory:").expect("open");
+        let mut upload = node("upload", "Upload", "", &["upload"], 0.0, 0.0);
+        upload.kind = "upload".to_owned();
+        upload.settings_json = Some(r#"{"version":1,"media":[]}"#.to_owned());
+        db.insert_nodes(vec![upload]).expect("insert");
+
+        let upload = |batch_id: &str,
+                      item_id: &str,
+                      asset_id: &str,
+                      settings: &str,
+                      body: &str,
+                      x: f64,
+                      width: f64| {
+            db.set_manual_upload(
+                "upload".to_owned(),
+                settings.to_owned(),
+                body.to_owned(),
+                ResultBatchInput {
+                    id: batch_id.to_owned(),
+                    node_id: "upload".to_owned(),
+                    trigger: "upload".to_owned(),
+                    provider: "local".to_owned(),
+                    model: String::new(),
+                    params_json: "{}".to_owned(),
+                    status: "done".to_owned(),
+                    error: None,
+                },
+                vec![ResultItemInput {
+                    id: item_id.to_owned(),
+                    position: 0.0,
+                    port_id: "image".to_owned(),
+                    kind: "image".to_owned(),
+                    text: String::new(),
+                    asset_id: Some(asset_id.to_owned()),
+                    meta_json: None,
+                }],
+                Some(NodeBounds {
+                    id: "upload".to_owned(),
+                    x,
+                    y: 0.0,
+                    width,
+                    height: 160.0,
+                }),
+            )
+            .expect("upload")
+        };
+
+        upload(
+            "batch-1",
+            "item-1",
+            "asset-cat",
+            r#"{"version":1,"media":["image"]}"#,
+            "cat.png",
+            0.0,
+            320.0,
+        );
+        upload(
+            "batch-2",
+            "item-2",
+            "asset-dog",
+            r#"{"version":1,"media":["image","video"]}"#,
+            "dog.png",
+            40.0,
+            400.0,
+        );
+
+        db.undo().expect("undo the second upload");
+        let first = db
+            .node_detail("upload".to_owned())
+            .expect("detail")
+            .expect("upload detail");
+        assert_eq!(
+            first.node.settings_json,
+            r#"{"version":1,"media":["image"]}"#
+        );
+        assert_eq!(first.node.body, "cat.png");
+        assert_eq!(first.node.output_batch_id.as_deref(), Some("batch-1"));
+        assert_eq!(first.node.status, "done");
+        assert_eq!((first.node.x, first.node.width), (0.0, 320.0));
+
+        db.redo().expect("redo the second upload");
+        let second = db
+            .node_detail("upload".to_owned())
+            .expect("detail")
+            .expect("upload detail");
+        assert_eq!(
+            second.node.settings_json,
+            r#"{"version":1,"media":["image","video"]}"#
+        );
+        assert_eq!(second.node.body, "dog.png");
+        assert_eq!(second.node.output_batch_id.as_deref(), Some("batch-2"));
+        assert_eq!(second.node.status, "done");
+        assert_eq!((second.node.x, second.node.width), (40.0, 400.0));
+    }
+
+    #[test]
     fn copies_an_upload_in_one_undoable_step() {
         let db = Database::open(":memory:").expect("open");
         let mut upload = node("copy", "Upload", "cat.png", &["upload"], 24.0, 24.0);
@@ -2952,7 +3309,7 @@ mod tests {
     }
 
     #[test]
-    fn undoing_a_settings_edit_keeps_a_later_run_output() {
+    fn a_later_run_invalidates_a_settings_edit_and_keeps_the_output() {
         let db = Database::open(":memory:").expect("open");
         db.insert_nodes(vec![node("a", "A", "Original", &[], 0.0, 0.0)])
             .expect("insert");
@@ -2984,18 +3341,25 @@ mod tests {
         )
         .expect("run");
 
-        db.undo().expect("undo settings");
+        // The run made the pending settings entry stale: undo must not restore
+        // the old settings over the output the run wrote.
+        let undone = db.undo().expect("undo after a run");
+        assert!(
+            undone.changed.is_empty(),
+            "a non-history run invalidates the settings entry"
+        );
         let detail = db
             .node_detail("a".to_owned())
             .expect("detail")
             .expect("node detail");
-        assert_eq!(detail.node.settings_json, "{}");
+        assert_eq!(detail.node.settings_json, "{\"prompt\":\"one\"}");
         assert_eq!(detail.node.body, "Run output");
         assert_eq!(detail.node.output_batch_id.as_deref(), Some("batch"));
-        // The settings no longer match the output, so it cannot be "done".
-        assert_eq!(detail.node.status, "stale");
+        assert_eq!(detail.node.status, "done");
 
-        db.redo().expect("redo settings");
+        // Redo was cleared by the run as well.
+        let redone = db.redo().expect("redo after invalidation");
+        assert!(redone.changed.is_empty());
         let redone = db
             .node_detail("a".to_owned())
             .expect("detail")
@@ -3003,6 +3367,50 @@ mod tests {
         assert_eq!(redone.node.settings_json, "{\"prompt\":\"one\"}");
         assert_eq!(redone.node.body, "Run output");
         assert_eq!(redone.node.output_batch_id.as_deref(), Some("batch"));
+    }
+
+    #[test]
+    fn an_asset_import_invalidates_history_that_references_the_asset() {
+        let db = Database::open(":memory:").expect("open");
+        db.insert_nodes(vec![node("n", "N", "", &[], 0.0, 0.0)])
+            .expect("insert");
+        db.clear_history().expect("clear insert history");
+        db.add_input(InputItemInput {
+            id: "input-1".to_owned(),
+            node_id: "n".to_owned(),
+            position: 0.0,
+            port_id: "in".to_owned(),
+            kind: "image".to_owned(),
+            origin: "local".to_owned(),
+            edge_id: None,
+            item_id: None,
+            asset_id: Some("asset-1".to_owned()),
+            text: String::new(),
+            meta_json: None,
+        })
+        .expect("add asset input");
+
+        db.import_asset(AssetInput {
+            id: "asset-1".to_owned(),
+            kind: "image".to_owned(),
+            name: "one.svg".to_owned(),
+            mime: "image/svg+xml".to_owned(),
+            bytes: b"<svg/>".to_vec(),
+            meta_json: None,
+        })
+        .expect("import asset");
+
+        let undone = db.undo().expect("undo after the asset import");
+        assert!(undone.changed.is_empty());
+        assert_eq!(
+            db.node_detail("n".to_owned())
+                .expect("detail")
+                .expect("node detail")
+                .inputs
+                .len(),
+            1,
+            "the import invalidated the input entry"
+        );
     }
 
     #[test]
@@ -3167,6 +3575,1052 @@ mod tests {
     }
 
     #[test]
+    fn a_no_op_move_settings_and_reorder_do_not_touch_history_or_the_rev() {
+        let db = Database::open(":memory:").expect("open");
+        db.insert_nodes(vec![node("n", "N", "", &[], 0.0, 0.0)])
+            .expect("insert");
+        for (id, text) in [("one", "One"), ("two", "Two")] {
+            db.add_input(InputItemInput {
+                id: id.to_owned(),
+                node_id: "n".to_owned(),
+                position: 0.0,
+                port_id: "out".to_owned(),
+                kind: "text".to_owned(),
+                origin: "local".to_owned(),
+                edge_id: None,
+                item_id: None,
+                asset_id: None,
+                text: text.to_owned(),
+                meta_json: None,
+            })
+            .expect("add input");
+        }
+        db.set_node_settings("n".to_owned(), "{\"a\":1}".to_owned())
+            .expect("settings");
+        let setup_ids: Vec<String> = db
+            .node_detail("n".to_owned())
+            .expect("detail")
+            .expect("node detail")
+            .inputs
+            .iter()
+            .map(|input| input.id.clone())
+            .collect();
+        db.reorder_inputs("n".to_owned(), setup_ids)
+            .expect("normalise input positions");
+        db.clear_history().expect("clear setup history");
+        let before = current_rev(&db);
+
+        let moved = db
+            .move_nodes(vec!["n".to_owned()], 0.0, 0.0)
+            .expect("no-op move");
+        assert!(moved.forward.is_empty());
+        assert!(moved.changes.changed.is_empty());
+        assert_eq!(moved.changes.rev, before as f64);
+        assert_eq!(current_rev(&db), before);
+        assert!(db.undo().expect("undo no-op move").changed.is_empty());
+        assert_eq!(current_rev(&db), before);
+
+        let current = db
+            .get_node("n".to_owned())
+            .expect("get node")
+            .expect("node");
+        let bounds = db
+            .set_node_bounds(vec![NodeBounds {
+                id: "n".to_owned(),
+                x: current.x,
+                y: current.y,
+                width: current.width,
+                height: current.height,
+            }])
+            .expect("no-op bounds");
+        assert!(bounds.forward.is_empty());
+        assert_eq!(bounds.changes.rev, before as f64);
+        assert_eq!(current_rev(&db), before);
+
+        let settings = db
+            .set_node_settings("n".to_owned(), "{\"a\":1}".to_owned())
+            .expect("no-op settings");
+        assert!(settings.forward.is_empty());
+        assert_eq!(settings.changes.rev, before as f64);
+        assert_eq!(current_rev(&db), before);
+
+        let detail = db
+            .node_detail("n".to_owned())
+            .expect("detail")
+            .expect("node detail");
+        let ids: Vec<String> = detail.inputs.iter().map(|input| input.id.clone()).collect();
+        let reordered = db
+            .reorder_inputs("n".to_owned(), ids)
+            .expect("no-op reorder");
+        assert!(reordered.forward.is_empty());
+        assert_eq!(reordered.changes.rev, before as f64);
+        assert_eq!(current_rev(&db), before);
+
+        for mutation in [
+            db.set_node_text("n".to_owned(), "N".to_owned(), Vec::new())
+                .expect("no-op text"),
+            db.insert_nodes(Vec::new()).expect("no-op insert nodes"),
+            db.insert_edges(Vec::new()).expect("no-op insert edges"),
+            db.connect_edges(Vec::new()).expect("no-op connect edges"),
+            db.delete_nodes(Vec::new()).expect("no-op delete nodes"),
+            db.delete_edges(Vec::new()).expect("no-op delete edges"),
+        ] {
+            assert!(mutation.forward.is_empty());
+            assert_eq!(mutation.changes.rev, before as f64);
+            assert_eq!(current_rev(&db), before);
+        }
+
+        assert!(db.undo().expect("nothing left to undo").changed.is_empty());
+        assert_eq!(current_rev(&db), before);
+    }
+
+    #[test]
+    fn a_batch_change_skips_a_manual_text_entry() {
+        let db = manual_text_db();
+        // A writer that bypasses history replaces the output pointer. The
+        // guarded entry must be dropped, not restore the manual snapshot.
+        direct_write(
+            &db,
+            "UPDATE nodes SET output_batch_id = NULL, status = 'idle' WHERE id = 'n'",
+        );
+        let before = current_rev(&db);
+
+        let undone = db.undo().expect("undo the stale entry");
+        assert!(undone.changed.is_empty());
+        assert_eq!(undone.rev, before as f64);
+        assert_eq!(current_rev(&db), before);
+        assert!(
+            db.history.lock().expect("history").take_redo().is_none(),
+            "a stale entry is dropped, not left on the redo stack"
+        );
+        let detail = db
+            .node_detail("n".to_owned())
+            .expect("detail")
+            .expect("node detail");
+        assert_eq!(detail.node.body, "after");
+        assert_eq!(detail.node.output_batch_id, None);
+    }
+
+    #[test]
+    fn a_body_change_skips_a_manual_text_entry() {
+        let db = manual_text_db();
+        direct_write(&db, "UPDATE nodes SET body = 'other' WHERE id = 'n'");
+        let before = current_rev(&db);
+
+        let undone = db.undo().expect("undo the stale entry");
+        assert!(undone.changed.is_empty());
+        assert_eq!(undone.rev, before as f64);
+        let detail = db
+            .node_detail("n".to_owned())
+            .expect("detail")
+            .expect("node detail");
+        assert_eq!(detail.node.body, "other");
+        assert_eq!(detail.node.output_batch_id.as_deref(), Some("batch-manual"));
+    }
+
+    #[test]
+    fn a_status_only_change_does_not_skip_a_manual_text_entry() {
+        let db = manual_text_db();
+        // Undoable input/settings edits mark a node stale without replacing
+        // its output; that alone must not block an older output undo.
+        direct_write(&db, "UPDATE nodes SET status = 'stale' WHERE id = 'n'");
+
+        let undone = db.undo().expect("undo the manual entry");
+        assert_eq!(undone.changed.len(), 1);
+        let detail = db
+            .node_detail("n".to_owned())
+            .expect("detail")
+            .expect("node detail");
+        assert_eq!(detail.node.body, "before");
+        assert_eq!(detail.node.output_batch_id, None);
+        assert_eq!(detail.node.status, "idle");
+    }
+
+    #[test]
+    fn a_colliding_edge_restore_is_stale_instead_of_wedging_undo() {
+        let db = Database::open(":memory:").expect("open");
+        db.insert_nodes(vec![
+            node("a", "A", "", &[], 0.0, 0.0),
+            node("t", "T", "", &[], 400.0, 0.0),
+        ])
+        .expect("insert");
+        db.clear_history().expect("clear insert history");
+        connect(&db, "e1", "a", "t");
+        db.delete_edges(vec!["e1".to_owned()]).expect("delete e1");
+        connect(&db, "e2", "a", "t");
+
+        // Simulate invalidation removing the entry that created e2 while the
+        // edge itself survives; restoring e1 would collide on its port pair.
+        let removed = db
+            .history
+            .lock()
+            .expect("history")
+            .take_undo()
+            .expect("e2 connect entry");
+        assert!(matches!(
+            removed.forward.first(),
+            Some(HistoryOp::InsertEdge(_))
+        ));
+
+        let undone = db.undo().expect("a colliding restore is stale");
+        assert!(undone.changed.is_empty());
+        assert_eq!(db.edge_count().expect("edge count"), 1);
+    }
+
+    #[test]
+    fn a_same_pair_reconnect_undoes_and_redoes() {
+        let db = Database::open(":memory:").expect("open");
+        db.insert_nodes(vec![
+            node("a", "A", "", &[], 0.0, 0.0),
+            node("t", "T", "", &[], 400.0, 0.0),
+        ])
+        .expect("insert");
+        connect(&db, "e1", "a", "t");
+        db.update_edge(EdgeInput {
+            id: "e1".to_owned(),
+            from_id: "a".to_owned(),
+            to_id: "t".to_owned(),
+            from_port: "out".to_owned(),
+            to_port: "in".to_owned(),
+            port_kind: "text".to_owned(),
+            from_offset: 50.0,
+            to_offset: 50.0,
+            kind: "flow".to_owned(),
+            data_json: None,
+        })
+        .expect("reconnect the same pair");
+        let offset = || {
+            db.run(|conn| {
+                edges::Entity::find_by_id("e1".to_owned())
+                    .one(conn)
+                    .map_err(|error| error.to_string())
+            })
+            .expect("read edge")
+            .expect("edge exists")
+            .from_offset
+        };
+        assert_eq!(offset(), 50.0);
+
+        db.undo().expect("undo the same-pair reconnect");
+        assert_eq!(offset(), 42.0);
+        db.redo().expect("redo the same-pair reconnect");
+        assert_eq!(offset(), 50.0);
+    }
+
+    #[test]
+    fn a_colliding_reconnect_restore_is_stale() {
+        let db = Database::open(":memory:").expect("open");
+        db.insert_nodes(vec![
+            node("a", "A", "", &[], 0.0, 0.0),
+            node("t", "T", "", &[], 400.0, 0.0),
+            node("t2", "T2", "", &[], 800.0, 0.0),
+        ])
+        .expect("insert");
+        db.clear_history().expect("clear insert history");
+        connect(&db, "e1", "a", "t");
+        db.update_edge(EdgeInput {
+            id: "e1".to_owned(),
+            from_id: "a".to_owned(),
+            to_id: "t2".to_owned(),
+            from_port: "out".to_owned(),
+            to_port: "in".to_owned(),
+            port_kind: "text".to_owned(),
+            from_offset: 42.0,
+            to_offset: 42.0,
+            kind: "flow".to_owned(),
+            data_json: None,
+        })
+        .expect("reconnect to t2");
+        connect(&db, "e3", "a", "t");
+
+        // Simulate invalidation dropping the e3 connect entry while e3
+        // survives; restoring e1's old pair would collide with e3.
+        let removed = db
+            .history
+            .lock()
+            .expect("history")
+            .take_undo()
+            .expect("e3 connect entry");
+        assert!(matches!(
+            removed.forward.first(),
+            Some(HistoryOp::InsertEdge(_))
+        ));
+
+        let undone = db.undo().expect("a colliding reconnect restore is stale");
+        assert!(undone.changed.is_empty());
+        let edge = db
+            .run(|conn| {
+                edges::Entity::find_by_id("e1".to_owned())
+                    .one(conn)
+                    .map_err(|error| error.to_string())
+            })
+            .expect("read e1")
+            .expect("e1 exists");
+        assert_eq!(edge.to_id, "t2");
+        assert_eq!(db.edge_count().expect("edge count"), 2);
+    }
+
+    #[test]
+    fn undoing_a_node_insert_cleans_edge_inputs_on_survivors() {
+        let db = Database::open(":memory:").expect("open");
+        db.insert_nodes(vec![node("a", "A", "before", &[], 0.0, 0.0)])
+            .expect("insert a");
+        db.insert_nodes(vec![node("t", "T", "", &[], 400.0, 0.0)])
+            .expect("insert t");
+        db.add_input(InputItemInput {
+            id: "local-t".to_owned(),
+            node_id: "t".to_owned(),
+            position: 0.0,
+            port_id: "out".to_owned(),
+            kind: "text".to_owned(),
+            origin: "local".to_owned(),
+            edge_id: None,
+            item_id: None,
+            asset_id: None,
+            text: "local".to_owned(),
+            meta_json: None,
+        })
+        .expect("add a local input");
+        db.set_manual_text(
+            "a".to_owned(),
+            "A output".to_owned(),
+            ResultBatchInput {
+                id: "batch-a".to_owned(),
+                node_id: "a".to_owned(),
+                trigger: "manual".to_owned(),
+                provider: "manual".to_owned(),
+                model: String::new(),
+                params_json: "{}".to_owned(),
+                status: "done".to_owned(),
+                error: None,
+            },
+            ResultItemInput {
+                id: "item-a".to_owned(),
+                position: 0.0,
+                port_id: "out".to_owned(),
+                kind: "text".to_owned(),
+                text: "A output".to_owned(),
+                asset_id: None,
+                meta_json: None,
+            },
+        )
+        .expect("manual output");
+        connect(&db, "a-t", "a", "t");
+        db.save_run(
+            ResultBatchInput {
+                id: "batch-t".to_owned(),
+                node_id: "t".to_owned(),
+                trigger: "run".to_owned(),
+                provider: "mock-text".to_owned(),
+                model: "mock-text".to_owned(),
+                params_json: "{}".to_owned(),
+                status: "done".to_owned(),
+                error: None,
+            },
+            vec![ResultItemInput {
+                id: "item-t".to_owned(),
+                position: 0.0,
+                port_id: "out".to_owned(),
+                kind: "text".to_owned(),
+                text: "T output".to_owned(),
+                asset_id: None,
+                meta_json: None,
+            }],
+        )
+        .expect("run t");
+
+        // The run invalidated the connect entry, so undoing the manual output
+        // and then the insert is the path that must clean T's snapshot.
+        db.undo().expect("undo the manual output");
+        let undone = db.undo().expect("undo the insert");
+        assert!(
+            undone.changed.iter().any(|row| row.id == "t"),
+            "the survivor's touched summary is in the change set"
+        );
+        assert_eq!(db.get_node("a".to_owned()).expect("get a"), None);
+        let target = db
+            .node_detail("t".to_owned())
+            .expect("detail")
+            .expect("t detail");
+        let input_ids: Vec<&str> = target
+            .inputs
+            .iter()
+            .map(|input| input.id.as_str())
+            .collect();
+        assert_eq!(
+            input_ids,
+            ["local-t"],
+            "only the deleted node's edge snapshot is removed; local inputs survive"
+        );
+    }
+
+    #[test]
+    fn a_missing_subject_drops_a_stale_entry_instead_of_wedging_undo() {
+        let db = Database::open(":memory:").expect("open");
+        db.insert_nodes(vec![node("n", "N", "", &[], 0.0, 0.0)])
+            .expect("insert n");
+        db.insert_nodes(vec![node("x", "X", "", &[], 400.0, 0.0)])
+            .expect("insert x");
+        connect(&db, "n-x", "n", "x");
+        db.delete_nodes(vec!["n".to_owned()]).expect("delete n");
+        db.save_run(
+            ResultBatchInput {
+                id: "batch-x".to_owned(),
+                node_id: "x".to_owned(),
+                trigger: "run".to_owned(),
+                provider: "mock-text".to_owned(),
+                model: "mock-text".to_owned(),
+                params_json: "{}".to_owned(),
+                status: "done".to_owned(),
+                error: None,
+            },
+            vec![ResultItemInput {
+                id: "item-x".to_owned(),
+                position: 0.0,
+                port_id: "out".to_owned(),
+                kind: "text".to_owned(),
+                text: "x".to_owned(),
+                asset_id: None,
+                meta_json: None,
+            }],
+        )
+        .expect("run x");
+
+        // The run invalidated the delete and connect entries; only the older
+        // insert-n entry remains, and its subject is gone. It must be dropped
+        // instead of failing and blocking every later undo.
+        let undone = db.undo().expect("undo the stale insert");
+        assert!(undone.changed.is_empty());
+        assert_eq!(db.count().expect("count"), 1);
+        let again = db.undo().expect("undo after the drop");
+        assert!(again.changed.is_empty());
+        assert_eq!(db.count().expect("count after the second undo"), 1);
+    }
+
+    #[test]
+    fn undoing_a_source_output_marks_downstream_stale() {
+        let db = Database::open(":memory:").expect("open");
+        db.insert_nodes(vec![
+            node("source", "Source", "", &[], 0.0, 0.0),
+            node("target", "Target", "", &[], 400.0, 0.0),
+        ])
+        .expect("insert");
+        db.save_run(
+            ResultBatchInput {
+                id: "batch-source".to_owned(),
+                node_id: "source".to_owned(),
+                trigger: "manual".to_owned(),
+                provider: "manual".to_owned(),
+                model: String::new(),
+                params_json: "{}".to_owned(),
+                status: "done".to_owned(),
+                error: None,
+            },
+            vec![ResultItemInput {
+                id: "item-source".to_owned(),
+                position: 0.0,
+                port_id: "out".to_owned(),
+                kind: "text".to_owned(),
+                text: "source output".to_owned(),
+                asset_id: None,
+                meta_json: None,
+            }],
+        )
+        .expect("source batch");
+        connect(&db, "source-target", "source", "target");
+        db.save_run(
+            ResultBatchInput {
+                id: "batch-target".to_owned(),
+                node_id: "target".to_owned(),
+                trigger: "run".to_owned(),
+                provider: "mock-text".to_owned(),
+                model: "mock-text".to_owned(),
+                params_json: "{}".to_owned(),
+                status: "done".to_owned(),
+                error: None,
+            },
+            vec![ResultItemInput {
+                id: "item-target".to_owned(),
+                position: 0.0,
+                port_id: "out".to_owned(),
+                kind: "text".to_owned(),
+                text: "target output".to_owned(),
+                asset_id: None,
+                meta_json: None,
+            }],
+        )
+        .expect("target batch");
+        db.set_manual_text(
+            "source".to_owned(),
+            "manual source".to_owned(),
+            ResultBatchInput {
+                id: "batch-manual".to_owned(),
+                node_id: "source".to_owned(),
+                trigger: "manual".to_owned(),
+                provider: "manual".to_owned(),
+                model: String::new(),
+                params_json: "{}".to_owned(),
+                status: "done".to_owned(),
+                error: None,
+            },
+            ResultItemInput {
+                id: "item-manual".to_owned(),
+                position: 0.0,
+                port_id: "out".to_owned(),
+                kind: "text".to_owned(),
+                text: "manual source".to_owned(),
+                asset_id: None,
+                meta_json: None,
+            },
+        )
+        .expect("manual source");
+        // Rerun the target after the manual edit so it is done again; the
+        // manual entry is on the source, so the target run leaves it pending.
+        db.save_run(
+            ResultBatchInput {
+                id: "batch-target-two".to_owned(),
+                node_id: "target".to_owned(),
+                trigger: "run".to_owned(),
+                provider: "mock-text".to_owned(),
+                model: "mock-text".to_owned(),
+                params_json: "{}".to_owned(),
+                status: "done".to_owned(),
+                error: None,
+            },
+            vec![ResultItemInput {
+                id: "item-target-two".to_owned(),
+                position: 0.0,
+                port_id: "out".to_owned(),
+                kind: "text".to_owned(),
+                text: "target again".to_owned(),
+                asset_id: None,
+                meta_json: None,
+            }],
+        )
+        .expect("target rerun");
+
+        let undone = db.undo().expect("undo the manual source output");
+        assert!(
+            undone
+                .changed
+                .iter()
+                .any(|row| row.id == "target" && row.status == "stale"),
+            "the change set carries the downstream stale row"
+        );
+        let source = db
+            .node_detail("source".to_owned())
+            .expect("detail")
+            .expect("source detail");
+        assert_eq!(source.node.output_batch_id.as_deref(), Some("batch-source"));
+        let target = db
+            .node_detail("target".to_owned())
+            .expect("detail")
+            .expect("target detail");
+        assert_eq!(
+            target.node.status, "stale",
+            "reverting the source output invalidates the target snapshot"
+        );
+        assert_eq!(
+            target.node.output_batch_id.as_deref(),
+            Some("batch-target-two")
+        );
+    }
+
+    #[test]
+    fn a_redo_after_a_body_change_is_skipped() {
+        let db = manual_text_db();
+        db.undo().expect("undo the manual entry");
+        direct_write(&db, "UPDATE nodes SET body = 'other' WHERE id = 'n'");
+        let before = current_rev(&db);
+
+        let redone = db.redo().expect("redo the stale entry");
+        assert!(redone.changed.is_empty());
+        assert_eq!(redone.rev, before as f64);
+        assert_eq!(current_rev(&db), before);
+        let top = db
+            .history
+            .lock()
+            .expect("history")
+            .take_undo()
+            .expect("the insert entry remains");
+        assert!(
+            matches!(top.forward.as_slice(), [HistoryOp::Insert(_)]),
+            "a stale redo entry is dropped, not returned to undo"
+        );
+        let detail = db
+            .node_detail("n".to_owned())
+            .expect("detail")
+            .expect("node detail");
+        assert_eq!(detail.node.body, "other");
+        assert_eq!(detail.node.output_batch_id, None);
+    }
+
+    #[test]
+    fn a_stale_upload_entry_applies_nothing() {
+        let db = Database::open(":memory:").expect("open");
+        let mut upload = node("upload", "Upload", "", &["upload"], 0.0, 0.0);
+        upload.kind = "upload".to_owned();
+        upload.settings_json = Some("{}".to_owned());
+        db.insert_nodes(vec![upload]).expect("insert");
+        db.set_manual_upload(
+            "upload".to_owned(),
+            r#"{"version":1,"media":["image"]}"#.to_owned(),
+            "cat.png".to_owned(),
+            ResultBatchInput {
+                id: "batch-upload".to_owned(),
+                node_id: "upload".to_owned(),
+                trigger: "upload".to_owned(),
+                provider: "local".to_owned(),
+                model: String::new(),
+                params_json: "{}".to_owned(),
+                status: "done".to_owned(),
+                error: None,
+            },
+            vec![ResultItemInput {
+                id: "item-upload".to_owned(),
+                position: 0.0,
+                port_id: "image".to_owned(),
+                kind: "image".to_owned(),
+                text: String::new(),
+                asset_id: Some("asset-cat".to_owned()),
+                meta_json: None,
+            }],
+            Some(NodeBounds {
+                id: "upload".to_owned(),
+                x: 40.0,
+                y: 10.0,
+                width: 320.0,
+                height: 160.0,
+            }),
+        )
+        .expect("upload");
+        direct_write(
+            &db,
+            "UPDATE nodes SET output_batch_id = NULL, status = 'idle' WHERE id = 'upload'",
+        );
+        let before = current_rev(&db);
+
+        let undone = db.undo().expect("undo the stale upload");
+        assert!(undone.changed.is_empty());
+        assert_eq!(undone.rev, before as f64);
+        assert_eq!(current_rev(&db), before);
+        assert!(db.history.lock().expect("history").take_redo().is_none());
+        let detail = db
+            .node_detail("upload".to_owned())
+            .expect("detail")
+            .expect("upload detail");
+        // No settings or geometry half-apply: the whole entry was skipped.
+        assert_eq!(
+            detail.node.settings_json,
+            r#"{"version":1,"media":["image"]}"#
+        );
+        assert_eq!(
+            (
+                detail.node.x,
+                detail.node.y,
+                detail.node.width,
+                detail.node.height
+            ),
+            (40.0, 10.0, 320.0, 160.0)
+        );
+        assert_eq!(detail.node.body, "cat.png");
+    }
+
+    #[test]
+    fn a_later_run_invalidates_a_manual_text_entry() {
+        let db = Database::open(":memory:").expect("open");
+        db.insert_nodes(vec![node("n", "N", "before", &[], 0.0, 0.0)])
+            .expect("insert");
+        db.set_manual_text(
+            "n".to_owned(),
+            "manual".to_owned(),
+            ResultBatchInput {
+                id: "batch-manual".to_owned(),
+                node_id: "n".to_owned(),
+                trigger: "manual".to_owned(),
+                provider: "manual".to_owned(),
+                model: String::new(),
+                params_json: "{}".to_owned(),
+                status: "done".to_owned(),
+                error: None,
+            },
+            ResultItemInput {
+                id: "item-manual".to_owned(),
+                position: 0.0,
+                port_id: "out".to_owned(),
+                kind: "text".to_owned(),
+                text: "manual".to_owned(),
+                asset_id: None,
+                meta_json: None,
+            },
+        )
+        .expect("manual edit");
+        db.save_run(
+            ResultBatchInput {
+                id: "batch-run".to_owned(),
+                node_id: "n".to_owned(),
+                trigger: "run".to_owned(),
+                provider: "mock-text".to_owned(),
+                model: "mock-text".to_owned(),
+                params_json: "{}".to_owned(),
+                status: "done".to_owned(),
+                error: None,
+            },
+            vec![ResultItemInput {
+                id: "item-run".to_owned(),
+                position: 0.0,
+                port_id: "out".to_owned(),
+                kind: "text".to_owned(),
+                text: "run output".to_owned(),
+                asset_id: None,
+                meta_json: None,
+            }],
+        )
+        .expect("run");
+        let before = current_rev(&db);
+
+        let undone = db.undo().expect("undo after a run");
+        assert!(undone.changed.is_empty());
+        assert_eq!(undone.rev, before as f64);
+        let detail = db
+            .node_detail("n".to_owned())
+            .expect("detail")
+            .expect("node detail");
+        assert_eq!(detail.node.body, "run output");
+        assert_eq!(detail.node.output_batch_id.as_deref(), Some("batch-run"));
+        assert_eq!(detail.node.status, "done");
+    }
+
+    #[test]
+    fn a_downstream_sync_keeps_an_upstream_move_entry() {
+        let db = Database::open(":memory:").expect("open");
+        db.insert_nodes(vec![
+            node("source", "Source", "A lake", &[], 0.0, 0.0),
+            node("target", "Target", "", &[], 400.0, 0.0),
+        ])
+        .expect("insert");
+        db.save_run(
+            ResultBatchInput {
+                id: "batch-source".to_owned(),
+                node_id: "source".to_owned(),
+                trigger: "manual".to_owned(),
+                provider: "manual".to_owned(),
+                model: String::new(),
+                params_json: "{}".to_owned(),
+                status: "done".to_owned(),
+                error: None,
+            },
+            vec![ResultItemInput {
+                id: "item-source".to_owned(),
+                position: 0.0,
+                port_id: "out".to_owned(),
+                kind: "text".to_owned(),
+                text: "A lake".to_owned(),
+                asset_id: None,
+                meta_json: None,
+            }],
+        )
+        .expect("source batch");
+        connect(&db, "source-target", "source", "target");
+
+        db.move_nodes(vec!["source".to_owned()], 10.0, 0.0)
+            .expect("move source");
+        db.sync_inputs("target".to_owned()).expect("sync target");
+
+        let undone = db.undo().expect("undo the source move");
+        assert_eq!(undone.changed.len(), 1);
+        let source = db
+            .get_node("source".to_owned())
+            .expect("get source")
+            .expect("source");
+        assert_eq!(source.x, 0.0, "the upstream move survives a target sync");
+    }
+
+    #[test]
+    fn a_run_on_the_source_invalidates_a_removed_edge_input() {
+        let db = Database::open(":memory:").expect("open");
+        db.insert_nodes(vec![
+            node("source", "Source", "A lake", &[], 0.0, 0.0),
+            node("target", "Target", "", &[], 400.0, 0.0),
+        ])
+        .expect("insert");
+        db.save_run(
+            ResultBatchInput {
+                id: "batch-one".to_owned(),
+                node_id: "source".to_owned(),
+                trigger: "manual".to_owned(),
+                provider: "manual".to_owned(),
+                model: String::new(),
+                params_json: "{}".to_owned(),
+                status: "done".to_owned(),
+                error: None,
+            },
+            vec![ResultItemInput {
+                id: "item-one".to_owned(),
+                position: 0.0,
+                port_id: "out".to_owned(),
+                kind: "text".to_owned(),
+                text: "A lake".to_owned(),
+                asset_id: None,
+                meta_json: None,
+            }],
+        )
+        .expect("source batch");
+        connect(&db, "source-target", "source", "target");
+        let input_id = db
+            .node_detail("target".to_owned())
+            .expect("detail")
+            .expect("target detail")
+            .inputs[0]
+            .id
+            .clone();
+        db.remove_input(input_id).expect("remove snapshot");
+
+        // A run on the source makes the removed snapshot stale; the entry
+        // records the source node from its edge.
+        db.save_run(
+            ResultBatchInput {
+                id: "batch-two".to_owned(),
+                node_id: "source".to_owned(),
+                trigger: "manual".to_owned(),
+                provider: "manual".to_owned(),
+                model: String::new(),
+                params_json: "{}".to_owned(),
+                status: "done".to_owned(),
+                error: None,
+            },
+            vec![ResultItemInput {
+                id: "item-two".to_owned(),
+                position: 0.0,
+                port_id: "out".to_owned(),
+                kind: "text".to_owned(),
+                text: "A dawn".to_owned(),
+                asset_id: None,
+                meta_json: None,
+            }],
+        )
+        .expect("source rerun");
+
+        let undone = db.undo().expect("undo after the source run");
+        assert!(undone.changed.is_empty());
+        assert!(
+            db.node_detail("target".to_owned())
+                .expect("detail")
+                .expect("target detail")
+                .inputs
+                .is_empty(),
+            "the run on the source invalidated the removed snapshot"
+        );
+    }
+
+    #[test]
+    fn a_source_run_invalidates_an_output_entry_on_a_stale_target() {
+        let db = Database::open(":memory:").expect("open");
+        db.insert_nodes(vec![
+            node("source", "Source", "A lake", &[], 0.0, 0.0),
+            node("target", "Target", "", &[], 400.0, 0.0),
+        ])
+        .expect("insert");
+        let run = |db: &Database, batch: &str, node: &str, item: &str, text: &str| {
+            db.save_run(
+                ResultBatchInput {
+                    id: batch.to_owned(),
+                    node_id: node.to_owned(),
+                    trigger: "run".to_owned(),
+                    provider: "mock-text".to_owned(),
+                    model: "mock-text".to_owned(),
+                    params_json: "{}".to_owned(),
+                    status: "done".to_owned(),
+                    error: None,
+                },
+                vec![ResultItemInput {
+                    id: item.to_owned(),
+                    position: 0.0,
+                    port_id: "out".to_owned(),
+                    kind: "text".to_owned(),
+                    text: text.to_owned(),
+                    asset_id: None,
+                    meta_json: None,
+                }],
+            )
+            .expect("run");
+        };
+        run(&db, "batch-source-one", "source", "item-source-one", "one");
+        run(
+            &db,
+            "batch-target",
+            "target",
+            "item-target",
+            "target output",
+        );
+        db.set_manual_text(
+            "target".to_owned(),
+            "manual target".to_owned(),
+            ResultBatchInput {
+                id: "batch-target-manual".to_owned(),
+                node_id: "target".to_owned(),
+                trigger: "manual".to_owned(),
+                provider: "manual".to_owned(),
+                model: String::new(),
+                params_json: "{}".to_owned(),
+                status: "done".to_owned(),
+                error: None,
+            },
+            ResultItemInput {
+                id: "item-target-manual".to_owned(),
+                position: 0.0,
+                port_id: "out".to_owned(),
+                kind: "text".to_owned(),
+                text: "manual target".to_owned(),
+                asset_id: None,
+                meta_json: None,
+            },
+        )
+        .expect("manual target");
+        // The connect marks the target stale while the manual entry is still
+        // pending; the next source run must still invalidate that entry.
+        connect(&db, "source-target", "source", "target");
+        run(&db, "batch-source-two", "source", "item-source-two", "two");
+
+        let undone = db.undo().expect("undo after the source run");
+        assert!(undone.changed.is_empty());
+        let target = db
+            .node_detail("target".to_owned())
+            .expect("detail")
+            .expect("target detail");
+        assert_eq!(target.node.status, "stale");
+        assert_eq!(target.node.body, "manual target");
+        assert_eq!(
+            target.node.output_batch_id.as_deref(),
+            Some("batch-target-manual")
+        );
+    }
+
+    #[test]
+    fn a_status_write_invalidates_pending_history() {
+        let db = Database::open(":memory:").expect("open");
+        db.insert_nodes(vec![node("n", "N", "", &[], 0.0, 0.0)])
+            .expect("insert");
+        db.move_nodes(vec!["n".to_owned()], 10.0, 0.0)
+            .expect("move");
+        db.set_node_status("n".to_owned(), "running".to_owned())
+            .expect("status");
+
+        let undone = db.undo().expect("undo after the status write");
+        assert!(undone.changed.is_empty());
+        assert_eq!(
+            db.get_node("n".to_owned()).expect("get").expect("n").x,
+            10.0
+        );
+    }
+
+    #[test]
+    fn recovering_runs_invalidates_pending_history() {
+        let db = Database::open(":memory:").expect("open");
+        db.insert_nodes(vec![node("n", "N", "", &[], 0.0, 0.0)])
+            .expect("insert");
+        db.set_node_status("n".to_owned(), "running".to_owned())
+            .expect("status");
+        db.save_run(
+            ResultBatchInput {
+                id: "batch".to_owned(),
+                node_id: "n".to_owned(),
+                trigger: "run".to_owned(),
+                provider: "mock-text".to_owned(),
+                model: "mock-text".to_owned(),
+                params_json: "{}".to_owned(),
+                status: "running".to_owned(),
+                error: None,
+            },
+            Vec::new(),
+        )
+        .expect("running batch");
+        db.move_nodes(vec!["n".to_owned()], 10.0, 0.0)
+            .expect("move");
+        assert_eq!(db.recover_runs().expect("recover"), 1);
+
+        let undone = db.undo().expect("undo after recovery");
+        assert!(undone.changed.is_empty());
+        assert_eq!(
+            db.get_node("n".to_owned()).expect("get").expect("n").x,
+            10.0
+        );
+    }
+
+    #[test]
+    fn a_redo_of_settings_marks_an_existing_output_stale() {
+        let db = Database::open(":memory:").expect("open");
+        db.insert_nodes(vec![node("n", "N", "before", &[], 0.0, 0.0)])
+            .expect("insert");
+        db.set_manual_text(
+            "n".to_owned(),
+            "manual".to_owned(),
+            ResultBatchInput {
+                id: "batch-manual".to_owned(),
+                node_id: "n".to_owned(),
+                trigger: "manual".to_owned(),
+                provider: "manual".to_owned(),
+                model: String::new(),
+                params_json: "{}".to_owned(),
+                status: "done".to_owned(),
+                error: None,
+            },
+            ResultItemInput {
+                id: "item-manual".to_owned(),
+                position: 0.0,
+                port_id: "out".to_owned(),
+                kind: "text".to_owned(),
+                text: "manual".to_owned(),
+                asset_id: None,
+                meta_json: None,
+            },
+        )
+        .expect("manual edit");
+        db.set_node_settings("n".to_owned(), "{\"a\":1}".to_owned())
+            .expect("settings");
+
+        db.undo().expect("undo settings");
+        db.undo().expect("undo manual output");
+        db.redo().expect("redo manual output");
+        db.redo().expect("redo settings");
+
+        let detail = db
+            .node_detail("n".to_owned())
+            .expect("detail")
+            .expect("node detail");
+        assert_eq!(detail.node.settings_json, "{\"a\":1}");
+        assert_eq!(detail.node.output_batch_id.as_deref(), Some("batch-manual"));
+        assert_eq!(
+            detail.node.status, "stale",
+            "a redone settings change invalidates an existing output"
+        );
+    }
+
+    #[test]
+    fn a_settings_edit_undoes_and_redoes() {
+        let db = Database::open(":memory:").expect("open");
+        db.insert_nodes(vec![node("n", "N", "", &[], 0.0, 0.0)])
+            .expect("insert");
+        db.set_node_settings("n".to_owned(), "{\"a\":1}".to_owned())
+            .expect("settings");
+
+        db.undo().expect("undo settings");
+        let detail = db
+            .node_detail("n".to_owned())
+            .expect("detail")
+            .expect("node detail");
+        assert_eq!(detail.node.settings_json, "{}");
+        assert_eq!(detail.node.status, "idle");
+
+        db.redo().expect("redo settings");
+        let detail = db
+            .node_detail("n".to_owned())
+            .expect("detail")
+            .expect("node detail");
+        assert_eq!(detail.node.settings_json, "{\"a\":1}");
+    }
+
+    #[test]
     fn reordering_inputs_is_undoable() {
         let db = Database::open(":memory:").expect("open");
         db.insert_nodes(vec![node("n", "N", "", &[], 0.0, 0.0)])
@@ -3312,7 +4766,7 @@ mod tests {
     }
 
     #[test]
-    fn undoing_a_reconnect_after_a_run_drops_the_stale_snapshot() {
+    fn a_later_run_invalidates_a_reconnect_entry() {
         let db = Database::open(":memory:").expect("open");
         db.insert_nodes(vec![
             node("first", "First", "A lake", &[], 0.0, 0.0),
@@ -3386,25 +4840,31 @@ mod tests {
         .expect("second rerun");
         db.sync_inputs("target".to_owned()).expect("sync");
 
-        db.undo().expect("undo reconnect");
+        // The rerun and the input sync made the reconnect entry stale; undo
+        // must not resurrect either the old or the replaced snapshot.
+        let undone = db.undo().expect("undo after a run and sync");
+        assert!(
+            undone.changed.is_empty(),
+            "the non-history writes invalidate the reconnect entry"
+        );
         let inputs = db
             .node_detail("target".to_owned())
             .expect("detail")
             .expect("target detail")
             .inputs;
         assert_eq!(inputs.len(), 1);
-        assert_eq!(inputs[0].item_id.as_deref(), Some("i1"));
-        assert_eq!(inputs[0].text, "first item");
+        assert_eq!(inputs[0].item_id.as_deref(), Some("j2"));
+        assert_eq!(inputs[0].text, "second again");
 
-        db.redo().expect("redo reconnect");
+        let redone = db.redo().expect("redo after invalidation");
+        assert!(redone.changed.is_empty());
         let inputs = db
             .node_detail("target".to_owned())
             .expect("detail")
             .expect("target detail")
             .inputs;
         assert_eq!(inputs.len(), 1);
-        assert_eq!(inputs[0].item_id.as_deref(), Some("j1"));
-        assert_eq!(inputs[0].text, "second item");
+        assert_eq!(inputs[0].item_id.as_deref(), Some("j2"));
     }
 
     #[test]

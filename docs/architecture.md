@@ -151,7 +151,10 @@ result batches and the assets.
 - Result batches and their items are immutable. A rerun or manual text edit
   appends a batch and moves the node's output; old batches remain for
   downstream snapshots. Provider runs are not undo history, while connect,
-  delete, input and manual-text edits are.
+  delete, input and manual-text edits are. A run invalidates pending history
+  on the nodes and batches it touches, including direct downstream targets
+  with an output, so undo never restores an older output or input snapshot
+  over the run.
 - Statuses are `idle`, `stale`, `running`, `done`, `failed`, `cancelled` and
   `interrupted`. A changed upstream marks an existing downstream result stale;
   startup turns abandoned runs into `interrupted`.

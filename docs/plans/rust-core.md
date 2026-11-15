@@ -231,7 +231,6 @@ impl Document {
         this: Instance<Document>,
         id: String,
         title: String,
-        body: String,
         tags: Vec<String>,
     ) -> Result<ChangeSet, String>;
     pub async fn delete_nodes(

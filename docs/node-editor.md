@@ -97,11 +97,16 @@ upload card has no output port.
   member port to the single external target. If any proposed edge would
   overflow a port, the whole gesture is rejected and nothing is written.
 - Provider runs never enter undo; document edits (connect, reconnect, delete,
-  input changes, manual text, settings) do.
+  input changes, manual text, settings) do. A run, input sync or asset write
+  invalidates pending entries that reference the rows it touched; a run also
+  records direct downstream targets with an output, so undo never restores
+  an older body, output pointer or input snapshot over newer work.
 - Undoing a settings edit restores only `settings_json` (and bumps the
-  revision); a later run's body, output and status are not history and survive
-  the undo. An existing output becomes stale when its settings change, until
-  the node runs again.
+  revision); body, output and status belong to runs. A manual text or upload
+  undo restores its output only while the node still has the batch and body
+  that edit wrote; otherwise the whole guarded entry is skipped and dropped.
+  An existing output becomes stale when its settings change, until the node
+  runs again.
 - Any write that changes a node's searchable text — a title/body/tags edit, a
   manual text edit or a successful run — rewrites its FTS row in the same
   transaction, so search matches the current text rather than the inserted one.

@@ -16,7 +16,7 @@ use crate::edge_index;
 use crate::entity::{
     documents, edges, node_inputs, nodes, nodes_fts, nodes_rtree, result_batches, result_items,
 };
-use crate::history::{EdgeRow, HistoryOp, InputRow, NodeRow};
+use crate::history::{EdgeRow, HistoryOp, HistoryRefs, InputRow, NodeRow};
 use crate::types::{
     ChangeSet, EdgeInput, EdgePoint, EdgeSummary, InputItemInput, NodeBounds, NodeInput,
     ResultBatchInput, ResultItemInput,
@@ -27,10 +27,26 @@ pub struct Mutation {
     pub changes: ChangeSet,
     pub forward: Vec<HistoryOp>,
     pub inverse: Vec<HistoryOp>,
+    /// References the ops themselves cannot see, such as an upload's assets.
+    pub refs: HistoryRefs,
+}
+
+impl Mutation {
+    fn new(changes: ChangeSet, forward: Vec<HistoryOp>, inverse: Vec<HistoryOp>) -> Self {
+        Self {
+            changes,
+            forward,
+            inverse,
+            refs: HistoryRefs::default(),
+        }
+    }
 }
 
 pub fn insert_nodes(conn: &DatabaseConnection, inputs: Vec<NodeInput>) -> Result<Mutation, String> {
     conn.transaction::<_, _, DbErr>(|txn| {
+        if inputs.is_empty() {
+            return no_op(txn);
+        }
         let mut changed = Vec::with_capacity(inputs.len());
         let mut forward = Vec::with_capacity(inputs.len());
         let mut inverse = Vec::with_capacity(inputs.len());
@@ -44,8 +60,8 @@ pub fn insert_nodes(conn: &DatabaseConnection, inputs: Vec<NodeInput>) -> Result
         inverse.reverse();
 
         let rev = bump_document_rev(txn)?;
-        Ok(Mutation {
-            changes: ChangeSet {
+        Ok(Mutation::new(
+            ChangeSet {
                 rev: rev as f64,
                 changed,
                 removed: Vec::new(),
@@ -54,7 +70,7 @@ pub fn insert_nodes(conn: &DatabaseConnection, inputs: Vec<NodeInput>) -> Result
             },
             forward,
             inverse,
-        })
+        ))
     })
     .map_err(|error| error.to_string())
 }
@@ -66,6 +82,9 @@ pub fn move_nodes(
     dy: f64,
 ) -> Result<Mutation, String> {
     conn.transaction::<_, _, DbErr>(|txn| {
+        if ids.is_empty() || (dx == 0.0 && dy == 0.0) {
+            return no_op(txn);
+        }
         let mut changed = Vec::with_capacity(ids.len());
         let mut forward = Vec::with_capacity(ids.len());
         let mut inverse = Vec::with_capacity(ids.len());
@@ -76,21 +95,25 @@ pub fn move_nodes(
             let y = before.y + dy;
             let row = update_position_tx(txn, &before, x, y)?;
             changed.push(row.summary());
-            forward.push(HistoryOp::Position {
+            forward.push(HistoryOp::NodeGeometry {
                 id: id.clone(),
                 x,
                 y,
+                width: row.width,
+                height: row.height,
             });
-            inverse.push(HistoryOp::Position {
+            inverse.push(HistoryOp::NodeGeometry {
                 id: id.clone(),
                 x: before.x,
                 y: before.y,
+                width: before.width,
+                height: before.height,
             });
         }
 
         let rev = bump_document_rev(txn)?;
-        Ok(Mutation {
-            changes: ChangeSet {
+        Ok(Mutation::new(
+            ChangeSet {
                 rev: rev as f64,
                 changed,
                 removed: Vec::new(),
@@ -99,7 +122,7 @@ pub fn move_nodes(
             },
             forward,
             inverse,
-        })
+        ))
     })
     .map_err(|error| error.to_string())
 }
@@ -110,19 +133,22 @@ pub fn set_node_bounds(
 ) -> Result<Mutation, String> {
     conn.transaction::<_, _, DbErr>(|txn| {
         let (changed_rows, pairs) = set_node_bounds_batched(txn, &bounds)?;
+        if pairs.is_empty() {
+            return no_op(txn);
+        }
         let changed = changed_rows.iter().map(|row| row.summary()).collect();
         let mut forward = Vec::with_capacity(pairs.len());
         let mut inverse = Vec::with_capacity(pairs.len());
 
         for (before, next) in &pairs {
-            forward.push(HistoryOp::Bounds {
+            forward.push(HistoryOp::NodeGeometry {
                 id: next.id.clone(),
                 x: next.x,
                 y: next.y,
                 width: next.width,
                 height: next.height,
             });
-            inverse.push(HistoryOp::Bounds {
+            inverse.push(HistoryOp::NodeGeometry {
                 id: before.id.clone(),
                 x: before.x,
                 y: before.y,
@@ -132,8 +158,8 @@ pub fn set_node_bounds(
         }
 
         let rev = bump_document_rev(txn)?;
-        Ok(Mutation {
-            changes: ChangeSet {
+        Ok(Mutation::new(
+            ChangeSet {
                 rev: rev as f64,
                 changed,
                 removed: Vec::new(),
@@ -142,7 +168,7 @@ pub fn set_node_bounds(
             },
             forward,
             inverse,
-        })
+        ))
     })
     .map_err(|error| error.to_string())
 }
@@ -151,41 +177,46 @@ pub fn set_node_text(
     conn: &DatabaseConnection,
     id: String,
     title: String,
-    body: String,
     tags: Vec<String>,
 ) -> Result<Mutation, String> {
     conn.transaction::<_, _, DbErr>(|txn| {
         let before = find_node_tx(txn, &id)?;
-        let row = update_text_tx(txn, &before, &title, &body, &tags)?;
+        let tags_json = serde_json::to_string(&tags)
+            .map_err(|error| DbErr::Custom(format!("tags are not serializable: {error}")))?;
+        if before.title == title && before.tags_json == tags_json {
+            return no_op(txn);
+        }
+        let row = update_text_tx(txn, &before, &title, &tags)?;
         let rev = bump_document_rev(txn)?;
 
-        Ok(Mutation {
-            changes: ChangeSet {
+        Ok(Mutation::new(
+            ChangeSet {
                 rev: rev as f64,
                 changed: vec![row.summary()],
                 removed: Vec::new(),
                 edges_changed: Vec::new(),
                 edges_removed: Vec::new(),
             },
-            forward: vec![HistoryOp::Text {
+            vec![HistoryOp::NodeText {
                 id: id.clone(),
                 title,
-                body,
                 tags,
             }],
-            inverse: vec![HistoryOp::Text {
+            vec![HistoryOp::NodeText {
                 id,
                 title: before.title,
-                body: before.body,
                 tags: serde_json::from_str(&before.tags_json).unwrap_or_default(),
             }],
-        })
+        ))
     })
     .map_err(|error| error.to_string())
 }
 
 pub fn delete_nodes(conn: &DatabaseConnection, ids: Vec<String>) -> Result<Mutation, String> {
     conn.transaction::<_, _, DbErr>(|txn| {
+        if ids.is_empty() {
+            return no_op(txn);
+        }
         let mut changed = Vec::new();
         let mut removed = Vec::with_capacity(ids.len());
         let mut inverse = Vec::new();
@@ -259,6 +290,7 @@ pub fn delete_nodes(conn: &DatabaseConnection, ids: Vec<String>) -> Result<Mutat
             },
             forward,
             inverse,
+            refs: HistoryRefs::default(),
         })
     })
     .map_err(|error| error.to_string())
@@ -266,6 +298,9 @@ pub fn delete_nodes(conn: &DatabaseConnection, ids: Vec<String>) -> Result<Mutat
 
 pub fn insert_edges(conn: &DatabaseConnection, inputs: Vec<EdgeInput>) -> Result<Mutation, String> {
     conn.transaction::<_, _, DbErr>(|txn| {
+        if inputs.is_empty() {
+            return no_op(txn);
+        }
         let mut changed = Vec::with_capacity(inputs.len());
         let mut forward = Vec::with_capacity(inputs.len());
         let mut inverse = Vec::with_capacity(inputs.len());
@@ -291,6 +326,7 @@ pub fn insert_edges(conn: &DatabaseConnection, inputs: Vec<EdgeInput>) -> Result
             },
             forward,
             inverse,
+            refs: HistoryRefs::default(),
         })
     })
     .map_err(|error| error.to_string())
@@ -298,6 +334,9 @@ pub fn insert_edges(conn: &DatabaseConnection, inputs: Vec<EdgeInput>) -> Result
 
 pub fn delete_edges(conn: &DatabaseConnection, ids: Vec<String>) -> Result<Mutation, String> {
     conn.transaction::<_, _, DbErr>(|txn| {
+        if ids.is_empty() {
+            return no_op(txn);
+        }
         let mut changed = Vec::new();
         let mut removed = Vec::with_capacity(ids.len());
         let mut forward = Vec::with_capacity(ids.len());
@@ -335,6 +374,7 @@ pub fn delete_edges(conn: &DatabaseConnection, ids: Vec<String>) -> Result<Mutat
             },
             forward,
             inverse,
+            refs: HistoryRefs::default(),
         })
     })
     .map_err(|error| error.to_string())
@@ -353,6 +393,9 @@ pub fn connect_edges(
     inputs: Vec<EdgeInput>,
 ) -> Result<Mutation, String> {
     conn.transaction::<_, _, DbErr>(|txn| {
+        if inputs.is_empty() {
+            return no_op(txn);
+        }
         let mut changed_by_id: BTreeMap<String, nodes::Model> = BTreeMap::new();
         let mut forward = Vec::new();
         let mut desired_inverse = Vec::new();
@@ -387,6 +430,7 @@ pub fn connect_edges(
             },
             forward,
             inverse,
+            refs: HistoryRefs::default(),
         })
     })
     .map_err(|error| error.to_string())
@@ -589,6 +633,7 @@ pub fn update_edge(conn: &DatabaseConnection, input: EdgeInput) -> Result<Mutati
             },
             forward,
             inverse: desired_inverse,
+            refs: HistoryRefs::default(),
         })
     })
     .map_err(|error| error.to_string())
@@ -615,6 +660,13 @@ pub fn add_input(conn: &DatabaseConnection, input: InputItemInput) -> Result<Mut
         insert_input_row_tx(txn, &row)?;
 
         let changed = vec![node_row(&touch_node_tx(txn, &row.node_id)?).summary()];
+        let mut refs = HistoryRefs::default();
+        if row.origin == "edge"
+            && let Some(edge_id) = &row.edge_id
+            && let Some(edge) = edges::Entity::find_by_id(edge_id.clone()).one(txn)?
+        {
+            refs.node(edge.from_id);
+        }
 
         let rev = bump_document_rev(txn)?;
         Ok(Mutation {
@@ -627,6 +679,7 @@ pub fn add_input(conn: &DatabaseConnection, input: InputItemInput) -> Result<Mut
             },
             forward: vec![HistoryOp::InsertInput(row.clone())],
             inverse: vec![HistoryOp::DeleteInput { id: row.id }],
+            refs,
         })
     })
     .map_err(|error| error.to_string())
@@ -639,6 +692,13 @@ pub fn remove_input(conn: &DatabaseConnection, id: String) -> Result<Mutation, S
         delete_input_tx(txn, &id)?;
 
         let changed = vec![node_row(&touch_node_tx(txn, &row.node_id)?).summary()];
+        let mut refs = HistoryRefs::default();
+        if row.origin == "edge"
+            && let Some(edge_id) = &row.edge_id
+            && let Some(edge) = edges::Entity::find_by_id(edge_id.clone()).one(txn)?
+        {
+            refs.node(edge.from_id);
+        }
 
         let rev = bump_document_rev(txn)?;
         Ok(Mutation {
@@ -651,6 +711,7 @@ pub fn remove_input(conn: &DatabaseConnection, id: String) -> Result<Mutation, S
             },
             forward: vec![HistoryOp::DeleteInput { id: id.clone() }],
             inverse: vec![HistoryOp::InsertInput(input_row(&row))],
+            refs,
         })
     })
     .map_err(|error| error.to_string())
@@ -683,6 +744,9 @@ pub fn reorder_inputs(
                 after.push((row.id.clone(), position));
             }
         }
+        if after == before {
+            return no_op(txn);
+        }
 
         set_input_positions_tx(txn, &node_id, &after)?;
         let changed = vec![node_row(&touch_node_tx(txn, &node_id)?).summary()];
@@ -704,6 +768,7 @@ pub fn reorder_inputs(
                 node_id,
                 order: before,
             }],
+            refs: HistoryRefs::default(),
         })
     })
     .map_err(|error| error.to_string())
@@ -713,9 +778,11 @@ pub fn reorder_inputs(
 /// Rebuilds a node's edge inputs from the current batches of every connected
 /// source. Local inputs keep their order; their old exclusions are cleared,
 /// as a regeneration starts from the sources' current outputs.
-pub fn sync_inputs(conn: &DatabaseConnection, node_id: String) -> Result<(), String> {
+pub fn sync_inputs(conn: &DatabaseConnection, node_id: String) -> Result<HistoryRefs, String> {
     conn.transaction::<_, _, DbErr>(|txn| {
         find_node_tx(txn, &node_id)?;
+        let mut refs = HistoryRefs::default();
+        refs.node(node_id.clone());
         let current = inputs_for_node_tx(txn, &node_id)?;
         let mut locals = Vec::new();
         let mut edge_rows = Vec::new();
@@ -776,7 +843,7 @@ pub fn sync_inputs(conn: &DatabaseConnection, node_id: String) -> Result<(), Str
         set_input_positions_tx(txn, &node_id, &order)?;
         touch_node_tx(txn, &node_id)?;
         bump_document_rev(txn)?;
-        Ok(())
+        Ok(refs)
     })
     .map_err(|error| error.to_string())
 }
@@ -788,6 +855,9 @@ pub fn set_node_settings(
 ) -> Result<Mutation, String> {
     conn.transaction::<_, _, DbErr>(|txn| {
         let before = find_node_tx(txn, &id)?;
+        if before.settings_json == settings_json {
+            return no_op(txn);
+        }
         let after = apply_settings_tx(txn, &before, settings_json.clone())?;
         let rev = bump_document_rev(txn)?;
 
@@ -801,14 +871,17 @@ pub fn set_node_settings(
             },
             // Only the settings are history: a run's output and body belong
             // to the run and must survive an undo of this edit.
-            forward: vec![HistoryOp::Settings {
+            forward: vec![HistoryOp::NodeSettings {
                 id: id.clone(),
                 settings_json,
+                mark_stale: true,
             }],
-            inverse: vec![HistoryOp::Settings {
+            inverse: vec![HistoryOp::NodeSettings {
                 id,
                 settings_json: before.settings_json,
+                mark_stale: false,
             }],
+            refs: HistoryRefs::default(),
         })
     })
     .map_err(|error| error.to_string())
@@ -830,6 +903,7 @@ pub fn set_manual_text(
             ));
         }
         let before = find_node_tx(txn, &id)?;
+        let before_row = node_row(&before);
         insert_batch_tx(txn, &batch)?;
         insert_result_item_tx(txn, &batch.id, &item)?;
 
@@ -854,6 +928,9 @@ pub fn set_manual_text(
 
         // The batch itself stays on undo, like a provider batch: it may still
         // be referenced by a downstream input snapshot.
+        let mut refs = HistoryRefs::default();
+        refs.batch(Some(&batch.id));
+        refs.asset(item.asset_id.as_deref());
         let rev = bump_document_rev(txn)?;
         Ok(Mutation {
             changes: ChangeSet {
@@ -863,8 +940,25 @@ pub fn set_manual_text(
                 edges_changed: Vec::new(),
                 edges_removed: Vec::new(),
             },
-            forward: vec![HistoryOp::Replace(after)],
-            inverse: vec![HistoryOp::Replace(node_row(&before))],
+            forward: vec![HistoryOp::NodeOutput {
+                id: id.clone(),
+                from_batch_id: before_row.output_batch_id.clone(),
+                from_body: before_row.body.clone(),
+                from_status: before_row.status.clone(),
+                to_batch_id: after.output_batch_id.clone(),
+                to_body: after.body.clone(),
+                to_status: after.status.clone(),
+            }],
+            inverse: vec![HistoryOp::NodeOutput {
+                id,
+                from_batch_id: after.output_batch_id.clone(),
+                from_body: after.body.clone(),
+                from_status: after.status.clone(),
+                to_batch_id: before_row.output_batch_id,
+                to_body: before_row.body,
+                to_status: before_row.status,
+            }],
+            refs,
         })
     })
     .map_err(|error| error.to_string())
@@ -902,6 +996,7 @@ pub fn set_manual_upload(
             ));
         }
         let before = find_node_tx(txn, &id)?;
+        let before_row = node_row(&before);
         insert_batch_tx(txn, &batch)?;
         for item in &items {
             insert_result_item_tx(txn, &batch.id, item)?;
@@ -940,6 +1035,61 @@ pub fn set_manual_upload(
                 .map(|row| node_row(&row).summary()),
         );
 
+        let mut forward = Vec::with_capacity(3);
+        let mut inverse = Vec::with_capacity(3);
+        forward.push(HistoryOp::NodeSettings {
+            id: id.clone(),
+            settings_json: after.settings_json.clone(),
+            mark_stale: true,
+        });
+        if let Some(next) = &bounds {
+            forward.push(HistoryOp::NodeGeometry {
+                id: id.clone(),
+                x: next.x,
+                y: next.y,
+                width: next.width,
+                height: next.height,
+            });
+            inverse.push(HistoryOp::NodeGeometry {
+                id: id.clone(),
+                x: before_row.x,
+                y: before_row.y,
+                width: before_row.width,
+                height: before_row.height,
+            });
+        }
+        inverse.push(HistoryOp::NodeSettings {
+            id: id.clone(),
+            settings_json: before_row.settings_json.clone(),
+            mark_stale: false,
+        });
+        // Undo reverses the inverse list, so output is restored first, then
+        // settings, then geometry. Redo applies the forward list, where the
+        // output comes last so the settings write cannot mark it stale.
+        forward.push(HistoryOp::NodeOutput {
+            id: id.clone(),
+            from_batch_id: before_row.output_batch_id.clone(),
+            from_body: before_row.body.clone(),
+            from_status: before_row.status.clone(),
+            to_batch_id: after.output_batch_id.clone(),
+            to_body: after.body.clone(),
+            to_status: after.status.clone(),
+        });
+        inverse.push(HistoryOp::NodeOutput {
+            id,
+            from_batch_id: after.output_batch_id.clone(),
+            from_body: after.body.clone(),
+            from_status: after.status.clone(),
+            to_batch_id: before_row.output_batch_id,
+            to_body: before_row.body,
+            to_status: before_row.status,
+        });
+
+        let mut refs = HistoryRefs::default();
+        refs.batch(Some(&batch.id));
+        for item in &items {
+            refs.asset(item.asset_id.as_deref());
+        }
         let rev = bump_document_rev(txn)?;
         Ok(Mutation {
             changes: ChangeSet {
@@ -949,8 +1099,9 @@ pub fn set_manual_upload(
                 edges_changed: Vec::new(),
                 edges_removed: Vec::new(),
             },
-            forward: vec![HistoryOp::Replace(after)],
-            inverse: vec![HistoryOp::Replace(node_row(&before))],
+            forward,
+            inverse,
+            refs,
         })
     })
     .map_err(|error| error.to_string())
@@ -993,6 +1144,11 @@ pub fn insert_upload_node(
         })
         .exec(txn)?;
         let after = node_row(&updated);
+        let mut refs = HistoryRefs::default();
+        refs.batch(Some(&batch.id));
+        for item in &items {
+            refs.asset(item.asset_id.as_deref());
+        }
         let rev = bump_document_rev(txn)?;
         Ok(Mutation {
             changes: ChangeSet {
@@ -1004,6 +1160,7 @@ pub fn insert_upload_node(
             },
             forward: vec![HistoryOp::Insert(after)],
             inverse: vec![HistoryOp::Delete { id: node.id }],
+            refs,
         })
     })
     .map_err(|error| error.to_string())
@@ -1015,7 +1172,7 @@ pub fn save_run(
     conn: &DatabaseConnection,
     batch: ResultBatchInput,
     items: Vec<ResultItemInput>,
-) -> Result<ChangeSet, String> {
+) -> Result<(ChangeSet, HistoryRefs), String> {
     let family = batch.node_id.clone();
     conn.transaction::<_, _, DbErr>(|txn| {
         find_node_tx(txn, &family)?;
@@ -1048,24 +1205,37 @@ pub fn save_run(
         }
         let updated = nodes::Entity::update(active).exec(txn)?;
 
+        let mut refs = HistoryRefs::default();
+        refs.node(family.clone());
+        refs.batch(Some(&batch.id));
+        for item in &items {
+            refs.asset(item.asset_id.as_deref());
+        }
+
         let mut changed = vec![node_row(&updated).summary()];
         if batch.status == "done" {
             refresh_fts_tx(txn, &updated)?;
-            changed.extend(
-                mark_downstream_stale_tx(txn, &family)?
-                    .into_iter()
-                    .map(|row| node_row(&row).summary()),
-            );
+            for row in mark_downstream_stale_tx(txn, &family)? {
+                changed.push(node_row(&row).summary());
+            }
+            // Include targets that were already stale: their older output
+            // entries must not survive the source's new batch.
+            for target in downstream_output_targets_tx(txn, &family)? {
+                refs.node(target);
+            }
         }
 
         let rev = bump_document_rev(txn)?;
-        Ok(ChangeSet {
-            rev: rev as f64,
-            changed,
-            removed: Vec::new(),
-            edges_changed: Vec::new(),
-            edges_removed: Vec::new(),
-        })
+        Ok((
+            ChangeSet {
+                rev: rev as f64,
+                changed,
+                removed: Vec::new(),
+                edges_changed: Vec::new(),
+                edges_removed: Vec::new(),
+            },
+            refs,
+        ))
     })
     .map_err(|error| error.to_string())
 }
@@ -1076,7 +1246,7 @@ pub fn set_node_status(
     conn: &DatabaseConnection,
     id: String,
     status: String,
-) -> Result<ChangeSet, String> {
+) -> Result<(ChangeSet, HistoryRefs), String> {
     conn.transaction::<_, _, DbErr>(|txn| {
         let before = find_node_tx(txn, &id)?;
         let updated = nodes::Entity::update(nodes::ActiveModel {
@@ -1087,24 +1257,32 @@ pub fn set_node_status(
             ..Default::default()
         })
         .exec(txn)?;
+        let mut refs = HistoryRefs::default();
+        refs.node(id);
         let rev = bump_document_rev(txn)?;
-        Ok(ChangeSet {
-            rev: rev as f64,
-            changed: vec![node_row(&updated).summary()],
-            removed: Vec::new(),
-            edges_changed: Vec::new(),
-            edges_removed: Vec::new(),
-        })
+        Ok((
+            ChangeSet {
+                rev: rev as f64,
+                changed: vec![node_row(&updated).summary()],
+                removed: Vec::new(),
+                edges_changed: Vec::new(),
+                edges_removed: Vec::new(),
+            },
+            refs,
+        ))
     })
     .map_err(|error| error.to_string())
 }
 
 /// Marks runs left running by a previous process as interrupted.
-pub fn recover_runs(conn: &DatabaseConnection) -> Result<u32, String> {
+pub fn recover_runs(conn: &DatabaseConnection) -> Result<(u32, HistoryRefs), String> {
     conn.transaction::<_, _, DbErr>(|txn| {
         let running_nodes = nodes::Entity::find()
             .filter(nodes::Column::DocumentId.eq(DOCUMENT_ID))
             .filter(nodes::Column::Status.eq("running"))
+            .all(txn)?;
+        let running_batches = result_batches::Entity::find()
+            .filter(result_batches::Column::Status.eq("running"))
             .all(txn)?;
         for node in &running_nodes {
             nodes::Entity::update(nodes::ActiveModel {
@@ -1125,30 +1303,169 @@ pub fn recover_runs(conn: &DatabaseConnection) -> Result<u32, String> {
             .filter(result_batches::Column::Status.eq("running"))
             .exec(txn)?;
 
+        let mut refs = HistoryRefs::default();
+        for node in &running_nodes {
+            refs.node(node.id.clone());
+        }
+        for batch in &running_batches {
+            refs.batch(Some(&batch.id));
+        }
         if !running_nodes.is_empty() {
             bump_document_rev(txn)?;
         }
-        Ok(running_nodes.len() as u32)
+        Ok((running_nodes.len() as u32, refs))
     })
     .map_err(|error| error.to_string())
 }
 
-pub fn apply_ops(conn: &DatabaseConnection, ops: &[HistoryOp]) -> Result<ChangeSet, String> {
+/// The result of applying one history entry.
+pub enum ApplyOutcome {
+    Applied(ChangeSet),
+    /// A guarded output no longer matches, or an operand is gone; no op in
+    /// the entry ran.
+    Stale,
+}
+
+/// Whether the entry's expected state is gone. Missing operands are stale,
+/// not errors: a non-history write can invalidate the entry that would have
+/// restored them, and a stale entry must be dropped rather than wedging undo.
+fn node_available(
+    txn: &DatabaseTransaction,
+    id: &str,
+    inserted: &BTreeSet<String>,
+) -> Result<bool, DbErr> {
+    Ok(inserted.contains(id) || find_node_opt_tx(txn, id)?.is_some())
+}
+
+fn edge_available(
+    txn: &DatabaseTransaction,
+    id: &str,
+    inserted: &BTreeSet<String>,
+) -> Result<bool, DbErr> {
+    Ok(inserted.contains(id) || find_edge_opt_tx(txn, id)?.is_some())
+}
+
+fn op_is_stale(
+    txn: &DatabaseTransaction,
+    op: &HistoryOp,
+    inserted_nodes: &BTreeSet<String>,
+    inserted_edges: &BTreeSet<String>,
+) -> Result<bool, DbErr> {
+    match op {
+        HistoryOp::Insert(row) => Ok(find_node_opt_tx(txn, &row.id)?.is_some()),
+        HistoryOp::Delete { id } => Ok(!node_available(txn, id, inserted_nodes)?),
+        HistoryOp::NodeGeometry { id, .. }
+        | HistoryOp::NodeText { id, .. }
+        | HistoryOp::NodeSettings { id, .. }
+        | HistoryOp::InputOrder { node_id: id, .. } => {
+            Ok(!node_available(txn, id, inserted_nodes)?)
+        }
+        HistoryOp::NodeOutput {
+            id,
+            from_batch_id,
+            from_body,
+            ..
+        } => {
+            if inserted_nodes.contains(id) {
+                return Ok(true);
+            }
+            let Some(node) = find_node_opt_tx(txn, id)? else {
+                return Ok(true);
+            };
+            // Status is restored by the op but is not guarded: undoable
+            // input/settings edits legitimately mark a node stale without
+            // replacing its output, and non-history status writes invalidate
+            // the entry through its reference set.
+            Ok(node.output_batch_id != *from_batch_id || node.body.as_str() != from_body.as_str())
+        }
+        HistoryOp::InsertEdge(row) => {
+            if find_edge_opt_tx(txn, &row.id)?.is_some() {
+                return Ok(true);
+            }
+            if already_connected_tx(
+                txn,
+                &row.from_id,
+                &row.from_port,
+                &row.to_id,
+                &row.to_port,
+                &row.id,
+            )? {
+                return Ok(true);
+            }
+            Ok(!node_available(txn, &row.from_id, inserted_nodes)?
+                || !node_available(txn, &row.to_id, inserted_nodes)?)
+        }
+        HistoryOp::ReplaceEdge(row) => {
+            if !edge_available(txn, &row.id, inserted_edges)? {
+                return Ok(true);
+            }
+            if already_connected_tx(
+                txn,
+                &row.from_id,
+                &row.from_port,
+                &row.to_id,
+                &row.to_port,
+                &row.id,
+            )? {
+                return Ok(true);
+            }
+            Ok(!node_available(txn, &row.from_id, inserted_nodes)?
+                || !node_available(txn, &row.to_id, inserted_nodes)?)
+        }
+        HistoryOp::DeleteEdge { id } => Ok(!edge_available(txn, id, inserted_edges)?),
+        HistoryOp::InsertInput(row) => Ok(!node_available(txn, &row.node_id, inserted_nodes)?),
+        HistoryOp::DeleteInput { .. } => Ok(false),
+    }
+}
+
+pub fn apply_ops(conn: &DatabaseConnection, ops: &[HistoryOp]) -> Result<ApplyOutcome, String> {
     conn.transaction::<_, _, DbErr>(|txn| {
+        // Guard the whole entry before writing anything. A stale guarded op
+        // or a missing operand must not leave an upload half-applied. Ops in
+        // one entry may restore entities other ops use, so collect the
+        // inserted ids first.
+        let mut inserted_nodes = BTreeSet::new();
+        let mut inserted_edges = BTreeSet::new();
+        for op in ops {
+            match op {
+                HistoryOp::Insert(row) => {
+                    let fresh = inserted_nodes.insert(row.id.clone());
+                    if !fresh {
+                        return Ok(ApplyOutcome::Stale);
+                    }
+                }
+                HistoryOp::InsertEdge(row) => {
+                    let fresh = inserted_edges.insert(row.id.clone());
+                    if !fresh {
+                        return Ok(ApplyOutcome::Stale);
+                    }
+                }
+                _ => {}
+            }
+        }
+        for op in ops {
+            if op_is_stale(txn, op, &inserted_nodes, &inserted_edges)? {
+                return Ok(ApplyOutcome::Stale);
+            }
+        }
+
         let mut changed = Vec::new();
         let mut removed = Vec::new();
         let mut edges_changed = Vec::new();
         let mut edges_removed = Vec::new();
         let mut touched = BTreeSet::new();
 
-        // An all-Bounds run is one gesture's undo or redo. Applying the whole
-        // run at the end lets the edge index see every final rect in one pass;
-        // a mixed run keeps its recorded order so unrelated ops cannot move
-        // around a geometry write.
-        let coalesced_bounds = if ops.iter().all(|op| matches!(op, HistoryOp::Bounds { .. })) {
+        // An all-geometry run is one gesture's undo or redo. Applying the
+        // whole run at the end lets the edge index see every final rect in one
+        // pass; a mixed run keeps its recorded order so unrelated ops cannot
+        // move around a geometry write.
+        let coalesced_geometry = if ops
+            .iter()
+            .all(|op| matches!(op, HistoryOp::NodeGeometry { .. }))
+        {
             let mut collected: Vec<NodeBounds> = Vec::new();
             for op in ops {
-                let HistoryOp::Bounds {
+                let HistoryOp::NodeGeometry {
                     id,
                     x,
                     y,
@@ -1177,38 +1494,45 @@ pub fn apply_ops(conn: &DatabaseConnection, ops: &[HistoryOp]) -> Result<ChangeS
         } else {
             Vec::new()
         };
+        let mut dirty = false;
 
         for op in ops {
             match op {
                 HistoryOp::Insert(row) => {
                     insert_row_tx(txn, row)?;
                     changed.push(row.summary());
-                }
-                HistoryOp::Replace(row) => {
-                    let row = replace_node_tx(txn, row)?;
-                    changed.push(node_row(&row).summary());
+                    dirty = true;
                 }
                 HistoryOp::Delete { id } => {
                     let row = find_node_tx(txn, id)?;
+                    // Mirror delete_nodes: edge snapshots on surviving nodes
+                    // have no FK to the edge or item, so remove them here.
+                    let removed_inputs = inputs_for_nodes_tx(txn, std::slice::from_ref(id))?;
+                    let mut survivors = BTreeSet::new();
+                    for input in &removed_inputs {
+                        delete_input_tx(txn, &input.id)?;
+                        if input.node_id != id.as_str() {
+                            survivors.insert(input.node_id.clone());
+                        }
+                    }
                     for edge in edges_for_node_tx(txn, id)? {
                         edges_removed.push(edge.id);
                     }
                     delete_node_tx(txn, &row)?;
+                    for survivor in survivors {
+                        changed.push(node_row(&touch_node_tx(txn, &survivor)?).summary());
+                    }
                     removed.push(id.clone());
+                    dirty = true;
                 }
-                HistoryOp::Position { id, x, y } => {
-                    let before = find_node_tx(txn, id)?;
-                    let row = update_position_tx(txn, &before, *x, *y)?;
-                    changed.push(row.summary());
-                }
-                HistoryOp::Bounds {
+                HistoryOp::NodeGeometry {
                     id,
                     x,
                     y,
                     width,
                     height,
                 } => {
-                    if coalesced_bounds.is_empty() {
+                    if coalesced_geometry.is_empty() {
                         let bounds = [NodeBounds {
                             id: id.clone(),
                             x: *x,
@@ -1217,31 +1541,69 @@ pub fn apply_ops(conn: &DatabaseConnection, ops: &[HistoryOp]) -> Result<ChangeS
                             height: *height,
                         }];
                         let (rows, _) = set_node_bounds_batched(txn, &bounds)?;
+                        if !rows.is_empty() {
+                            dirty = true;
+                        }
                         for row in rows {
                             changed.push(row.summary());
                         }
                     }
                 }
-                HistoryOp::Text {
+                HistoryOp::NodeText { id, title, tags } => {
+                    let before = find_node_tx(txn, id)?;
+                    let row = update_text_tx(txn, &before, title, tags)?;
+                    changed.push(row.summary());
+                    dirty = true;
+                }
+                HistoryOp::NodeSettings {
                     id,
-                    title,
-                    body,
-                    tags,
+                    settings_json,
+                    mark_stale,
                 } => {
                     let before = find_node_tx(txn, id)?;
-                    let row = update_text_tx(txn, &before, title, body, tags)?;
+                    let row = if *mark_stale {
+                        apply_settings_tx(txn, &before, settings_json.clone())?
+                    } else {
+                        // Undo restores settings without touching the
+                        // run-owned status, so an upload's output restore
+                        // keeps the status it just wrote.
+                        restore_settings_tx(txn, &before, settings_json.clone())?
+                    };
                     changed.push(row.summary());
+                    dirty = true;
                 }
-                HistoryOp::Settings { id, settings_json } => {
+                HistoryOp::NodeOutput {
+                    id,
+                    to_batch_id,
+                    to_body,
+                    to_status,
+                    ..
+                } => {
+                    // The whole-entry preflight above proved the guard.
                     let before = find_node_tx(txn, id)?;
-                    let row = apply_settings_tx(txn, &before, settings_json.clone())?;
-                    changed.push(row.summary());
+                    let updated = nodes::Entity::update(nodes::ActiveModel {
+                        seq: Unchanged(before.seq),
+                        body: Set(to_body.clone()),
+                        status: Set(to_status.clone()),
+                        output_batch_id: Set(to_batch_id.clone()),
+                        rev: Set(before.rev + 1),
+                        updated_at: Set(now_ms()),
+                        ..Default::default()
+                    })
+                    .exec(txn)?;
+                    refresh_fts_tx(txn, &updated)?;
+                    changed.push(node_row(&updated).summary());
+                    for row in mark_downstream_stale_tx(txn, id)? {
+                        changed.push(node_row(&row).summary());
+                    }
+                    dirty = true;
                 }
                 HistoryOp::InsertEdge(row) => {
                     insert_edge_row_tx(txn, row)?;
                     let from = find_node_tx(txn, &row.from_id)?;
                     let to = find_node_tx(txn, &row.to_id)?;
                     edges_changed.push(edge_summary(row, &from, &to));
+                    dirty = true;
                 }
                 HistoryOp::ReplaceEdge(row) => {
                     let row = replace_edge_row_tx(txn, row)?;
@@ -1263,6 +1625,7 @@ pub fn apply_ops(conn: &DatabaseConnection, ops: &[HistoryOp]) -> Result<ChangeS
                     let from = find_node_tx(txn, &row.from_id)?;
                     let to = find_node_tx(txn, &row.to_id)?;
                     edges_changed.push(edge_summary(&row, &from, &to));
+                    dirty = true;
                 }
                 HistoryOp::DeleteEdge { id } => {
                     let edge = find_edge_tx(txn, id)?;
@@ -1281,6 +1644,7 @@ pub fn apply_ops(conn: &DatabaseConnection, ops: &[HistoryOp]) -> Result<ChangeS
                     }
                     delete_edge_tx(txn, id)?;
                     edges_removed.push(edge.id);
+                    dirty = true;
                 }
                 HistoryOp::InsertInput(row) => {
                     // A provider run's input sync may already have recreated
@@ -1295,6 +1659,7 @@ pub fn apply_ops(conn: &DatabaseConnection, ops: &[HistoryOp]) -> Result<ChangeS
                     if touched.insert(row.node_id.clone()) {
                         changed.push(node_row(&touch_node_tx(txn, &row.node_id)?).summary());
                     }
+                    dirty = true;
                 }
                 HistoryOp::DeleteInput { id } => {
                     // Input sync during a run may already have removed the
@@ -1307,31 +1672,40 @@ pub fn apply_ops(conn: &DatabaseConnection, ops: &[HistoryOp]) -> Result<ChangeS
                     if touched.insert(row.node_id.clone()) {
                         changed.push(node_row(&touch_node_tx(txn, &row.node_id)?).summary());
                     }
+                    dirty = true;
                 }
                 HistoryOp::InputOrder { node_id, order } => {
                     set_input_positions_tx(txn, node_id, order)?;
                     if touched.insert(node_id.clone()) {
                         changed.push(node_row(&touch_node_tx(txn, node_id)?).summary());
                     }
+                    dirty = true;
                 }
             }
         }
 
-        if !coalesced_bounds.is_empty() {
-            let (rows, _) = set_node_bounds_batched(txn, &coalesced_bounds)?;
+        if !coalesced_geometry.is_empty() {
+            let (rows, _) = set_node_bounds_batched(txn, &coalesced_geometry)?;
+            if !rows.is_empty() {
+                dirty = true;
+            }
             for row in rows {
                 changed.push(row.summary());
             }
         }
 
-        let rev = bump_document_rev(txn)?;
-        Ok(ChangeSet {
+        let rev = if dirty {
+            bump_document_rev(txn)?
+        } else {
+            document_rev_tx(txn)?
+        };
+        Ok(ApplyOutcome::Applied(ChangeSet {
             rev: rev as f64,
             changed,
             removed,
             edges_changed,
             edges_removed,
-        })
+        }))
     })
     .map_err(|error| error.to_string())
 }
@@ -1556,6 +1930,13 @@ fn set_node_bounds_batched(
             .get(&next.id)
             .cloned()
             .ok_or_else(|| DbErr::RecordNotFound(format!("node {} was not found", next.id)))?;
+        if before.x == next.x
+            && before.y == next.y
+            && before.width == next.width
+            && before.height == next.height
+        {
+            continue;
+        }
         let now = now_ms();
         let new_rev = before.rev + 1;
 
@@ -1631,16 +2012,15 @@ fn update_text_tx(
     txn: &DatabaseTransaction,
     before: &nodes::Model,
     title: &str,
-    body: &str,
     tags: &[String],
 ) -> Result<NodeRow, DbErr> {
     let tags_json = serde_json::to_string(tags)
         .map_err(|error| DbErr::Custom(format!("tags are not serializable: {error}")))?;
 
+    // Body is output-derived: a title/tags edit never restores or rewrites it.
     let updated = nodes::Entity::update(nodes::ActiveModel {
         seq: Unchanged(before.seq),
         title: Set(title.to_owned()),
-        body: Set(body.to_owned()),
         tags_json: Set(tags_json),
         rev: Set(before.rev + 1),
         updated_at: Set(now_ms()),
@@ -1648,14 +2028,7 @@ fn update_text_tx(
     })
     .exec(txn)?;
 
-    nodes_fts::Entity::delete_by_id(updated.seq).exec(txn)?;
-    nodes_fts::Entity::insert(nodes_fts::ActiveModel {
-        rowid: Set(updated.seq),
-        title: Set(updated.title.clone()),
-        body: Set(updated.body.clone()),
-        tags: Set(tags.join(" ")),
-    })
-    .exec(txn)?;
+    refresh_fts_tx(txn, &updated)?;
 
     Ok(node_row(&updated))
 }
@@ -1677,6 +2050,25 @@ fn apply_settings_tx(
         } else {
             before.status.clone()
         }),
+        rev: Set(before.rev + 1),
+        updated_at: Set(now_ms()),
+        ..Default::default()
+    })
+    .exec(txn)?;
+    Ok(node_row(&updated))
+}
+
+/// Restores a history entry's settings. Unlike the user command, it never
+/// changes the run-owned status: a coordinated upload undo restores the
+/// output first and then the settings, and the status must stay as restored.
+fn restore_settings_tx(
+    txn: &DatabaseTransaction,
+    before: &nodes::Model,
+    settings_json: String,
+) -> Result<NodeRow, DbErr> {
+    let updated = nodes::Entity::update(nodes::ActiveModel {
+        seq: Unchanged(before.seq),
+        settings_json: Set(settings_json),
         rev: Set(before.rev + 1),
         updated_at: Set(now_ms()),
         ..Default::default()
@@ -1777,11 +2169,15 @@ fn delete_edge_tx(txn: &DatabaseTransaction, id: &str) -> Result<(), DbErr> {
 }
 
 fn find_node_tx(txn: &DatabaseTransaction, id: &str) -> Result<nodes::Model, DbErr> {
+    find_node_opt_tx(txn, id)?
+        .ok_or_else(|| DbErr::RecordNotFound(format!("node {id} was not found")))
+}
+
+fn find_node_opt_tx(txn: &DatabaseTransaction, id: &str) -> Result<Option<nodes::Model>, DbErr> {
     nodes::Entity::find()
         .filter(nodes::Column::Id.eq(id))
         .filter(nodes::Column::DocumentId.eq(DOCUMENT_ID))
-        .one(txn)?
-        .ok_or_else(|| DbErr::RecordNotFound(format!("node {id} was not found")))
+        .one(txn)
 }
 
 /// Whether another edge already joins this ordered pair. Parallel duplicate
@@ -1806,10 +2202,14 @@ fn already_connected_tx(
 }
 
 fn find_edge_tx(txn: &DatabaseTransaction, id: &str) -> Result<edges::Model, DbErr> {
+    find_edge_opt_tx(txn, id)?
+        .ok_or_else(|| DbErr::RecordNotFound(format!("edge {id} was not found")))
+}
+
+fn find_edge_opt_tx(txn: &DatabaseTransaction, id: &str) -> Result<Option<edges::Model>, DbErr> {
     edges::Entity::find_by_id(id.to_owned())
         .filter(edges::Column::DocumentId.eq(DOCUMENT_ID))
-        .one(txn)?
-        .ok_or_else(|| DbErr::RecordNotFound(format!("edge {id} was not found")))
+        .one(txn)
 }
 
 fn edges_for_node_tx(txn: &DatabaseTransaction, id: &str) -> Result<Vec<EdgeRow>, DbErr> {
@@ -2024,6 +2424,29 @@ fn mark_stale_tx(txn: &DatabaseTransaction, id: &str) -> Result<Option<nodes::Mo
     .map(Some)
 }
 
+fn downstream_output_targets_tx(
+    txn: &DatabaseTransaction,
+    source_id: &str,
+) -> Result<Vec<String>, DbErr> {
+    let edges = edges::Entity::find()
+        .filter(edges::Column::DocumentId.eq(DOCUMENT_ID))
+        .filter(edges::Column::FromId.eq(source_id))
+        .all(txn)?;
+    let ids: Vec<String> = edges.into_iter().map(|edge| edge.to_id).collect();
+    let mut targets = Vec::new();
+    for chunk in ids.chunks(400) {
+        let rows = nodes::Entity::find()
+            .filter(nodes::Column::DocumentId.eq(DOCUMENT_ID))
+            .filter(nodes::Column::Id.is_in(chunk.to_vec()))
+            .filter(nodes::Column::OutputBatchId.is_not_null())
+            .all(txn)?;
+        targets.extend(rows.into_iter().map(|row| row.id));
+    }
+    targets.sort();
+    targets.dedup();
+    Ok(targets)
+}
+
 fn mark_downstream_stale_tx(
     txn: &DatabaseTransaction,
     source_id: &str,
@@ -2039,44 +2462,6 @@ fn mark_downstream_stale_tx(
         }
     }
     Ok(stale)
-}
-
-fn replace_node_tx(txn: &DatabaseTransaction, row: &NodeRow) -> Result<nodes::Model, DbErr> {
-    let before = find_node_tx(txn, &row.id)?;
-    let tags_json = serde_json::to_string(&row.tags)
-        .map_err(|error| DbErr::Custom(format!("tags are not serializable: {error}")))?;
-    let updated = nodes::Entity::update(nodes::ActiveModel {
-        seq: Unchanged(before.seq),
-        title: Set(row.title.clone()),
-        body: Set(row.body.clone()),
-        tags_json: Set(tags_json),
-        x: Set(row.x),
-        y: Set(row.y),
-        width: Set(row.width),
-        height: Set(row.height),
-        z: Set(row.z),
-        data_json: Set(row.data_json.clone()),
-        settings_json: Set(row.settings_json.clone()),
-        status: Set(row.status.clone()),
-        output_batch_id: Set(row.output_batch_id.clone()),
-        rev: Set(row.rev),
-        updated_at: Set(row.updated_at),
-        ..Default::default()
-    })
-    .exec(txn)?;
-
-    sync_bounds_tx(txn, &before, &updated)?;
-    nodes_fts::Entity::delete_by_id(updated.seq).exec(txn)?;
-    nodes_fts::Entity::insert(nodes_fts::ActiveModel {
-        rowid: Set(updated.seq),
-        title: Set(updated.title.clone()),
-        body: Set(updated.body.clone()),
-        tags: Set(row.tags.join(" ")),
-    })
-    .exec(txn)?;
-    edge_index::sync_node_edges(txn, &updated.id)?;
-
-    Ok(updated)
 }
 
 /// The spatial side of a node's new bounds: its RTree entry and the stored
@@ -2149,6 +2534,27 @@ fn input_row(row: &node_inputs::Model) -> InputRow {
         meta_json: row.meta_json.clone(),
         created_at: row.created_at,
     }
+}
+
+fn no_op(txn: &DatabaseTransaction) -> Result<Mutation, DbErr> {
+    Ok(Mutation::new(
+        ChangeSet {
+            rev: document_rev_tx(txn)? as f64,
+            changed: Vec::new(),
+            removed: Vec::new(),
+            edges_changed: Vec::new(),
+            edges_removed: Vec::new(),
+        },
+        Vec::new(),
+        Vec::new(),
+    ))
+}
+
+fn document_rev_tx(txn: &DatabaseTransaction) -> Result<i64, DbErr> {
+    documents::Entity::find_by_id(DOCUMENT_ID)
+        .one(txn)?
+        .map(|document| document.rev)
+        .ok_or_else(|| DbErr::RecordNotFound("the default document was not found".to_owned()))
 }
 
 fn bump_document_rev(txn: &DatabaseTransaction) -> Result<i64, DbErr> {

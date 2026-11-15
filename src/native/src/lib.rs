@@ -65,17 +65,17 @@ impl Document {
         off_thread(move || db.move_nodes(ids, dx, dy).map(|mutation| mutation.changes)).await
     }
 
-    /// Replaces a node's searchable text and tags.
+    /// Replaces a node's searchable title and tags. The body belongs to the
+    /// node's output and is never part of a text edit.
     pub async fn set_node_text(
         this: Instance<Self>,
         id: String,
         title: String,
-        body: String,
         tags: Vec<String>,
     ) -> Result<ChangeSet, String> {
         let db = this.with(|document| document.db.clone());
         off_thread(move || {
-            db.set_node_text(id, title, body, tags)
+            db.set_node_text(id, title, tags)
                 .map(|mutation| mutation.changes)
         })
         .await
