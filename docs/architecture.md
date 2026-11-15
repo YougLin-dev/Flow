@@ -94,6 +94,17 @@ canvas stays in TSX and owns only the scene model and its views.
   from being reseeded. The v1 guard deliberately refuses a pre-v1 development
   database: before the first launch of this build, delete `.nsh/dev/flow.db`
   (and its `-wal`/`-shm` files) and `.nsh/dev/assets`.
+- The package records its lifecycle. On quit the workspace stops in-flight
+  runs (their batches settle cancelled), saves the camera with `saveView`,
+  then calls `close()`: the WAL is checkpointed, `clean_shutdown` is set and
+  the file is released before the call resolves. `projectInfo` reports the
+  flag the package had before this open; a `false` (unclean) value schedules
+  `verify()` after the first scene read, while a new or cleanly closed
+  package does no integrity scan. `verify()` runs SQLite's integrity and
+  foreign-key checks, compares and rebuilds the FTS index and both RTrees
+  when they drifted, flushes leftover connector markers and compacts the
+  document bounds. A saved camera is restored instead of fitting; only a
+  never-saved package has the `0, 0, 1` default.
 - `FlowScene` is driven from `scene(rect, margin)` snapshots. Drag/resize,
   add, delete and connect each send one command; undo/redo return change sets.
   A card is stored as an axis-aligned world rectangle, so gestures commit a
