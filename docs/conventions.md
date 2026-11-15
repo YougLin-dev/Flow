@@ -46,8 +46,8 @@ Decision tree:
 3. Pure coordinate math? `flow/<area>/geometry/...` or `flow/shared/geometry.ts`.
 4. Pointer/keyboard state machine? `flow/<area>/interaction/...`.
 5. Calls the native document, picker, runner or asset store? `flow/document/...`
-   (the only runtime `@flow/native` importer); the runner reaches the document
-   through page callbacks.
+   or `flow/projects/...` (the only runtime `@flow/native` importers); the
+   runner reaches the document through page callbacks.
 6. Creates/disposes page objects, binds keys or effects? `pages/flow/workspace/...`.
 7. Fixture, fake or probe? `test/`, `test-support/` or `components/probes/`.
 8. Generic UI used by more than one feature? `components/primitives/`.
@@ -98,17 +98,20 @@ Decision tree:
   dependency graph acyclic; use it when a directory actually has internal
   modules, not as indirection everywhere.
 - The mixed Rust crate lives in `src/native/`. Its `#[native_module]` exports
-  are the only surface TSX sees: only `flow/document` may import `@flow/native`
-  at runtime; every other module must import the generated types through
+  are the only surface TSX sees: only `flow/document` and `flow/projects` may
+  import `@flow/native` at runtime; every other module must import the generated types through
   `flow/shared/native-types.ts`. Do not add a second Rust-backed import path.
   Keep SQLite and search code in Rust, and keep TSX/canvas code out of the
   crate.
 - SeaORM entities are one file per table under `src/native/src/entity/`, named
   after the table. Today commands live in `mutation.rs`; reads in `search.rs`,
   `viewport.rs`, `scene.rs` or `detail.rs`; asset bytes in `asset.rs`; package
-  collection in `gc.rs`; `db.rs` owns the worker handle, history and startup,
-  and `schema.rs` owns table creation. Raw SQLITE SQL belongs only in
-  `schema.rs`/`search.rs` for virtual tables. The Phase 6 target is
+  collection in `gc.rs`; creating and managing packages in `project.rs` and
+  `project/`; durable file helpers in `fsutil.rs`; `db.rs` owns the worker
+  handle, history and startup, and `schema.rs` owns table creation and the
+  package-wide statements in `schema/package.rs`. Raw SQLITE SQL belongs only
+  in `schema.rs`/`search.rs` for virtual tables and in `schema/package.rs` for
+  checkpointing, snapshotting and rekeying a package. The Phase 6 target is
   `db/{mod,worker,startup,undo,tests}`,
   `mutation/{mod,nodes,edges,inputs,runs,apply,support,tx}`,
   `reads/{mod,viewport,scene,detail,search,metadata}` and

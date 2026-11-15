@@ -87,6 +87,13 @@ export const AREAS = {
     mayImport: ["flow/shared", "flow/nodes", "flow/canvas", "flow/execution"],
     deepSameFeature: [],
   },
+  "flow/projects": {
+    layer: "foundation",
+    feature: "projects",
+    facade: "src/flow/projects/index.ts",
+    mayImport: ["flow/shared", "flow/document"],
+    deepSameFeature: [],
+  },
   "components/primitives": {
     layer: "component",
     feature: "primitives",
@@ -192,6 +199,19 @@ export function isTestSupportPath(file) {
   const path = file.replace(/\\/g, "/");
   return (
     path.startsWith("src/test-support/") || path.includes("/test/") || TEST_SUPPORT_FILES.has(path)
+  );
+}
+
+/**
+ * Whether a production file may import the generated `@flow/native` runtime.
+ * The type seam file re-exports generated types; `flow/document` and
+ * `flow/projects` are the two runtime areas.
+ */
+export function mayImportNative(file) {
+  return (
+    file === "src/flow/shared/native-types.ts" ||
+    file.startsWith("src/flow/document/") ||
+    file.startsWith("src/flow/projects/")
   );
 }
 

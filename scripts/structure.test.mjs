@@ -47,6 +47,8 @@ const tree = {
   "src/flow/document/interaction/controller.ts": 'import "../session/y";',
   "src/flow/document/model/x.ts": 'import "../session/y";',
   "src/flow/document/test/helper.ts": "",
+  "src/flow/projects/index.ts": "",
+  "src/flow/projects/project-store.ts": 'import "@flow/native";',
   "src/components/canvas/index.ts": "",
   "src/components/canvas/helper.ts": 'import "@flow/native";',
   "src/components/canvas/type-only.ts": 'import type { NodeSummary } from "@flow/native";',
@@ -105,8 +107,8 @@ test("reports a new flat module, a missing facade and a forbidden folder", () =>
         "new flat module at the flow/ root: src/flow/page-chrome.ts",
         "new flat module at the pages/ root: src/pages/FlowPage.tsx",
         "new flat module at the pages/ root: src/pages/index.ts",
-        "src/components/canvas/helper.ts imports @flow/native outside the document seam",
-        "src/components/canvas/type-only.ts imports @flow/native outside the document seam",
+        "src/components/canvas/helper.ts imports @flow/native outside the native seam",
+        "src/components/canvas/type-only.ts imports @flow/native outside the native seam",
         "src/components/search/SearchPalette.tsx may not import flow/canvas (../../flow/canvas)",
         "src/flow/canvas/geometry/point.ts (geometry) may not import src/flow/canvas/model/camera.ts",
         "src/flow/canvas/geometry/point.ts may not import flow/execution (../../execution/index)",
@@ -151,10 +153,13 @@ test("reports a new flat module, a missing facade and a forbidden folder", () =>
       "src/flow/canvas/geometry/point.ts (geometry) may not import src/flow/execution/index.ts",
     );
     expect(result.failures).toContain(
-      "src/components/canvas/helper.ts imports @flow/native outside the document seam",
+      "src/components/canvas/helper.ts imports @flow/native outside the native seam",
     );
     expect(result.failures).toContain(
-      "src/components/canvas/type-only.ts imports @flow/native outside the document seam",
+      "src/components/canvas/type-only.ts imports @flow/native outside the native seam",
+    );
+    expect(result.failures).not.toContain(
+      "src/flow/projects/project-store.ts imports @flow/native outside the native seam",
     );
     expect(result.failures).not.toContain(
       "src/flow/document/model/x.ts (model) may not import src/flow/document/session/y.ts",
@@ -250,10 +255,10 @@ test("the area findings are failures by default", () => {
       "src/flow/canvas/geometry/point.ts (geometry) may not import src/flow/canvas/model/camera.ts",
     );
     expect(result.failures).toContain(
-      "src/components/canvas/helper.ts imports @flow/native outside the document seam",
+      "src/components/canvas/helper.ts imports @flow/native outside the native seam",
     );
     expect(result.failures).toContain(
-      "src/components/canvas/type-only.ts imports @flow/native outside the document seam",
+      "src/components/canvas/type-only.ts imports @flow/native outside the native seam",
     );
   });
 });

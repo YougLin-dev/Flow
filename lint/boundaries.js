@@ -27,6 +27,7 @@ import {
   isTestFile,
   isTestSupportTarget,
   layerOf,
+  mayImportNative,
   segmentOf,
 } from "./structure-map.js";
 
@@ -256,11 +257,12 @@ const nativeOutsideSeam = defineRule({
   meta: {
     type: "problem",
     docs: {
-      description: "The native module is called only by flow/document; types use the seam.",
+      description:
+        "The native module is called only by flow/document and flow/projects; types use the seam.",
     },
     messages: {
       native:
-        "`@flow/native` is document-only at runtime; import types from flow/shared/native-types.",
+        "`@flow/native` is document- and projects-only at runtime; import types from flow/shared/native-types.",
     },
   },
   create(context) {
@@ -269,9 +271,7 @@ const nativeOutsideSeam = defineRule({
       if (specifier !== "@flow/native") return;
       const file = toProjectPath(context.cwd, context.filename);
       if (!isProductionFile(file)) return;
-      if (file === "src/flow/shared/native-types.ts" || file.startsWith("src/flow/document/")) {
-        return;
-      }
+      if (mayImportNative(file)) return;
       report(context, node.source, "native", {});
     };
     return {

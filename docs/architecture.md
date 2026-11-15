@@ -55,10 +55,10 @@ are.
 
 `src/native/` is a Rust crate in NSH's mixed-app mode. It owns the document
 database, commands and undo, full-text search, viewport queries and asset
-metadata. Only `flow/document` may call the generated API from `@flow/native`
-at runtime; every other TSX module must import the types through
-`flow/shared/native-types.ts`. TSX must not open SQLite or write SQL. The
-canvas stays in TSX and owns only the scene model and its views.
+metadata. Only `flow/document` and `flow/projects` may call the generated API
+from `@flow/native` at runtime; every other TSX module must import the types
+through `flow/shared/native-types.ts`. TSX must not open SQLite or write SQL.
+The canvas stays in TSX and owns only the scene model and its views.
 
 - `src/nsh.json` declares `"rust": "native"`; `App.tsx` remains the app entry.
 - The database is SQLite with WAL, FTS5 (trigram tokenizer) and two RTree
@@ -165,6 +165,40 @@ canvas stays in TSX and owns only the scene model and its views.
   on a mixed query, and an all-short query falls back to a capped scan of at
   most eight terms. Its arrow-key bindings live with the mounted palette, so
   canvas shortcuts return when it closes.
+- The project layer sits above packages. A managed root
+  (`<dataDir>/projects`) holds self-contained `<project_id>/` directories
+  (`project.db` plus `assets/`), a rebuildable `catalog.json`, and
+  `.locks/`. Packs become visible by one rename of a fully written temp
+  directory; delete renames into `.trash-*` before purging; duplicate and
+  import snapshot with `VACUUM INTO` and verify every asset hash before the
+  commit rename, and mint an identity when the source's is taken. The catalog
+  is derived and validated strictly (root-relative 32-hex paths only); any
+  doubt rebuilds it from the directories, unreadable packages and packages
+  whose document identity disagrees with their directory stay visible as
+  fallback rows keyed by the directory, and a valid catalog is reconciled
+  without reopening known packages. The lock lives in `<root>/.locks/<id>.lock`, not inside
+  the package, because Windows refuses to rename a directory while any
+  handle inside it is open; its owner is the OS lock, so process death
+  frees it and no stale-lock protocol exists. `ProjectStore` hands out one
+  `ProjectLease` per window; the workspace opens that lease's
+  `databasePath` with `Document.openPackage(path, projectId)`, which refuses
+  a missing or empty file without creating it and marks the package dirty
+  only after the document identity matches. A close that fails before its
+  job runs keeps the lease: a leaked lock is better than two writers. A
+  close that ran but could not checkpoint (the recovery-warning marker)
+  releases it — the worker dropped its connection and the dirty package
+  verifies on the next open. The lease is released after the document
+  worker acknowledged the close. A managed project's
+  seed decision is made at creation (`demo_seeded=1` when created blank),
+  and a managed open (one with a project id) defaults `seedDemo` to false,
+  so an imported empty package is not filled in later. Delete needs only a
+  real package directory under its lock, not a readable identity, so
+  fallback rows remain removable; rename and duplicate still require the
+  identity. Rename is closed-package only in this slice, changes only
+  title/`updated_at`, and never moves the directory;
+  imports accept an unpacked package directory, not an archive; pre-v1
+  packages are refused rather than migrated. The project-list UI and the
+  app's default startup still use the legacy `flow.db` path.
 - The decision and the phased migration are recorded in
   [ADR 0002](adr/0002-rust-document-core.md),
   [ADR 0003](adr/0003-orm-seaorm.md) and

@@ -17,6 +17,17 @@ pub const USER_VERSION: i64 = 1;
 /// The frozen v1 DDL, stored verbatim beside this module.
 pub const MIGRATION_1: &str = include_str!("v1.sql");
 
+/// The frozen identity trigger, byte for byte, as `sqlite_master` stores it
+/// (without the trailing semicolon). Rekeying a copied package drops the
+/// trigger, updates the row and recreates this text; the containment test
+/// below fails if the constant and `v1.sql` ever drift.
+pub(crate) const PROJECT_ID_TRIGGER: &str =
+    "CREATE TRIGGER document_project_id_immutable BEFORE UPDATE OF project_id ON document
+WHEN NEW.project_id <> OLD.project_id
+BEGIN
+  SELECT RAISE(ABORT, 'document.project_id is immutable');
+END";
+
 /// Objects an opened v1 package must contain. `verify()` checks their
 /// contents; the open guard only proves they exist.
 const REQUIRED_OBJECTS: &[(&str, &str)] = &[
@@ -178,12 +189,20 @@ pub fn inspect<C: ConnectionTrait>(conn: &C) -> Result<FileState, String> {
 
 /// Creates a v1 package in one transaction and returns its identity.
 pub fn create<C: ConnectionTrait>(conn: &C, title: &str) -> Result<ProjectInfo, String> {
-    if title.contains('\0') {
-        return Err("the project title is invalid".to_owned());
-    }
-    if is_blank_title(title) {
-        return Err("the project title is empty".to_owned());
-    }
+    create_with(conn, title, false)
+}
+
+/// Creates a v1 package like [`create`], recording whether the initial-content
+/// decision was already made. A managed blank project passes `true` so the
+/// legacy auto-seed does not fill it; a project that is about to receive seed
+/// data passes `false`, which [`crate::mutation::seed_document`] flips once the
+/// content is written.
+pub(crate) fn create_with<C: ConnectionTrait>(
+    conn: &C,
+    title: &str,
+    demo_seeded: bool,
+) -> Result<ProjectInfo, String> {
+    validate_title(title)?;
     match inspect(conn)? {
         FileState::New => {}
         FileState::Current(_) => {
@@ -198,7 +217,7 @@ pub fn create<C: ConnectionTrait>(conn: &C, title: &str) -> Result<ProjectInfo, 
     // error. SQLite rolls back on the fatal errors where ROLLBACK cannot run.
     conn.execute_unprepared("BEGIN IMMEDIATE")
         .map_err(|error| error.to_string())?;
-    match create_in_transaction(conn, title) {
+    match create_in_transaction(conn, title, demo_seeded) {
         Ok(project) => {
             if let Err(error) = conn.execute_unprepared("COMMIT") {
                 let _ = conn.execute_unprepared("ROLLBACK");
@@ -213,7 +232,11 @@ pub fn create<C: ConnectionTrait>(conn: &C, title: &str) -> Result<ProjectInfo, 
     }
 }
 
-fn create_in_transaction<C: ConnectionTrait>(conn: &C, title: &str) -> Result<ProjectInfo, String> {
+fn create_in_transaction<C: ConnectionTrait>(
+    conn: &C,
+    title: &str,
+    demo_seeded: bool,
+) -> Result<ProjectInfo, String> {
     match inspect(conn)? {
         FileState::New => {}
         FileState::Current(_) => {
@@ -222,15 +245,16 @@ fn create_in_transaction<C: ConnectionTrait>(conn: &C, title: &str) -> Result<Pr
     }
     conn.execute_unprepared(MIGRATION_1)
         .map_err(|error| error.to_string())?;
-    let project_id = scalar_string(conn, "SELECT lower(hex(randomblob(16)))", vec![])?;
+    let project_id = mint_project_id(conn)?;
     let now = crate::clock::now_ms();
     conn.execute_raw(statement_values(
-        "INSERT INTO document (id, project_id, title, created_at, updated_at) \
-         VALUES (1, ?1, ?2, ?3, ?3)",
+        "INSERT INTO document (id, project_id, title, created_at, updated_at, demo_seeded) \
+         VALUES (1, ?1, ?2, ?3, ?3, ?4)",
         vec![
             project_id.clone().into(),
             title.to_owned().into(),
             now.into(),
+            (if demo_seeded { 1i64 } else { 0i64 }).into(),
         ],
     ))
     .map_err(|error| error.to_string())?;
@@ -326,6 +350,23 @@ fn validate_document(
     Ok(ProjectInfo { project_id, title })
 }
 
+/// The title rule shared by create, rename and import: no NUL and, after the
+/// DDL's ASCII-space trimming, not empty.
+pub(crate) fn validate_title(title: &str) -> Result<(), String> {
+    if title.contains('\0') {
+        return Err("the project title is invalid".to_owned());
+    }
+    if is_blank_title(title) {
+        return Err("the project title is empty".to_owned());
+    }
+    Ok(())
+}
+
+/// Mints a fresh package identity: 16 random bytes as 32 lowercase hex.
+pub(crate) fn mint_project_id<C: ConnectionTrait>(conn: &C) -> Result<String, String> {
+    scalar_string(conn, "SELECT lower(hex(randomblob(16)))", vec![])
+}
+
 /// Mirrors the DDL's `trim(title, ' ' || char(9) || char(10) || char(13))`.
 fn is_blank_title(title: &str) -> bool {
     title
@@ -344,7 +385,7 @@ pub(crate) fn is_valid_camera(x: f64, y: f64, zoom: f64) -> bool {
         && zoom < 1.0e308
 }
 
-fn is_project_id(value: &str) -> bool {
+pub(crate) fn is_project_id(value: &str) -> bool {
     value.len() == 32
         && value
             .bytes()
@@ -548,6 +589,67 @@ mod tests {
         assert_eq!((camera_x, camera_y, camera_zoom), (0.0, 0.0, 1.0));
         assert_eq!((demo_seeded, clean_shutdown), (0, 0));
         assert_eq!(inspect(&conn), Ok(FileState::Current(project)));
+    }
+
+    #[test]
+    fn create_with_records_the_initial_content_decision() {
+        let blank = memory();
+        create_with(&blank, "Blank", true).expect("blank create");
+        let row = query_one(
+            &blank,
+            "SELECT demo_seeded FROM document WHERE id = 1",
+            vec![],
+        )
+        .expect("read document");
+        assert_eq!(row.try_get_by_index::<i64>(0).expect("demo_seeded"), 1);
+
+        let seeded = memory();
+        create_with(&seeded, "Seeded", false).expect("seeded create");
+        let row = query_one(
+            &seeded,
+            "SELECT demo_seeded FROM document WHERE id = 1",
+            vec![],
+        )
+        .expect("read document");
+        assert_eq!(row.try_get_by_index::<i64>(0).expect("demo_seeded"), 0);
+    }
+
+    #[test]
+    fn mint_project_id_is_32_lowercase_hex_and_unique() {
+        let conn = memory();
+        let first = mint_project_id(&conn).expect("first id");
+        let second = mint_project_id(&conn).expect("second id");
+        assert!(is_project_id(&first), "not a project id: {first}");
+        assert!(is_project_id(&second), "not a project id: {second}");
+        assert_ne!(first, second);
+    }
+
+    #[test]
+    fn validate_title_shares_the_ddl_rule() {
+        assert_eq!(validate_title("Flow"), Ok(()));
+        assert_eq!(
+            validate_title(" \t\r\n"),
+            Err("the project title is empty".to_owned())
+        );
+        assert_eq!(
+            validate_title("a\0b"),
+            Err("the project title is invalid".to_owned())
+        );
+    }
+
+    #[test]
+    fn project_id_trigger_constant_is_the_schema_text() {
+        assert!(MIGRATION_1.contains(PROJECT_ID_TRIGGER));
+        let conn = memory();
+        create(&conn, "Trigger").expect("create v1");
+        let stored = scalar_string(
+            &conn,
+            "SELECT sql FROM sqlite_master \
+             WHERE type = 'trigger' AND name = 'document_project_id_immutable'",
+            vec![],
+        )
+        .expect("read trigger");
+        assert_eq!(stored, PROJECT_ID_TRIGGER);
     }
 
     #[test]

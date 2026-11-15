@@ -36,7 +36,9 @@ repeats the platform tests (`*.host.test.tsx`) on this OS's real desktop host.
   area matrix. See [docs/code-map.md](docs/code-map.md).
 - **Database access is ORM-first.** Use the SeaORM entities and SeaQuery in
   `src/native/`; handwritten SQL is limited to the FTS5/RTree virtual-table
-  adapter and migrations. Never interpolate values into a query.
+  adapter, migrations, and the package lifecycle statements in
+  `schema/package.rs` (checkpoint, snapshot, identity rekey). Never
+  interpolate values into a query.
 - **Signals stay private in `src/store.ts`.** Export readers and actions;
   pages bind them to presentational components.
 - **The canvas is native views.** Cards, ports, selection and the composer are

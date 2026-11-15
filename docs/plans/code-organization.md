@@ -2031,33 +2031,37 @@ panel.ts}`, `components/probes/{ImageLoadProbe,ZoomProbe}.tsx`,
 
 ## Appendix B — Rust placement map
 
-| Current                             | Target                                                                                                                |
-| ----------------------------------- | --------------------------------------------------------------------------------------------------------------------- |
-| `db.rs` production                  | `db/{mod,worker,startup,undo}.rs`                                                                                     |
-| `db.rs` tests (line 570+)           | `db/tests/{mod,nodes,edges,inputs,runs,scene,search,assets,history,startup,benchmark}.rs` (fixtures live in `mod.rs`) |
-| `mutation.rs` `Mutation`            | `mutation/mod.rs`                                                                                                     |
-| `mutation.rs` nodes                 | `mutation/nodes.rs`                                                                                                   |
-| `mutation.rs` edges                 | `mutation/edges.rs`                                                                                                   |
-| `mutation.rs` inputs                | `mutation/inputs.rs`                                                                                                  |
-| `mutation.rs` manual/runs           | `mutation/runs.rs`                                                                                                    |
-| `mutation.rs` `apply_ops`           | `mutation/apply.rs`                                                                                                   |
-| `mutation.rs` pure helpers          | `mutation/support.rs`                                                                                                 |
-| `mutation.rs` tx helpers            | `mutation/tx/{nodes,edges,inputs,indexes,rows}.rs`                                                                    |
-| `db.rs` counts/bounds/is_empty      | `reads/metadata.rs`                                                                                                   |
-| `db.rs` ensure_document             | `store/document.rs`                                                                                                   |
-| `db.rs` empty_change/lock_history   | `db/undo.rs`                                                                                                          |
-| `mutation.rs` bump_document_rev     | `store/document.rs`                                                                                                   |
-| `document.rs` current_rev           | `store/document.rs`                                                                                                   |
-| `viewport.rs`                       | `reads/viewport.rs`                                                                                                   |
-| `scene.rs`                          | `reads/scene.rs`                                                                                                      |
-| `detail.rs`                         | `reads/detail.rs`                                                                                                     |
-| `search.rs`                         | `reads/search.rs`                                                                                                     |
-| `schema.rs`                         | `store/schema.rs`                                                                                                     |
-| `edge_index.rs`                     | `store/edge_index.rs`                                                                                                 |
-| `gc.rs`                             | `store/gc.rs`                                                                                                         |
-| `history.rs` row snapshots          | stay in `history.rs` (referenced by `HistoryOp`)                                                                      |
-| `detail.rs`/`viewport.rs` test data | `db/tests/*`; keep reference oracles in place                                                                         |
-| `entity/mod.rs` ownership comment   | update to `store/schema.rs`                                                                                           |
+| Current                                              | Target                                                                                                                |
+| ---------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------- |
+| `db.rs` production                                   | `db/{mod,worker,startup,undo}.rs`                                                                                     |
+| `db.rs` tests (line 570+)                            | `db/tests/{mod,nodes,edges,inputs,runs,scene,search,assets,history,startup,benchmark}.rs` (fixtures live in `mod.rs`) |
+| `mutation.rs` `Mutation`                             | `mutation/mod.rs`                                                                                                     |
+| `mutation.rs` nodes                                  | `mutation/nodes.rs`                                                                                                   |
+| `mutation.rs` edges                                  | `mutation/edges.rs`                                                                                                   |
+| `mutation.rs` inputs                                 | `mutation/inputs.rs`                                                                                                  |
+| `mutation.rs` manual/runs                            | `mutation/runs.rs`                                                                                                    |
+| `mutation.rs` `apply_ops`                            | `mutation/apply.rs`                                                                                                   |
+| `mutation.rs` pure helpers                           | `mutation/support.rs`                                                                                                 |
+| `mutation.rs` tx helpers                             | `mutation/tx/{nodes,edges,inputs,indexes,rows}.rs`                                                                    |
+| `db.rs` counts/bounds/is_empty                       | `reads/metadata.rs`                                                                                                   |
+| `db.rs` ensure_document                              | `store/document.rs`                                                                                                   |
+| `db.rs` empty_change/lock_history                    | `db/undo.rs`                                                                                                          |
+| `mutation.rs` bump_document_rev                      | `store/document.rs`                                                                                                   |
+| `document.rs` current_rev                            | `store/document.rs`                                                                                                   |
+| `viewport.rs`                                        | `reads/viewport.rs`                                                                                                   |
+| `scene.rs`                                           | `reads/scene.rs`                                                                                                      |
+| `detail.rs`                                          | `reads/detail.rs`                                                                                                     |
+| `search.rs`                                          | `reads/search.rs`                                                                                                     |
+| `schema.rs`                                          | `store/schema.rs`                                                                                                     |
+| `edge_index.rs`                                      | `store/edge_index.rs`                                                                                                 |
+| `gc.rs`                                              | `store/gc.rs`                                                                                                         |
+| `project.rs`                                         | `store/projects/mod.rs`                                                                                               |
+| `project/{paths,lock,package,catalog,create,ops}.rs` | `store/projects/{paths,lock,package,catalog,create,ops}.rs`                                                           |
+| `schema/package.rs`                                  | `store/package.rs`                                                                                                    |
+| `fsutil.rs`                                          | `store/fsutil.rs`                                                                                                     |
+| `history.rs` row snapshots                           | stay in `history.rs` (referenced by `HistoryOp`)                                                                      |
+| `detail.rs`/`viewport.rs` test data                  | `db/tests/*`; keep reference oracles in place                                                                         |
+| `entity/mod.rs` ownership comment                    | update to `store/schema.rs`                                                                                           |
 
 ## Appendix C — References
 

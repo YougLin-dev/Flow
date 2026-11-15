@@ -17,6 +17,21 @@ pub struct ProjectInfo {
     pub opened_clean: bool,
 }
 
+/// One project in the managed projects root, as the list UI receives it.
+/// `path` is the absolute package database path; `open_here` and
+/// `open_elsewhere` are separate because probing this window's own held lock
+/// also reports "busy".
+#[derive(Debug, Clone, PartialEq, JsObject)]
+pub struct ProjectEntry {
+    pub project_id: String,
+    pub title: String,
+    pub path: String,
+    pub updated_at: f64,
+    pub last_opened_at: Option<f64>,
+    pub open_here: bool,
+    pub open_elsewhere: bool,
+}
+
 /// One transactional demo seed: the cards, the optional manual text result
 /// they start with, and the edges between them. The document refuses it once
 /// it has seeded or holds any node.

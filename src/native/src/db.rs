@@ -69,6 +69,17 @@ impl Drop for AssetsDir {
     }
 }
 
+/// How a database connection treats its file.
+#[derive(Clone, Debug)]
+enum OpenMode {
+    /// Create the file and its release schema when missing. The legacy and
+    /// dev path.
+    Create,
+    /// Require an existing compatible package whose document carries this
+    /// identity. Never creates the file or a parent directory.
+    Existing { project_id: String },
+}
+
 /// A handle to the database worker.
 ///
 /// SeaORM's sync Rusqlite connection is deliberately not `Send` (it holds a
@@ -102,7 +113,21 @@ pub struct Database {
 }
 
 impl Database {
+    /// Opens `path`, creating the file and its schema when missing. This is
+    /// the legacy/dev path (`FLOW_DB_PATH`, tests and the 100k smoke).
     pub fn open(path: &str) -> Result<Self, String> {
+        Self::open_with(path, OpenMode::Create)
+    }
+
+    /// Opens an existing package and requires its document identity. A
+    /// missing or empty file is refused without creating it or its parent
+    /// directory, and the package is only marked dirty after the identity
+    /// matches.
+    pub(crate) fn open_package(path: &str, project_id: String) -> Result<Self, String> {
+        Self::open_with(path, OpenMode::Existing { project_id })
+    }
+
+    fn open_with(path: &str, mode: OpenMode) -> Result<Self, String> {
         let (ready_tx, ready_rx) = mpsc::channel();
         let (job_tx, job_rx) = mpsc::channel::<Job>();
         let path = path.to_owned();
@@ -113,7 +138,7 @@ impl Database {
 
         std::thread::Builder::new()
             .name("flow-db".to_owned())
-            .spawn(move || worker(&path, ready_tx, job_rx))
+            .spawn(move || worker(&path, mode, ready_tx, job_rx))
             .map_err(|error| error.to_string())?;
 
         let opened_clean = ready_rx
@@ -310,9 +335,14 @@ impl Database {
         if sent.is_err() {
             return Ok(());
         }
-        result_rx
+        let acked = result_rx
             .recv()
-            .map_err(|_| "the database worker stopped during close".to_owned())?
+            .map_err(|_| "the database worker stopped during close".to_owned())?;
+        // An error from the acknowledged job means the worker already dropped
+        // its connection and stopped; the package is merely dirty and will
+        // verify on its next open. The marker lets the workspace release the
+        // package lease in that case while keeping it when no job ran.
+        acked.map_err(|error| format!("{CLOSE_FAILED_AFTER_STOP}{error}"))
     }
 
     pub fn insert_nodes(&self, nodes: Vec<NodeInput>) -> Result<Mutation, String> {
@@ -789,8 +819,8 @@ fn remove_asset_path(path: &Path) {
     };
 }
 
-fn worker(path: &str, ready: Sender<Result<bool, String>>, jobs: Receiver<Job>) {
-    let conn = match open_connection(path) {
+fn worker(path: &str, mode: OpenMode, ready: Sender<Result<bool, String>>, jobs: Receiver<Job>) {
+    let conn = match open_connection(path, mode) {
         Ok(opened) => {
             let _ = ready.send(Ok(opened.clean));
             opened.conn
@@ -830,38 +860,11 @@ fn worker(path: &str, ready: Sender<Result<bool, String>>, jobs: Receiver<Job>) 
                         .map_err(|error| error.to_string())?;
                     }
                     // Fold committed WAL frames back into the package file
-                    // first, and inspect the result row: a concurrent reader
-                    // makes TRUNCATE report busy/checkpointed < log without
-                    // an SQL error. Only a complete checkpoint may be called
-                    // a clean close; the flag stays 0 otherwise.
-                    let checkpoint = conn
-                        .query_one_raw(sea_orm::Statement::from_string(
-                            conn.get_database_backend(),
-                            "PRAGMA wal_checkpoint(TRUNCATE)".to_owned(),
-                        ))
-                        .map_err(|error| error.to_string())?
-                        .ok_or_else(|| "wal_checkpoint returned no row".to_owned())?;
-                    let busy = checkpoint
-                        .try_get_by_index::<i64>(0)
-                        .map_err(|error| error.to_string())?;
-                    let log = checkpoint
-                        .try_get_by_index::<i64>(1)
-                        .map_err(|error| error.to_string())?;
-                    let checkpointed = checkpoint
-                        .try_get_by_index::<i64>(2)
-                        .map_err(|error| error.to_string())?;
-                    if checkpointed != log {
-                        return Err(format!(
-                            "the package's write-ahead log is still busy \
-                             (busy={busy}, checkpointed={checkpointed} of {log})"
-                        ));
-                    }
+                    // first. Only a complete checkpoint may be called a clean
+                    // close; the flag stays 0 otherwise.
+                    schema::package::checkpoint_truncate(&conn)?;
                     if mark_clean {
-                        conn.execute_unprepared(
-                            "UPDATE document SET clean_shutdown = 1 WHERE id = 1",
-                        )
-                        .map(|_| ())
-                        .map_err(|error| error.to_string())?;
+                        schema::package::mark_clean(&conn)?;
                     }
                     Ok(())
                 }))
@@ -884,15 +887,24 @@ struct OpenConnection {
     clean: bool,
 }
 
-fn open_connection(path: &str) -> Result<OpenConnection, String> {
-    if path != ":memory:"
+fn open_connection(path: &str, mode: OpenMode) -> Result<OpenConnection, String> {
+    if matches!(mode, OpenMode::Create)
+        && path != ":memory:"
         && let Some(parent) = Path::new(path).parent()
         && !parent.as_os_str().is_empty()
     {
         fs::create_dir_all(parent).map_err(|error| error.to_string())?;
     }
 
-    let url = sqlite_url(path)?;
+    let url = match &mode {
+        OpenMode::Create => sqlite_url(path)?,
+        OpenMode::Existing { .. } => {
+            if path != ":memory:" && !Path::new(path).is_file() {
+                return Err(missing_package_error(path));
+            }
+            sqlite_url_rw(path)?
+        }
+    };
     let conn = sea_orm::Database::connect(url.as_str()).map_err(|error| error.to_string())?;
     schema::v1::configure(&conn).map_err(|error| package_error(path, error))?;
 
@@ -900,11 +912,23 @@ fn open_connection(path: &str) -> Result<OpenConnection, String> {
     // database even though the guard then refuses it. The previous session's
     // flag is read here, before the open marks the package dirty.
     let clean = match schema::v1::inspect(&conn).map_err(|error| package_error(path, error))? {
-        schema::v1::FileState::New => {
-            schema::v1::create(&conn, "Flow").map_err(|error| package_error(path, error))?;
-            true
-        }
-        schema::v1::FileState::Current(_) => {
+        schema::v1::FileState::New => match &mode {
+            OpenMode::Create => {
+                schema::v1::create(&conn, "Flow").map_err(|error| package_error(path, error))?;
+                true
+            }
+            OpenMode::Existing { .. } => {
+                return Err(missing_package_error(path));
+            }
+        },
+        schema::v1::FileState::Current(info) => {
+            if let OpenMode::Existing { project_id } = &mode
+                && info.project_id != *project_id
+            {
+                return Err(format!(
+                    "the project package belongs to a different project: {path}"
+                ));
+            }
             document::current(&conn)
                 .map_err(|error| error.to_string())?
                 .clean_shutdown
@@ -915,10 +939,16 @@ fn open_connection(path: &str) -> Result<OpenConnection, String> {
 
     // The flag stays 0 for the whole session; `close` sets it once the
     // document has been written out cleanly.
-    conn.execute_unprepared("UPDATE document SET clean_shutdown = 0 WHERE id = 1")
-        .map_err(|error| error.to_string())?;
+    schema::package::mark_dirty(&conn).map_err(|error| error.to_string())?;
 
     Ok(OpenConnection { conn, clean })
+}
+
+fn missing_package_error(path: &str) -> String {
+    format!(
+        "the project package has no Flow database: {path}. \
+         Create a project or choose an existing package."
+    )
 }
 
 /// Adds the package path and a recovery suggestion to a guard error. The
@@ -929,6 +959,13 @@ fn package_error(path: &str, error: String) -> String {
          delete it and its assets directory, or open a new project."
     )
 }
+
+/// Prefix of a close failure that ran to completion: the worker acknowledged
+/// the job (and dropped its connection) but could not make the package
+/// clean. The workspace releases the lease; the dirty package verifies on
+/// the next open. A failure without this prefix may have left the worker
+/// holding the connection.
+pub(crate) const CLOSE_FAILED_AFTER_STOP: &str = "the document closed with a recovery warning: ";
 
 /// The reason an in-flight recovery check stops early: the package is being
 /// closed, and the next open re-runs the check.
@@ -1144,15 +1181,54 @@ pub(crate) fn sqlite_url(path: &str) -> Result<String, String> {
     if path == ":memory:" {
         return Ok("sqlite::memory:".to_owned());
     }
+    absolute_sqlite_url(path)
+}
 
+/// A read-only URL for a scan: SQLite fails instead of creating a missing
+/// file, and a foreign or damaged package is inspected without writing to it.
+pub(crate) fn sqlite_url_ro(path: &str) -> Result<String, String> {
+    if path == ":memory:" {
+        return Ok("sqlite::memory:".to_owned());
+    }
+    Ok(format!("{}?mode=ro", absolute_sqlite_url(path)?))
+}
+
+/// A read-write URL that refuses to create a missing file. The managed open
+/// path must not leave an empty database behind when the package is absent.
+pub(crate) fn sqlite_url_rw(path: &str) -> Result<String, String> {
+    if path == ":memory:" {
+        return Ok("sqlite::memory:".to_owned());
+    }
+    Ok(format!("{}?mode=rw", absolute_sqlite_url(path)?))
+}
+
+fn absolute_sqlite_url(path: &str) -> Result<String, String> {
     // SQLite resolves `file:` URIs as absolute paths. Make relative overrides
     // (`FLOW_DB_PATH=./flow.db`) absolute first so they open next to the
     // caller rather than at the filesystem root, and so a colon in a file
     // name cannot be read as a URL authority and port.
     let absolute = std::path::absolute(path).map_err(|error| error.to_string())?;
     let normalized = absolute.to_string_lossy().replace('\\', "/");
+    // `fs::canonicalize` produces a verbatim `\\?\C:\...` path on Windows
+    // (or `\\?\UNC\server\share`); its `?` is not part of a SQLite `file:`
+    // URI and must not survive as an authority. A verbatim UNC prefix
+    // becomes the normal `//server/share` authority; a drive path drops the
+    // prefix.
+    let normalized = match normalized.strip_prefix("//?/UNC/") {
+        Some(rest) => format!("//{rest}"),
+        None => normalized
+            .strip_prefix("//?/")
+            .unwrap_or(&normalized)
+            .to_owned(),
+    };
     let encoded = encode_uri_path(&normalized);
-    if encoded.starts_with('/') {
+    if encoded.starts_with("//") {
+        // A UNC path's `//server/share` would be read as a URI authority,
+        // which the bundled SQLite rejects (it is built without
+        // SQLITE_ALLOW_URI_AUTHORITY). `localhost` is the one authority such
+        // a build accepts and ignores, leaving the double-slash UNC path.
+        Ok(format!("sqlite:file://localhost{encoded}"))
+    } else if encoded.starts_with('/') {
         Ok(format!("sqlite:file:{encoded}"))
     } else {
         Ok(format!("sqlite:file:///{encoded}"))
@@ -1179,7 +1255,7 @@ fn encode_uri_path(path: &str) -> String {
     encoded
 }
 
-fn configure(conn: &DatabaseConnection, path: &str) -> Result<(), String> {
+pub(crate) fn configure(conn: &DatabaseConnection, path: &str) -> Result<(), String> {
     conn.execute_unprepared("PRAGMA busy_timeout = 5000; PRAGMA cache_size = -64000;")
         .map_err(|error| error.to_string())?;
     if path != ":memory:" {
@@ -1999,6 +2075,45 @@ mod tests {
         assert!(url.starts_with("sqlite:file:"));
         assert!(url.contains("my%20data/notes:2024.db"));
         assert!(!url.contains("sqlite://my"));
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn sqlite_url_strips_a_verbatim_prefix() {
+        let url = sqlite_url("\\\\?\\C:\\Flow Data\\flow.db").expect("url");
+        assert!(!url.contains("%3F"), "{url}");
+        assert!(url.contains("C:/Flow%20Data/flow.db"), "{url}");
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn sqlite_url_keeps_a_verbatim_unc_share() {
+        let url = sqlite_url("\\\\?\\UNC\\nas\\backups\\flow.db").expect("url");
+        assert!(!url.contains("%3F"), "{url}");
+        // The authority-less `file://server` form is rejected by the bundled
+        // SQLite; the ignored `localhost` authority keeps the UNC path.
+        assert!(
+            url.starts_with("sqlite:file://localhost//nas/backups/flow.db"),
+            "{url}"
+        );
+        assert!(!url.contains("file://nas"), "{url}");
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn sqlite_url_opens_a_canonicalized_package() {
+        let (path, database) = temp_database("verbatim-open");
+        {
+            let db = Database::open(&database).expect("create");
+            db.close().expect("close");
+        }
+        let canonical = std::fs::canonicalize(&path).expect("canonicalize");
+        let url = sqlite_url_ro(&canonical.to_string_lossy()).expect("url");
+        let conn = sea_orm::Database::connect(url).expect("open canonicalized url");
+        let state = schema::v1::inspect(&conn).expect("inspect the opened package");
+        assert!(matches!(state, schema::v1::FileState::Current(_)));
+        drop(conn);
+        remove_database_files(&path);
     }
 
     #[test]
@@ -7581,6 +7696,70 @@ mod tests {
     }
 
     #[test]
+    fn open_package_refuses_missing_files_without_creating_them() {
+        let (path, _) = temp_database("package-missing");
+        let missing = path.with_file_name(format!(
+            "flow-missing-package-{}-{}.db",
+            std::process::id(),
+            now_ms()
+        ));
+        let text = missing.to_string_lossy().into_owned();
+        let error = match Database::open_package(&text, "a".repeat(32)) {
+            Ok(_) => panic!("a missing package must be refused"),
+            Err(error) => error,
+        };
+        assert!(error.contains("has no Flow database"), "{error}");
+        assert!(!missing.exists(), "the open must not create the file");
+        remove_database_files(&path);
+
+        let (empty_path, empty) = temp_database("package-empty");
+        std::fs::write(&empty_path, b"").expect("empty package file");
+        let error = match Database::open_package(&empty, "a".repeat(32)) {
+            Ok(_) => panic!("an empty package must be refused"),
+            Err(error) => error,
+        };
+        assert!(error.contains("has no Flow database"), "{error}");
+        assert_eq!(
+            std::fs::metadata(&empty_path).expect("empty file").len(),
+            0,
+            "an empty file must not receive a schema"
+        );
+        remove_database_files(&empty_path);
+    }
+
+    #[test]
+    fn open_package_requires_the_matching_identity_without_marking_it_dirty() {
+        let (path, database) = temp_database("package-identity");
+        let project_id;
+        {
+            let db = Database::open(&database).expect("create");
+            project_id = db.project_info().expect("info").project_id;
+            db.close().expect("clean close");
+        }
+        {
+            let db = Database::open_package(&database, project_id.clone()).expect("open package");
+            let info = db.project_info().expect("info");
+            assert!(info.opened_clean);
+            assert_eq!(info.project_id, project_id);
+            db.close().expect("close");
+        }
+        let error = match Database::open_package(&database, "b".repeat(32)) {
+            Ok(_) => panic!("a mismatched identity must be refused"),
+            Err(error) => error,
+        };
+        assert!(error.contains("belongs to a different project"), "{error}");
+        {
+            let db = Database::open_package(&database, project_id).expect("reopen");
+            assert!(
+                db.project_info().expect("info").opened_clean,
+                "a refused identity must not mark the package dirty"
+            );
+            db.close().expect("close");
+        }
+        remove_database_files(&path);
+    }
+
+    #[test]
     fn opening_refuses_foreign_and_legacy_files_without_dropping_them() {
         let (foreign_path, foreign) = temp_database("foreign");
         write_raw_database(
@@ -7698,10 +7877,18 @@ mod tests {
 
         db.insert_nodes(vec![node("late", "Late", "", &[], 0.0, 0.0)])
             .expect("commit after the snapshot");
+        assert_eq!(
+            CLOSE_FAILED_AFTER_STOP,
+            "the document closed with a recovery warning: "
+        );
         let error = db
             .close()
             .expect_err("a blocked checkpoint is not a clean close");
         assert!(error.contains("write-ahead log"), "{error}");
+        assert!(
+            error.starts_with(CLOSE_FAILED_AFTER_STOP),
+            "the worker stopped, so the close must say so: {error}"
+        );
 
         // The failed close leaves the package marked dirty, so the next open
         // schedules verification instead of skipping it.
@@ -7729,6 +7916,10 @@ mod tests {
                 .close_with_view(f64::NAN, 0.0, 1.0)
                 .expect_err("an invalid camera must not close the package");
             assert!(error.contains("camera"), "{error}");
+            assert!(
+                !error.starts_with(CLOSE_FAILED_AFTER_STOP),
+                "no close job ran, so the worker may still hold the package"
+            );
             db.close_with_view(120.0, -40.0, 2.5)
                 .expect("close with the view");
         }
@@ -9359,7 +9550,7 @@ mod tests {
             Ok(!has_nodes(conn)? && !has_edges(conn)?)
         }
 
-        let conn = open_connection(":memory:")
+        let conn = open_connection(":memory:", OpenMode::Create)
             .expect("open memory database")
             .conn;
         assert!(is_empty(&conn).expect("empty predicate"));
@@ -9438,7 +9629,7 @@ mod tests {
 
     #[test]
     fn running_work_queries_use_partial_indexes() {
-        let conn = open_connection(":memory:")
+        let conn = open_connection(":memory:", OpenMode::Create)
             .expect("open memory database")
             .conn;
         let nodes_statement = nodes::Entity::find()
@@ -9465,7 +9656,7 @@ mod tests {
 
     #[test]
     fn geometry_flush_queries_drive_from_the_dirty_markers() {
-        let conn = open_connection(":memory:")
+        let conn = open_connection(":memory:", OpenMode::Create)
             .expect("open memory database")
             .conn;
         for sql in [
@@ -9489,7 +9680,7 @@ mod tests {
 
     #[test]
     fn overview_sample_uses_the_sample_index() {
-        let conn = open_connection(":memory:")
+        let conn = open_connection(":memory:", OpenMode::Create)
             .expect("open memory database")
             .conn;
         let statement = viewport::overview_statement(100_000, 400);

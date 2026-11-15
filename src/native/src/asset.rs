@@ -2,6 +2,7 @@
 //! `<database directory>/assets/<sha256>`, which TSX never touches directly.
 
 use std::fs;
+use std::io::{Read as _, Write as _};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 
@@ -185,7 +186,13 @@ fn write_bytes(dir: &Path, hash: &str, bytes: &[u8]) -> Result<(), String> {
         return Ok(());
     }
     let temp = dir.join(format!(".{hash}.tmp-{}", std::process::id()));
-    fs::write(&temp, bytes).map_err(|error| error.to_string())?;
+    // The content-addressed name is a durability promise: flush the bytes
+    // before the rename that publishes them, and flush the directory entry
+    // after. A crash otherwise leaves a referenced row without durable bytes.
+    let mut file = fs::File::create(&temp).map_err(|error| error.to_string())?;
+    file.write_all(bytes).map_err(|error| error.to_string())?;
+    file.sync_all().map_err(|error| error.to_string())?;
+    drop(file);
     match fs::remove_file(&target) {
         Ok(()) => {}
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
@@ -195,7 +202,10 @@ fn write_bytes(dir: &Path, hash: &str, bytes: &[u8]) -> Result<(), String> {
         }
     }
     match fs::rename(&temp, &target) {
-        Ok(()) => Ok(()),
+        Ok(()) => {
+            crate::fsutil::sync_dir_best_effort(dir);
+            Ok(())
+        }
         Err(error) => {
             let _ = fs::remove_file(&temp);
             // Another writer may have installed valid bytes after the remove.
@@ -210,7 +220,7 @@ fn write_bytes(dir: &Path, hash: &str, bytes: &[u8]) -> Result<(), String> {
 
 /// Whether a stored file is exactly the bytes its content-addressed name
 /// promises. A missing file is a mismatch, not an error.
-fn file_matches(path: &Path, hash: &str, size: usize) -> Result<bool, String> {
+pub(crate) fn file_matches(path: &Path, hash: &str, size: usize) -> Result<bool, String> {
     let metadata = match fs::metadata(path) {
         Ok(metadata) => metadata,
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(false),
@@ -219,8 +229,19 @@ fn file_matches(path: &Path, hash: &str, size: usize) -> Result<bool, String> {
     if metadata.len() != size as u64 {
         return Ok(false);
     }
-    let bytes = fs::read(path).map_err(|error| error.to_string())?;
-    Ok(hash_bytes(&bytes) == hash)
+    // Stream the file: asset bytes are untrusted and may be large, and the
+    // package verification pass must not allocate the whole file.
+    let mut file = fs::File::open(path).map_err(|error| error.to_string())?;
+    let mut hasher = Sha256::new();
+    let mut buffer = [0u8; 64 * 1024];
+    loop {
+        let read = file.read(&mut buffer).map_err(|error| error.to_string())?;
+        if read == 0 {
+            break;
+        }
+        hasher.update(&buffer[..read]);
+    }
+    Ok(format!("{:x}", hasher.finalize()) == hash)
 }
 
 fn asset_summary(asset: &assets::Model) -> AssetSummary {

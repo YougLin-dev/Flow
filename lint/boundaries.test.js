@@ -357,7 +357,7 @@ test("reports production imports of test support", () => {
   });
 });
 
-test("confines the native module to flow/document and the type seam", () => {
+test("confines the native module to flow/document, flow/projects and the type seam", () => {
   withTree(areaTree, (root) => {
     expect(
       reportsForRule(
@@ -395,6 +395,9 @@ test("confines the native module to flow/document and the type seam", () => {
     ).toEqual([]);
     expect(
       reportsForRule(nativeOutsideSeam, "src/flow/shared/native-types.ts", "@flow/native", root),
+    ).toEqual([]);
+    expect(
+      reportsForRule(nativeOutsideSeam, "src/flow/projects/project-store.ts", "@flow/native", root),
     ).toEqual([]);
   });
 });

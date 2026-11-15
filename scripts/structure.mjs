@@ -23,6 +23,7 @@ import {
   isTestSupportPath,
   isTestSupportTarget,
   layerOf,
+  mayImportNative,
   segmentOf,
 } from "../lint/structure-map.js";
 
@@ -215,6 +216,9 @@ export function checkRustLayout(root) {
     "viewport.rs",
     "detail.rs",
     "gc.rs",
+    "fsutil.rs",
+    "project.rs",
+    "project",
     "constants.rs",
     "clock.rs",
     "types.rs",
@@ -238,8 +242,8 @@ export function checkAreaImports(root, files) {
     const sourceSegment = segmentOf(file);
     for (const specifier of readImports(root, file)) {
       if (specifier === "@flow/native") {
-        if (file !== "src/flow/shared/native-types.ts" && !file.startsWith("src/flow/document/")) {
-          nativeReports.push(`${file} imports @flow/native outside the document seam`);
+        if (!mayImportNative(file)) {
+          nativeReports.push(`${file} imports @flow/native outside the native seam`);
         }
         continue;
       }

@@ -12,9 +12,11 @@ mod detail;
 mod document;
 mod edge_index;
 mod entity;
+mod fsutil;
 mod gc;
 mod history;
 mod mutation;
+mod project;
 mod scene;
 pub mod schema;
 mod search;
@@ -22,6 +24,7 @@ mod types;
 mod viewport;
 
 use db::Database;
+use project::ProjectStore;
 use types::{
     AssetInput, AssetSummary, ChangeSet, EdgeInput, GcReport, InputItemInput, InputItemSummary,
     NodeBounds, NodeDetail, NodeInput, NodePreview, NodeSummary, Overview, ProjectInfo,
@@ -43,6 +46,14 @@ impl Document {
     /// Opens `path`; creates the file and its schema when missing.
     pub async fn open(path: String) -> Result<Document, String> {
         let db = off_thread(move || Database::open(&path)).await?;
+        Ok(Document { db })
+    }
+
+    /// Opens an existing managed project package and requires its document
+    /// identity to equal `project_id`. A missing package, an empty file and a
+    /// mismatched identity are refused without creating anything.
+    pub async fn open_package(path: String, project_id: String) -> Result<Document, String> {
+        let db = off_thread(move || Database::open_package(&path, project_id)).await?;
         Ok(Document { db })
     }
 
@@ -484,10 +495,11 @@ impl Document {
 #[native_module("@flow/native")]
 fn native(registry: &mut Registry) {
     registry.class::<Document>();
+    registry.class::<ProjectStore>();
 }
 
 /// Runs SQLite work on NSH's blocking pool, so the engine thread is free.
-async fn off_thread<T, F>(work: F) -> Result<T, String>
+pub(crate) async fn off_thread<T, F>(work: F) -> Result<T, String>
 where
     T: Send + 'static,
     F: FnOnce() -> Result<T, String> + Send + 'static,

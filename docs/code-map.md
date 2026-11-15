@@ -36,6 +36,7 @@ same-feature deep import is the sibling area in the other layer.
 | `flow/execution`        | foundation | `src/flow/execution/index.ts`        | `flow/shared`, `flow/nodes`                                                          | `@YougLin-dev` |
 | `flow/composer`         | foundation | `src/flow/composer/index.ts`         | `flow/shared`, `flow/nodes`, `flow/canvas`                                           | `@YougLin-dev` |
 | `flow/document`         | foundation | `src/flow/document/index.ts`         | `flow/shared`, `flow/nodes`, `flow/canvas`, `flow/execution`                         | `@YougLin-dev` |
+| `flow/projects`         | foundation | `src/flow/projects/index.ts`         | `flow/shared`, `flow/document`                                                       | `@YougLin-dev` |
 | `components/primitives` | component  | `src/components/primitives/index.ts` | `flow/shared`                                                                        | `@YougLin-dev` |
 | `components/app`        | component  | `src/components/app/index.ts`        | `components/primitives`, `flow/shared`                                               | `@YougLin-dev` |
 | `components/probes`     | component  | `src/components/probes/index.ts`     | `components/primitives`, `flow/canvas`                                               | `@YougLin-dev` |
@@ -131,5 +132,9 @@ facade, forbidden-folder, segment, native-seam and unclassified rules fail
 `bun run check`, and the budget still reports above 12 direct entries and
 fails above 20. The old → new map is in
 [the plan's Appendix A](plans/code-organization.md#appendix-a--tsx-placement-map).
-Do not add a new file at the `components/`, `flow/` or `pages/` root:
+The project layer added `flow/projects` (managed root, store adapter, lease
+session and pure list helpers) over the Rust `ProjectStore`; it imports
+`flow/document` through its facade and remains unwired from the page until
+the project UI lands. Do not add a new file at the `components/`, `flow/` or
+`pages/` root:
 `scripts/structure.mjs` fails it.
