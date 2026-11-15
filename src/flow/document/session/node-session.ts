@@ -385,8 +385,13 @@ export class NodeSession {
     return copyNodeWithDraftsCommand(this.host, this, id, settings);
   }
 
-  /** Deletes cards in one write; the change set also drops their connectors. */
+  /**
+   * Deletes cards in one write; the change set also drops their connectors.
+   * A deleted card's run is cancelled first so its provider cannot keep
+   * importing assets for a node that no longer exists.
+   */
   async deleteNodes(ids: readonly string[]): Promise<void> {
+    this.cancelRuns(ids);
     return deleteNodesCommand(this.host, ids);
   }
 
@@ -395,7 +400,13 @@ export class NodeSession {
    * restores the content the user saw.
    */
   async deleteNodeWithDrafts(id: string, settings: NodeSettings | null): Promise<void> {
+    this.cancelRuns([id]);
     return deleteNodeWithDraftsCommand(this.host, this, id, settings);
+  }
+
+  private cancelRuns(ids: readonly string[]): void {
+    const runner = this.host.runner();
+    for (const id of ids) runner?.cancel(id);
   }
 
   /** Connects one or more pairs in one write; duplicates and bad pairs skip. */
