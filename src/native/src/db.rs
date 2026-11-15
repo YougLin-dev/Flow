@@ -37,8 +37,9 @@ enum Job {
     Close {
         ack: Sender<Result<(), String>>,
         camera: Option<(f64, f64, f64)>,
-        /// False after a failed verify: the package stays due for recovery.
-        mark_clean: bool,
+        /// Shared with the handle: a close job reads it in the worker, after
+        /// any earlier verify job has stored its outcome (FIFO order).
+        recovery_pending: Arc<AtomicBool>,
     },
 }
 
@@ -85,13 +86,14 @@ pub struct Database {
     /// Fit and the minimap's overview ask at the same revision at startup.
     bounds_cache: Arc<Mutex<Option<(i64, Viewport)>>>,
     closed: Arc<AtomicBool>,
-    /// Set as soon as a close is requested. Jobs already queued behind it
-    /// answer "closed" without touching SQLite, so a quit does not wait for
-    /// stale reads.
+    /// Set as soon as a close is requested. Queued reads answer "closed"
+    /// without touching SQLite so a quit does not wait for stale reads;
+    /// commands already accepted still run ahead of the close job.
     closing: Arc<AtomicBool>,
-    /// Set when verify reports a defect: the next close leaves the package
-    /// due for recovery instead of marking it clean.
-    verify_failed: Arc<AtomicBool>,
+    /// True while the package is due for the recovery check: an unclean open
+    /// starts pending; only a verify job that completes successfully clears
+    /// it, and only then may close mark the package clean.
+    recovery_pending: Arc<AtomicBool>,
     /// Whether the package was clean before this open marked it dirty. A new
     /// package counts as clean: there is nothing from a previous session.
     opened_clean: bool,
@@ -123,7 +125,7 @@ impl Database {
             bounds_cache: Arc::new(Mutex::new(None)),
             closed: Arc::new(AtomicBool::new(false)),
             closing: Arc::new(AtomicBool::new(false)),
-            verify_failed: Arc::new(AtomicBool::new(false)),
+            recovery_pending: Arc::new(AtomicBool::new(!opened_clean)),
             opened_clean,
         })
     }
@@ -131,7 +133,7 @@ impl Database {
     /// The package identity, title, camera and derived counts.
     pub fn project_info(&self) -> Result<ProjectInfo, String> {
         let opened_clean = self.opened_clean;
-        self.run(move |conn| {
+        self.run_read(move |conn| {
             let document = document::current(conn).map_err(|error| error.to_string())?;
             Ok(ProjectInfo {
                 project_id: document.project_id,
@@ -170,18 +172,21 @@ impl Database {
     /// integrity and foreign-key checks, then the FTS/RTree parity repairs, a
     /// dirty-connector flush and exact bounds in one transaction. Kept off
     /// the open path: the 100k fixture makes a full check expensive.
+    ///
+    /// The outcome is stored from inside the worker job, so a close queued
+    /// after it always sees the result. A close requested while the check
+    /// runs aborts it between phases and leaves the package due for recovery.
     pub fn verify(&self) -> Result<(), String> {
-        let result = self.run(|conn| {
-            check_integrity(conn)?;
-            conn.transaction::<_, _, sea_orm::DbErr>(|txn| {
-                schema::maintenance::repair_fts(txn)?;
-                edge_index::flush_geometry_tx(txn)?;
-                schema::maintenance::repair_rtrees(txn)?;
-                compact_bounds_tx(txn)
-            })
-            .map_err(|error| format!("the document repair failed: {error}"))
-        });
-        self.verify_failed.store(result.is_err(), Ordering::SeqCst);
+        let recovery_pending = Arc::clone(&self.recovery_pending);
+        let closing = Arc::clone(&self.closing);
+        let result = self.run_job(
+            move |conn| {
+                let outcome = verify_connection(conn, || closing.load(Ordering::SeqCst));
+                recovery_pending.store(outcome.is_err(), Ordering::SeqCst);
+                outcome
+            },
+            true,
+        );
         if result.is_ok() {
             self.clear_bounds_cache();
         }
@@ -230,7 +235,6 @@ impl Database {
             return Ok(());
         }
         self.closing.store(true, Ordering::SeqCst);
-        let mark_clean = !self.verify_failed.load(Ordering::SeqCst);
         let (result_tx, result_rx) = mpsc::channel();
         let sent = self
             .tx
@@ -239,7 +243,7 @@ impl Database {
             .send(Job::Close {
                 ack: result_tx,
                 camera,
-                mark_clean,
+                recovery_pending: Arc::clone(&self.recovery_pending),
             });
         if sent.is_err() {
             return Ok(());
@@ -429,12 +433,12 @@ impl Database {
 
     /// A node with its output batch and input list.
     pub fn node_detail(&self, id: String) -> Result<Option<NodeDetail>, String> {
-        self.run(move |conn| detail::node_detail(conn, &id))
+        self.run_read(move |conn| detail::node_detail(conn, &id))
     }
 
     /// The first items of several nodes' current batches, for card previews.
     pub fn previews(&self, ids: Vec<String>) -> Result<Vec<NodePreview>, String> {
-        self.run(move |conn| detail::previews(conn, ids))
+        self.run_read(move |conn| detail::previews(conn, ids))
     }
 
     pub fn import_asset(&self, input: AssetInput) -> Result<AssetSummary, String> {
@@ -451,7 +455,7 @@ impl Database {
 
     pub fn asset_bytes(&self, id: String) -> Result<Vec<u8>, String> {
         let assets_dir = Arc::clone(&self.assets_dir);
-        self.run(move |conn| asset::asset_bytes(conn, &assets_dir, id))
+        self.run_read(move |conn| asset::asset_bytes(conn, &assets_dir, id))
     }
 
     pub fn delete_nodes(&self, ids: Vec<String>) -> Result<Mutation, String> {
@@ -562,7 +566,7 @@ impl Database {
     }
 
     pub fn viewport(&self, rect: Viewport, margin: f64) -> Result<Vec<NodeSummary>, String> {
-        self.run(move |conn| viewport::viewport(conn, rect, margin, viewport::NODE_LIMIT))
+        self.run_read(move |conn| viewport::viewport(conn, rect, margin, viewport::NODE_LIMIT))
     }
 
     pub fn scene(
@@ -571,24 +575,24 @@ impl Database {
         margin: f64,
         max_cards: u64,
     ) -> Result<SceneSnapshot, String> {
-        self.run(move |conn| scene::snapshot(conn, rect, margin, max_cards))
+        self.run_read(move |conn| scene::snapshot(conn, rect, margin, max_cards))
     }
 
     pub fn bounds(&self) -> Result<Viewport, String> {
         let cache = self.bounds_cache.clone();
-        self.run(move |conn| cached_bounds(conn, &cache))
+        self.run_read(move |conn| cached_bounds(conn, &cache))
     }
 
     pub fn overview(&self) -> Result<Overview, String> {
         let cache = self.bounds_cache.clone();
-        self.run(move |conn| {
+        self.run_read(move |conn| {
             let bounds = cached_bounds(conn, &cache)?;
             scene::overview(conn, bounds)
         })
     }
 
     pub fn get_node(&self, id: String) -> Result<Option<NodeSummary>, String> {
-        self.run(move |conn| scene::get_node(conn, &id))
+        self.run_read(move |conn| scene::get_node(conn, &id))
     }
 
     pub fn search(
@@ -597,21 +601,21 @@ impl Database {
         filters: SearchFilters,
         limit: u32,
     ) -> Result<Vec<SearchHit>, String> {
-        self.run(move |conn| search::search(conn, query, filters, limit))
+        self.run_read(move |conn| search::search(conn, query, filters, limit))
     }
 
     pub fn count(&self) -> Result<u32, String> {
-        self.run(count)
+        self.run_read(count)
     }
 
     pub fn edge_count(&self) -> Result<u32, String> {
-        self.run(edge_count)
+        self.run_read(edge_count)
     }
 
     /// Whether the open document has neither nodes nor edges. One worker job
     /// answers startup's seed question with two existence reads, not counts.
     pub fn is_empty(&self) -> Result<bool, String> {
-        self.run(|conn| Ok(!has_nodes(conn)? && !has_edges(conn)?))
+        self.run_read(|conn| Ok(!has_nodes(conn)? && !has_edges(conn)?))
     }
 
     /// Runs a document mutation and records its inverse in the same worker
@@ -639,7 +643,28 @@ impl Database {
         })
     }
 
+    /// Runs a command. A close requested while it sits in the queue still
+    /// runs it: a flushed write must reach the checkpoint.
     fn run<T, F>(&self, work: F) -> Result<T, String>
+    where
+        T: Send + 'static,
+        F: FnOnce(&DatabaseConnection) -> Result<T, String> + Send + 'static,
+    {
+        self.run_job(work, false)
+    }
+
+    /// Runs a read or maintenance job. A close requested while it sits in the
+    /// queue answers "closed" without touching SQLite, so a quit does not
+    /// wait for stale work; the owner is closing and will not use the value.
+    fn run_read<T, F>(&self, work: F) -> Result<T, String>
+    where
+        T: Send + 'static,
+        F: FnOnce(&DatabaseConnection) -> Result<T, String> + Send + 'static,
+    {
+        self.run_job(work, true)
+    }
+
+    fn run_job<T, F>(&self, work: F, skippable: bool) -> Result<T, String>
     where
         T: Send + 'static,
         F: FnOnce(&DatabaseConnection) -> Result<T, String> + Send + 'static,
@@ -650,9 +675,7 @@ impl Database {
         let closing = Arc::clone(&self.closing);
         let (result_tx, result_rx) = mpsc::channel();
         let job = Job::Run(Box::new(move |conn| {
-            // A close requested while this job sat in the queue must reach
-            // the checkpoint first: answer without touching SQLite.
-            if closing.load(Ordering::SeqCst) {
+            if skippable && closing.load(Ordering::SeqCst) {
                 let _ = result_tx.send(Err("the database is closed".to_owned()));
                 return;
             }
@@ -699,9 +722,13 @@ fn worker(path: &str, ready: Sender<Result<bool, String>>, jobs: Receiver<Job>) 
             Job::Close {
                 ack,
                 camera,
-                mark_clean,
+                recovery_pending,
             } => {
                 let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                    // Read inside the worker: an earlier verify job that
+                    // started has already stored its outcome here (FIFO); a
+                    // verify still queued at close is skipped before it runs.
+                    let mark_clean = !recovery_pending.load(Ordering::SeqCst);
                     if let Some((x, y, zoom)) = camera {
                         document_row::Entity::update(document_row::ActiveModel {
                             id: Unchanged(document::ROW_ID),
@@ -814,7 +841,49 @@ fn package_error(path: &str, error: String) -> String {
     )
 }
 
-fn check_integrity(conn: &DatabaseConnection) -> Result<(), String> {
+/// The reason an in-flight recovery check stops early: the package is being
+/// closed, and the next open re-runs the check.
+const VERIFY_CLOSING: &str = "the database is closing";
+
+/// The recovery body. The stop decision is sampled between phases, so a quit
+/// aborts the check as soon as the current statement returns. `quick_check`
+/// itself cannot be interrupted, so it still bounds the wait on a large
+/// package; a package left dirty by that abort verifies on the next open.
+/// The decision is a callback so tests can flip it at a chosen phase.
+fn verify_connection(conn: &DatabaseConnection, stop: impl Fn() -> bool) -> Result<(), String> {
+    if stop() {
+        return Err(VERIFY_CLOSING.to_owned());
+    }
+    check_quick_check(conn)?;
+    if stop() {
+        return Err(VERIFY_CLOSING.to_owned());
+    }
+    check_foreign_keys(conn)?;
+    if stop() {
+        return Err(VERIFY_CLOSING.to_owned());
+    }
+    conn.transaction::<_, _, sea_orm::DbErr>(|txn| {
+        if stop() {
+            return Err(sea_orm::DbErr::Custom(VERIFY_CLOSING.to_owned()));
+        }
+        schema::maintenance::repair_fts(txn)?;
+        if stop() {
+            return Err(sea_orm::DbErr::Custom(VERIFY_CLOSING.to_owned()));
+        }
+        edge_index::flush_geometry_tx(txn)?;
+        if stop() {
+            return Err(sea_orm::DbErr::Custom(VERIFY_CLOSING.to_owned()));
+        }
+        schema::maintenance::repair_rtrees(txn)?;
+        if stop() {
+            return Err(sea_orm::DbErr::Custom(VERIFY_CLOSING.to_owned()));
+        }
+        compact_bounds_tx(txn)
+    })
+    .map_err(|error| format!("the document repair failed: {error}"))
+}
+
+fn check_quick_check(conn: &DatabaseConnection) -> Result<(), String> {
     let integrity = conn
         .query_one_raw(sea_orm::Statement::from_string(
             conn.get_database_backend(),
@@ -829,6 +898,10 @@ fn check_integrity(conn: &DatabaseConnection) -> Result<(), String> {
             "the database failed its integrity check: {integrity}"
         ));
     }
+    Ok(())
+}
+
+fn check_foreign_keys(conn: &DatabaseConnection) -> Result<(), String> {
     let violations = conn
         .query_all_raw(sea_orm::Statement::from_string(
             conn.get_database_backend(),
@@ -1133,6 +1206,21 @@ mod tests {
             z: 0.0,
             data_json: None,
             settings_json: None,
+        }
+    }
+
+    fn edge(id: &str, from: &str, to: &str) -> EdgeInput {
+        EdgeInput {
+            id: id.to_owned(),
+            from_id: from.to_owned(),
+            to_id: to.to_owned(),
+            from_port: "out".to_owned(),
+            to_port: "in".to_owned(),
+            port_kind: "text".to_owned(),
+            from_offset: 42.0,
+            to_offset: 42.0,
+            kind: "flow".to_owned(),
+            data_json: None,
         }
     }
 
@@ -7387,15 +7475,173 @@ mod tests {
     }
 
     #[test]
-    fn a_close_request_makes_a_queued_job_skip_the_database() {
+    fn a_close_request_skips_a_queued_read_but_runs_a_queued_command() {
         let db = Database::open(":memory:").expect("open");
         db.closing.store(true, Ordering::SeqCst);
-        let error = db
-            .run(|_| -> Result<(), String> {
-                panic!("a job after the close request must not touch SQLite")
+        let skipped = db
+            .run_read(|_| -> Result<(), String> {
+                panic!("a read after the close request must not touch SQLite")
             })
-            .expect_err("the queued job answers closed");
-        assert!(error.contains("closed"), "{error}");
+            .expect_err("the queued read answers closed");
+        assert!(skipped.contains("closed"), "{skipped}");
+
+        // A command the UI already issued must still reach the checkpoint.
+        db.insert_nodes(vec![node("queued", "Queued", "", &[], 0.0, 0.0)])
+            .expect("a queued command still runs");
+        let count = db
+            .run(|conn| {
+                conn.query_one_raw(sea_orm::Statement::from_string(
+                    conn.get_database_backend(),
+                    "SELECT count(*) FROM nodes".to_owned(),
+                ))
+                .map_err(|error| error.to_string())?
+                .ok_or_else(|| "the count returned no row".to_owned())?
+                .try_get_by_index::<i64>(0)
+                .map_err(|error| error.to_string())
+            })
+            .expect("read the count");
+        assert_eq!(count, 1);
+    }
+
+    #[test]
+    fn closing_before_verify_keeps_a_crashed_package_dirty() {
+        let (path, database) = temp_database("close-pending");
+        {
+            let db = Database::open(&database).expect("open");
+            db.insert_nodes(vec![node("a", "A", "", &[], 0.0, 0.0)])
+                .expect("insert");
+            // Drop without close: the package stays dirty.
+        }
+        {
+            let db = Database::open(&database).expect("reopen after a crash");
+            assert!(!db.project_info().expect("info").opened_clean);
+            // Quit before the recovery check ever runs.
+            db.close().expect("close without verify");
+        }
+        {
+            let db = Database::open(&database).expect("reopen again");
+            assert!(
+                !db.project_info().expect("info").opened_clean,
+                "the recovery check is still pending"
+            );
+            db.verify().expect("complete the recovery check");
+            db.close().expect("close");
+        }
+        {
+            let db = Database::open(&database).expect("reopen after verify");
+            assert!(
+                db.project_info().expect("info").opened_clean,
+                "a completed verify lets the next close mark the package clean"
+            );
+            db.close().expect("close");
+        }
+        remove_database_files(&path);
+    }
+
+    #[test]
+    fn a_close_job_reads_the_recovery_state_after_earlier_jobs() {
+        let (path, database) = temp_database("close-order");
+        {
+            let db = Database::open(&database).expect("open");
+            let pending = Arc::clone(&db.recovery_pending);
+            let (ack_tx, ack_rx) = std::sync::mpsc::channel();
+            // Queue the jobs by hand: a blocked verify would be skipped by the
+            // close gate, so this pins the FIFO ordering of an earlier job
+            // that did run and stored its outcome before the close is read.
+            db.closing.store(true, Ordering::SeqCst);
+            db.closed.store(true, Ordering::SeqCst);
+            db.tx
+                .lock()
+                .expect("lock the job queue")
+                .send(Job::Run(Box::new(move |_| {
+                    pending.store(true, Ordering::SeqCst);
+                })))
+                .expect("queue the marking job");
+            db.tx
+                .lock()
+                .expect("lock the job queue")
+                .send(Job::Close {
+                    ack: ack_tx,
+                    camera: None,
+                    recovery_pending: Arc::clone(&db.recovery_pending),
+                })
+                .expect("queue the close job");
+            ack_rx.recv().expect("close ack").expect("close");
+        }
+        {
+            let db = Database::open(&database).expect("reopen");
+            assert!(
+                !db.project_info().expect("info").opened_clean,
+                "the close job must read the state after the earlier job ran"
+            );
+            db.verify().expect("complete the recovery check");
+            db.close().expect("close");
+        }
+        remove_database_files(&path);
+    }
+
+    #[test]
+    fn verify_stops_at_the_entry_when_a_close_is_pending() {
+        let db = Database::open(":memory:").expect("open");
+        let error = db
+            .run(|conn| verify_connection(conn, || true))
+            .expect_err("a pending close aborts the recovery check");
+        assert!(error.contains("closing"), "{error}");
+    }
+
+    #[test]
+    fn verify_stops_between_phases_and_rolls_the_repair_back() {
+        let db = Database::open(":memory:").expect("open");
+        db.insert_nodes(vec![
+            node("a", "A", "", &[], 0.0, 0.0),
+            node("b", "B", "", &[], 300.0, 0.0),
+        ])
+        .expect("insert");
+        db.insert_edges(vec![edge("a-b", "a", "b")])
+            .expect("connect");
+        let seq = edge_seq(&db, "a-b");
+        let before = min_x_of(&db, "edges_rtree", seq);
+        // A direct geometry write records the dirty connector but does not
+        // run the command's flush, so the edge box still holds the old curve.
+        direct_write(&db, "UPDATE nodes SET x = x + 400 WHERE id = 'a'");
+        assert_eq!(min_x_of(&db, "edges_rtree", seq), before);
+        let error = db
+            .run(|conn| {
+                let calls = std::cell::Cell::new(0u32);
+                // Stop after the transaction's geometry flush has run with a
+                // repair phase still to go: the rollback must undo the flush.
+                verify_connection(conn, || {
+                    let next = calls.get() + 1;
+                    calls.set(next);
+                    next >= 6
+                })
+            })
+            .expect_err("a close between phases aborts the repair");
+        assert!(error.contains("closing"), "{error}");
+        assert_eq!(
+            min_x_of(&db, "edges_rtree", seq),
+            before,
+            "the aborted transaction rolled the flush back"
+        );
+        let dirty = db
+            .run(|conn| {
+                conn.query_one_raw(sea_orm::Statement::from_string(
+                    conn.get_database_backend(),
+                    "SELECT count(*) FROM nodes_geometry_dirty".to_owned(),
+                ))
+                .map_err(|error| error.to_string())?
+                .ok_or_else(|| "the count returned no row".to_owned())?
+                .try_get_by_index::<i64>(0)
+                .map_err(|error| error.to_string())
+            })
+            .expect("read the dirty count");
+        assert!(dirty > 0, "the flush still has work to do");
+
+        db.verify().expect("the next verify finishes the repair");
+        assert!(
+            (min_x_of(&db, "edges_rtree", seq) - before).abs() > 50.0,
+            "the completed flush updates the edge box"
+        );
     }
 
     #[test]
@@ -7463,6 +7709,36 @@ mod tests {
         })
         .expect("read node")
         .expect("node row")
+    }
+
+    fn edge_seq(db: &Database, id: &str) -> i64 {
+        let id = id.to_owned();
+        db.run(move |conn| {
+            edges::Entity::find()
+                .filter(edges::Column::Id.eq(id))
+                .one(conn)
+                .map(|row| row.map(|row| row.seq))
+                .map_err(|error| error.to_string())
+        })
+        .expect("read edge")
+        .expect("edge row")
+    }
+
+    /// One `min_x` cell from an RTree or the `edge_boxes` view.
+    fn min_x_of(db: &Database, table: &'static str, id: i64) -> f64 {
+        db.run(move |conn| {
+            let sql = format!("SELECT min_x FROM {table} WHERE id = ?");
+            conn.query_one_raw(sea_orm::Statement::from_sql_and_values(
+                sea_orm::DbBackend::Sqlite,
+                &sql,
+                [id.into()],
+            ))
+            .map_err(|error| error.to_string())?
+            .ok_or_else(|| "the box row is missing".to_owned())?
+            .try_get_by_index::<f64>(0)
+            .map_err(|error| error.to_string())
+        })
+        .expect("read the box")
     }
 
     #[test]
@@ -7614,6 +7890,61 @@ mod tests {
 
         db.verify().expect("verify rebuilds a stale box");
         assert!((min_x(&db) - 8.0).abs() < 0.01);
+    }
+
+    #[test]
+    fn verify_rebuilds_a_stale_edge_box() {
+        let db = Database::open(":memory:").expect("open");
+        db.insert_nodes(vec![
+            node("a", "A", "", &[], 0.0, 0.0),
+            node("b", "B", "", &[], 300.0, 0.0),
+        ])
+        .expect("insert");
+        db.insert_edges(vec![edge("a-b", "a", "b")])
+            .expect("connect");
+        // The view and the RTree key on `edges.seq`, not the connector id.
+        let seq = edge_seq(&db, "a-b");
+        let expected = min_x_of(&db, "edge_boxes", seq);
+        db.run(move |conn| {
+            conn.execute_raw(sea_orm::Statement::from_sql_and_values(
+                sea_orm::DbBackend::Sqlite,
+                "UPDATE edges_rtree SET min_x = min_x + 1000, max_x = max_x + 1000 \
+                  WHERE id = ?",
+                [seq.into()],
+            ))
+            .map(|_| ())
+            .map_err(|error| error.to_string())
+        })
+        .expect("move the edge box away");
+        let stale = min_x_of(&db, "edges_rtree", seq);
+        assert!((stale - expected).abs() > 100.0);
+
+        db.verify().expect("verify rebuilds the edge box");
+        let repaired = min_x_of(&db, "edges_rtree", seq);
+        assert!((repaired - expected).abs() < 0.01);
+    }
+
+    #[test]
+    fn verify_accepts_rtree_cells_at_the_world_limits() {
+        let db = Database::open(":memory:").expect("open");
+        // The quarter-unit offsets are not representable in a 32-bit RTree
+        // cell, so the stored cells genuinely round outward at these
+        // magnitudes. Exact coordinates would make the parity delta zero and
+        // leave the tolerance untested.
+        db.insert_nodes(vec![
+            node("a", "A", "", &[], 9_999_000.25, -9_999_000.25),
+            node("b", "B", "", &[], -9_999_000.25, 9_999_000.25),
+            node("c", "C", "", &[], 0.125, -0.375),
+            node("d", "D", "", &[], 8_388_000.75, -8_388_000.75),
+        ])
+        .expect("insert at the world limits");
+        let mut across = edge("limit-edge", "a", "b");
+        across.from_offset = 42.3;
+        across.to_offset = 42.7;
+        db.insert_edges(vec![across])
+            .expect("connect across the world");
+        db.verify()
+            .expect("legitimate 32-bit cells pass the parity tolerance");
     }
 
     #[test]
