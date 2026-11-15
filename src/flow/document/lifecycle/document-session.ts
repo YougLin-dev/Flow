@@ -26,6 +26,14 @@ export async function openFlowDocument(pathOverride?: string): Promise<OpenedFlo
   const document = await Document.open(path);
   try {
     await document.recoverRuns();
+    // Package maintenance: the undo history is empty at open, so terminal
+    // batches and assets no live row references can be removed. A collection
+    // failure is not a reason to keep the project shut.
+    try {
+      await document.gc();
+    } catch (error) {
+      console.error("Flow could not collect its package", error);
+    }
     // A project seeds once. An empty project that already seeded keeps its
     // emptiness: deleting every card is not a reason to restore the demo.
     let info = await document.projectInfo();

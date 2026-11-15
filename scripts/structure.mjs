@@ -214,6 +214,7 @@ export function checkRustLayout(root) {
     "scene.rs",
     "viewport.rs",
     "detail.rs",
+    "gc.rs",
     "constants.rs",
     "clock.rs",
     "types.rs",

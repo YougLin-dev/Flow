@@ -12,6 +12,7 @@ mod detail;
 mod document;
 mod edge_index;
 mod entity;
+mod gc;
 mod history;
 mod mutation;
 mod scene;
@@ -22,9 +23,10 @@ mod viewport;
 
 use db::Database;
 use types::{
-    AssetInput, AssetSummary, ChangeSet, EdgeInput, InputItemInput, InputItemSummary, NodeBounds,
-    NodeDetail, NodeInput, NodePreview, NodeSummary, Overview, ProjectInfo, ResultBatchInput,
-    ResultItemInput, SceneSnapshot, SearchFilters, SearchHit, SeedDocumentInput, Viewport,
+    AssetInput, AssetSummary, ChangeSet, EdgeInput, GcReport, InputItemInput, InputItemSummary,
+    NodeBounds, NodeDetail, NodeInput, NodePreview, NodeSummary, Overview, ProjectInfo,
+    ResultBatchInput, ResultItemInput, SceneSnapshot, SearchFilters, SearchHit, SeedDocumentInput,
+    Viewport,
 };
 
 /// The open Flow document.
@@ -461,6 +463,13 @@ impl Document {
     pub async fn clear_history(this: Instance<Self>) -> Result<(), String> {
         let db = this.with(|document| document.db.clone());
         off_thread(move || db.clear_history()).await
+    }
+
+    /// Removes unreachable batches, items, assets and asset files. Runs at
+    /// open/maintenance; refuses while the undo history holds an entry.
+    pub async fn gc(this: Instance<Self>) -> Result<GcReport, String> {
+        let db = this.with(|document| document.db.clone());
+        off_thread(move || db.gc()).await
     }
 }
 

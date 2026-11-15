@@ -365,6 +365,12 @@ impl History {
     const LIMIT: usize = 200;
     const BYTE_LIMIT: usize = 64 * 1024 * 1024;
 
+    /// Whether any undo or redo entry exists. Package collection refuses to
+    /// run while one does: the entry may need a batch or asset it names.
+    pub fn is_empty(&self) -> bool {
+        self.undo.is_empty() && self.redo.is_empty()
+    }
+
     pub fn push(&mut self, entry: HistoryEntry) {
         if entry.forward.is_empty() {
             return;

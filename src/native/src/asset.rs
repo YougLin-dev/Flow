@@ -171,7 +171,7 @@ fn hash_bytes(bytes: &[u8]) -> String {
 
 /// A content hash must be exactly what `hash_bytes` produces: 64 lowercase
 /// hexadecimal characters. A malformed stored hash is not used as a path.
-fn is_sha256_hex(hash: &str) -> bool {
+pub(crate) fn is_sha256_hex(hash: &str) -> bool {
     hash.len() == 64
         && hash
             .bytes()

@@ -15,6 +15,7 @@ use crate::detail;
 use crate::document;
 use crate::edge_index;
 use crate::entity::{document as document_row, nodes};
+use crate::gc;
 #[cfg(test)]
 use crate::history::HistoryOp;
 use crate::history::{History, HistoryEntry, HistoryRefs};
@@ -23,9 +24,10 @@ use crate::scene;
 use crate::schema;
 use crate::search;
 use crate::types::{
-    AssetInput, AssetSummary, ChangeSet, EdgeInput, InputItemInput, InputItemSummary, NodeBounds,
-    NodeDetail, NodeInput, NodePreview, NodeSummary, Overview, ProjectInfo, ResultBatchInput,
-    ResultItemInput, SceneSnapshot, SearchFilters, SearchHit, SeedDocumentInput, Viewport,
+    AssetInput, AssetSummary, ChangeSet, EdgeInput, GcReport, InputItemInput, InputItemSummary,
+    NodeBounds, NodeDetail, NodeInput, NodePreview, NodeSummary, Overview, ProjectInfo,
+    ResultBatchInput, ResultItemInput, SceneSnapshot, SearchFilters, SearchHit, SeedDocumentInput,
+    Viewport,
 };
 use crate::viewport;
 
@@ -127,6 +129,24 @@ impl Database {
             closing: Arc::new(AtomicBool::new(false)),
             recovery_pending: Arc::new(AtomicBool::new(!opened_clean)),
             opened_clean,
+        })
+    }
+
+    /// Collects unreachable terminal batches, their items, unreferenced assets
+    /// and asset files with no row. Maintenance only: refuses while the undo
+    /// history holds an entry, because an entry may name one of those rows.
+    pub fn gc(&self) -> Result<GcReport, String> {
+        let history = Arc::clone(&self.history);
+        let assets_dir = Arc::clone(&self.assets_dir);
+        self.run(move |conn| {
+            let empty = history
+                .lock()
+                .map_err(|_| "the undo history lock is poisoned".to_owned())?
+                .is_empty();
+            if !empty {
+                return Err("a package collection needs an empty undo history".to_owned());
+            }
+            gc::collect(conn, &assets_dir)
         })
     }
 
@@ -1222,6 +1242,60 @@ mod tests {
             kind: "flow".to_owned(),
             data_json: None,
         }
+    }
+
+    fn result_batch(id: &str, node_id: &str, status: &str) -> ResultBatchInput {
+        ResultBatchInput {
+            id: id.to_owned(),
+            node_id: node_id.to_owned(),
+            trigger: "run".to_owned(),
+            provider: "mock-text".to_owned(),
+            model: "mock-text".to_owned(),
+            params_json: "{}".to_owned(),
+            status: status.to_owned(),
+            error: None,
+        }
+    }
+
+    fn result_text_item(id: &str, text: &str) -> ResultItemInput {
+        ResultItemInput {
+            id: id.to_owned(),
+            position: 0.0,
+            port_id: "out".to_owned(),
+            kind: "text".to_owned(),
+            text: text.to_owned(),
+            asset_id: None,
+            meta_json: None,
+        }
+    }
+
+    fn result_image_item(id: &str, asset_id: &str) -> ResultItemInput {
+        ResultItemInput {
+            id: id.to_owned(),
+            position: 0.0,
+            port_id: "out".to_owned(),
+            kind: "image".to_owned(),
+            text: String::new(),
+            asset_id: Some(asset_id.to_owned()),
+            meta_json: None,
+        }
+    }
+
+    fn batch_exists(db: &Database, id: &str) -> bool {
+        let id = id.to_owned();
+        db.run(move |conn| {
+            conn.query_one_raw(sea_orm::Statement::from_sql_and_values(
+                sea_orm::DbBackend::Sqlite,
+                "SELECT EXISTS (SELECT 1 FROM result_batches WHERE id = ?)",
+                [id.into()],
+            ))
+            .map_err(|error| error.to_string())?
+            .ok_or_else(|| "the existence read returned no row".to_owned())?
+            .try_get_by_index::<i64>(0)
+            .map(|found| found != 0)
+            .map_err(|error| error.to_string())
+        })
+        .expect("check the batch")
     }
 
     #[test]
@@ -7677,12 +7751,156 @@ mod tests {
     }
 
     #[test]
+    fn gc_refuses_while_the_undo_history_holds_an_entry() {
+        let db = Database::open(":memory:").expect("open");
+        db.insert_nodes(vec![node("a", "A", "", &[], 0.0, 0.0)])
+            .expect("insert");
+        let error = db.gc().expect_err("an undoable edit blocks collection");
+        assert!(error.contains("undo history"), "{error}");
+
+        db.clear_history().expect("clear history");
+        let report = db.gc().expect("collect an idle package");
+        assert_eq!(report.batches, 0.0);
+        assert_eq!(report.assets, 0.0);
+    }
+
+    #[test]
+    fn gc_keeps_outputs_inputs_and_the_newest_batch() {
+        let db = Database::open(":memory:").expect("open");
+        db.insert_nodes(vec![
+            node("s", "S", "", &[], 0.0, 0.0),
+            node("t", "T", "", &[], 300.0, 0.0),
+        ])
+        .expect("insert");
+        db.save_run(
+            result_batch("b1", "s", "done"),
+            vec![result_text_item("i1", "one")],
+        )
+        .expect("first run");
+        db.connect_edge(edge("s-t", "s", "t"))
+            .expect("snapshot b1 into the target");
+        db.save_run(
+            result_batch("b2", "s", "done"),
+            vec![result_text_item("i2", "two")],
+        )
+        .expect("second run");
+        db.save_run(result_batch("b3", "s", "failed"), Vec::new())
+            .expect("failed run");
+        db.save_run(
+            result_batch("b4", "s", "done"),
+            vec![result_text_item("i4", "four")],
+        )
+        .expect("third run");
+        db.clear_history().expect("clear history");
+
+        let report = db.gc().expect("collect");
+        assert_eq!(report.batches, 2.0, "b2 and the failed b3 are unreachable");
+        assert_eq!(report.items, 1.0, "only b2 had an item");
+        assert!(batch_exists(&db, "b1"), "the input snapshot keeps b1");
+        assert!(!batch_exists(&db, "b2"));
+        assert!(!batch_exists(&db, "b3"));
+        assert!(batch_exists(&db, "b4"), "the output and newest batch stays");
+        let detail = db
+            .node_detail("t".to_owned())
+            .expect("detail")
+            .expect("target node");
+        assert_eq!(detail.inputs[0].item_id.as_deref(), Some("i1"));
+        assert!(detail.inputs[0].item.is_some());
+    }
+
+    #[test]
+    fn gc_collects_unreferenced_assets_and_orphan_files() {
+        let db = Database::open(":memory:").expect("open");
+        db.insert_nodes(vec![
+            node("kept", "Kept", "", &[], 0.0, 0.0),
+            node("gone", "Gone", "", &[], 300.0, 0.0),
+        ])
+        .expect("insert");
+        let kept_asset = test_asset(&db, "kept-asset");
+        let input_asset = test_asset(&db, "input-asset");
+        let dead_asset = test_asset(&db, "dead-asset");
+        let orphan_asset = test_asset(&db, "orphan-asset");
+        db.save_run(
+            result_batch("kept-batch", "kept", "done"),
+            vec![result_image_item("kept-item", &kept_asset)],
+        )
+        .expect("kept run");
+        db.save_run(
+            result_batch("dead-batch", "gone", "done"),
+            vec![result_image_item("dead-item", &dead_asset)],
+        )
+        .expect("run of the node that is deleted");
+        db.add_input(InputItemInput {
+            id: "local-input".to_owned(),
+            node_id: "kept".to_owned(),
+            port_id: "references".to_owned(),
+            kind: "image".to_owned(),
+            origin: "local".to_owned(),
+            edge_id: None,
+            item_id: None,
+            asset_id: Some(input_asset.clone()),
+            text: String::new(),
+            meta_json: None,
+        })
+        .expect("local input");
+        db.delete_nodes(vec!["gone".to_owned()])
+            .expect("delete the node, leaving its batch");
+        let orphan_hash = "ab".repeat(32);
+        fs::write(db.assets_dir.join(&orphan_hash), b"orphan file").expect("write the orphan");
+        fs::write(db.assets_dir.join("notes.txt"), b"keep me").expect("write the unknown file");
+        db.clear_history().expect("clear history");
+
+        let report = db.gc().expect("collect");
+        assert_eq!(report.batches, 1.0);
+        assert_eq!(report.items, 1.0);
+        assert_eq!(report.assets, 2.0, "the dead and orphan rows are gone");
+        assert_eq!(report.files, 3.0, "two asset files and the orphan hash");
+        assert!(db.asset_bytes(kept_asset).is_ok());
+        assert!(db.asset_bytes(input_asset).is_ok());
+        assert!(db.asset_bytes(dead_asset).is_err());
+        assert!(db.asset_bytes(orphan_asset).is_err());
+        assert!(db.assets_dir.join("notes.txt").exists());
+        assert!(!db.assets_dir.join(&orphan_hash).exists());
+    }
+
+    #[test]
     fn verify_stops_at_the_entry_when_a_close_is_pending() {
         let db = Database::open(":memory:").expect("open");
         let error = db
             .run(|conn| verify_connection(conn, || true))
             .expect_err("a pending close aborts the recovery check");
         assert!(error.contains("closing"), "{error}");
+    }
+
+    #[test]
+    fn a_close_request_skips_a_queued_verify_and_leaves_it_pending() {
+        let (path, database) = temp_database("verify-skip");
+        {
+            let db = Database::open(&database).expect("open");
+            db.insert_nodes(vec![node("a", "A", "", &[], 0.0, 0.0)])
+                .expect("insert");
+            // Drop without close: the package is due for recovery.
+        }
+        {
+            let db = Database::open(&database).expect("reopen");
+            assert!(!db.project_info().expect("info").opened_clean);
+            db.closing.store(true, Ordering::SeqCst);
+            let error = db
+                .verify()
+                .expect_err("the close gate skips the queued check");
+            assert!(error.contains("closed"), "{error}");
+            db.close().expect("close after the skipped check");
+        }
+        {
+            let db = Database::open(&database).expect("reopen after close");
+            assert!(
+                !db.project_info().expect("info").opened_clean,
+                "a skipped verify keeps the recovery pending"
+            );
+            db.verify().expect("complete the recovery check");
+            db.close().expect("close");
+        }
+        remove_database_files(&path);
     }
 
     #[test]
@@ -10594,6 +10812,22 @@ mod tests {
             db.recover_runs().expect("final recovery"),
             0,
             "final reopen has no running rows"
+        );
+        let gc_started = std::time::Instant::now();
+        let report = db.gc().expect("package collection");
+        println!(
+            "maintenance gc: elapsed={:.2}ms batches={:.0} items={:.0} assets={:.0} files={:.0}",
+            gc_started.elapsed().as_secs_f64() * 1000.0,
+            report.batches,
+            report.items,
+            report.assets,
+            report.files
+        );
+        let compact_started = std::time::Instant::now();
+        db.compact_bounds().expect("bounds compaction");
+        println!(
+            "maintenance compactBounds: elapsed={:.2}ms",
+            compact_started.elapsed().as_secs_f64() * 1000.0
         );
         drop(db);
 

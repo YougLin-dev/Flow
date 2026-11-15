@@ -302,6 +302,16 @@ pub struct SceneSnapshot {
     pub edges: Vec<EdgeSummary>,
 }
 
+/// What one package collection removed: terminal batches, their items (by
+/// cascade), unreferenced asset rows and asset files with no row.
+#[derive(Debug, Clone, PartialEq, JsObject)]
+pub struct GcReport {
+    pub batches: f64,
+    pub items: f64,
+    pub assets: f64,
+    pub files: f64,
+}
+
 /// One card silhouette the minimap draws, without content or styling.
 #[derive(Debug, Clone, PartialEq, JsObject)]
 pub struct OverviewCard {
