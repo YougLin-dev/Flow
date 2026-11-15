@@ -7,7 +7,14 @@ export {
   openFlowDocument,
   type OpenedFlowDocument,
 } from "./lifecycle/document-session";
-export { needsVerify, savedCamera, type SavedCamera } from "./lifecycle/open-report";
+export {
+  applyOpenView,
+  needsVerify,
+  savedCamera,
+  type OpenView,
+  type SavedCamera,
+} from "./lifecycle/open-report";
+export { shutdownWorkspace, type ShutdownPorts } from "./lifecycle/shutdown";
 export {
   CONTENT,
   IMAGE_NODE_ID,

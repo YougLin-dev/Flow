@@ -37,3 +37,31 @@ export function savedCamera(report: CameraReport): SavedCamera | null {
   if (x === 0 && y === 0 && zoom === 1) return null;
   return { x, y, zoom };
 }
+
+/** The camera operations the open applies; structural so a test can fake them. */
+export interface RestorableCamera {
+  restore(view: { x: number; y: number; scale: number }): boolean;
+}
+
+export interface MovableViewport {
+  userMoved(): void;
+}
+
+/** Whether the open restored a saved view or must fit the document. */
+export type OpenView = "restored" | "fit";
+
+/**
+ * Applies the saved view, marking it user-chosen so a later resize does not
+ * refit. Returns `fit` when the package never saved one.
+ */
+export function applyOpenView(
+  camera: RestorableCamera,
+  viewport: MovableViewport,
+  report: CameraReport,
+): OpenView {
+  const saved = savedCamera(report);
+  if (saved === null) return "fit";
+  viewport.userMoved();
+  camera.restore({ x: saved.x, y: saved.y, scale: saved.zoom });
+  return "restored";
+}

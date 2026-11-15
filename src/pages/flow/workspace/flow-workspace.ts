@@ -5,7 +5,14 @@
  * workspace owns the mutable document lifetime and every cross-object action.
  */
 import { Picker, signal, type Signal } from "nsh";
-import type { ChangeSet, Document, NodeBounds, SearchHit, StageSize } from "../../../flow/shared";
+import type {
+  ChangeSet,
+  Document,
+  NodeBounds,
+  ProjectInfo,
+  SearchHit,
+  StageSize,
+} from "../../../flow/shared";
 import { CanvasCamera, FlowScene } from "../../../flow/canvas";
 import { CanvasController } from "../../../flow/canvas/interaction/canvas-controller";
 import { ComposerState, composerPlacement } from "../../../flow/composer";
@@ -17,10 +24,11 @@ import {
   NodeSession,
   PreviewLoader,
   ViewportController,
+  applyOpenView,
   closeDocumentQuietly,
   needsVerify,
   openFlowDocument,
-  savedCamera,
+  shutdownWorkspace,
 } from "../../../flow/document";
 import { NodeRunner } from "../../../flow/execution";
 import { MinimapController } from "../../../flow/minimap";
@@ -73,13 +81,23 @@ export interface FlowWorkspace {
   readonly shutdown: () => Promise<void>;
 }
 
+/**
+ * How long the shell stays responsive before the recovery check runs. The
+ * quit listener is capped at 200 ms and the single worker is FIFO, so the
+ * check must not overlap the first moments (or an immediate quit).
+ */
+const VERIFY_DELAY_MS = 1500;
+
 export function createFlowWorkspace(deps: FlowWorkspaceDeps): FlowWorkspace {
   let document: Document | null = null;
   let assets: AssetUrls | null = null;
   let runner: NodeRunner | null = null;
   let disposed = false;
   let opening = false;
+  let openingTask: Promise<void> | null = null;
+  let verifyTimer: ReturnType<typeof setTimeout> | null = null;
   let sized = false;
+  let cameraReady = false;
 
   const scene = new FlowScene();
   const camera = new CanvasCamera();
@@ -274,6 +292,26 @@ export function createFlowWorkspace(deps: FlowWorkspaceDeps): FlowWorkspace {
     void revealNode(hit.id);
   };
 
+  const scheduleVerify = (doc: Document, report: ProjectInfo): void => {
+    if (!needsVerify(report)) return;
+    verifyTimer = setTimeout(() => {
+      verifyTimer = null;
+      if (disposed) return;
+      void doc
+        .verify()
+        .then(() => {
+          if (disposed) return;
+          // A repair changes the connector/node indexes and the bounds
+          // without a revision, so publish a fresh read.
+          viewport.schedule();
+          minimap.schedule();
+        })
+        .catch((error) => {
+          console.error("Flow could not verify its document", error);
+        });
+    }, VERIFY_DELAY_MS);
+  };
+
   const openFlow = async (): Promise<void> => {
     if (document || opening || disposed) return;
     opening = true;
@@ -308,25 +346,16 @@ export function createFlowWorkspace(deps: FlowWorkspaceDeps): FlowWorkspace {
         }),
       );
       minimap.schedule();
-      const saved = savedCamera(opened.info);
-      if (saved !== null) {
-        // A saved view wins over the startup fit, and a later resize must
-        // not replace it with an automatic fit.
-        viewport.userMoved();
-        camera.restore({ x: saved.x, y: saved.y, scale: saved.zoom });
-      } else {
+      // A saved view wins over the startup fit, and a later resize must not
+      // replace it with an automatic fit.
+      if (applyOpenView(camera, viewport, opened.info) === "fit") {
         await viewport.fitToDocument(false, false);
       }
       await viewport.refresh();
       if (!disposed) {
+        cameraReady = true;
         viewport.announceZoom(camera.scale);
-        // The recovery check is a post-open job: schedule it after the first
-        // scene read so the open's own reads keep the worker's queue.
-        if (needsVerify(opened.info)) {
-          void opened.document.verify().catch((error) => {
-            console.error("Flow could not verify its document", error);
-          });
-        }
+        scheduleVerify(opened.document, opened.info);
       }
     } catch (error) {
       console.error("Flow could not open its document", error);
@@ -334,6 +363,14 @@ export function createFlowWorkspace(deps: FlowWorkspaceDeps): FlowWorkspace {
     } finally {
       opening = false;
     }
+  };
+
+  const startOpen = (): void => {
+    const task = openFlow();
+    openingTask = task;
+    void task.finally(() => {
+      if (openingTask === task) openingTask = null;
+    });
   };
 
   const addNode = (kind: NodeKindId): void => {
@@ -379,7 +416,7 @@ export function createFlowWorkspace(deps: FlowWorkspaceDeps): FlowWorkspace {
     if (!sized) {
       sized = true;
       camera.fit(CONTENT, size);
-      void openFlow();
+      startOpen();
       return;
     }
     viewport.onResize(size.width, size.height);
@@ -390,6 +427,10 @@ export function createFlowWorkspace(deps: FlowWorkspaceDeps): FlowWorkspace {
   const stopLoaders = (): void => {
     canvasMenu.close();
     disposed = true;
+    if (verifyTimer !== null) {
+      clearTimeout(verifyTimer);
+      verifyTimer = null;
+    }
     previews.dispose();
     minimap.dispose();
     minimapDrag.dispose();
@@ -416,25 +457,19 @@ export function createFlowWorkspace(deps: FlowWorkspaceDeps): FlowWorkspace {
   const shutdown = async (): Promise<void> => {
     if (shuttingDown) return;
     shuttingDown = true;
-    const openDocument = document;
-    const activeRunner = runner;
-    // Settle or cancel running batches while the document is still writable.
-    await activeRunner?.stop();
-    // Without a stage size the camera carries no user view; saving it would
-    // overwrite the previous session's view with the startup default.
-    const view = sized ? camera.view() : null;
-    stopLoaders();
-    if (openDocument !== null) {
-      if (view !== null) {
-        try {
-          await openDocument.saveView(view.x, view.y, view.scale);
-        } catch (error) {
-          console.error("Flow could not save its view", error);
-        }
-      }
-      await closeDocumentQuietly(openDocument);
-      openDocument.dispose();
-    }
+    // A quit can race the open: wait for the handle it produces instead of
+    // leaving that package neither closed nor disposed.
+    const task = openingTask;
+    if (task !== null) await task;
+    // Before the camera has been fitted or restored it carries no view the
+    // user saw; saving it would overwrite the previous session's camera.
+    const view = cameraReady ? camera.view() : null;
+    await shutdownWorkspace({
+      runner,
+      document,
+      view: view === null ? null : { x: view.x, y: view.y, zoom: view.scale },
+      stopConsumers: stopLoaders,
+    });
     forgetDocument();
   };
 

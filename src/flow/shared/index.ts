@@ -27,6 +27,7 @@ export type {
   NodeSummary,
   Overview,
   OverviewCard,
+  ProjectInfo,
   ResultBatchInput,
   ResultItemInput,
   SceneSnapshot,
