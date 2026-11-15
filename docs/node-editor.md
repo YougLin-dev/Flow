@@ -10,28 +10,35 @@ Appendix A.
 
 ## Data model
 
-Schema version 2 is a deliberate reset. `migration_2` drops every document
-table, including the version 1 nodes and edges, and recreates the current
-schema; there is no data migration. The TSX side seeds the text → image
-example into an empty database (`flow/document/lifecycle/seed.ts`). Version 3 keeps the
-document and adds the connector RTree, filled from the existing edges.
-Version 5 is the typed-port reset: it drops the document tables and recreates
-them with required edge port fields and `port_id` on inputs and result items;
-there is again no data migration because the app is unreleased.
+Schema v1 is frozen in `schema/v1.sql`. A project is one self-contained
+package: one SQLite file with a singleton `document` row, plus its
+content-addressed `assets/` directory. The opener checks `application_id` and
+`user_version` before any DDL and refuses a foreign SQLite file, an older
+schema or a newer one without dropping anything; there is no migration from
+the pre-release development schemas because every current row is test data.
+The TSX side seeds the text → image example through one transactional
+`seedDocument` command (`flow/document/lifecycle/seed.ts`), and the document
+records `demo_seeded` so an emptied project is not reseeded.
 
 | Table            | Role                                                                            |
 | ---------------- | ------------------------------------------------------------------------------- |
-| `nodes`          | kind, geometry, body, opaque `settings_json`, `status`, current output          |
-| `result_batches` | one immutable provider or manual run per node                                   |
-| `result_items`   | the text/image items of a batch, ordered by position, with output port          |
+| `document`       | singleton: project id, title, rev, derived counts/bounds, camera, flags         |
+| `nodes`          | kind, geometry, body, newline-joined `tags`, opaque settings, status, output    |
+| `result_batches` | one immutable provider, manual or upload run per node, with `item_count`        |
+| `result_items`   | the text/image items of a batch, ordered per output port                        |
 | `node_inputs`    | a node's ordered input items, with target port: edge snapshots or local uploads |
-| `assets`         | metadata for content-addressed bytes under `<database dir>/assets/`             |
+| `assets`         | metadata for content-addressed bytes under the package's `assets/` directory    |
 | `edges`          | directed output-port → input-port connections                                   |
 
 `nodes.output_batch_id` points at the batch the node currently shows. A batch
 is never edited: a rerun or manual text edit inserts a new batch and moves the
 pointer. Old batches stay because downstream input snapshots may still refer to
-their items.
+their items. A batch is inserted `running`, filled with items, then settled;
+the triggers reject a settled batch edit, an item outside a running batch and
+a `done` batch with no items. Node/edge counts, content bounds, the node and
+connector RTree rows and the FTS index are maintained by v1 triggers; the
+command layer only marks moved nodes and flushes their connector boxes once
+per transaction.
 
 Rust stores `kind` and `settings_json` opaquely. The TSX kind registry
 (`flow/nodes/node-kinds.ts`) owns each node's ports, default size and settings

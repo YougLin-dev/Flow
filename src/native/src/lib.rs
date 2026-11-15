@@ -7,7 +7,6 @@ use nsh_core::prelude::*;
 
 mod asset;
 mod clock;
-mod constants;
 mod db;
 mod detail;
 mod document;
@@ -24,8 +23,8 @@ mod viewport;
 use db::Database;
 use types::{
     AssetInput, AssetSummary, ChangeSet, EdgeInput, InputItemInput, InputItemSummary, NodeBounds,
-    NodeDetail, NodeInput, NodePreview, NodeSummary, Overview, ResultBatchInput, ResultItemInput,
-    SceneSnapshot, SearchFilters, SearchHit, Viewport,
+    NodeDetail, NodeInput, NodePreview, NodeSummary, Overview, ProjectInfo, ResultBatchInput,
+    ResultItemInput, SceneSnapshot, SearchFilters, SearchHit, SeedDocumentInput, Viewport,
 };
 
 /// The open Flow document.
@@ -209,7 +208,8 @@ impl Document {
         off_thread(move || db.sync_inputs(node_id)).await
     }
 
-    /// Persists a provider run's immutable batch and items.
+    /// Persists a provider run's immutable batch and items in one call. A
+    /// provider call that happens in TSX uses `beginRun`/`settleRun` instead.
     pub async fn save_run(
         this: Instance<Self>,
         batch: ResultBatchInput,
@@ -217,6 +217,69 @@ impl Document {
     ) -> Result<ChangeSet, String> {
         let db = this.with(|document| document.db.clone());
         off_thread(move || db.save_run(batch, items)).await
+    }
+
+    /// Starts a provider run with a running batch and node. The provider
+    /// call happens between this and `settleRun`.
+    pub async fn begin_run(
+        this: Instance<Self>,
+        batch: ResultBatchInput,
+    ) -> Result<ChangeSet, String> {
+        let db = this.with(|document| document.db.clone());
+        off_thread(move || db.begin_run(batch)).await
+    }
+
+    /// Settles a running batch with the provider's result metadata, its
+    /// items and the final status. A late or repeated settle is a no-op.
+    pub async fn settle_run(
+        this: Instance<Self>,
+        batch: ResultBatchInput,
+        items: Vec<ResultItemInput>,
+    ) -> Result<ChangeSet, String> {
+        let db = this.with(|document| document.db.clone());
+        off_thread(move || db.settle_run(batch, items)).await
+    }
+
+    /// Writes the demo seed in one transaction; an already-seeded document is
+    /// left untouched.
+    pub async fn seed_document(
+        this: Instance<Self>,
+        input: SeedDocumentInput,
+    ) -> Result<ChangeSet, String> {
+        let db = this.with(|document| document.db.clone());
+        off_thread(move || db.seed_document(input)).await
+    }
+
+    /// The package identity, saved camera and derived counters.
+    pub async fn project_info(this: Instance<Self>) -> Result<ProjectInfo, String> {
+        let db = this.with(|document| document.db.clone());
+        off_thread(move || db.project_info()).await
+    }
+
+    /// Saves the camera without bumping the document revision or the undo
+    /// history.
+    pub async fn save_view(this: Instance<Self>, x: f64, y: f64, zoom: f64) -> Result<(), String> {
+        let db = this.with(|document| document.db.clone());
+        off_thread(move || db.save_view(x, y, zoom)).await
+    }
+
+    /// Runs SQLite's quick integrity check and foreign-key check.
+    pub async fn verify(this: Instance<Self>) -> Result<(), String> {
+        let db = this.with(|document| document.db.clone());
+        off_thread(move || db.verify()).await
+    }
+
+    /// Tightens the document's conservative bounds after deletes.
+    pub async fn compact_bounds(this: Instance<Self>) -> Result<(), String> {
+        let db = this.with(|document| document.db.clone());
+        off_thread(move || db.compact_bounds()).await
+    }
+
+    /// Marks the package cleanly closed and stops the worker. Later calls on
+    /// this handle fail; repeated closes are harmless.
+    pub async fn close(this: Instance<Self>) -> Result<(), String> {
+        let db = this.with(|document| document.db.clone());
+        off_thread(move || db.close()).await
     }
 
     /// Sets a node's run status without touching its results.

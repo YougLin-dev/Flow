@@ -1,6 +1,6 @@
 # Flow first-release database design
 
-> **Status: direction approved; step 1 implemented, not wired.** Owner: `@YougLin-dev`. Written 2026-11-15 from a read-only assessment and revised the same day after the owner confirmed the project model: one project is one self-contained package, with a project layer above it. Step 1 (the frozen v1 DDL, the open guard and the schema-shape tests) lives in `src/native/src/schema/v1.{rs,sql}`; the live document path still runs the v5 schema until step 2 switches it. Because Flow has not shipped and every current row is test data, **no migration compatibility is required pre-release**: the five development migrations are replaced by one frozen v1 schema, and existing development databases are reset rather than migrated. Section 12 records the v1 decisions; section 13 is the implementation order.
+> **Status: direction approved; the v1 core swap is implemented.** Owner: `@YougLin-dev`. Written 2026-11-15 from a read-only assessment and revised the same day after the owner confirmed the project model: one project is one self-contained package, with a project layer above it. The frozen v1 DDL and the open guard live in `src/native/src/schema/v1.{rs,sql}`, and the live document path now opens, writes and reads v1: the entities, the trigger-maintained indexes, the batch/input state machines, the transactional seed and the TSX run/seed surface are switched. Because Flow has not shipped and every current row is test data, **no migration compatibility is required pre-release**: the five development migrations are replaced by one frozen v1 schema, and existing development databases are reset rather than migrated. The post-swap read-path, maintenance and project-layer work remains (section 13). Section 12 records the v1 decisions.
 
 ## 1. Goals and non-goals
 
@@ -1119,7 +1119,7 @@ The owner confirmed the project model on 2026-11-15 and delegated the remaining 
 
 ## 13. Approval and implementation order
 
-This is a **proposal whose direction is approved; step 1 is implemented and steps 2-7 are not**. It deliberately breaks compatibility with the current test-only v5 database: the development reset deletes the old database and its asset directory, while a project reset deletes the whole package, then reseeds. No production data exists, so no migration path is required before the first release.
+This is a **proposal whose direction is approved; the v1 core swap is implemented**. It deliberately breaks compatibility with the previous test-only development database: the development reset deletes the old database and its asset directory, while a project reset deletes the whole package, then reseeds. No production data exists, so no migration path is required before the first release.
 
 Implementation order:
 
@@ -1131,4 +1131,4 @@ Implementation order:
 6. Reset/seed/GC/verify, `projectInfo`/`saveView`, and the TSX surface changes.
 7. The project layer as a separate workstream: package layout and lock, catalog cache, create/open/switch/rename/delete/duplicate/import, and the project-list UI. It is not part of the code-organization Phase 6/7 refactor; it consumes the document core's open/close lifecycle.
 
-Step 1 is implemented on this branch; the live document path still uses the v5 schema until step 2. Each step is a small, revertible PR with tests and the full gate; the 100k benchmark runs after the index/query steps and before the project layer is declared ready.
+Steps 1–2 and the v1 write/read surface are implemented on `feat/database-v1`; the read-path rewrites, maintenance commands and the project layer remain. Each step is a small, revertible PR with tests and the full gate; the 100k benchmark runs after the index/query steps and before the project layer is declared ready.

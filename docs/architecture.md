@@ -64,21 +64,21 @@ canvas stays in TSX and owns only the scene model and its views.
 - The database is SQLite with WAL, FTS5 (trigram tokenizer) and two RTree
   viewport indexes: node bounds and connector curve bounds. Node, edge, FTS
   and RTree rows change in one transaction.
-- Schema version 2 is the node editor's breaking reset: the migration drops
-  the version 1 document and recreates the tables (there is no data
-  migration). Version 3 adds the connector index and fills it from the
-  existing edges. Version 5 is the typed-port reset: `edges` gains required
-  `from_port`, `to_port`, `port_kind` and per-edge port offsets, `node_inputs`
-  and `result_items` gain required `port_id`, and the document tables are
-  recreated empty like version 2. The core also stores immutable result
-  batches/items, ordered node inputs and content-addressed asset bytes under
-  `<database dir>/assets/`. Its commands cover settings, manual text,
-  connect/reconnect, input changes, runs and crash recovery.
+- Schema v1 is frozen in `schema/v1.sql`: one project package is one SQLite
+  file with a singleton `document` row (project id, rev, counts, bounds,
+  camera) and its content-addressed `assets/` directory. The opener checks
+  `application_id` and `user_version` and refuses foreign, older or newer
+  files before writing anything; pre-release development databases are reset,
+  not migrated. The v1 triggers own the node/edge counts, bounds, FTS and
+  RTree rows, and the core stores immutable result batches/items and ordered
+  node inputs. Its commands cover settings, manual text, connect/reconnect,
+  input changes, runs and crash recovery.
   [The node editor contract](node-editor.md) records the data model and
-  semantics.
+  semantics; [the database design](plans/database-design.md) records the
+  frozen schema.
 - Ordinary tables are SeaORM entities; SeaQuery builds dynamic filters and
-  joins. Only the FTS5/RTree virtual-table adapters (`schema.rs`, `search.rs`,
-  `edge_index.rs`) contain static SQLite SQL.
+  joins. Only the FTS5/RTree virtual-table adapters (`schema/v1.sql`,
+  `search.rs`, `edge_index.rs`) contain static SQLite SQL.
 - Database work runs on NSH's blocking pool, then through a handle to one
   dedicated database worker thread. That thread owns the connection, which
   keeps the single-writer design and avoids sending SeaORM's sync Rusqlite
@@ -89,7 +89,11 @@ canvas stays in TSX and owns only the scene model and its views.
   `FLOW_DB_PATH`, then `process.dataDir/flow.db`, falling back to `:memory:`
   in headless tests. `bun run dev` sets `FLOW_DB_PATH` to `.nsh/dev/flow.db`,
   so development data survives restarts; `src/nsh.json` grants exactly that
-  one environment variable. An empty document is seeded from the demo flow.
+  one environment variable. A new, unseeded project is seeded from the demo
+  flow in one transaction; the `demo_seeded` flag keeps an emptied project
+  from being reseeded. The v1 guard deliberately refuses a pre-v1 development
+  database: before the first launch of this build, delete `.nsh/dev/flow.db`
+  (and its `-wal`/`-shm` files) and `.nsh/dev/assets`.
 - `FlowScene` is driven from `scene(rect, margin)` snapshots. Drag/resize,
   add, delete and connect each send one command; undo/redo return change sets.
   A card is stored as an axis-aligned world rectangle, so gestures commit a

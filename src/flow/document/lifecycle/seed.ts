@@ -64,24 +64,28 @@ export function seedNodes(): NodeInput[] {
 }
 
 /**
- * Writes the M1 example into an empty document: a text node with one manual
- * result, connected to an unrun image node. The demo is not undo history.
+ * Writes the M1 example into an empty document in one transaction: a text
+ * node with one manual result, connected to an unrun image node. The seed is
+ * marked on the document, so it never runs twice; it is not undo history.
  */
 export async function seedDocument(document: Document): Promise<void> {
-  await document.insertNodes(seedNodes());
-
   const { batch, item } = manualTextResult(TEXT_NODE_ID, SEED_TEXT);
-  await document.setManualText(TEXT_NODE_ID, SEED_TEXT, batch, item);
-  await document.connectEdge({
-    id: SEED_EDGE_ID,
-    fromId: TEXT_NODE_ID,
-    toId: IMAGE_NODE_ID,
-    fromPort: "text",
-    toPort: "prompt",
-    portKind: "text",
-    fromOffset: portOffset(0, 1, NODE_HEIGHT),
-    toOffset: portOffset(0, 2, NODE_HEIGHT),
-    kind: "flow",
+  await document.seedDocument({
+    nodes: seedNodes(),
+    edges: [
+      {
+        id: SEED_EDGE_ID,
+        fromId: TEXT_NODE_ID,
+        toId: IMAGE_NODE_ID,
+        fromPort: "text",
+        toPort: "prompt",
+        portKind: "text",
+        fromOffset: portOffset(0, 1, NODE_HEIGHT),
+        toOffset: portOffset(0, 2, NODE_HEIGHT),
+        kind: "flow",
+      },
+    ],
+    batch,
+    item,
   });
-  await document.clearHistory();
 }

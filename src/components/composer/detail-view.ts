@@ -9,7 +9,7 @@ import type { InputItemSummary, NodeDetail } from "../../flow/shared";
 /** The failed run's error line for a detail, empty when it has none. */
 export function errorOf(detail: NodeDetail): string {
   if (detail.node.status !== "failed") return "";
-  return detail.latestBatch?.status === "failed" ? detail.latestBatch.error : "";
+  return detail.latestBatch?.status === "failed" ? (detail.latestBatch.error ?? "") : "";
 }
 
 /** The asset URL an input item shows: its own asset, or its source item's. */

@@ -9,6 +9,7 @@ import {
   type ChangeSet,
   type Document,
   type NodeDetail,
+  type ResultBatchFields,
   type ResultItemInput,
 } from "../shared";
 import type { ImageSettings, NodeSettings, TextSettings } from "../nodes";
@@ -65,9 +66,25 @@ export class NodeRunner {
     this.runs.set(nodeId, controller);
     const batchId = `batch-${crypto.randomUUID()}`;
     const provider = detail.node.kind === "image" ? mockImage : mockText;
+    let begun = false;
 
     try {
-      this.apply(await this.document.setNodeStatus(nodeId, "running"));
+      // v1 runs start with a running batch on the node; the provider result
+      // settles that same batch. A prompt failure before this point records
+      // a failed batch in one call instead.
+      this.apply(
+        await this.document.beginRun(
+          resultBatch({
+            id: batchId,
+            nodeId,
+            trigger: "run",
+            provider: "mock",
+            model: settings.model,
+            status: "running",
+          }),
+        ),
+      );
+      begun = true;
       const inputs = await this.document.syncInputs(nodeId);
       if (controller.signal.aborted) throw new CancelledError();
       const result = await provider({
@@ -104,20 +121,53 @@ export class NodeRunner {
         paramsJson: result.paramsJson,
         status: "done",
       });
-      this.apply(await this.document.saveRun(batch, items));
+      this.apply(await this.document.settleRun(batch, items));
     } catch (error) {
       // The app is closing: the database is gone and startup recovery will
       // mark the abandoned run interrupted.
       if (this.disposed) return;
       if (isCancelled(error)) {
-        await this.settle(nodeId, batchId, "cancelled", "", settings, "mock");
+        if (begun) {
+          await this.settleRunning(nodeId, batchId, "cancelled", "", settings);
+        } else {
+          await this.settleFailure(nodeId, "the run was cancelled", settings);
+        }
       } else {
         console.error("Flow could not run a node", error);
-        await this.settleFailure(nodeId, messageOf(error), settings, batchId);
+        if (begun) {
+          await this.settleRunning(nodeId, batchId, "failed", messageOf(error), settings);
+        } else {
+          await this.settleFailure(nodeId, messageOf(error), settings);
+        }
       }
     } finally {
       this.runs.delete(nodeId);
       this.callbacks.onSettled(nodeId);
+    }
+  }
+
+  /** Closes the running batch a provider call started. */
+  private async settleRunning(
+    nodeId: string,
+    batchId: string,
+    status: "failed" | "cancelled",
+    error: string,
+    settings: TextSettings | ImageSettings,
+  ): Promise<void> {
+    try {
+      const fields: ResultBatchFields = {
+        id: batchId,
+        nodeId,
+        trigger: "run",
+        provider: `mock-${settings.model.replace(/^mock-/, "")}`,
+        model: settings.model,
+        paramsJson: JSON.stringify({ prompt: settings.prompt }),
+        status,
+        ...(error === "" ? {} : { error }),
+      };
+      this.apply(await this.document.settleRun(resultBatch(fields), []));
+    } catch (settleError) {
+      console.error("Flow could not settle a run", settleError);
     }
   }
 

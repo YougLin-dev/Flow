@@ -64,10 +64,10 @@ export function textResultItem(position: number, text: string): ResultItemInput 
   return resultItem({ position, portId: "text", kind: "text", text });
 }
 
-/** One image item on the image port. */
+/** One image item on the image port. v1 requires its asset. */
 export function imageResultItem(
   position: number,
-  assetId: string | null,
+  assetId: string,
   metaJson: string | null,
 ): ResultItemInput {
   return resultItem({ position, portId: "image", kind: "image", text: "", assetId, metaJson });

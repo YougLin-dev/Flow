@@ -89,9 +89,9 @@ test("an item writes asset keys only when the writer supplies them", () => {
 
   const copied = resultItem({
     position: 0,
-    portId: "image",
-    kind: "image",
-    text: "",
+    portId: "text",
+    kind: "text",
+    text: "copied",
     assetId: null,
     metaJson: '{"width":10}',
   });

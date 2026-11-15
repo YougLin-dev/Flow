@@ -17,7 +17,10 @@ export async function openFlowDocument(): Promise<Document> {
   const document = await Document.open(path);
   try {
     await document.recoverRuns();
-    if (await document.isEmpty()) {
+    // A project seeds once. An empty project that already seeded keeps its
+    // emptiness: deleting every card is not a reason to restore the demo.
+    const info = await document.projectInfo();
+    if (!info.demoSeeded && (await document.isEmpty())) {
       await seedDocument(document);
     }
   } catch (error) {
