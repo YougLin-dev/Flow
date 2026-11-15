@@ -852,35 +852,72 @@ pub fn set_node_settings(
     conn: &DatabaseConnection,
     id: String,
     settings_json: String,
+    valid_ports: Option<Vec<String>>,
 ) -> Result<Mutation, String> {
+    let valid_ports = valid_ports.map(|ports| ports.into_iter().collect::<BTreeSet<_>>());
     conn.transaction::<_, _, DbErr>(|txn| {
         let before = find_node_tx(txn, &id)?;
         if before.settings_json == settings_json {
             return no_op(txn);
         }
         let after = apply_settings_tx(txn, &before, settings_json.clone())?;
-        let rev = bump_document_rev(txn)?;
+        // A caller that does not know the kind's ports (a newer document)
+        // passes None: absence of schema knowledge must not delete edges.
+        let reconciliation = match &valid_ports {
+            Some(ports) => reconcile_ports_tx(txn, &id, ports)?,
+            None => PortReconciliation::default(),
+        };
 
+        let mut changed = vec![after.summary()];
+        for target in &reconciliation.survivors {
+            changed.push(node_row(&touch_node_tx(txn, target)?).summary());
+        }
+
+        // Settings and the edges their new port schema removed are one undo
+        // entry; a run's output and body belong to the run and must survive
+        // an undo of this edit. Undo applies the stored inverse back to
+        // front, so this reverse makes that order settings, then each edge,
+        // then that edge's snapshots. The v1 producer trigger requires the
+        // edge row before its inputs.
+        let mut forward = vec![HistoryOp::NodeSettings {
+            id: id.clone(),
+            settings_json,
+            mark_stale: true,
+        }];
+        let mut inverse = vec![HistoryOp::NodeSettings {
+            id: id.clone(),
+            settings_json: before.settings_json,
+            mark_stale: false,
+        }];
+        let mut edges_removed = Vec::with_capacity(reconciliation.removed.len());
+        for removed in &reconciliation.removed {
+            for input in &removed.inputs {
+                forward.push(HistoryOp::DeleteInput {
+                    id: input.id.clone(),
+                });
+            }
+            forward.push(HistoryOp::DeleteEdge {
+                id: removed.edge.id.clone(),
+            });
+            inverse.push(HistoryOp::InsertEdge(removed.edge.clone()));
+            for input in &removed.inputs {
+                inverse.push(HistoryOp::InsertInput(input.clone()));
+            }
+            edges_removed.push(removed.edge.id.clone());
+        }
+        inverse.reverse();
+
+        let rev = bump_document_rev(txn)?;
         Ok(Mutation {
             changes: ChangeSet {
                 rev: rev as f64,
-                changed: vec![after.summary()],
+                changed,
                 removed: Vec::new(),
                 edges_changed: Vec::new(),
-                edges_removed: Vec::new(),
+                edges_removed,
             },
-            // Only the settings are history: a run's output and body belong
-            // to the run and must survive an undo of this edit.
-            forward: vec![HistoryOp::NodeSettings {
-                id: id.clone(),
-                settings_json,
-                mark_stale: true,
-            }],
-            inverse: vec![HistoryOp::NodeSettings {
-                id,
-                settings_json: before.settings_json,
-                mark_stale: false,
-            }],
+            forward,
+            inverse,
             refs: HistoryRefs::default(),
         })
     })
@@ -995,6 +1032,10 @@ pub fn set_manual_upload(
                 "an upload batch must be done and hold at least one item".to_owned(),
             ));
         }
+        // An upload's output ports are derived from the media it holds. A
+        // replaced upload that no longer holds a kind loses that port and
+        // the edges that used it, in this same undo step.
+        let valid_ports: BTreeSet<String> = items.iter().map(|item| item.port_id.clone()).collect();
         let before = find_node_tx(txn, &id)?;
         let before_row = node_row(&before);
         insert_batch_tx(txn, &batch)?;
@@ -1028,15 +1069,21 @@ pub fn set_manual_upload(
         }
         let after = node_row(&updated);
         refresh_fts_tx(txn, &updated)?;
+        let reconciliation = reconcile_ports_tx(txn, &id, &valid_ports)?;
         let mut changed = vec![after.summary()];
-        changed.extend(
-            mark_downstream_stale_tx(txn, &id)?
-                .into_iter()
-                .map(|row| node_row(&row).summary()),
-        );
+        let mut touched = BTreeSet::new();
+        for row in mark_downstream_stale_tx(txn, &id)? {
+            touched.insert(row.id.clone());
+            changed.push(node_row(&row).summary());
+        }
+        for target in &reconciliation.survivors {
+            if touched.insert(target.clone()) {
+                changed.push(node_row(&touch_node_tx(txn, target)?).summary());
+            }
+        }
 
-        let mut forward = Vec::with_capacity(3);
-        let mut inverse = Vec::with_capacity(3);
+        let mut forward = Vec::with_capacity(3 + reconciliation.removed.len() * 2);
+        let mut inverse = Vec::with_capacity(3 + reconciliation.removed.len() * 2);
         forward.push(HistoryOp::NodeSettings {
             id: id.clone(),
             settings_json: after.settings_json.clone(),
@@ -1064,8 +1111,16 @@ pub fn set_manual_upload(
             mark_stale: false,
         });
         // Undo reverses the inverse list, so output is restored first, then
-        // settings, then geometry. Redo applies the forward list, where the
-        // output comes last so the settings write cannot mark it stale.
+        // each removed edge (before its own snapshots), then settings and
+        // geometry. Redo applies the forward list: the settings write may
+        // mark an existing output stale, so the output op follows and
+        // restores the run-owned body and status; the edge deletes come last.
+        for removed in &reconciliation.removed {
+            for input in &removed.inputs {
+                inverse.push(HistoryOp::InsertInput(input.clone()));
+            }
+            inverse.push(HistoryOp::InsertEdge(removed.edge.clone()));
+        }
         forward.push(HistoryOp::NodeOutput {
             id: id.clone(),
             from_batch_id: before_row.output_batch_id.clone(),
@@ -1076,7 +1131,7 @@ pub fn set_manual_upload(
             to_status: after.status.clone(),
         });
         inverse.push(HistoryOp::NodeOutput {
-            id,
+            id: id.clone(),
             from_batch_id: after.output_batch_id.clone(),
             from_body: after.body.clone(),
             from_status: after.status.clone(),
@@ -1084,6 +1139,18 @@ pub fn set_manual_upload(
             to_body: before_row.body,
             to_status: before_row.status,
         });
+        let mut edges_removed = Vec::with_capacity(reconciliation.removed.len());
+        for removed in &reconciliation.removed {
+            for input in &removed.inputs {
+                forward.push(HistoryOp::DeleteInput {
+                    id: input.id.clone(),
+                });
+            }
+            forward.push(HistoryOp::DeleteEdge {
+                id: removed.edge.id.clone(),
+            });
+            edges_removed.push(removed.edge.id.clone());
+        }
 
         let mut refs = HistoryRefs::default();
         refs.batch(Some(&batch.id));
@@ -1097,7 +1164,7 @@ pub fn set_manual_upload(
                 changed,
                 removed: Vec::new(),
                 edges_changed: Vec::new(),
-                edges_removed: Vec::new(),
+                edges_removed,
             },
             forward,
             inverse,
@@ -2210,6 +2277,52 @@ fn find_edge_opt_tx(txn: &DatabaseTransaction, id: &str) -> Result<Option<edges:
     edges::Entity::find_by_id(id.to_owned())
         .filter(edges::Column::DocumentId.eq(DOCUMENT_ID))
         .one(txn)
+}
+
+/// An edge removed because its port at the edited node is no longer declared
+/// by the node's settings, together with the snapshots it contributed.
+struct RemovedEdge {
+    edge: EdgeRow,
+    inputs: Vec<InputRow>,
+}
+
+#[derive(Default)]
+struct PortReconciliation {
+    removed: Vec<RemovedEdge>,
+    /// Downstream nodes whose input list lost an edge. The edited node itself
+    /// is never included; the caller touches each survivor once.
+    survivors: BTreeSet<String>,
+}
+
+/// Deletes every incident edge whose port at `node_id` is absent from
+/// `valid_ports`. The edge's input snapshots go in the same transaction.
+fn reconcile_ports_tx(
+    txn: &DatabaseTransaction,
+    node_id: &str,
+    valid_ports: &BTreeSet<String>,
+) -> Result<PortReconciliation, DbErr> {
+    let mut edges = edges_for_node_tx(txn, node_id)?;
+    edges.sort_by(|left, right| left.id.cmp(&right.id));
+
+    let mut removed = Vec::new();
+    let mut survivors = BTreeSet::new();
+    for edge in edges {
+        let lost_output = edge.from_id == node_id && !valid_ports.contains(&edge.from_port);
+        let lost_input = edge.to_id == node_id && !valid_ports.contains(&edge.to_port);
+        if !lost_output && !lost_input {
+            continue;
+        }
+        let inputs = inputs_for_edge_tx(txn, &edge.id)?;
+        for input in &inputs {
+            delete_input_tx(txn, &input.id)?;
+        }
+        delete_edge_tx(txn, &edge.id)?;
+        if edge.to_id != node_id {
+            survivors.insert(edge.to_id.clone());
+        }
+        removed.push(RemovedEdge { edge, inputs });
+    }
+    Ok(PortReconciliation { removed, survivors })
 }
 
 fn edges_for_node_tx(txn: &DatabaseTransaction, id: &str) -> Result<Vec<EdgeRow>, DbErr> {

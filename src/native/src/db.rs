@@ -96,8 +96,15 @@ impl Database {
         self.run_mutation(move |conn| mutation::set_node_text(conn, id, title, tags))
     }
 
-    pub fn set_node_settings(&self, id: String, settings_json: String) -> Result<Mutation, String> {
-        self.run_mutation(move |conn| mutation::set_node_settings(conn, id, settings_json))
+    pub fn set_node_settings(
+        &self,
+        id: String,
+        settings_json: String,
+        valid_ports: Option<Vec<String>>,
+    ) -> Result<Mutation, String> {
+        self.run_mutation(move |conn| {
+            mutation::set_node_settings(conn, id, settings_json, valid_ports)
+        })
     }
 
     /// A text node's manual edit: a new immutable text batch, not undoable as
@@ -1470,19 +1477,135 @@ mod tests {
     }
 
     fn connect(db: &Database, id: &str, from: &str, to: &str) {
+        connect_ports(db, id, from, "out", to, "in", "text");
+    }
+
+    fn connect_ports(
+        db: &Database,
+        id: &str,
+        from: &str,
+        from_port: &str,
+        to: &str,
+        to_port: &str,
+        port_kind: &str,
+    ) {
         db.connect_edge(EdgeInput {
             id: id.to_owned(),
             from_id: from.to_owned(),
             to_id: to.to_owned(),
-            from_port: "out".to_owned(),
-            to_port: "in".to_owned(),
-            port_kind: "text".to_owned(),
+            from_port: from_port.to_owned(),
+            to_port: to_port.to_owned(),
+            port_kind: port_kind.to_owned(),
             from_offset: 42.0,
             to_offset: 42.0,
             kind: "flow".to_owned(),
             data_json: None,
         })
         .expect("connect");
+    }
+
+    fn scene_edge_ids(db: &Database) -> Vec<String> {
+        db.scene(
+            Viewport {
+                x: -1000.0,
+                y: -1000.0,
+                width: 5000.0,
+                height: 5000.0,
+            },
+            0.0,
+            100,
+        )
+        .expect("scene")
+        .edges
+        .into_iter()
+        .map(|edge| edge.id)
+        .collect()
+    }
+
+    /// A text source with one done output, a text target, and an edge that
+    /// snapshots the source's `text` item into the target's prompt.
+    fn text_target_with_incoming_edge(db: &Database) {
+        db.insert_nodes(vec![
+            node("source", "Source", "", &[], 0.0, 0.0),
+            node("target", "Target", "", &[], 400.0, 0.0),
+        ])
+        .expect("insert");
+        db.save_run(
+            ResultBatchInput {
+                id: "batch-source".to_owned(),
+                node_id: "source".to_owned(),
+                trigger: "run".to_owned(),
+                provider: "mock-text".to_owned(),
+                model: "mock-text".to_owned(),
+                params_json: "{}".to_owned(),
+                status: "done".to_owned(),
+                error: None,
+            },
+            vec![ResultItemInput {
+                id: "item-source".to_owned(),
+                position: 0.0,
+                port_id: "text".to_owned(),
+                kind: "text".to_owned(),
+                text: "hello".to_owned(),
+                asset_id: None,
+                meta_json: None,
+            }],
+        )
+        .expect("run");
+        connect_ports(
+            db,
+            "edge-target",
+            "source",
+            "text",
+            "target",
+            "prompt",
+            "text",
+        );
+    }
+
+    /// An upload with one image output, a text target, and an edge that
+    /// snapshots the uploaded item into the target's references.
+    fn upload_with_edge_to_target(db: &Database) {
+        let mut upload = node("source", "Source", "", &[], 0.0, 0.0);
+        upload.kind = "upload".to_owned();
+        upload.settings_json = Some(r#"{"version":1,"media":["image"]}"#.to_owned());
+        db.insert_nodes(vec![upload, node("target", "Target", "", &[], 400.0, 0.0)])
+            .expect("insert");
+        db.set_manual_upload(
+            "source".to_owned(),
+            r#"{"version":1,"media":["image"]}"#.to_owned(),
+            "cat.png".to_owned(),
+            ResultBatchInput {
+                id: "batch-first".to_owned(),
+                node_id: "source".to_owned(),
+                trigger: "upload".to_owned(),
+                provider: "local".to_owned(),
+                model: String::new(),
+                params_json: "{}".to_owned(),
+                status: "done".to_owned(),
+                error: None,
+            },
+            vec![ResultItemInput {
+                id: "item-first".to_owned(),
+                position: 0.0,
+                port_id: "image".to_owned(),
+                kind: "image".to_owned(),
+                text: String::new(),
+                asset_id: Some("asset-cat".to_owned()),
+                meta_json: None,
+            }],
+            None,
+        )
+        .expect("upload");
+        connect_ports(
+            db,
+            "edge-source",
+            "source",
+            "image",
+            "target",
+            "references",
+            "image",
+        );
     }
 
     fn scene_between(
@@ -2939,6 +3062,7 @@ mod tests {
         db.set_node_settings(
             "upload".to_owned(),
             r#"{"version":1,"media":["image"],"edited":true}"#.to_owned(),
+            Some(vec!["image".to_owned()]),
         )
         .expect("settings");
         // Undoing the settings edit restores settings but leaves the stale
@@ -3313,8 +3437,16 @@ mod tests {
         let db = Database::open(":memory:").expect("open");
         db.insert_nodes(vec![node("a", "A", "Original", &[], 0.0, 0.0)])
             .expect("insert");
-        db.set_node_settings("a".to_owned(), "{\"prompt\":\"one\"}".to_owned())
-            .expect("settings");
+        db.set_node_settings(
+            "a".to_owned(),
+            "{\"prompt\":\"one\"}".to_owned(),
+            Some(vec![
+                "prompt".to_owned(),
+                "references".to_owned(),
+                "text".to_owned(),
+            ]),
+        )
+        .expect("settings");
 
         // Runs are not history: the undo below must not resurrect the body,
         // output or status this run wrote.
@@ -3595,7 +3727,7 @@ mod tests {
             })
             .expect("add input");
         }
-        db.set_node_settings("n".to_owned(), "{\"a\":1}".to_owned())
+        db.set_node_settings("n".to_owned(), "{\"a\":1}".to_owned(), Some(Vec::new()))
             .expect("settings");
         let setup_ids: Vec<String> = db
             .node_detail("n".to_owned())
@@ -3638,7 +3770,7 @@ mod tests {
         assert_eq!(current_rev(&db), before);
 
         let settings = db
-            .set_node_settings("n".to_owned(), "{\"a\":1}".to_owned())
+            .set_node_settings("n".to_owned(), "{\"a\":1}".to_owned(), Some(Vec::new()))
             .expect("no-op settings");
         assert!(settings.forward.is_empty());
         assert_eq!(settings.changes.rev, before as f64);
@@ -4576,7 +4708,7 @@ mod tests {
             },
         )
         .expect("manual edit");
-        db.set_node_settings("n".to_owned(), "{\"a\":1}".to_owned())
+        db.set_node_settings("n".to_owned(), "{\"a\":1}".to_owned(), Some(Vec::new()))
             .expect("settings");
 
         db.undo().expect("undo settings");
@@ -4601,7 +4733,7 @@ mod tests {
         let db = Database::open(":memory:").expect("open");
         db.insert_nodes(vec![node("n", "N", "", &[], 0.0, 0.0)])
             .expect("insert");
-        db.set_node_settings("n".to_owned(), "{\"a\":1}".to_owned())
+        db.set_node_settings("n".to_owned(), "{\"a\":1}".to_owned(), Some(Vec::new()))
             .expect("settings");
 
         db.undo().expect("undo settings");
@@ -4618,6 +4750,765 @@ mod tests {
             .expect("detail")
             .expect("node detail");
         assert_eq!(detail.node.settings_json, "{\"a\":1}");
+    }
+
+    #[test]
+    fn removing_an_output_port_removes_its_edge_and_undo_restores_both() {
+        let db = Database::open(":memory:").expect("open");
+        upload_with_edge_to_target(&db);
+        assert_eq!(
+            db.node_detail("target".to_owned())
+                .expect("detail")
+                .expect("target detail")
+                .inputs
+                .len(),
+            1
+        );
+        db.clear_history().expect("clear setup history");
+
+        let changes = db
+            .set_node_settings(
+                "source".to_owned(),
+                r#"{"version":1,"media":[]}"#.to_owned(),
+                Some(Vec::new()),
+            )
+            .expect("remove the output port");
+        assert_eq!(
+            changes.changes.edges_removed,
+            vec!["edge-source".to_owned()]
+        );
+        assert!(scene_edge_ids(&db).is_empty());
+        assert!(
+            db.node_detail("target".to_owned())
+                .expect("detail")
+                .expect("target detail")
+                .inputs
+                .is_empty()
+        );
+
+        db.undo().expect("undo the settings edit");
+        let restored = db
+            .node_detail("source".to_owned())
+            .expect("detail")
+            .expect("source detail");
+        assert_eq!(
+            restored.node.settings_json,
+            r#"{"version":1,"media":["image"]}"#
+        );
+        assert_eq!(scene_edge_ids(&db), vec!["edge-source".to_owned()]);
+        let target = db
+            .node_detail("target".to_owned())
+            .expect("detail")
+            .expect("target detail");
+        assert_eq!(target.inputs.len(), 1);
+        let input = &target.inputs[0];
+        assert_eq!(input.edge_id.as_deref(), Some("edge-source"));
+        assert_eq!(input.item_id.as_deref(), Some("item-first"));
+        assert_eq!(input.asset_id.as_deref(), Some("asset-cat"));
+        assert_eq!(input.port_id, "references");
+
+        db.redo().expect("redo the settings edit");
+        assert!(scene_edge_ids(&db).is_empty());
+        assert!(
+            db.node_detail("target".to_owned())
+                .expect("detail")
+                .expect("target detail")
+                .inputs
+                .is_empty()
+        );
+    }
+
+    #[test]
+    fn removing_an_input_port_removes_the_incoming_edge_and_undo_restores_it() {
+        let db = Database::open(":memory:").expect("open");
+        text_target_with_incoming_edge(&db);
+        db.clear_history().expect("clear setup history");
+
+        let changes = db
+            .set_node_settings(
+                "target".to_owned(),
+                r#"{"version":1,"prompt":"changed"}"#.to_owned(),
+                Some(vec!["references".to_owned(), "text".to_owned()]),
+            )
+            .expect("remove the input port");
+        assert_eq!(
+            changes.changes.edges_removed,
+            vec!["edge-target".to_owned()]
+        );
+        assert!(scene_edge_ids(&db).is_empty());
+        assert!(
+            db.node_detail("target".to_owned())
+                .expect("detail")
+                .expect("target detail")
+                .inputs
+                .is_empty()
+        );
+
+        db.undo().expect("undo the settings edit");
+        assert_eq!(scene_edge_ids(&db), vec!["edge-target".to_owned()]);
+        let restored = db
+            .node_detail("target".to_owned())
+            .expect("detail")
+            .expect("target detail");
+        assert_eq!(restored.node.settings_json, "{}");
+        assert_eq!(restored.inputs.len(), 1);
+        let input = &restored.inputs[0];
+        assert_eq!(input.edge_id.as_deref(), Some("edge-target"));
+        assert_eq!(input.item_id.as_deref(), Some("item-source"));
+        assert_eq!(input.asset_id, None);
+        assert_eq!(input.text, "hello");
+        assert_eq!(input.port_id, "prompt");
+
+        db.redo().expect("redo the settings edit");
+        assert!(scene_edge_ids(&db).is_empty());
+    }
+
+    #[test]
+    fn a_settings_change_that_keeps_its_ports_keeps_the_edges() {
+        let db = Database::open(":memory:").expect("open");
+        text_target_with_incoming_edge(&db);
+        db.clear_history().expect("clear setup history");
+        let before = current_rev(&db);
+
+        let changes = db
+            .set_node_settings(
+                "target".to_owned(),
+                r#"{"version":1,"prompt":"changed"}"#.to_owned(),
+                Some(vec![
+                    "prompt".to_owned(),
+                    "references".to_owned(),
+                    "text".to_owned(),
+                ]),
+            )
+            .expect("valid settings change");
+        assert_eq!(
+            changes.changes.changed[0].settings_json,
+            r#"{"version":1,"prompt":"changed"}"#
+        );
+        assert!(changes.forward.iter().any(|op| matches!(
+            op,
+            HistoryOp::NodeSettings {
+                id,
+                mark_stale: true,
+                ..
+            } if id == "target"
+        )));
+        assert_eq!(current_rev(&db), before + 1);
+        assert!(changes.changes.edges_removed.is_empty());
+        assert_eq!(scene_edge_ids(&db), vec!["edge-target".to_owned()]);
+        assert_eq!(
+            db.node_detail("target".to_owned())
+                .expect("detail")
+                .expect("target detail")
+                .inputs
+                .len(),
+            1
+        );
+
+        db.undo().expect("undo the valid change");
+        assert_eq!(scene_edge_ids(&db), vec!["edge-target".to_owned()]);
+    }
+
+    #[test]
+    fn a_no_op_settings_change_keeps_edges_even_with_no_valid_ports() {
+        let db = Database::open(":memory:").expect("open");
+        text_target_with_incoming_edge(&db);
+        db.set_node_settings(
+            "target".to_owned(),
+            r#"{"version":1,"prompt":"changed"}"#.to_owned(),
+            Some(vec![
+                "prompt".to_owned(),
+                "references".to_owned(),
+                "text".to_owned(),
+            ]),
+        )
+        .expect("settings");
+        db.clear_history().expect("clear setup history");
+        let before = current_rev(&db);
+
+        let no_op = db
+            .set_node_settings(
+                "target".to_owned(),
+                r#"{"version":1,"prompt":"changed"}"#.to_owned(),
+                Some(Vec::new()),
+            )
+            .expect("no-op settings");
+        assert!(no_op.forward.is_empty());
+        assert_eq!(no_op.changes.rev, before as f64);
+        assert_eq!(current_rev(&db), before);
+        assert_eq!(scene_edge_ids(&db), vec!["edge-target".to_owned()]);
+    }
+
+    #[test]
+    fn replacing_an_upload_drops_an_edge_whose_output_port_is_gone() {
+        let db = Database::open(":memory:").expect("open");
+        upload_with_edge_to_target(&db);
+        db.clear_history().expect("clear setup history");
+
+        let changes = db
+            .set_manual_upload(
+                "source".to_owned(),
+                r#"{"version":1,"media":["video"]}"#.to_owned(),
+                "clip.mp4".to_owned(),
+                ResultBatchInput {
+                    id: "batch-second".to_owned(),
+                    node_id: "source".to_owned(),
+                    trigger: "upload".to_owned(),
+                    provider: "local".to_owned(),
+                    model: String::new(),
+                    params_json: "{}".to_owned(),
+                    status: "done".to_owned(),
+                    error: None,
+                },
+                vec![ResultItemInput {
+                    id: "item-second".to_owned(),
+                    position: 0.0,
+                    port_id: "video".to_owned(),
+                    kind: "image".to_owned(),
+                    text: String::new(),
+                    asset_id: Some("asset-clip".to_owned()),
+                    meta_json: None,
+                }],
+                None,
+            )
+            .expect("replace the upload");
+        assert_eq!(
+            changes.changes.edges_removed,
+            vec!["edge-source".to_owned()]
+        );
+        assert!(scene_edge_ids(&db).is_empty());
+        let replaced = db
+            .node_detail("source".to_owned())
+            .expect("detail")
+            .expect("source detail");
+        assert_eq!(
+            replaced.node.settings_json,
+            r#"{"version":1,"media":["video"]}"#
+        );
+        assert_eq!(
+            replaced.node.output_batch_id.as_deref(),
+            Some("batch-second")
+        );
+        assert!(
+            db.node_detail("target".to_owned())
+                .expect("detail")
+                .expect("target detail")
+                .inputs
+                .is_empty()
+        );
+
+        db.undo().expect("undo the replacement");
+        let restored = db
+            .node_detail("source".to_owned())
+            .expect("detail")
+            .expect("source detail");
+        assert_eq!(
+            restored.node.settings_json,
+            r#"{"version":1,"media":["image"]}"#
+        );
+        assert_eq!(
+            restored.node.output_batch_id.as_deref(),
+            Some("batch-first")
+        );
+        assert_eq!(scene_edge_ids(&db), vec!["edge-source".to_owned()]);
+        let target = db
+            .node_detail("target".to_owned())
+            .expect("detail")
+            .expect("target detail");
+        assert_eq!(target.inputs.len(), 1);
+        let input = &target.inputs[0];
+        assert_eq!(input.edge_id.as_deref(), Some("edge-source"));
+        assert_eq!(input.item_id.as_deref(), Some("item-first"));
+        assert_eq!(input.asset_id.as_deref(), Some("asset-cat"));
+        assert_eq!(input.port_id, "references");
+
+        db.redo().expect("redo the replacement");
+        assert!(scene_edge_ids(&db).is_empty());
+        let redone = db
+            .node_detail("source".to_owned())
+            .expect("detail")
+            .expect("source detail");
+        assert_eq!(
+            redone.node.settings_json,
+            r#"{"version":1,"media":["video"]}"#
+        );
+        assert_eq!(redone.node.output_batch_id.as_deref(), Some("batch-second"));
+        assert!(
+            db.node_detail("target".to_owned())
+                .expect("detail")
+                .expect("target detail")
+                .inputs
+                .is_empty()
+        );
+    }
+
+    #[test]
+    fn a_settings_change_without_a_port_schema_keeps_every_edge() {
+        let db = Database::open(":memory:").expect("open");
+        upload_with_edge_to_target(&db);
+        db.clear_history().expect("clear setup history");
+        let before = current_rev(&db);
+
+        // A newer document's kind: this build cannot tell which ports it
+        // has, so the settings write must land but must not delete edges.
+        let changes = db
+            .set_node_settings(
+                "source".to_owned(),
+                r#"{"version":1,"media":[]}"#.to_owned(),
+                None,
+            )
+            .expect("settings without a port schema");
+        assert_eq!(current_rev(&db), before + 1);
+        assert_eq!(
+            changes.changes.changed[0].settings_json,
+            r#"{"version":1,"media":[]}"#
+        );
+        assert!(changes.forward.iter().any(|op| matches!(
+            op,
+            HistoryOp::NodeSettings {
+                id,
+                mark_stale: true,
+                ..
+            } if id == "source"
+        )));
+        let persisted = db
+            .node_detail("source".to_owned())
+            .expect("detail")
+            .expect("source detail");
+        assert_eq!(persisted.node.settings_json, r#"{"version":1,"media":[]}"#);
+        assert!(changes.changes.edges_removed.is_empty());
+        assert_eq!(scene_edge_ids(&db), vec!["edge-source".to_owned()]);
+        assert_eq!(
+            db.node_detail("target".to_owned())
+                .expect("detail")
+                .expect("target detail")
+                .inputs
+                .len(),
+            1
+        );
+    }
+
+    #[test]
+    fn a_settings_change_removes_every_edge_on_a_gone_port() {
+        let db = Database::open(":memory:").expect("open");
+        let mut upload = node("source", "Source", "", &[], 0.0, 0.0);
+        upload.kind = "upload".to_owned();
+        upload.settings_json = Some(r#"{"version":1,"media":["image"]}"#.to_owned());
+        db.insert_nodes(vec![
+            upload,
+            node("target-a", "A", "", &[], 400.0, 0.0),
+            node("target-b", "B", "", &[], 800.0, 0.0),
+        ])
+        .expect("insert");
+        db.set_manual_upload(
+            "source".to_owned(),
+            r#"{"version":1,"media":["image"]}"#.to_owned(),
+            "cat.png".to_owned(),
+            ResultBatchInput {
+                id: "batch-first".to_owned(),
+                node_id: "source".to_owned(),
+                trigger: "upload".to_owned(),
+                provider: "local".to_owned(),
+                model: String::new(),
+                params_json: "{}".to_owned(),
+                status: "done".to_owned(),
+                error: None,
+            },
+            vec![ResultItemInput {
+                id: "item-first".to_owned(),
+                position: 0.0,
+                port_id: "image".to_owned(),
+                kind: "image".to_owned(),
+                text: String::new(),
+                asset_id: Some("asset-cat".to_owned()),
+                meta_json: None,
+            }],
+            None,
+        )
+        .expect("upload");
+        connect_ports(
+            &db,
+            "edge-a",
+            "source",
+            "image",
+            "target-a",
+            "references",
+            "image",
+        );
+        connect_ports(
+            &db,
+            "edge-b",
+            "source",
+            "image",
+            "target-b",
+            "references",
+            "image",
+        );
+        db.clear_history().expect("clear setup history");
+
+        let changes = db
+            .set_node_settings(
+                "source".to_owned(),
+                r#"{"version":1,"media":[]}"#.to_owned(),
+                Some(Vec::new()),
+            )
+            .expect("remove the output port");
+        assert_eq!(
+            changes.changes.edges_removed,
+            vec!["edge-a".to_owned(), "edge-b".to_owned()]
+        );
+        assert!(scene_edge_ids(&db).is_empty());
+        for target in ["target-a", "target-b"] {
+            assert!(
+                db.node_detail(target.to_owned())
+                    .expect("detail")
+                    .expect("target detail")
+                    .inputs
+                    .is_empty()
+            );
+        }
+
+        db.undo().expect("undo the settings edit");
+        assert_eq!(
+            scene_edge_ids(&db),
+            vec!["edge-a".to_owned(), "edge-b".to_owned()]
+        );
+        for target in ["target-a", "target-b"] {
+            let restored = db
+                .node_detail(target.to_owned())
+                .expect("detail")
+                .expect("target detail");
+            assert_eq!(restored.inputs.len(), 1);
+            assert_eq!(restored.inputs[0].item_id.as_deref(), Some("item-first"));
+            assert_eq!(restored.inputs[0].asset_id.as_deref(), Some("asset-cat"));
+        }
+
+        db.redo().expect("redo the settings edit");
+        assert!(scene_edge_ids(&db).is_empty());
+        for target in ["target-a", "target-b"] {
+            assert!(
+                db.node_detail(target.to_owned())
+                    .expect("detail")
+                    .expect("target detail")
+                    .inputs
+                    .is_empty()
+            );
+        }
+    }
+
+    #[test]
+    fn successive_settings_changes_undo_and_redo_in_order() {
+        let db = Database::open(":memory:").expect("open");
+        let mut source = node("source", "Source", "", &[], 0.0, 0.0);
+        source.kind = "future".to_owned();
+        source.settings_json = Some(r#"{"version":1,"ports":["image","video"]}"#.to_owned());
+        db.insert_nodes(vec![
+            source,
+            node("target-a", "A", "", &[], 400.0, 0.0),
+            node("target-b", "B", "", &[], 800.0, 0.0),
+        ])
+        .expect("insert");
+        db.save_run(
+            ResultBatchInput {
+                id: "batch-source".to_owned(),
+                node_id: "source".to_owned(),
+                trigger: "run".to_owned(),
+                provider: "mock-image".to_owned(),
+                model: "mock-image".to_owned(),
+                params_json: "{}".to_owned(),
+                status: "done".to_owned(),
+                error: None,
+            },
+            vec![
+                ResultItemInput {
+                    id: "item-image".to_owned(),
+                    position: 0.0,
+                    port_id: "image".to_owned(),
+                    kind: "image".to_owned(),
+                    text: String::new(),
+                    asset_id: Some("asset-image".to_owned()),
+                    meta_json: None,
+                },
+                ResultItemInput {
+                    id: "item-video".to_owned(),
+                    position: 1.0,
+                    port_id: "video".to_owned(),
+                    kind: "image".to_owned(),
+                    text: String::new(),
+                    asset_id: Some("asset-video".to_owned()),
+                    meta_json: None,
+                },
+            ],
+        )
+        .expect("run");
+        connect_ports(
+            &db,
+            "edge-image",
+            "source",
+            "image",
+            "target-a",
+            "references",
+            "image",
+        );
+        connect_ports(
+            &db,
+            "edge-video",
+            "source",
+            "video",
+            "target-b",
+            "references",
+            "image",
+        );
+        db.clear_history().expect("clear setup history");
+
+        let first = db
+            .set_node_settings(
+                "source".to_owned(),
+                r#"{"version":1,"ports":["image"]}"#.to_owned(),
+                Some(vec!["image".to_owned()]),
+            )
+            .expect("first settings edit");
+        assert_eq!(first.changes.edges_removed, vec!["edge-video".to_owned()]);
+        assert_eq!(scene_edge_ids(&db), vec!["edge-image".to_owned()]);
+
+        let second = db
+            .set_node_settings(
+                "source".to_owned(),
+                r#"{"version":1,"ports":[]}"#.to_owned(),
+                Some(Vec::new()),
+            )
+            .expect("second settings edit");
+        assert_eq!(second.changes.edges_removed, vec!["edge-image".to_owned()]);
+        assert!(scene_edge_ids(&db).is_empty());
+
+        db.undo().expect("undo the second edit");
+        let after_first_undo = db
+            .node_detail("source".to_owned())
+            .expect("detail")
+            .expect("source detail");
+        assert_eq!(
+            after_first_undo.node.settings_json,
+            r#"{"version":1,"ports":["image"]}"#
+        );
+        assert_eq!(scene_edge_ids(&db), vec!["edge-image".to_owned()]);
+
+        db.undo().expect("undo the first edit");
+        let after_second_undo = db
+            .node_detail("source".to_owned())
+            .expect("detail")
+            .expect("source detail");
+        assert_eq!(
+            after_second_undo.node.settings_json,
+            r#"{"version":1,"ports":["image","video"]}"#
+        );
+        assert_eq!(
+            scene_edge_ids(&db),
+            vec!["edge-image".to_owned(), "edge-video".to_owned()]
+        );
+        let target_b = db
+            .node_detail("target-b".to_owned())
+            .expect("detail")
+            .expect("target detail");
+        assert_eq!(target_b.inputs[0].item_id.as_deref(), Some("item-video"));
+
+        db.redo().expect("redo the first edit");
+        assert_eq!(scene_edge_ids(&db), vec!["edge-image".to_owned()]);
+        db.redo().expect("redo the second edit");
+        assert!(scene_edge_ids(&db).is_empty());
+    }
+
+    #[test]
+    fn removing_an_edge_marks_a_downstream_target_stale_once() {
+        let db = Database::open(":memory:").expect("open");
+        upload_with_edge_to_target(&db);
+        db.save_run(
+            ResultBatchInput {
+                id: "batch-target".to_owned(),
+                node_id: "target".to_owned(),
+                trigger: "run".to_owned(),
+                provider: "mock-text".to_owned(),
+                model: "mock-text".to_owned(),
+                params_json: "{}".to_owned(),
+                status: "done".to_owned(),
+                error: None,
+            },
+            vec![ResultItemInput {
+                id: "item-target".to_owned(),
+                position: 0.0,
+                port_id: "text".to_owned(),
+                kind: "text".to_owned(),
+                text: "result".to_owned(),
+                asset_id: None,
+                meta_json: None,
+            }],
+        )
+        .expect("target run");
+        db.clear_history().expect("clear setup history");
+        let before = db
+            .get_node("target".to_owned())
+            .expect("get target")
+            .expect("target");
+
+        let changes = db
+            .set_node_settings(
+                "source".to_owned(),
+                r#"{"version":1,"media":[]}"#.to_owned(),
+                Some(Vec::new()),
+            )
+            .expect("remove the output port");
+        let touched: Vec<_> = changes
+            .changes
+            .changed
+            .iter()
+            .filter(|node| node.id == "target")
+            .collect();
+        assert_eq!(touched.len(), 1, "the target is refreshed exactly once");
+        assert_eq!(touched[0].status, "stale");
+        assert_eq!(touched[0].rev, before.rev + 1.0);
+
+        db.undo().expect("undo the settings edit");
+        assert_eq!(scene_edge_ids(&db), vec!["edge-source".to_owned()]);
+        let restored = db
+            .node_detail("target".to_owned())
+            .expect("detail")
+            .expect("target detail");
+        assert_eq!(restored.inputs.len(), 1);
+        assert_eq!(restored.inputs[0].edge_id.as_deref(), Some("edge-source"));
+    }
+
+    #[test]
+    fn a_run_invalidates_a_settings_entry_that_removed_an_edge() {
+        let db = Database::open(":memory:").expect("open");
+        text_target_with_incoming_edge(&db);
+        db.clear_history().expect("clear setup history");
+        let settings = db
+            .set_node_settings(
+                "target".to_owned(),
+                r#"{"version":1,"prompt":"changed"}"#.to_owned(),
+                Some(vec!["references".to_owned(), "text".to_owned()]),
+            )
+            .expect("remove the input port");
+        assert!(settings.forward.iter().any(|op| matches!(
+            op,
+            HistoryOp::DeleteEdge { id } if id == "edge-target"
+        )));
+        assert!(scene_edge_ids(&db).is_empty());
+
+        // A run is not history: it invalidates the pending settings entry,
+        // which references the source through its restored edge.
+        db.save_run(
+            ResultBatchInput {
+                id: "batch-later".to_owned(),
+                node_id: "source".to_owned(),
+                trigger: "run".to_owned(),
+                provider: "mock-text".to_owned(),
+                model: "mock-text".to_owned(),
+                params_json: "{}".to_owned(),
+                status: "done".to_owned(),
+                error: None,
+            },
+            vec![ResultItemInput {
+                id: "item-later".to_owned(),
+                position: 0.0,
+                port_id: "text".to_owned(),
+                kind: "text".to_owned(),
+                text: "later".to_owned(),
+                asset_id: None,
+                meta_json: None,
+            }],
+        )
+        .expect("run");
+
+        let undone = db.undo().expect("undo after a run");
+        assert!(undone.changed.is_empty());
+        assert!(scene_edge_ids(&db).is_empty());
+        let target = db
+            .node_detail("target".to_owned())
+            .expect("detail")
+            .expect("target detail");
+        assert_eq!(
+            target.node.settings_json,
+            r#"{"version":1,"prompt":"changed"}"#
+        );
+        assert!(target.inputs.is_empty());
+    }
+
+    #[test]
+    fn replacing_an_upload_keeps_an_edge_whose_port_survives() {
+        let db = Database::open(":memory:").expect("open");
+        upload_with_edge_to_target(&db);
+        db.save_run(
+            ResultBatchInput {
+                id: "batch-target".to_owned(),
+                node_id: "target".to_owned(),
+                trigger: "run".to_owned(),
+                provider: "mock-text".to_owned(),
+                model: "mock-text".to_owned(),
+                params_json: "{}".to_owned(),
+                status: "done".to_owned(),
+                error: None,
+            },
+            vec![ResultItemInput {
+                id: "item-target".to_owned(),
+                position: 0.0,
+                port_id: "text".to_owned(),
+                kind: "text".to_owned(),
+                text: "result".to_owned(),
+                asset_id: None,
+                meta_json: None,
+            }],
+        )
+        .expect("target run");
+        db.clear_history().expect("clear setup history");
+
+        let changes = db
+            .set_manual_upload(
+                "source".to_owned(),
+                r#"{"version":1,"media":["image"]}"#.to_owned(),
+                "dog.png".to_owned(),
+                ResultBatchInput {
+                    id: "batch-second".to_owned(),
+                    node_id: "source".to_owned(),
+                    trigger: "upload".to_owned(),
+                    provider: "local".to_owned(),
+                    model: String::new(),
+                    params_json: "{}".to_owned(),
+                    status: "done".to_owned(),
+                    error: None,
+                },
+                vec![ResultItemInput {
+                    id: "item-second".to_owned(),
+                    position: 0.0,
+                    port_id: "image".to_owned(),
+                    kind: "image".to_owned(),
+                    text: String::new(),
+                    asset_id: Some("asset-dog".to_owned()),
+                    meta_json: None,
+                }],
+                None,
+            )
+            .expect("replace the upload");
+        assert!(changes.changes.edges_removed.is_empty());
+        assert_eq!(scene_edge_ids(&db), vec!["edge-source".to_owned()]);
+        let touched: Vec<_> = changes
+            .changes
+            .changed
+            .iter()
+            .filter(|node| node.id == "target")
+            .collect();
+        assert_eq!(touched.len(), 1, "the target is refreshed exactly once");
+        assert_eq!(touched[0].status, "stale");
+        let target = db
+            .node_detail("target".to_owned())
+            .expect("detail")
+            .expect("target detail");
+        assert_eq!(target.inputs.len(), 1);
+        assert_eq!(target.inputs[0].item_id.as_deref(), Some("item-first"));
+
+        db.undo().expect("undo the replacement");
+        assert_eq!(scene_edge_ids(&db), vec!["edge-source".to_owned()]);
+        db.redo().expect("redo the replacement");
+        assert_eq!(scene_edge_ids(&db), vec!["edge-source".to_owned()]);
     }
 
     #[test]

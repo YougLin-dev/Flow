@@ -81,15 +81,19 @@ impl Document {
         .await
     }
 
-    /// Replaces a node's kind settings (opaque JSON).
+    /// Replaces a node's kind settings (opaque JSON) and the port ids those
+    /// settings declare; an edge whose port is gone is removed with the edit.
+    /// `None` means this build does not know the kind's ports, so incident
+    /// edges are left alone.
     pub async fn set_node_settings(
         this: Instance<Self>,
         id: String,
         settings_json: String,
+        valid_ports: Option<Vec<String>>,
     ) -> Result<ChangeSet, String> {
         let db = this.with(|document| document.db.clone());
         off_thread(move || {
-            db.set_node_settings(id, settings_json)
+            db.set_node_settings(id, settings_json, valid_ports)
                 .map(|mutation| mutation.changes)
         })
         .await

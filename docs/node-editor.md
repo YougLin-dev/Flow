@@ -101,12 +101,18 @@ upload card has no output port.
   invalidates pending entries that reference the rows it touched; a run also
   records direct downstream targets with an output, so undo never restores
   an older body, output pointer or input snapshot over newer work.
-- Undoing a settings edit restores only `settings_json` (and bumps the
-  revision); body, output and status belong to runs. A manual text or upload
-  undo restores its output only while the node still has the batch and body
-  that edit wrote; otherwise the whole guarded entry is skipped and dropped.
-  An existing output becomes stale when its settings change, until the node
-  runs again.
+- Undoing a settings edit restores `settings_json`, its incident edges and
+  their input snapshots together (and bumps the revision); body, output and
+  status belong to runs. Settings reconcile the node's derived ports: an edge
+  whose port the new settings no longer declare is deleted in the same
+  transaction, and its downstream node is marked stale. A kind this build
+  does not know sends no port schema, so its edges are left alone. A settings
+  change that keeps its ports touches no edge; a no-op write touches nothing
+  and does not bump the revision or push an undo entry. A manual text or
+  upload undo restores its output only while the node still has the batch and
+  body that edit wrote; otherwise the whole guarded entry is skipped and
+  dropped. An existing output becomes stale when its settings change, until
+  the node runs again.
 - Any write that changes a node's searchable text — a title/body/tags edit, a
   manual text edit or a successful run — rewrites its FTS row in the same
   transaction, so search matches the current text rather than the inserted one.
@@ -154,9 +160,11 @@ or `interrupted` (`input-not-ready` is reserved for a later dependency gate).
   stores the node's media settings (`{"version":1,"media":["image"]}`), its
   body (the file names, for search), the output pointer and the fitted card
   rectangle, and is undoable like a manual text edit: one undo restores the
-  previous output and size together. Replacing the upload switches the output to a new
-  batch and marks downstream nodes stale; a failed import records a failed
-  batch and keeps the previous output. The card resizes to the image's aspect
+  previous output and size together. Replacing the upload switches the output
+  to a new batch and marks downstream nodes stale; if the new upload no longer
+  emits a media kind, edges attached to that output port are removed and
+  restored by the same undo. A failed import records a failed batch and keeps
+  the previous output. The card resizes to the image's aspect
   ratio (fitted in a 320-point box, with a 220-point minimum width that keeps
   the button usable) and keeps its centre, so the image shows whole instead
   of being cropped. A ratio too extreme for both the box and the minimum

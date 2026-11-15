@@ -20,6 +20,7 @@ import {
 import {
   canConnectPorts,
   defaultSettings,
+  isKnownKind,
   isRunnableKind,
   type NodeKindId,
   type NodeSettings,
@@ -42,6 +43,13 @@ export interface NodeSessionHost extends NodeCommandHost {
   /** Shows the platform's image picker; a test host can answer it. */
   pickImages(options: PickImagesOptions): Promise<PickedImage[]>;
   schedulePreviews(): void;
+}
+
+/** The kind a settings draft belongs to when no open detail names it. */
+function settingsKind(settings: NodeSettings): NodeKindId {
+  if ("media" in settings) return "upload";
+  if ("count" in settings) return "image";
+  return "text";
 }
 
 export class NodeSession {
@@ -174,8 +182,16 @@ export class NodeSession {
     const json = serializeSettings(settings);
     const current = this.detail();
     if (current?.node.id === id && current.node.settingsJson === json) return;
+    const kind = current?.node.id === id ? current.node.kind : settingsKind(settings);
+    // A kind this build does not know keeps its edges: the fallback port
+    // schema is a reading aid, not an authoritative list of the node's ports.
+    const ports = isKnownKind(kind) ? portsOfNode({ kind, settingsJson: json }) : null;
+    const validPorts =
+      ports === null
+        ? null
+        : [...new Set([...ports.inputs, ...ports.outputs].map((port) => port.id))];
     try {
-      const changes = await document.setNodeSettings(id, json);
+      const changes = await document.setNodeSettings(id, json, validPorts);
       if (!this.host.isDisposed()) this.host.applyChanges(changes);
     } catch (error) {
       console.error("Flow could not save the node settings", error);

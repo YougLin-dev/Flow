@@ -14,6 +14,7 @@ export {
   IMAGE_RESOLUTIONS,
   imageModelLabel,
   isImageModel,
+  isKnownKind,
   isPortKind,
   isRunnableKind,
   isTextModel,

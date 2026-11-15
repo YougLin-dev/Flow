@@ -220,11 +220,13 @@ const KINDS: Record<string, NodeKind> = {
 const PORTS_CACHE = new WeakMap<PortSchemaSource, NodePorts>();
 
 export function nodeKind(id: string): NodeKind {
-  return KINDS[id] ?? FALLBACK_KIND;
+  // `id in KINDS` would admit Object prototype names such as "constructor";
+  // a document could then look like a known kind with fallback ports.
+  return Object.prototype.hasOwnProperty.call(KINDS, id) ? KINDS[id] : FALLBACK_KIND;
 }
 
 export function isKnownKind(id: string): id is NodeKindId {
-  return id in KINDS;
+  return Object.prototype.hasOwnProperty.call(KINDS, id);
 }
 
 /**

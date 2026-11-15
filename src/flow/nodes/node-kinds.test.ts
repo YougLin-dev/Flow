@@ -3,8 +3,10 @@ import {
   canConnectPorts,
   defaultSettings,
   imageModelLabel,
+  isKnownKind,
   isPortKind,
   MEDIA_KINDS,
+  nodeKind,
   parseSettings,
   portsOfNode,
   serializeSettings,
@@ -54,6 +56,13 @@ test("keeps a known text model and falls back for an unknown one", () => {
   expect(unknown).toMatchObject({ model: "deepseek-v4.1-flash" });
   expect(textModelLabel("deepseek-v4.1-flash")).toBe("DeepSeek V4.1 Flash");
   expect(textModelLabel("mock-text")).toBe("Mock Text");
+});
+
+test("does not treat Object prototype names as node kinds", () => {
+  for (const id of ["constructor", "toString", "__proto__", "hasOwnProperty"]) {
+    expect(isKnownKind(id)).toBe(false);
+    expect(nodeKind(id)).toEqual(nodeKind("future-kind"));
+  }
 });
 
 test("parses a known resolution and the wider aspect choices", () => {
