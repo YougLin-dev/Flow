@@ -142,6 +142,9 @@ or `interrupted` (`input-not-ready` is reserved for a later dependency gate).
   composer reads the newest batch for the error line while cards keep showing
   the last successful output.
 - Startup marks runs left `running` by a previous process as `interrupted`.
+- Deleting a node cancels its running batch in the same command. A provider
+  result that arrives afterwards is a no-op, and undoing the delete restores
+  the card in a terminal status rather than stuck `running`.
 - Any change to a node's input list increments the node revision and returns
   the node in the change set even when it has no output, so an open composer
   refreshes. An existing result becomes stale.

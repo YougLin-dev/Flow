@@ -398,23 +398,66 @@ test("cancels a run and keeps the last output", async () => {
   await seedDocument(document);
   const { session, runner, assets } = makeSession(document);
 
-  session.openComposer(IMAGE_NODE_ID);
-  await until(() => session.detail()?.node.id === IMAGE_NODE_ID);
+  session.openComposer(TEXT_NODE_ID);
+  await until(() => session.detail()?.node.id === TEXT_NODE_ID);
+  const opened = session.detail();
+  if (!opened) throw new Error("the composer did not open");
+  await session.run(parseSettings(opened.node.kind, opened.node.settingsJson));
+  const done = await document.nodeDetail(TEXT_NODE_ID);
+  const output = done?.batch;
+  if (!done || !output) throw new Error("the first run stored no output");
+  expect(done.node.status).toBe("done");
+
+  // A second run cancelled mid-flight records its batch but keeps the first
+  // run's output, body and status line.
+  session.openComposer(TEXT_NODE_ID);
+  await until(() => session.detail()?.node.id === TEXT_NODE_ID);
   const detail = session.detail();
-  if (!detail) throw new Error("the composer did not open");
+  if (!detail) throw new Error("the composer did not reopen");
   const pending = session.run(parseSettings(detail.node.kind, detail.node.settingsJson));
-  await until(() => runner.isRunning(IMAGE_NODE_ID));
+  await until(() => runner.isRunning(TEXT_NODE_ID));
   session.cancel();
   await pending;
 
-  const after = await document.nodeDetail(IMAGE_NODE_ID);
-  if (!after) throw new Error("the image node disappeared");
+  const after = await document.nodeDetail(TEXT_NODE_ID);
+  if (!after) throw new Error("the text node disappeared");
   expect(after.node.status).toBe("cancelled");
-  expect(after.batch).toBeNull();
+  expect(after.batch?.id).toBe(output.id);
+  expect(after.node.outputBatchId).toBe(output.id);
+  expect(after.node.body).toBe(done.node.body);
   expect(after.latestBatch?.status).toBe("cancelled");
-  expect(after.node.outputBatchId).toBeNull();
+  expect(after.latestBatch?.error).toBeNull();
 
   runner.dispose();
+  assets.dispose();
+  document.dispose();
+});
+
+test("disposing the runner mid-run leaves the batch for startup recovery", async () => {
+  const document = await Document.open(":memory:");
+  await seedDocument(document);
+  const { session, runner, assets } = makeSession(document);
+
+  session.openComposer(TEXT_NODE_ID);
+  await until(() => session.detail()?.node.id === TEXT_NODE_ID);
+  const detail = session.detail();
+  if (!detail) throw new Error("the composer did not open");
+  const pending = session.run(parseSettings(detail.node.kind, detail.node.settingsJson));
+  await until(() => runner.isRunning(TEXT_NODE_ID));
+  runner.dispose();
+  await pending;
+
+  // The app is closing, so the runner leaves the run open for the next open
+  // to settle rather than writing through a database that may be gone.
+  const abandoned = await document.nodeDetail(TEXT_NODE_ID);
+  expect(abandoned?.node.status).toBe("running");
+  expect(abandoned?.latestBatch?.status).toBe("running");
+
+  expect(await document.recoverRuns()).toBeGreaterThan(0);
+  const after = await document.nodeDetail(TEXT_NODE_ID);
+  expect(after?.node.status).toBe("interrupted");
+  expect(after?.latestBatch?.status).toBe("interrupted");
+
   assets.dispose();
   document.dispose();
 });

@@ -774,6 +774,11 @@ fn ensure_history(history: &Arc<Mutex<History>>) -> Result<(), String> {
 /// poisoned lock is ignored here because the write already happened and an
 /// error would invite a duplicate retry.
 fn invalidate_history(history: &Arc<Mutex<History>>, refs: &HistoryRefs) {
+    // A late or repeated write that touched no row must not clear the redo
+    // entry a user could still apply.
+    if refs.is_empty() {
+        return;
+    }
     if let Ok(mut history) = history.lock() {
         history.invalidate(refs);
     }
@@ -7327,6 +7332,169 @@ mod tests {
             .expect("late settle");
         assert!(missing.changed.is_empty());
         assert_eq!(current_rev(&db), before);
+    }
+
+    fn text_item(id: &str, text: &str) -> ResultItemInput {
+        ResultItemInput {
+            id: id.to_owned(),
+            position: 0.0,
+            port_id: "out".to_owned(),
+            kind: "text".to_owned(),
+            text: text.to_owned(),
+            asset_id: None,
+            meta_json: None,
+        }
+    }
+
+    fn run_batch(id: &str, node_id: &str, status: &str, error: Option<&str>) -> ResultBatchInput {
+        ResultBatchInput {
+            id: id.to_owned(),
+            node_id: node_id.to_owned(),
+            trigger: "run".to_owned(),
+            provider: "mock-text".to_owned(),
+            model: "mock-text".to_owned(),
+            params_json: "{}".to_owned(),
+            status: status.to_owned(),
+            error: error.map(str::to_owned),
+        }
+    }
+
+    #[test]
+    fn a_failed_rerun_keeps_the_previous_output() {
+        let db = Database::open(":memory:").expect("open");
+        db.insert_nodes(vec![node("a", "A", "", &[], 0.0, 0.0)])
+            .expect("insert");
+        db.save_run(
+            run_batch("batch-first", "a", "done", None),
+            vec![text_item("item-first", "first result")],
+        )
+        .expect("first run");
+        let first = db
+            .node_detail("a".to_owned())
+            .expect("detail")
+            .expect("node");
+        let first_batch = first.batch.expect("the first run is the output");
+        assert_eq!(first.node.status, "done");
+        assert_eq!(first.node.output_batch_id.as_deref(), Some("batch-first"));
+        assert_eq!(first_batch.id, "batch-first");
+        assert_eq!(first_batch.error, None, "a done batch has no error");
+
+        for (batch_id, status, error) in [
+            ("batch-failed", "failed", Some("the provider failed")),
+            ("batch-cancelled", "cancelled", None),
+        ] {
+            db.begin_run(run_batch(batch_id, "a", "running", None))
+                .expect("begin rerun");
+            let settled = db
+                .settle_run(run_batch(batch_id, "a", status, error), Vec::new())
+                .expect("settle rerun");
+            let changed = settled
+                .changed
+                .iter()
+                .find(|changed| changed.id == "a")
+                .expect("the node changed");
+            assert_eq!(changed.status, status);
+            assert_eq!(
+                changed.output_batch_id.as_deref(),
+                Some("batch-first"),
+                "a {status} run keeps the previous output"
+            );
+            assert_eq!(
+                changed.body, "first result",
+                "a {status} run keeps the body"
+            );
+            let detail = db
+                .node_detail("a".to_owned())
+                .expect("detail")
+                .expect("node");
+            assert_eq!(detail.batch.expect("output batch").id, "batch-first");
+            let latest = detail.latest_batch.expect("the rerun batch");
+            assert_eq!(
+                (latest.id.as_str(), latest.status.as_str()),
+                (batch_id, status)
+            );
+        }
+    }
+
+    #[test]
+    fn deleting_a_node_mid_run_cancels_its_batch() {
+        let db = Database::open(":memory:").expect("open");
+        db.insert_nodes(vec![node("a", "A", "", &[], 0.0, 0.0)])
+            .expect("insert");
+        db.begin_run(run_batch("batch-live", "a", "running", None))
+            .expect("begin run");
+        assert_eq!(
+            db.delete_nodes(vec!["a".to_owned()])
+                .expect("delete mid-run")
+                .changes
+                .removed,
+            ["a"]
+        );
+        let settled = db
+            .run(|conn| {
+                result_batches::Entity::find()
+                    .filter(result_batches::Column::Id.eq("batch-live"))
+                    .one(conn)
+                    .map(|row| row.map(|row| (row.status, row.finished_at)))
+                    .map_err(|error| error.to_string())
+            })
+            .expect("read batch")
+            .expect("batch row");
+        assert_eq!(settled.0, "cancelled", "delete settles the running batch");
+        assert!(settled.1.is_some(), "the cancelled batch is finished");
+
+        // Undo restores the node in a terminal state, not stuck running with
+        // no run behind it.
+        let undone = db.undo().expect("undo the delete");
+        let restored = undone
+            .changed
+            .iter()
+            .find(|changed| changed.id == "a")
+            .expect("the node came back");
+        assert_eq!(restored.status, "cancelled");
+
+        // A late provider result is a no-op: it can neither fill the settled
+        // batch nor overwrite the node the undo restored.
+        let late = db
+            .settle_run(
+                run_batch("batch-live", "a", "done", None),
+                vec![text_item("late-item", "late result")],
+            )
+            .expect("late settle");
+        assert!(late.changed.is_empty());
+        let detail = db
+            .node_detail("a".to_owned())
+            .expect("detail")
+            .expect("the node exists");
+        assert_eq!(detail.node.status, "cancelled");
+        assert_eq!(detail.node.body, "");
+        assert!(detail.batch.is_none(), "the cancelled run wrote no output");
+        assert_eq!(
+            detail.latest_batch.map(|batch| batch.status),
+            Some("cancelled".to_owned())
+        );
+
+        // The late settle did not invalidate the delete's redo entry.
+        assert_eq!(db.redo().expect("redo the delete").removed, ["a"]);
+        assert_eq!(db.count().expect("nodes after redo"), 0);
+
+        // A one-call write for the now-missing node is also a no-op.
+        let late_save = db
+            .save_run(run_batch("batch-orphan", "a", "failed", None), Vec::new())
+            .expect("late save");
+        assert!(late_save.changed.is_empty());
+        let batch_count = db
+            .run(|conn| {
+                result_batches::Entity::find()
+                    .all(conn)
+                    .map(|rows| rows.len())
+                    .map_err(|error| error.to_string())
+            })
+            .expect("count batches");
+        assert_eq!(
+            batch_count, 1,
+            "a late save for a missing node writes nothing"
+        );
     }
 
     fn seed_input() -> SeedDocumentInput {

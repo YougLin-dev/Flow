@@ -17,7 +17,7 @@ use crate::entity::{edges, node_inputs, nodes, result_batches, result_items};
 use crate::history::{EdgeRow, HistoryOp, HistoryRefs, InputRow, NodeRow};
 use crate::types::{
     ChangeSet, EdgeInput, EdgePoint, EdgeSummary, InputItemInput, NodeBounds, NodeInput,
-    ResultBatchInput, ResultItemInput,
+    NodeSummary, ResultBatchInput, ResultItemInput,
 };
 
 /// A write and the history needed to reverse it.
@@ -245,8 +245,19 @@ pub fn delete_nodes(conn: &DatabaseConnection, ids: Vec<String>) -> Result<Mutat
                 id: input.id.clone(),
             });
         }
+        let mut refs = HistoryRefs::default();
         for id in &ids {
-            let row = find_node_tx(txn, id)?;
+            let mut row = find_node_tx(txn, id)?;
+            // A deleted node must not leave a running batch behind: a late
+            // settle would otherwise write a done batch for a dead node, or
+            // revive the output of a node restored by undo. Cancel first,
+            // then capture the terminal status for the inverse.
+            for batch in cancel_running_batches_tx(txn, id)? {
+                refs.batch(Some(&batch));
+            }
+            if row.status == "running" {
+                row = set_node_status_tx(txn, &row, "cancelled")?;
+            }
             delete_node_tx(txn, &row)?;
             removed.push(id.clone());
             forward.push(HistoryOp::Delete { id: id.clone() });
@@ -288,7 +299,7 @@ pub fn delete_nodes(conn: &DatabaseConnection, ids: Vec<String>) -> Result<Mutat
             },
             forward,
             inverse,
-            refs: HistoryRefs::default(),
+            refs,
         })
     })
     .map_err(|error| error.to_string())
@@ -1376,6 +1387,16 @@ pub fn settle_run(
             ));
         }
 
+        // Resolve the node before writing anything else. A run whose node was
+        // deleted, or whose id now belongs to a new incarnation, must not
+        // fill its batch with unreachable items or revive an old output.
+        let Some(node) = find_node_opt_tx(txn, &batch.node_id)? else {
+            return cancel_orphan_settle(txn, &running, "the node was deleted");
+        };
+        if node.seq != running.node_seq {
+            return cancel_orphan_settle(txn, &running, "the node was deleted");
+        }
+
         // The provider's metadata is only known after its call, so it is
         // written while the batch still runs and locked by the settle.
         result_batches::Entity::update_many()
@@ -1399,42 +1420,7 @@ pub fn settle_run(
         }
         settle_batch_tx(txn, &batch.id, &batch.status, batch.error.as_deref())?;
 
-        let mut refs = HistoryRefs::default();
-        refs.batch(Some(&batch.id));
-        for item in &items {
-            refs.asset(item.asset_id.as_deref());
-        }
-        let mut changed = Vec::new();
-        if let Some(node) = find_node_opt_tx(txn, &batch.node_id)? {
-            refs.node(node.id.clone());
-            let body = items
-                .iter()
-                .find(|item| item.kind == "text")
-                .map(|item| item.text.clone())
-                .unwrap_or_else(|| node.body.clone());
-            let mut active = nodes::ActiveModel {
-                seq: Unchanged(node.seq),
-                status: Set(batch.status.clone()),
-                rev: Set(node.rev + 1),
-                updated_at: Set(now_ms()),
-                ..Default::default()
-            };
-            if batch.status == "done" {
-                active.output_batch_id = Set(Some(batch.id.clone()));
-                active.body = Set(body);
-            }
-            let updated = nodes::Entity::update(active).exec(txn)?;
-            changed.push(node_row(&updated).summary());
-            if batch.status == "done" {
-                for row in mark_downstream_stale_tx(txn, &batch.node_id)? {
-                    changed.push(node_row(&row).summary());
-                }
-                for target in downstream_output_targets_tx(txn, &batch.node_id)? {
-                    refs.node(target);
-                }
-            }
-        }
-
+        let (changed, refs) = apply_batch_result_tx(txn, &batch, &items, &node)?;
         let rev = finish_tx(txn)?;
         Ok((
             ChangeSet {
@@ -1448,6 +1434,78 @@ pub fn settle_run(
         ))
     })
     .map_err(|error| error.to_string())
+}
+
+/// Applies a settled batch to its node: the run body and output pointer on a
+/// successful run, downstream staleness, and the history references a later
+/// write must invalidate. Shared by `settle_run` and `save_run`, so their
+/// finalization cannot drift.
+fn apply_batch_result_tx(
+    txn: &DatabaseTransaction,
+    batch: &ResultBatchInput,
+    items: &[ResultItemInput],
+    node: &nodes::Model,
+) -> Result<(Vec<NodeSummary>, HistoryRefs), DbErr> {
+    let body = items
+        .iter()
+        .find(|item| item.kind == "text")
+        .map(|item| item.text.clone())
+        .unwrap_or_else(|| node.body.clone());
+    let mut active = nodes::ActiveModel {
+        seq: Unchanged(node.seq),
+        status: Set(batch.status.clone()),
+        rev: Set(node.rev + 1),
+        updated_at: Set(now_ms()),
+        ..Default::default()
+    };
+    if batch.status == "done" {
+        active.output_batch_id = Set(Some(batch.id.clone()));
+        active.body = Set(body);
+    }
+    let updated = nodes::Entity::update(active).exec(txn)?;
+
+    let mut refs = HistoryRefs::default();
+    refs.node(node.id.clone());
+    refs.batch(Some(&batch.id));
+    for item in items {
+        refs.asset(item.asset_id.as_deref());
+    }
+
+    let mut changed = vec![node_row(&updated).summary()];
+    if batch.status == "done" {
+        for row in mark_downstream_stale_tx(txn, &node.id)? {
+            changed.push(node_row(&row).summary());
+        }
+        for target in downstream_output_targets_tx(txn, &node.id)? {
+            refs.node(target);
+        }
+    }
+    Ok((changed, refs))
+}
+
+/// Settles a running batch whose node no longer exists as cancelled instead
+/// of writing unreachable results: the late settle is a no-op, but the batch
+/// must not stay running forever.
+fn cancel_orphan_settle(
+    txn: &DatabaseTransaction,
+    running: &result_batches::Model,
+    error: &str,
+) -> Result<(ChangeSet, HistoryRefs), DbErr> {
+    settle_batch_tx(txn, &running.id, "cancelled", Some(error))?;
+    let mut refs = HistoryRefs::default();
+    refs.batch(Some(&running.id));
+    refs.node(running.node_id.clone());
+    let rev = finish_tx(txn)?;
+    Ok((
+        ChangeSet {
+            rev: rev as f64,
+            changed: Vec::new(),
+            removed: Vec::new(),
+            edges_changed: Vec::new(),
+            edges_removed: Vec::new(),
+        },
+        refs,
+    ))
 }
 
 fn empty_settle(txn: &DatabaseTransaction) -> Result<(ChangeSet, HistoryRefs), DbErr> {
@@ -1579,9 +1637,12 @@ pub fn save_run(
     batch: ResultBatchInput,
     items: Vec<ResultItemInput>,
 ) -> Result<(ChangeSet, HistoryRefs), String> {
-    let family = batch.node_id.clone();
     conn.transaction::<_, _, DbErr>(|txn| {
-        find_node_tx(txn, &family)?;
+        // A write for a node deleted mid-run is a no-op: its batch would be
+        // unreachable, and undoing the delete must not revive a stale run.
+        let Some(node) = find_node_opt_tx(txn, &batch.node_id)? else {
+            return empty_settle(txn);
+        };
         if batch.status == "done" && items.is_empty() {
             return Err(DbErr::Custom(
                 "a successful batch must contain at least one item".to_owned(),
@@ -1593,44 +1654,7 @@ pub fn save_run(
         }
         settle_batch_tx(txn, &batch.id, &batch.status, batch.error.as_deref())?;
 
-        let before = find_node_tx(txn, &family)?;
-        let body = items
-            .iter()
-            .find(|item| item.kind == "text")
-            .map(|item| item.text.clone())
-            .unwrap_or_else(|| before.body.clone());
-        let mut active = nodes::ActiveModel {
-            seq: Unchanged(before.seq),
-            status: Set(batch.status.clone()),
-            rev: Set(before.rev + 1),
-            updated_at: Set(now_ms()),
-            ..Default::default()
-        };
-        if batch.status == "done" {
-            active.output_batch_id = Set(Some(batch.id.clone()));
-            active.body = Set(body);
-        }
-        let updated = nodes::Entity::update(active).exec(txn)?;
-
-        let mut refs = HistoryRefs::default();
-        refs.node(family.clone());
-        refs.batch(Some(&batch.id));
-        for item in &items {
-            refs.asset(item.asset_id.as_deref());
-        }
-
-        let mut changed = vec![node_row(&updated).summary()];
-        if batch.status == "done" {
-            for row in mark_downstream_stale_tx(txn, &family)? {
-                changed.push(node_row(&row).summary());
-            }
-            // Include targets that were already stale: their older output
-            // entries must not survive the source's new batch.
-            for target in downstream_output_targets_tx(txn, &family)? {
-                refs.node(target);
-            }
-        }
-
+        let (changed, refs) = apply_batch_result_tx(txn, &batch, &items, &node)?;
         let rev = finish_tx(txn)?;
         Ok((
             ChangeSet {
@@ -1655,14 +1679,7 @@ pub fn set_node_status(
 ) -> Result<(ChangeSet, HistoryRefs), String> {
     conn.transaction::<_, _, DbErr>(|txn| {
         let before = find_node_tx(txn, &id)?;
-        let updated = nodes::Entity::update(nodes::ActiveModel {
-            seq: Unchanged(before.seq),
-            status: Set(status),
-            rev: Set(before.rev + 1),
-            updated_at: Set(now_ms()),
-            ..Default::default()
-        })
-        .exec(txn)?;
+        let updated = set_node_status_tx(txn, &before, &status)?;
         let mut refs = HistoryRefs::default();
         refs.node(id);
         let rev = finish_tx(txn)?;
@@ -2665,6 +2682,38 @@ fn settle_batch_tx(
         .filter(result_batches::Column::Status.eq("running"))
         .exec(txn)?;
     Ok(())
+}
+
+/// Settles every running batch of `node_id` as cancelled and returns their
+/// ids. Called before a node delete so no run outlives its node.
+fn cancel_running_batches_tx(
+    txn: &DatabaseTransaction,
+    node_id: &str,
+) -> Result<Vec<String>, DbErr> {
+    let running = result_batches::Entity::find()
+        .filter(result_batches::Column::NodeId.eq(node_id))
+        .filter(result_batches::Column::Status.eq("running"))
+        .all(txn)?;
+    for batch in &running {
+        settle_batch_tx(txn, &batch.id, "cancelled", Some("the node was deleted"))?;
+    }
+    Ok(running.into_iter().map(|batch| batch.id).collect())
+}
+
+/// Updates a node's status without touching its results.
+fn set_node_status_tx(
+    txn: &DatabaseTransaction,
+    node: &nodes::Model,
+    status: &str,
+) -> Result<nodes::Model, DbErr> {
+    nodes::Entity::update(nodes::ActiveModel {
+        seq: Unchanged(node.seq),
+        status: Set(status.to_owned()),
+        rev: Set(node.rev + 1),
+        updated_at: Set(now_ms()),
+        ..Default::default()
+    })
+    .exec(txn)
 }
 
 fn insert_result_item_tx(

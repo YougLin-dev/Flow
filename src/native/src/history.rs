@@ -197,6 +197,10 @@ impl HistoryRefs {
         self.assets.extend(other.assets.iter().cloned());
     }
 
+    pub fn is_empty(&self) -> bool {
+        self.nodes.is_empty() && self.batches.is_empty() && self.assets.is_empty()
+    }
+
     pub fn intersects(&self, other: &Self) -> bool {
         intersects(&self.nodes, &other.nodes)
             || intersects(&self.batches, &other.batches)
