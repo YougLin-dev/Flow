@@ -784,7 +784,7 @@ DELETE FROM nodes_geometry_dirty;
 
 The flush is part of the command harness (`run_command`/`apply_ops`), so every move, resize, undo and redo runs it. A connector whose both ends moved is written once, reproducing the single-pass behavior of `sync_edges_for_nodes` (`edge_index.rs:136-199`) without a per-node trigger. `verify()` flushes leftover dirty rows after a crash or a direct SQL write. Height changes also run `scale_edge_offsets_tx` as a set-based UPDATE using `NEW.height / OLD.height`; this is kept separate from the removed RTree writes. Rotating the whole world, adding/removing ports without height changes, and far-card offsets remain documented limitations (v1 decisions; section 12).
 
-The crossing-edge read caps at 4,000 rows and drops the redundant SQL `ORDER BY`; the caller already collects into a BTreeMap. The cap bounds payload; the RTree scan still costs the number of matching boxes, which is the intended spatial semantics.
+The crossing-edge read caps at 4,000 rows and drops the redundant SQL `ORDER BY`; the caller already collects into a BTreeMap. The cap bounds payload; the RTree scan still costs the number of matching boxes, which is the intended spatial semantics. Above the cap the retained subset follows the index's physical order, so a flush that re-inserts boxes can change it; the response order itself stays by edge id.
 
 ### 6.4 Cascades, REPLACE and integrity
 

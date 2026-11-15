@@ -665,16 +665,17 @@ Measured 2026-11-15 on branch `feat/database-v1` after the indexed read-path
 step, release build, same machine and profile as the full-fixture table
 above. The fixture version changed with the v1 schema and typed ports, so
 these numbers are not comparable with the v1-fixture rows; they are the new
-baseline. The lines below are copied verbatim from `bun run test:bench`
-(`cargo test --release`, ignored benchmark). The fixture had 100,000 nodes,
-99,000 edges, 2,000 image nodes with 2,000 batches, 8,000 image items and
-2,000 assets.
+baseline. The lines below are excerpted from `bun run test:bench`
+(`cargo test --release`, ignored benchmark); the fixture line's trailing
+temporary `db=` path is omitted. The fixture had 100,000 nodes, 99,000
+edges, 2,000 image nodes with 2,000 batches, 8,000 image items and 2,000
+assets.
 
 ```text
 100k fixture version=100k-grid-edges-images-v2-typed-ports include_images=true nodes=100000 edges=99000 image_nodes=2000 image_batches=2000 image_items=8000 image_assets=2000
 100k fixture seed (open+insert+assets+batches)=41000.26ms
 startup emptiness is_empty: n=5 avg=0.03ms p95=0.05ms max=0.05ms fixture nodes=100000 edges=99000 unchanged
-bounds (Fit source): read=0.07ms
+bounds (Fit source): Viewport { x: 0.0, y: 0.0, width: 21980.0, height: 139944.0 } read=0.07ms
 overview (minimap, bounds cached): cards=400 read=2.94ms
 legacy viewport scale=1.0000 (reference; edges and images present): n=5 avg=0.31ms p95=0.37ms max=0.37ms rect=(0.0,0.0,1920.0,1080.0) margin=120.0 nodes=90
 legacy scene scale=1.0000 (reference; edges and images present): n=5 avg=0.87ms p95=0.95ms max=0.95ms scale=1.0000 rect=(0.0,0.0,1920.0,1080.0) margin=120.0 nodes=90 edges=90

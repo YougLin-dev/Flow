@@ -139,8 +139,10 @@ canvas stays in TSX and owns only the scene model and its views.
   read (300/800/2000 cards) skips that second half, because its RTree
   matches can exceed the card budget, while a read that exactly fills its
   budget did not drop a card and keeps crossing connectors. The crossing
-  half is itself capped at 4,000 connectors. Every read edge carries both
-  endpoint ports; the far cards are not instantiated as views. A selected
+  half is itself capped at 4,000 connectors; above the cap the retained
+  subset follows the index's physical order and can change after a geometry
+  flush, while the response order stays by edge id. Every read edge carries
+  both endpoint ports; the far cards are not instantiated as views. A selected
   card pinned in the scene keeps its connectors even when a read omits them,
   so a mid-drag read, which sees only committed geometry, cannot blank the
   line. The connector index (`edge_index.rs`) is maintained in the same

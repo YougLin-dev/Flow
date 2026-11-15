@@ -1944,6 +1944,37 @@ mod tests {
     }
 
     #[test]
+    fn the_in_view_order_uses_exact_geometry_not_the_padded_cell() {
+        let db = Database::open(":memory:").expect("open");
+        db.insert_nodes(vec![
+            // Its padded RTree cell reaches into the rect, and its low z
+            // would outrank the visible card under the old cell-based CASE.
+            {
+                let mut margin = node("margin", "Margin", "", &[], 101.0, 10.0);
+                margin.z = -1.0;
+                margin
+            },
+            node("visible", "Visible", "", &[], 10.0, 10.0),
+        ])
+        .expect("insert");
+
+        let scene = db
+            .scene(
+                Viewport {
+                    x: 0.0,
+                    y: 0.0,
+                    width: 100.0,
+                    height: 100.0,
+                },
+                300.0,
+                1,
+            )
+            .expect("one-card scene");
+        assert_eq!(scene.nodes.len(), 1);
+        assert_eq!(scene.nodes[0].id, "visible");
+    }
+
+    #[test]
     fn viewport_rechecks_exact_geometry_after_the_rtree() {
         let db = Database::open(":memory:").expect("open");
         db.insert_nodes(vec![
@@ -2382,9 +2413,15 @@ mod tests {
         // A complete read that happens to equal the budget is not a sample:
         // the one-row probe found nothing beyond it, so the crossing
         // connector is part of the scene.
-        let three = db.scene(rect, 0.0, 3).expect("three-card scene");
+        let three = db.scene(rect.clone(), 0.0, 3).expect("three-card scene");
         assert_eq!(three.nodes.len(), 3);
         assert!(three.edges.iter().any(|edge| edge.id == "left-right"));
+
+        // A zero budget is the deliberate empty read: no cards and no
+        // crossing half, even when the read itself fits.
+        let empty = db.scene(rect, 0.0, 0).expect("empty scene");
+        assert!(empty.nodes.is_empty());
+        assert!(empty.edges.is_empty());
     }
 
     #[test]
@@ -4165,6 +4202,28 @@ mod tests {
             .expect("mixed search");
         let ids: Vec<&str> = hits.iter().map(|hit| hit.id.as_str()).collect();
         assert_eq!(ids, ["both"]);
+    }
+
+    #[test]
+    fn a_mixed_search_applies_every_short_term() {
+        let db = Database::open(":memory:").expect("open");
+        db.insert_nodes(vec![
+            node("all", "generator a b c d e f g h z", "", &[], 0.0, 0.0),
+            node("missing-z", "generator a b c d e f g h", "", &[], 0.0, 0.0),
+        ])
+        .expect("insert");
+
+        // Nine short terms plus one long one: the mixed path must apply all
+        // of them, not the all-short fallback's first eight.
+        let hits = db
+            .search(
+                "generator a b c d e f g h z".to_owned(),
+                SearchFilters::default(),
+                20,
+            )
+            .expect("mixed search");
+        let ids: Vec<&str> = hits.iter().map(|hit| hit.id.as_str()).collect();
+        assert_eq!(ids, ["all"]);
     }
 
     #[test]

@@ -45,8 +45,10 @@ pub fn snapshot(
     // touching the cards that survived. Only a complete read can afford the
     // RTree half that finds connectors whose cards are both outside the node
     // read. The one-row probe distinguishes a truncated sample from a
-    // complete read that happens to equal its budget.
-    let edges = edges_for_scene(conn, &read.nodes, &rect, margin, read.truncated)?;
+    // complete read that happens to equal its budget. A zero budget is the
+    // deliberate empty read, so it skips the crossing half as well.
+    let truncated = read.truncated || max_cards == 0;
+    let edges = edges_for_scene(conn, &read.nodes, &rect, margin, truncated)?;
     let rev = document::current_rev(conn).map_err(|error| error.to_string())?;
 
     Ok(SceneSnapshot {

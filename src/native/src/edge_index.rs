@@ -129,8 +129,10 @@ pub(crate) fn viewport_statement(rect: &Viewport, margin: f64) -> SelectStatemen
         )
         // The cap bounds the payload of a dense viewport; ordering every RTree
         // match just to pick a stable subset would cost more than the payload
-        // saves. The scene stores connectors in an id-keyed map, so the
-        // snapshot itself is still deterministic per read.
+        // saves. Above the cap the retained subset follows the index's
+        // physical order, so a flush that re-inserts boxes can change it; the
+        // scene's id-keyed map orders what did return, but cannot stabilize
+        // which rows survive the cap.
         .limit(EDGE_LIMIT);
 
     statement

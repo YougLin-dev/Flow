@@ -46,9 +46,11 @@ pub fn search(
     let (long, short): (Vec<&str>, Vec<&str>) = terms
         .into_iter()
         .partition(|term| term.chars().count() >= MIN_INDEXED_CHARS);
-    let short = &short[..std::cmp::min(short.len(), SHORT_TERM_LIMIT)];
     if long.is_empty() {
-        return collect(conn, &like_statement(query, short, kind.as_deref(), limit));
+        // The scan has no index to narrow it, so it takes only the first few
+        // terms; a mixed query keeps every short term as a post-filter.
+        let capped = &short[..std::cmp::min(short.len(), SHORT_TERM_LIMIT)];
+        return collect(conn, &like_statement(query, capped, kind.as_deref(), limit));
     }
 
     let match_query = fts_match_query(&long.join(" "));
@@ -58,7 +60,7 @@ pub fn search(
 
     collect(
         conn,
-        &fts_statement(&match_query, kind.as_deref(), limit, short),
+        &fts_statement(&match_query, kind.as_deref(), limit, &short),
     )
 }
 

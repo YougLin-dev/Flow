@@ -408,6 +408,20 @@ mod tests {
         assert!(sql.contains("\"nodes\".\"z\" ASC"));
         assert!(sql.contains("\"nodes\".\"seq\""));
         assert!(sql.contains("LIMIT 5"));
+
+        // The truncation probe needs the extra row even at the hard cap.
+        let probe = viewport_seq_statement(
+            Viewport {
+                x: 0.0,
+                y: 0.0,
+                width: 1920.0,
+                height: 1080.0,
+            },
+            120.0,
+            NODE_LIMIT + 1,
+        )
+        .to_string(SqliteQueryBuilder);
+        assert!(probe.contains("LIMIT 2001"), "{probe}");
     }
 
     #[test]
