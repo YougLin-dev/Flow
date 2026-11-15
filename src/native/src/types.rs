@@ -12,6 +12,9 @@ pub struct ProjectInfo {
     pub node_count: f64,
     pub edge_count: f64,
     pub demo_seeded: bool,
+    /// Whether the previous session closed cleanly (or the package is new).
+    /// A false value schedules the post-open verify job.
+    pub opened_clean: bool,
 }
 
 /// One transactional demo seed: the cards, the optional manual text result

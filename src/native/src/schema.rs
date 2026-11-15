@@ -5,4 +5,5 @@
 //! SQLite's FTS5 and RTree tables are declared in the frozen file with their
 //! triggers, so no schema is generated from entity definitions.
 
+pub(crate) mod maintenance;
 pub mod v1;

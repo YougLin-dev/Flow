@@ -13,6 +13,7 @@ use sea_orm::{
 use crate::asset;
 use crate::detail;
 use crate::document;
+use crate::edge_index;
 use crate::entity::{document as document_row, nodes};
 #[cfg(test)]
 use crate::history::HistoryOp;
@@ -78,6 +79,9 @@ pub struct Database {
     /// Fit and the minimap's overview ask at the same revision at startup.
     bounds_cache: Arc<Mutex<Option<(i64, Viewport)>>>,
     closed: Arc<AtomicBool>,
+    /// Whether the package was clean before this open marked it dirty. A new
+    /// package counts as clean: there is nothing from a previous session.
+    opened_clean: bool,
 }
 
 impl Database {
@@ -95,7 +99,7 @@ impl Database {
             .spawn(move || worker(&path, ready_tx, job_rx))
             .map_err(|error| error.to_string())?;
 
-        ready_rx
+        let opened_clean = ready_rx
             .recv()
             .map_err(|_| "the database worker stopped during startup".to_owned())??;
 
@@ -105,12 +109,14 @@ impl Database {
             assets_dir,
             bounds_cache: Arc::new(Mutex::new(None)),
             closed: Arc::new(AtomicBool::new(false)),
+            opened_clean,
         })
     }
 
     /// The package identity, title, camera and derived counts.
     pub fn project_info(&self) -> Result<ProjectInfo, String> {
-        self.run(|conn| {
+        let opened_clean = self.opened_clean;
+        self.run(move |conn| {
             let document = document::current(conn).map_err(|error| error.to_string())?;
             Ok(ProjectInfo {
                 project_id: document.project_id,
@@ -121,6 +127,7 @@ impl Database {
                 node_count: document.node_count as f64,
                 edge_count: document.edge_count as f64,
                 demo_seeded: document.demo_seeded != 0,
+                opened_clean,
             })
         })
     }
@@ -144,96 +151,44 @@ impl Database {
         })
     }
 
-    /// Checks the SQLite file and its foreign keys. Kept off the open path:
-    /// the 100k fixture makes a full check expensive.
+    /// The recovery check for a package that was not closed cleanly: SQLite's
+    /// integrity and foreign-key checks, then the FTS/RTree parity repairs, a
+    /// dirty-connector flush and exact bounds in one transaction. Kept off
+    /// the open path: the 100k fixture makes a full check expensive.
     pub fn verify(&self) -> Result<(), String> {
-        self.run(|conn| {
-            let integrity = conn
-                .query_one_raw(sea_orm::Statement::from_string(
-                    conn.get_database_backend(),
-                    "PRAGMA quick_check".to_owned(),
-                ))
-                .map_err(|error| error.to_string())?
-                .ok_or_else(|| "quick_check returned no row".to_owned())?
-                .try_get_by_index::<String>(0)
-                .map_err(|error| error.to_string())?;
-            if integrity != "ok" {
-                return Err(format!(
-                    "the database failed its integrity check: {integrity}"
-                ));
-            }
-            let violations = conn
-                .query_all_raw(sea_orm::Statement::from_string(
-                    conn.get_database_backend(),
-                    "PRAGMA foreign_key_check".to_owned(),
-                ))
-                .map_err(|error| error.to_string())?;
-            if !violations.is_empty() {
-                return Err(format!(
-                    "the database has {} foreign-key violation(s)",
-                    violations.len()
-                ));
-            }
-            Ok(())
-        })
+        let result = self.run(|conn| {
+            check_integrity(conn)?;
+            conn.transaction::<_, _, sea_orm::DbErr>(|txn| {
+                schema::maintenance::repair_fts(txn)?;
+                edge_index::flush_geometry_tx(txn)?;
+                schema::maintenance::repair_rtrees(txn)?;
+                compact_bounds_tx(txn)
+            })
+            .map_err(|error| format!("the document repair failed: {error}"))
+        });
+        if result.is_ok() {
+            self.clear_bounds_cache();
+        }
+        result
     }
 
     /// Tightens the conservative document bounds after deletes, and records
     /// that they are exact. Maintenance only: it does not bump the revision.
     pub fn compact_bounds(&self) -> Result<(), String> {
         let result = self.run(|conn| {
-            conn.transaction::<_, _, sea_orm::DbErr>(|txn| {
-                #[derive(FromQueryResult)]
-                struct Bounds {
-                    min_x: Option<f64>,
-                    max_x: Option<f64>,
-                    min_y: Option<f64>,
-                    max_y: Option<f64>,
-                }
-                let bounds = nodes::Entity::find()
-                    .select_only()
-                    .expr_as(Expr::col(nodes::Column::X).min(), "min_x")
-                    .expr_as(
-                        Expr::col(nodes::Column::X)
-                            .add(Expr::col(nodes::Column::Width))
-                            .max(),
-                        "max_x",
-                    )
-                    .expr_as(Expr::col(nodes::Column::Y).min(), "min_y")
-                    .expr_as(
-                        Expr::col(nodes::Column::Y)
-                            .add(Expr::col(nodes::Column::Height))
-                            .max(),
-                        "max_y",
-                    )
-                    .into_model::<Bounds>()
-                    .one(txn)?
-                    .unwrap_or(Bounds {
-                        min_x: None,
-                        max_x: None,
-                        min_y: None,
-                        max_y: None,
-                    });
-                document_row::Entity::update(document_row::ActiveModel {
-                    id: Unchanged(document::ROW_ID),
-                    bounds_exact: Set(1),
-                    min_x: Set(bounds.min_x),
-                    max_x: Set(bounds.max_x),
-                    min_y: Set(bounds.min_y),
-                    max_y: Set(bounds.max_y),
-                    ..Default::default()
-                })
-                .exec(txn)?;
-                Ok(())
-            })
-            .map_err(|error| error.to_string())
+            conn.transaction::<_, _, sea_orm::DbErr>(compact_bounds_tx)
+                .map_err(|error| error.to_string())
         });
-        if result.is_ok()
-            && let Ok(mut cache) = self.bounds_cache.lock()
-        {
-            *cache = None;
+        if result.is_ok() {
+            self.clear_bounds_cache();
         }
         result
+    }
+
+    fn clear_bounds_cache(&self) {
+        if let Ok(mut cache) = self.bounds_cache.lock() {
+            *cache = None;
+        }
     }
 
     /// Marks the package cleanly closed and stops the worker. Idempotent: a
@@ -677,11 +632,11 @@ impl Database {
     }
 }
 
-fn worker(path: &str, ready: Sender<Result<(), String>>, jobs: Receiver<Job>) {
+fn worker(path: &str, ready: Sender<Result<bool, String>>, jobs: Receiver<Job>) {
     let conn = match open_connection(path) {
-        Ok(conn) => {
-            let _ = ready.send(Ok(()));
-            conn
+        Ok(opened) => {
+            let _ = ready.send(Ok(opened.clean));
+            opened.conn
         }
         Err(error) => {
             let _ = ready.send(Err(error));
@@ -741,7 +696,14 @@ fn worker(path: &str, ready: Sender<Result<(), String>>, jobs: Receiver<Job>) {
     }
 }
 
-fn open_connection(path: &str) -> Result<DatabaseConnection, String> {
+/// An opened package connection and the shutdown state it had beforehand.
+struct OpenConnection {
+    conn: DatabaseConnection,
+    /// A new package has nothing from a previous session to verify.
+    clean: bool,
+}
+
+fn open_connection(path: &str) -> Result<OpenConnection, String> {
     if path != ":memory:"
         && let Some(parent) = Path::new(path).parent()
         && !parent.as_os_str().is_empty()
@@ -754,13 +716,20 @@ fn open_connection(path: &str) -> Result<DatabaseConnection, String> {
     schema::v1::configure(&conn).map_err(|error| package_error(path, error))?;
 
     // Inspect before tuning the file: setting WAL would write to a foreign
-    // database even though the guard then refuses it.
-    match schema::v1::inspect(&conn).map_err(|error| package_error(path, error))? {
+    // database even though the guard then refuses it. The previous session's
+    // flag is read here, before the open marks the package dirty.
+    let clean = match schema::v1::inspect(&conn).map_err(|error| package_error(path, error))? {
         schema::v1::FileState::New => {
             schema::v1::create(&conn, "Flow").map_err(|error| package_error(path, error))?;
+            true
         }
-        schema::v1::FileState::Current(_) => {}
-    }
+        schema::v1::FileState::Current(_) => {
+            document::current(&conn)
+                .map_err(|error| error.to_string())?
+                .clean_shutdown
+                != 0
+        }
+    };
     configure(&conn, path)?;
 
     // The flag stays 0 for the whole session; `close` sets it once the
@@ -768,7 +737,7 @@ fn open_connection(path: &str) -> Result<DatabaseConnection, String> {
     conn.execute_unprepared("UPDATE document SET clean_shutdown = 0 WHERE id = 1")
         .map_err(|error| error.to_string())?;
 
-    Ok(conn)
+    Ok(OpenConnection { conn, clean })
 }
 
 /// Adds the package path and a recovery suggestion to a guard error. The
@@ -778,6 +747,84 @@ fn package_error(path: &str, error: String) -> String {
         "{path}: {error}. The file is not a compatible Flow project package; \
          delete it and its assets directory, or open a new project."
     )
+}
+
+fn check_integrity(conn: &DatabaseConnection) -> Result<(), String> {
+    let integrity = conn
+        .query_one_raw(sea_orm::Statement::from_string(
+            conn.get_database_backend(),
+            "PRAGMA quick_check".to_owned(),
+        ))
+        .map_err(|error| error.to_string())?
+        .ok_or_else(|| "quick_check returned no row".to_owned())?
+        .try_get_by_index::<String>(0)
+        .map_err(|error| error.to_string())?;
+    if integrity != "ok" {
+        return Err(format!(
+            "the database failed its integrity check: {integrity}"
+        ));
+    }
+    let violations = conn
+        .query_all_raw(sea_orm::Statement::from_string(
+            conn.get_database_backend(),
+            "PRAGMA foreign_key_check".to_owned(),
+        ))
+        .map_err(|error| error.to_string())?;
+    if !violations.is_empty() {
+        return Err(format!(
+            "the database has {} foreign-key violation(s)",
+            violations.len()
+        ));
+    }
+    Ok(())
+}
+
+/// Recomputes the exact content bounds in the caller's transaction. Shared by
+/// `compact_bounds` and `verify`, so a repair does not enqueue a second worker
+/// job behind its own.
+fn compact_bounds_tx(conn: &impl ConnectionTrait) -> Result<(), sea_orm::DbErr> {
+    #[derive(FromQueryResult)]
+    struct Bounds {
+        min_x: Option<f64>,
+        max_x: Option<f64>,
+        min_y: Option<f64>,
+        max_y: Option<f64>,
+    }
+    let bounds = nodes::Entity::find()
+        .select_only()
+        .expr_as(Expr::col(nodes::Column::X).min(), "min_x")
+        .expr_as(
+            Expr::col(nodes::Column::X)
+                .add(Expr::col(nodes::Column::Width))
+                .max(),
+            "max_x",
+        )
+        .expr_as(Expr::col(nodes::Column::Y).min(), "min_y")
+        .expr_as(
+            Expr::col(nodes::Column::Y)
+                .add(Expr::col(nodes::Column::Height))
+                .max(),
+            "max_y",
+        )
+        .into_model::<Bounds>()
+        .one(conn)?
+        .unwrap_or(Bounds {
+            min_x: None,
+            max_x: None,
+            min_y: None,
+            max_y: None,
+        });
+    document_row::Entity::update(document_row::ActiveModel {
+        id: Unchanged(document::ROW_ID),
+        bounds_exact: Set(1),
+        min_x: Set(bounds.min_x),
+        max_x: Set(bounds.max_x),
+        min_y: Set(bounds.min_y),
+        max_y: Set(bounds.max_y),
+        ..Default::default()
+    })
+    .exec(conn)?;
+    Ok(())
 }
 
 fn empty_change(conn: &DatabaseConnection) -> Result<ChangeSet, String> {
@@ -7260,6 +7307,199 @@ mod tests {
         assert!(error.contains("foreign-key"), "{error}");
     }
 
+    fn node_seq(db: &Database, id: &str) -> i64 {
+        let id = id.to_owned();
+        db.run(move |conn| {
+            nodes::Entity::find()
+                .filter(nodes::Column::Id.eq(id))
+                .one(conn)
+                .map(|row| row.map(|row| row.seq))
+                .map_err(|error| error.to_string())
+        })
+        .expect("read node")
+        .expect("node row")
+    }
+
+    #[test]
+    fn project_info_reports_the_previous_shutdown_state() {
+        let (path, database) = temp_database("opened-clean");
+        {
+            let db = Database::open(&database).expect("open");
+            assert!(
+                db.project_info().expect("info").opened_clean,
+                "a new package has nothing from a previous session"
+            );
+            db.close().expect("close");
+        }
+        {
+            let db = Database::open(&database).expect("reopen");
+            assert!(
+                db.project_info().expect("info").opened_clean,
+                "a clean close reopens clean"
+            );
+            // Dropping without close leaves the package dirty.
+        }
+        {
+            let db = Database::open(&database).expect("reopen after an abandoned session");
+            assert!(
+                !db.project_info().expect("info").opened_clean,
+                "an abandoned session schedules verify"
+            );
+            db.close().expect("close");
+        }
+        remove_database_files(&path);
+    }
+
+    #[test]
+    fn verify_rebuilds_a_drifted_fts_index() {
+        let db = Database::open(":memory:").expect("open");
+        db.insert_nodes(vec![node(
+            "a",
+            "Alpha",
+            "searchable body",
+            &["tag"],
+            0.0,
+            0.0,
+        )])
+        .expect("insert");
+        let seq = node_seq(&db, "a");
+        // Remove the index entry without the trigger that mirrors nodes.
+        db.run(move |conn| {
+            conn.execute_raw(sea_orm::Statement::from_sql_and_values(
+                sea_orm::DbBackend::Sqlite,
+                "INSERT INTO nodes_fts(nodes_fts, rowid, title, body, tags) \
+                 VALUES('delete', ?, ?, ?, ?)",
+                [
+                    seq.into(),
+                    "Alpha".into(),
+                    "searchable body".into(),
+                    "tag".into(),
+                ],
+            ))
+            .map(|_| ())
+            .map_err(|error| error.to_string())
+        })
+        .expect("desync the index");
+        assert!(
+            db.search("searchable".to_owned(), SearchFilters::default(), 20)
+                .expect("search the missing row")
+                .is_empty(),
+            "the index lost the node"
+        );
+
+        db.verify().expect("verify rebuilds the index");
+        let hits = db
+            .search("searchable".to_owned(), SearchFilters::default(), 20)
+            .expect("search after verify");
+        assert_eq!(hits.len(), 1);
+        assert_eq!(hits[0].id, "a");
+    }
+
+    #[test]
+    fn verify_rebuilds_a_missing_node_box() {
+        let db = Database::open(":memory:").expect("open");
+        db.insert_nodes(vec![node("a", "A", "", &[], 10.0, 20.0)])
+            .expect("insert");
+        let seq = node_seq(&db, "a");
+        db.run(move |conn| {
+            conn.execute_raw(sea_orm::Statement::from_sql_and_values(
+                sea_orm::DbBackend::Sqlite,
+                "DELETE FROM nodes_rtree WHERE id = ?",
+                [seq.into()],
+            ))
+            .map(|_| ())
+            .map_err(|error| error.to_string())
+        })
+        .expect("remove the box");
+        let rect = Viewport {
+            x: 0.0,
+            y: 0.0,
+            width: 400.0,
+            height: 400.0,
+        };
+        assert!(
+            db.viewport(rect.clone(), 0.0).expect("viewport").is_empty(),
+            "the missing box hides the node"
+        );
+
+        db.verify().expect("verify rebuilds the node index");
+        assert_eq!(
+            db.viewport(rect, 0.0).expect("viewport after verify").len(),
+            1
+        );
+    }
+
+    #[test]
+    fn verify_clears_leftover_geometry_markers() {
+        let db = Database::open(":memory:").expect("open");
+        db.insert_nodes(vec![
+            node("a", "A", "", &[], 0.0, 0.0),
+            node("b", "B", "", &[], 300.0, 0.0),
+        ])
+        .expect("insert");
+        db.insert_edges(vec![EdgeInput {
+            id: "a-b".to_owned(),
+            from_id: "a".to_owned(),
+            to_id: "b".to_owned(),
+            from_port: "out".to_owned(),
+            to_port: "in".to_owned(),
+            port_kind: "text".to_owned(),
+            from_offset: 42.0,
+            to_offset: 42.0,
+            kind: "flow".to_owned(),
+            data_json: None,
+        }])
+        .expect("connect");
+        db.run(|conn| {
+            conn.execute_unprepared("INSERT INTO nodes_geometry_dirty (node_id) VALUES ('a')")
+                .map(|_| ())
+                .map_err(|error| error.to_string())
+        })
+        .expect("leave a marker behind");
+        let markers = |db: &Database| {
+            db.run(|conn| {
+                conn.query_one_raw(sea_orm::Statement::from_string(
+                    conn.get_database_backend(),
+                    "SELECT count(*) FROM nodes_geometry_dirty".to_owned(),
+                ))
+                .map_err(|error| error.to_string())?
+                .ok_or_else(|| "the marker count returned no row".to_owned())?
+                .try_get_by_index::<i64>(0)
+                .map_err(|error| error.to_string())
+            })
+            .expect("count markers")
+        };
+        assert_eq!(markers(&db), 1);
+
+        db.verify().expect("verify flushes the markers");
+        assert_eq!(markers(&db), 0);
+    }
+
+    #[test]
+    fn verify_tightens_the_bounds_without_bumping_the_revision() {
+        let db = Database::open(":memory:").expect("open");
+        db.insert_nodes(vec![
+            node("a", "A", "", &[], 0.0, 0.0),
+            node("b", "B", "", &[], 5000.0, 5000.0),
+        ])
+        .expect("insert");
+        db.delete_nodes(vec!["b".to_owned()]).expect("delete");
+        let loose = db.bounds().expect("bounds after delete");
+        assert!(
+            loose.width > 200.0,
+            "a delete leaves the conservative envelope"
+        );
+        let rev = current_rev(&db);
+
+        db.verify().expect("verify compacts the bounds");
+        let exact = db.bounds().expect("bounds after verify");
+        assert_eq!(
+            (exact.x, exact.y, exact.width, exact.height),
+            (0.0, 0.0, 200.0, 84.0)
+        );
+        assert_eq!(current_rev(&db), rev, "maintenance is not an undo step");
+    }
+
     #[test]
     fn tags_are_stored_in_canonical_newline_form() {
         let db = Database::open(":memory:").expect("open");
@@ -8000,7 +8240,9 @@ mod tests {
             Ok(!has_nodes(conn)? && !has_edges(conn)?)
         }
 
-        let conn = open_connection(":memory:").expect("open memory database");
+        let conn = open_connection(":memory:")
+            .expect("open memory database")
+            .conn;
         assert!(is_empty(&conn).expect("empty predicate"));
 
         mutation::insert_nodes(
@@ -8077,7 +8319,9 @@ mod tests {
 
     #[test]
     fn running_work_queries_use_partial_indexes() {
-        let conn = open_connection(":memory:").expect("open memory database");
+        let conn = open_connection(":memory:")
+            .expect("open memory database")
+            .conn;
         let nodes_statement = nodes::Entity::find()
             .filter(nodes::Column::Status.eq("running"))
             .select_only()
@@ -8102,7 +8346,9 @@ mod tests {
 
     #[test]
     fn geometry_flush_queries_drive_from_the_dirty_markers() {
-        let conn = open_connection(":memory:").expect("open memory database");
+        let conn = open_connection(":memory:")
+            .expect("open memory database")
+            .conn;
         for sql in [
             crate::edge_index::dirty_edge_delete_statement(),
             crate::edge_index::dirty_edge_insert_statement(),
@@ -8124,7 +8370,9 @@ mod tests {
 
     #[test]
     fn overview_sample_uses_the_sample_index() {
-        let conn = open_connection(":memory:").expect("open memory database");
+        let conn = open_connection(":memory:")
+            .expect("open memory database")
+            .conn;
         let statement = viewport::overview_statement(100_000, 400);
         let (sql, values) = statement.build(sea_orm::sea_query::SqliteQueryBuilder);
         let plan = explain_plan(
