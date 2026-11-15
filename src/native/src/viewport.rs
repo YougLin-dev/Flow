@@ -45,23 +45,50 @@ struct OverviewRow {
     height: f64,
 }
 
+/// One viewport read: the cards the budget kept and whether anything fell
+/// outside it.
+pub(crate) struct ViewportRead {
+    pub(crate) nodes: Vec<NodeSummary>,
+    pub(crate) truncated: bool,
+}
+
 pub fn viewport(
     conn: &DatabaseConnection,
     rect: Viewport,
     margin: f64,
     limit: u64,
 ) -> Result<Vec<NodeSummary>, String> {
-    // Phase 1 keeps its payload narrow: the same RTree-first, in-view-first,
-    // z/hash/id ordering as before, but only the internal seq crosses the
-    // sorter. Phase 2 then fetches the summary columns for exactly those
-    // rows, restoring phase-1 order instead of the `IN` result order.
-    let seqs = viewport_seqs(conn, rect, margin, limit)?;
-    if seqs.is_empty() {
-        return Ok(Vec::new());
+    Ok(viewport_read(conn, rect, margin, limit)?.nodes)
+}
+
+/// Phase 1 keeps its payload narrow: the same RTree-first, in-view-first,
+/// z/hash/id ordering as before, but only the internal seq crosses the
+/// sorter. It reads one row past the budget so the caller can tell a full
+/// read from a truncated sample; phase 2 then fetches the summary columns
+/// for exactly the kept rows, restoring phase-1 order.
+pub(crate) fn viewport_read(
+    conn: &DatabaseConnection,
+    rect: Viewport,
+    margin: f64,
+    limit: u64,
+) -> Result<ViewportRead, String> {
+    let limit = std::cmp::min(limit, NODE_LIMIT);
+    let seqs = viewport_seqs(conn, rect, margin, limit + 1)?;
+    let truncated = seqs.len() as u64 > limit;
+    let kept = if truncated {
+        &seqs[..limit as usize]
+    } else {
+        &seqs[..]
+    };
+    if kept.is_empty() {
+        return Ok(ViewportRead {
+            nodes: Vec::new(),
+            truncated,
+        });
     }
 
-    let mut rows: HashMap<i64, ViewportRow> = HashMap::with_capacity(seqs.len());
-    for chunk in seqs.chunks(SEQ_CHUNK) {
+    let mut rows: HashMap<i64, ViewportRow> = HashMap::with_capacity(kept.len());
+    for chunk in kept.chunks(SEQ_CHUNK) {
         let statement = viewport_rows_statement(chunk);
         let fetched = conn
             .query_all(&statement)
@@ -74,13 +101,15 @@ pub fn viewport(
         }
     }
 
-    seqs.iter()
+    let nodes = kept
+        .iter()
         .map(|seq| {
             rows.remove(seq)
                 .map(node_summary)
                 .ok_or_else(|| format!("the viewport row for seq {seq} disappeared"))
         })
-        .collect()
+        .collect::<Result<Vec<_>, String>>()?;
+    Ok(ViewportRead { nodes, truncated })
 }
 
 fn viewport_seqs(
@@ -133,18 +162,22 @@ fn ordered_viewport_query(rect: Viewport, margin: f64, limit: u64) -> SelectStat
     // The margin is for prefetching, not for the first frame: with the limit
     // applied after ordering, nodes outside the visible rectangle but inside
     // the margin must not consume the UI's card budget. Sort the nodes that
-    // intersect `rect` before the margin-only ones.
+    // intersect `rect` before the margin-only ones. The CASE tests the exact
+    // f64 rectangle, not the padded RTree cell, so a rounding false positive
+    // is never ranked as in view.
     let in_view = Expr::case(
         Condition::all()
-            .add(Expr::col((nodes_rtree::Entity, nodes_rtree::Column::MaxX)).gte(rect.x))
+            .add(Expr::col((nodes::Entity, nodes::Column::X)).lte(rect.x + rect.width))
             .add(
-                Expr::col((nodes_rtree::Entity, nodes_rtree::Column::MinX))
-                    .lte(rect.x + rect.width),
+                Expr::col((nodes::Entity, nodes::Column::X))
+                    .add(Expr::col((nodes::Entity, nodes::Column::Width)))
+                    .gte(rect.x),
             )
-            .add(Expr::col((nodes_rtree::Entity, nodes_rtree::Column::MaxY)).gte(rect.y))
+            .add(Expr::col((nodes::Entity, nodes::Column::Y)).lte(rect.y + rect.height))
             .add(
-                Expr::col((nodes_rtree::Entity, nodes_rtree::Column::MinY))
-                    .lte(rect.y + rect.height),
+                Expr::col((nodes::Entity, nodes::Column::Y))
+                    .add(Expr::col((nodes::Entity, nodes::Column::Height)))
+                    .gte(rect.y),
             ),
         0,
     )
@@ -155,7 +188,7 @@ fn ordered_viewport_query(rect: Viewport, margin: f64, limit: u64) -> SelectStat
         .order_by((nodes::Entity, nodes::Column::Z), Order::Asc)
         .order_by_expr(sample_order(), Order::Asc)
         .order_by((nodes::Entity, nodes::Column::Id), Order::Asc)
-        .limit(std::cmp::min(limit, NODE_LIMIT));
+        .limit(std::cmp::min(limit, NODE_LIMIT + 1));
 
     statement
 }
@@ -177,10 +210,25 @@ fn document_cards_query(rect: &Viewport, margin: f64) -> SelectStatement {
             Expr::col((nodes_rtree::Entity, nodes_rtree::Column::Id))
                 .equals((nodes::Entity, nodes::Column::Seq)),
         )
+        // The RTree cell is padded and 32-bit; the exact f64 rectangle is what
+        // decides membership, so a rounded cell cannot add a card that does
+        // not intersect the read.
         .and_where(Expr::col((nodes_rtree::Entity, nodes_rtree::Column::MaxX)).gte(min_x))
         .and_where(Expr::col((nodes_rtree::Entity, nodes_rtree::Column::MinX)).lte(max_x))
         .and_where(Expr::col((nodes_rtree::Entity, nodes_rtree::Column::MaxY)).gte(min_y))
-        .and_where(Expr::col((nodes_rtree::Entity, nodes_rtree::Column::MinY)).lte(max_y));
+        .and_where(Expr::col((nodes_rtree::Entity, nodes_rtree::Column::MinY)).lte(max_y))
+        .and_where(Expr::col((nodes::Entity, nodes::Column::X)).lte(max_x))
+        .and_where(
+            Expr::col((nodes::Entity, nodes::Column::X))
+                .add(Expr::col((nodes::Entity, nodes::Column::Width)))
+                .gte(min_x),
+        )
+        .and_where(Expr::col((nodes::Entity, nodes::Column::Y)).lte(max_y))
+        .and_where(
+            Expr::col((nodes::Entity, nodes::Column::Y))
+                .add(Expr::col((nodes::Entity, nodes::Column::Height)))
+                .gte(min_y),
+        );
 
     statement
 }

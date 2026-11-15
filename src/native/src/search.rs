@@ -1,5 +1,6 @@
-//! Search over the FTS5 index, with a bounded `LIKE` fallback for queries
-//! shorter than the trigram tokenizer can index.
+//! Search over the FTS5 index. Terms the trigram tokenizer can index use
+//! `MATCH`; shorter terms stay `LIKE` post-filters, and an all-short query
+//! falls back to a bounded `LIKE` scan.
 //!
 //! SeaQuery builds the joins, filters and ordering. The three SQLite-specific
 //! fragments below are unavoidable: `MATCH`, `snippet()`/`bm25()`, and the
@@ -10,6 +11,14 @@ use sea_orm::{ConnectionTrait, DatabaseConnection, FromQueryResult};
 
 use crate::entity::{nodes, nodes_fts};
 use crate::types::{SearchFilters, SearchHit};
+
+/// The trigram tokenizer indexes terms of three or more characters. Shorter
+/// terms cannot use the index; a mixed query keeps the long terms in FTS and
+/// applies the short ones as post-filters.
+const MIN_INDEXED_CHARS: usize = 3;
+/// An all-short query falls back to a scan; more than this many terms is not
+/// selective enough to be worth the rows visited.
+const SHORT_TERM_LIMIT: usize = 8;
 
 #[derive(FromQueryResult)]
 struct SearchHitRow {
@@ -34,24 +43,31 @@ pub fn search(
     }
 
     let terms: Vec<&str> = query.split_whitespace().collect();
-    let shortest = terms
-        .iter()
-        .map(|term| term.chars().count())
-        .min()
-        .unwrap_or(0);
-    if shortest < 3 {
-        return collect(conn, &like_statement(query, kind.as_deref(), limit));
+    let (long, short): (Vec<&str>, Vec<&str>) = terms
+        .into_iter()
+        .partition(|term| term.chars().count() >= MIN_INDEXED_CHARS);
+    let short = &short[..std::cmp::min(short.len(), SHORT_TERM_LIMIT)];
+    if long.is_empty() {
+        return collect(conn, &like_statement(query, short, kind.as_deref(), limit));
     }
 
-    let match_query = fts_match_query(query);
+    let match_query = fts_match_query(&long.join(" "));
     if match_query.is_empty() {
         return Ok(Vec::new());
     }
 
-    collect(conn, &fts_statement(&match_query, kind.as_deref(), limit))
+    collect(
+        conn,
+        &fts_statement(&match_query, kind.as_deref(), limit, short),
+    )
 }
 
-pub(crate) fn fts_statement(match_query: &str, kind: Option<&str>, limit: u64) -> SelectStatement {
+pub(crate) fn fts_statement(
+    match_query: &str,
+    kind: Option<&str>,
+    limit: u64,
+    short_terms: &[&str],
+) -> SelectStatement {
     let mut statement = Query::select();
     statement
         .column((nodes::Entity, nodes::Column::Id))
@@ -79,6 +95,13 @@ pub(crate) fn fts_statement(match_query: &str, kind: Option<&str>, limit: u64) -
             [match_query.to_owned()],
         ));
 
+    // Short terms cannot use the trigram index, but each term still has to
+    // match: a single pattern for the whole query would miss documents that
+    // contain the terms separately ("AI image" in "AI image generation").
+    if !short_terms.is_empty() {
+        statement.and_where(term_filters(short_terms).into());
+    }
+
     if let Some(kind) = kind {
         statement.and_where(Expr::col((nodes::Entity, nodes::Column::Kind)).eq(kind));
     }
@@ -91,20 +114,7 @@ pub(crate) fn fts_statement(match_query: &str, kind: Option<&str>, limit: u64) -
     statement
 }
 
-fn like_statement(query: &str, kind: Option<&str>, limit: u64) -> SelectStatement {
-    // Short terms cannot use the trigram index, but each term still has to
-    // match: a single pattern for the whole query would miss documents that
-    // contain the terms separately ("AI image" in "AI image generation").
-    let mut matches = Condition::all();
-    for term in query.split_whitespace() {
-        let pattern = format!("%{}%", escape_like(term));
-        matches = matches.add(Expr::cust_with_values(
-            "(nodes.title LIKE ? ESCAPE '\\' OR nodes.body LIKE ? ESCAPE '\\' \
-             OR nodes.tags LIKE ? ESCAPE '\\')",
-            [pattern.clone(), pattern.clone(), pattern],
-        ));
-    }
-
+fn like_statement(query: &str, terms: &[&str], kind: Option<&str>, limit: u64) -> SelectStatement {
     let mut statement = Query::select();
     statement
         .column((nodes::Entity, nodes::Column::Id))
@@ -116,7 +126,7 @@ fn like_statement(query: &str, kind: Option<&str>, limit: u64) -> SelectStatemen
         )
         .expr_as(Expr::val(0.0), Alias::new("score"))
         .from(nodes::Entity)
-        .and_where(matches.into());
+        .and_where(term_filters(terms).into());
 
     if let Some(kind) = kind {
         statement.and_where(Expr::col((nodes::Entity, nodes::Column::Kind)).eq(kind));
@@ -131,6 +141,21 @@ fn like_statement(query: &str, kind: Option<&str>, limit: u64) -> SelectStatemen
         .limit(limit);
 
     statement
+}
+
+/// Every term must appear in the title, body or tags. Used for the all-short
+/// fallback and as post-filters on a mixed FTS query.
+fn term_filters(terms: &[&str]) -> Condition {
+    let mut matches = Condition::all();
+    for term in terms {
+        let pattern = format!("%{}%", escape_like(term));
+        matches = matches.add(Expr::cust_with_values(
+            "(nodes.title LIKE ? ESCAPE '\\' OR nodes.body LIKE ? ESCAPE '\\' \
+             OR nodes.tags LIKE ? ESCAPE '\\')",
+            [pattern.clone(), pattern.clone(), pattern],
+        ));
+    }
+    matches
 }
 
 fn collect(
@@ -179,16 +204,25 @@ mod tests {
 
     #[test]
     fn fts_statement_matches_before_joining_nodes() {
-        let sql = fts_statement("\"generator\"", None, 20).to_string(SqliteQueryBuilder);
+        let sql = fts_statement("\"generator\"", None, 20, &[]).to_string(SqliteQueryBuilder);
         println!("{sql}");
         assert!(sql.contains("FROM \"nodes_fts\" CROSS JOIN \"nodes\""));
         assert!(sql.contains("MATCH"));
         assert!(sql.contains("bm25"));
+        assert!(!sql.contains("LIKE"));
+    }
+
+    #[test]
+    fn a_mixed_query_filters_short_terms_after_the_match() {
+        let sql = fts_statement("\"generator\"", None, 20, &["AI"]).to_string(SqliteQueryBuilder);
+        println!("{sql}");
+        assert!(sql.contains("MATCH"));
+        assert!(sql.contains("LIKE"));
     }
 
     #[test]
     fn like_statement_escapes_the_pattern() {
-        let sql = like_statement("50%_off", None, 20).to_string(SqliteQueryBuilder);
+        let sql = like_statement("50%_off", &["50%_off"], None, 20).to_string(SqliteQueryBuilder);
         println!("{sql}");
         assert!(sql.contains("LIKE"));
         assert!(sql.contains("ESCAPE '\\'"));

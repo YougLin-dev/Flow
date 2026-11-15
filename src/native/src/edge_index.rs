@@ -14,12 +14,15 @@
 //! every connector touching a moved node once per command, then clears the
 //! marker table. No app write touches `edges_rtree` directly.
 
-use sea_orm::sea_query::{Expr, ExprTrait, Order, Query, SelectStatement};
+use sea_orm::sea_query::{Expr, ExprTrait, Query, SelectStatement};
 use sea_orm::{ConnectionTrait, DbErr, FromQueryResult};
 
 use crate::entity::edges;
 use crate::types::{EdgePoint, Viewport};
 
+/// The most connectors one crossing read returns, however dense the RTree
+/// match is. The cap bounds the payload, not the indexed scan.
+pub const EDGE_LIMIT: u64 = 4_000;
 /// How far outside a card's border its port icon's centre sits. Mirrors
 /// `PORT_CENTER_GAP` in `src/flow/canvas/geometry/connection.ts`.
 pub const PORT_CENTER_GAP: f64 = 14.0;
@@ -124,7 +127,11 @@ pub(crate) fn viewport_statement(rect: &Viewport, margin: f64) -> SelectStatemen
             ))
             .lte(max_y),
         )
-        .order_by((edges::Entity, edges::Column::Id), Order::Asc);
+        // The cap bounds the payload of a dense viewport; ordering every RTree
+        // match just to pick a stable subset would cost more than the payload
+        // saves. The scene stores connectors in an id-keyed map, so the
+        // snapshot itself is still deterministic per read.
+        .limit(EDGE_LIMIT);
 
     statement
 }
@@ -192,6 +199,11 @@ mod tests {
         .to_string(SqliteQueryBuilder);
         assert!(sql.contains("FROM \"edges_rtree\" CROSS JOIN \"edges\""));
         assert!(sql.contains("\"edges\".\"seq\" = \"edges_rtree\".\"id\""));
+        assert!(sql.contains("LIMIT 4000"), "{sql}");
+        assert!(
+            !sql.contains("ORDER BY"),
+            "the cap must not sort the scan: {sql}"
+        );
     }
 
     #[test]

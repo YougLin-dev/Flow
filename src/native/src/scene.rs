@@ -40,19 +40,18 @@ pub fn snapshot(
     margin: f64,
     max_cards: u64,
 ) -> Result<SceneSnapshot, String> {
-    let kept_limit = std::cmp::min(max_cards, viewport::NODE_LIMIT);
-    let nodes = viewport::viewport(conn, rect.clone(), margin, max_cards)?;
-    // A read that exhausted its card budget is a sample: its connectors can
-    // only be the ones touching the cards that survived. Only an uncapped
-    // (or not-yet-full) read can afford the RTree half that finds connectors
-    // whose cards are both outside the node read.
-    let capped = kept_limit == 0 || nodes.len() as u64 >= kept_limit;
-    let edges = edges_for_scene(conn, &nodes, &rect, margin, capped)?;
+    let read = viewport::viewport_read(conn, rect.clone(), margin, max_cards)?;
+    // A truncated read is a sample: its connectors can only be the ones
+    // touching the cards that survived. Only a complete read can afford the
+    // RTree half that finds connectors whose cards are both outside the node
+    // read. The one-row probe distinguishes a truncated sample from a
+    // complete read that happens to equal its budget.
+    let edges = edges_for_scene(conn, &read.nodes, &rect, margin, read.truncated)?;
     let rev = document::current_rev(conn).map_err(|error| error.to_string())?;
 
     Ok(SceneSnapshot {
         rev: rev as f64,
-        nodes,
+        nodes: read.nodes,
         edges,
     })
 }
@@ -110,12 +109,12 @@ fn edges_for_scene(
     nodes: &[NodeSummary],
     rect: &Viewport,
     margin: f64,
-    capped: bool,
+    truncated: bool,
 ) -> Result<Vec<EdgeSummary>, String> {
     let mut found: BTreeMap<String, edges::Model> = BTreeMap::new();
 
     // Edges touching a card the node read returned. This runs before the UI
-    // applies its own card cap, so a capped-out card's connectors still
+    // applies its own card cap, so a budget-excluded card's connectors still
     // travel in the snapshot with both ports.
     if !nodes.is_empty() {
         let ids: Vec<String> = nodes.iter().map(|node| node.id.clone()).collect();
@@ -137,9 +136,9 @@ fn edges_for_scene(
 
     // Edges whose curve crosses the viewport while both of their cards are
     // outside the node read. The curve's box, not its endpoints, decides.
-    // A capped read skips this half: the sample's card budget is the whole
-    // point, so its connectors must come from the cards that survived.
-    if !capped {
+    // A truncated read skips this half: its budget dropped cards, so its
+    // connectors must come from the cards that survived.
+    if !truncated {
         for row in edge_index::viewport(conn, rect, margin).map_err(|error| error.to_string())? {
             found.insert(row.id.clone(), row);
         }

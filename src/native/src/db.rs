@@ -1870,6 +1870,67 @@ mod tests {
     }
 
     #[test]
+    fn viewport_rechecks_exact_geometry_after_the_rtree() {
+        let db = Database::open(":memory:").expect("open");
+        db.insert_nodes(vec![
+            // The padded RTree cell reaches one unit into the rect; the card
+            // itself starts one unit past it.
+            node("past-right", "Right", "", &[], 101.0, 10.0),
+            // A true edge that touches the rect boundary is inside.
+            node("touching", "Touch", "", &[], -200.0, 10.0),
+            node("inside", "Inside", "", &[], 10.0, 10.0),
+        ])
+        .expect("insert");
+
+        let nodes = db
+            .viewport(
+                Viewport {
+                    x: 0.0,
+                    y: 0.0,
+                    width: 100.0,
+                    height: 100.0,
+                },
+                0.0,
+            )
+            .expect("viewport");
+        let ids: BTreeSet<&str> = nodes.iter().map(|node| node.id.as_str()).collect();
+        assert_eq!(ids, BTreeSet::from(["inside", "touching"]));
+    }
+
+    #[test]
+    fn a_viewport_read_reports_truncation_from_its_extra_row() {
+        let db = Database::open(":memory:").expect("open");
+        db.insert_nodes(vec![
+            node("a", "A", "", &[], 10.0, 10.0),
+            node("b", "B", "", &[], 60.0, 10.0),
+            node("c", "C", "", &[], 110.0, 10.0),
+        ])
+        .expect("insert");
+        let rect = Viewport {
+            x: 0.0,
+            y: 0.0,
+            width: 400.0,
+            height: 100.0,
+        };
+
+        let capped_rect = rect.clone();
+        let capped = db
+            .run(move |conn| viewport::viewport_read(conn, capped_rect, 0.0, 2))
+            .expect("capped read");
+        assert_eq!(capped.nodes.len(), 2);
+        assert!(capped.truncated, "the third card fell outside the budget");
+
+        let complete = db
+            .run(move |conn| viewport::viewport_read(conn, rect, 0.0, 3))
+            .expect("complete read");
+        assert_eq!(complete.nodes.len(), 3);
+        assert!(
+            !complete.truncated,
+            "a read that fills its budget exactly is complete"
+        );
+    }
+
+    #[test]
     fn two_phase_scene_matches_the_single_statement_reference() {
         let db = Database::open(":memory:").expect("open");
         let dense: Vec<NodeInput> = (0..12)
@@ -2244,11 +2305,12 @@ mod tests {
         );
         assert!(!one.edges.iter().any(|edge| edge.id == "left-right"));
 
-        // Reaching the cap exactly (three interior cards, budget three) is
-        // still capped; the predicate is `>=`, not `>`.
+        // A complete read that happens to equal the budget is not a sample:
+        // the one-row probe found nothing beyond it, so the crossing
+        // connector is part of the scene.
         let three = db.scene(rect, 0.0, 3).expect("three-card scene");
         assert_eq!(three.nodes.len(), 3);
-        assert!(!three.edges.iter().any(|edge| edge.id == "left-right"));
+        assert!(three.edges.iter().any(|edge| edge.id == "left-right"));
     }
 
     #[test]
@@ -4010,6 +4072,40 @@ mod tests {
                 .expect("replaced body search")
                 .is_empty()
         );
+    }
+
+    #[test]
+    fn a_mixed_search_indexes_long_terms_and_filters_short_ones() {
+        let db = Database::open(":memory:").expect("open");
+        db.insert_nodes(vec![
+            node("both", "AI image generator", "", &[], 0.0, 0.0),
+            node("long", "image generator", "", &[], 0.0, 0.0),
+            node("short", "AI image", "", &[], 0.0, 0.0),
+        ])
+        .expect("insert");
+
+        // "generator" uses the trigram index; "AI" is too short for it and is
+        // checked against the title, body and tags after the match.
+        let hits = db
+            .search("AI generator".to_owned(), SearchFilters::default(), 20)
+            .expect("mixed search");
+        let ids: Vec<&str> = hits.iter().map(|hit| hit.id.as_str()).collect();
+        assert_eq!(ids, ["both"]);
+    }
+
+    #[test]
+    fn an_all_short_search_applies_at_most_eight_terms() {
+        let db = Database::open(":memory:").expect("open");
+        db.insert_nodes(vec![node("eight", "a b c d e f g h", "", &[], 0.0, 0.0)])
+            .expect("insert");
+
+        // The ninth short term is past the fallback's cap and is ignored; a
+        // query applying it would find nothing.
+        let hits = db
+            .search("a b c d e f g h z".to_owned(), SearchFilters::default(), 20)
+            .expect("short search");
+        assert_eq!(hits.len(), 1);
+        assert_eq!(hits[0].id, "eight");
     }
 
     #[test]
