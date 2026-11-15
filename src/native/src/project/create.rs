@@ -54,6 +54,7 @@ pub(crate) fn create_project(
         title: row.title,
         updated_at: row.updated_at,
         last_opened_at: None,
+        fallback: false,
     };
     drop(conn);
 

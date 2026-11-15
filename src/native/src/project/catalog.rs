@@ -8,7 +8,10 @@
 //!
 //! A package that fails identity reading is still listed with a fallback
 //! entry (title = directory name, `updated_at = 0`) so it is not silently
-//! lost; opening or mutating it still fails its identity guard. Known entries are never reopened during reconciliation.
+//! lost; opening or mutating it still fails its identity guard. A readable
+//! cached entry is trusted while reconciling; a fallback row, or one whose
+//! identity no longer matches its directory, is re-read on every list so
+//! recovery and out-of-band changes surface without a manual refresh.
 
 use std::cmp::Ordering;
 use std::collections::{HashMap, HashSet};
@@ -38,11 +41,18 @@ pub(crate) struct Entry {
     /// Best-effort ordering metadata (the frozen schema has no column for
     /// it); lost when a corrupt catalog is rebuilt.
     pub last_opened_at: Option<i64>,
+    /// True when this row is a directory fallback: the package could not be
+    /// read at the last scan. The list re-reads these, so a package that
+    /// recovers keeps its title without a manual refresh. The flag is stored
+    /// rather than inferred from a title equal to the directory, because a
+    /// readable package may legitimately have such a title.
+    pub fallback: bool,
 }
 
 /// Lists the projects, reconciling a valid catalog with the directories on
 /// disk. An invalid or missing catalog is rebuilt from scratch. New entries
-/// are read from their packages; known entries are not reopened.
+/// are read from their packages; a readable cached entry is trusted, while a
+/// fallback row or one whose identity differs from its directory is re-read.
 pub(crate) fn list(root: &Path) -> Result<Vec<Entry>, String> {
     let candidates = scan(root)?;
     let Some(previous) = load_valid(root) else {
@@ -110,10 +120,9 @@ fn rebuild(
     Ok(entries)
 }
 
-/// A fallback entry is keyed by its directory, titled by it and carries no
-/// timestamp; the real row replaces it as soon as the package is readable.
-fn is_fallback(entry: &Entry) -> bool {
-    entry.title == entry.path && entry.updated_at == 0
+/// Whether this row is a directory fallback rather than a read package.
+pub(crate) fn is_fallback(entry: &Entry) -> bool {
+    entry.fallback
 }
 
 /// Reads one candidate package; a package that cannot be read — or whose
@@ -128,6 +137,7 @@ fn read_candidate(path: &str, dir: &Path) -> Entry {
             title: identity.title,
             updated_at: identity.updated_at,
             last_opened_at: None,
+            fallback: false,
         },
         _ => Entry {
             path: path.to_owned(),
@@ -135,6 +145,7 @@ fn read_candidate(path: &str, dir: &Path) -> Entry {
             title: path.to_owned(),
             updated_at: 0,
             last_opened_at: None,
+            fallback: true,
         },
     }
 }
@@ -228,6 +239,13 @@ fn parse_entries(value: &Value) -> Option<Vec<Entry>> {
             Value::Null => None,
             value => Some(value.as_i64()?),
         };
+        // Catalogs written before the flag existed are read with its old
+        // inference once; the next reconciliation stores the real flag.
+        let fallback = match item.get("fallback") {
+            Some(Value::Bool(fallback)) => *fallback,
+            None => title == path && updated_at == 0,
+            Some(_) => return None,
+        };
         if !paths::is_package_name(path) || !paths::is_package_name(project_id) {
             return None;
         }
@@ -246,6 +264,7 @@ fn parse_entries(value: &Value) -> Option<Vec<Entry>> {
             title: title.to_owned(),
             updated_at,
             last_opened_at,
+            fallback,
         });
     }
     Some(entries)
@@ -264,6 +283,7 @@ pub(crate) fn write(root: &Path, entries: &[Entry]) -> Result<(), String> {
                 "title": entry.title,
                 "updated_at": entry.updated_at,
                 "last_opened_at": entry.last_opened_at,
+                "fallback": entry.fallback,
             }))
             .collect::<Vec<_>>(),
     }))
@@ -311,7 +331,7 @@ fn sort_entries(entries: &mut [Entry]) {
 
 #[cfg(test)]
 mod tests {
-    use sea_orm::Database;
+    use sea_orm::{ConnectionTrait, Database, DbBackend, Statement};
 
     use super::*;
     use crate::project::test_support::TempRoot;
@@ -404,6 +424,7 @@ mod tests {
                 title: "Kept".to_owned(),
                 updated_at: 1,
                 last_opened_at: Some(7),
+                fallback: false,
             }],
         )
         .expect("write catalog");
@@ -460,6 +481,7 @@ mod tests {
         assert_eq!(entries[0].title, ID_A);
         assert_eq!(entries[0].updated_at, 0);
         assert!(entries[0].last_opened_at.is_none());
+        assert!(is_fallback(&entries[0]));
     }
 
     #[test]
@@ -500,6 +522,93 @@ mod tests {
     }
 
     #[test]
+    fn a_readable_package_whose_title_matches_its_directory_stays_readable() {
+        let temp = TempRoot::new("title-collision");
+        // A legal package may be titled with its own 32-hex identity and
+        // carry a zero timestamp; neither makes it a fallback row.
+        package_with_id(&temp, ID_A, ID_A);
+        let database = paths::database_path(temp.path(), ID_A);
+        let conn =
+            Database::connect(crate::db::sqlite_url(&database.to_string_lossy()).expect("url"))
+                .expect("connect");
+        conn.execute_raw(Statement::from_string(
+            DbBackend::Sqlite,
+            "UPDATE document SET updated_at = 0 WHERE id = 1".to_owned(),
+        ))
+        .expect("zero the update time");
+        drop(conn);
+
+        let entries = list(temp.path()).expect("first list");
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].title, ID_A);
+        assert!(!is_fallback(&entries[0]));
+        assert_eq!(catalog(&temp)["entries"][0]["fallback"], false);
+
+        let entries = list(temp.path()).expect("cached list");
+        assert!(
+            !is_fallback(&entries[0]),
+            "the stored flag is not re-inferred"
+        );
+    }
+
+    #[test]
+    fn a_catalog_from_before_the_fallback_flag_is_still_read() {
+        let temp = TempRoot::new("old-catalog");
+        let id = package(&temp, "Before");
+        // A genuine pre-flag fallback row (a junk package directory written
+        // with title == path and a zero timestamp) must keep that reading.
+        foreign(&temp, ID_B);
+        fs::write(
+            paths::catalog_path(temp.path()),
+            format!(
+                "{{\"version\":1,\"entries\":[{{\"path\":\"{id}\",\"project_id\":\"{id}\",\"title\":\"Before\",\"updated_at\":1,\"last_opened_at\":null}},{{\"path\":\"{ID_B}\",\"project_id\":\"{ID_B}\",\"title\":\"{ID_B}\",\"updated_at\":0,\"last_opened_at\":null}}]}}"
+            ),
+        )
+        .expect("old catalog");
+
+        let entries = list(temp.path()).expect("list");
+        let readable = entries
+            .iter()
+            .find(|entry| entry.path == id)
+            .expect("readable row");
+        assert_eq!(readable.title, "Before");
+        assert!(!is_fallback(readable), "a readable row stays readable");
+        let fallback = entries
+            .iter()
+            .find(|entry| entry.path == ID_B)
+            .expect("fallback row");
+        assert!(is_fallback(fallback), "the old inference is kept");
+        // The reconciliation itself is unchanged, so the old file stays; the
+        // next write persists the parsed flag for every row.
+        mark_opened(temp.path(), ID_B, 3).expect("mark the fallback row");
+        let stored = catalog(&temp);
+        let stored_fallback = stored["entries"]
+            .as_array()
+            .expect("entries")
+            .iter()
+            .find(|entry| entry["path"] == ID_B)
+            .expect("stored fallback")["fallback"]
+            .as_bool();
+        assert_eq!(
+            stored_fallback,
+            Some(true),
+            "the next write stores the flag"
+        );
+
+        // The stored flag then drives recovery: a package that appears under
+        // the fallback's directory is read and replaces the row.
+        fs::remove_dir_all(temp.path().join(ID_B)).expect("remove the junk package");
+        package_with_id(&temp, "Recovered", ID_B);
+        let entries = list(temp.path()).expect("list after recovery");
+        let recovered = entries
+            .iter()
+            .find(|entry| entry.path == ID_B)
+            .expect("recovered row");
+        assert_eq!(recovered.title, "Recovered");
+        assert!(!is_fallback(recovered));
+    }
+
+    #[test]
     fn refresh_preserves_open_order_only_for_a_matching_identity() {
         let temp = TempRoot::new("refresh");
         let first = package(&temp, "First");
@@ -513,6 +622,7 @@ mod tests {
                     title: "First".to_owned(),
                     updated_at: 1,
                     last_opened_at: Some(50),
+                    fallback: false,
                 },
                 Entry {
                     path: second.clone(),
@@ -520,6 +630,7 @@ mod tests {
                     title: "Second".to_owned(),
                     updated_at: 2,
                     last_opened_at: Some(60),
+                    fallback: false,
                 },
             ],
         )
@@ -558,6 +669,7 @@ mod tests {
                 title: "Ordered".to_owned(),
                 updated_at: 1,
                 last_opened_at: Some(99),
+                fallback: false,
             }],
         )
         .expect("write catalog");
@@ -589,6 +701,7 @@ mod tests {
             title: title.to_owned(),
             updated_at: 5,
             last_opened_at: None,
+            fallback: false,
         }
     }
 
@@ -625,6 +738,7 @@ mod tests {
                 title: "Stable".to_owned(),
                 updated_at: 1,
                 last_opened_at: None,
+                fallback: false,
             }],
         )
         .expect("write catalog");

@@ -297,6 +297,7 @@ fn open_lease(state: Arc<StoreState>, project_id: String) -> Result<ProjectLease
                 title: identity.title,
                 updated_at: identity.updated_at,
                 last_opened_at: None,
+                fallback: false,
             },
         );
         let _ = catalog::mark_opened(&state.root, &project_id, clock::now_ms());
@@ -331,6 +332,7 @@ fn entry_view(state: &StoreState, entry: catalog::Entry) -> ProjectEntry {
     let active = active_project(state);
     let open_here = active.as_deref() == Some(entry.path.as_str());
     let open_elsewhere = !open_here && lock::is_open_elsewhere(&state.root, &entry.path);
+    let unreadable = catalog::is_fallback(&entry);
     ProjectEntry {
         project_id: entry.project_id,
         title: entry.title,
@@ -341,6 +343,7 @@ fn entry_view(state: &StoreState, entry: catalog::Entry) -> ProjectEntry {
         last_opened_at: entry.last_opened_at.map(|at| at as f64),
         open_here,
         open_elsewhere,
+        unreadable,
     }
 }
 
@@ -469,6 +472,37 @@ mod tests {
         assert_eq!(lease.project_id(), created.project_id);
         lease.release();
         let _ = crate::fsutil::remove_dir_all(&state.root);
+    }
+
+    #[test]
+    fn only_a_fallback_row_lists_as_unreadable() {
+        let root =
+            std::env::temp_dir().join(format!("flow-store-unreadable-{}", paths::unique_suffix()));
+        fs::create_dir_all(&root).expect("root");
+        let state = Arc::new(open_state(root.to_string_lossy().into_owned()).expect("open state"));
+        let created = create::create_project(&state.root, "Real", None).expect("create");
+        let forged = "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee";
+        fs::rename(
+            paths::package_dir(&state.root, &created.path),
+            paths::package_dir(&state.root, forged),
+        )
+        .expect("forge directory");
+
+        let entries = catalog::list(&state.root).expect("list");
+        let view = entry_view(&state, entries[0].clone());
+        assert!(view.unreadable, "a mismatched package is unavailable");
+        assert_eq!(view.title, forged, "the row is keyed by its directory");
+
+        fs::rename(
+            paths::package_dir(&state.root, forged),
+            paths::package_dir(&state.root, &created.path),
+        )
+        .expect("restore directory");
+        let entries = catalog::list(&state.root).expect("list after restore");
+        let view = entry_view(&state, entries[0].clone());
+        assert!(!view.unreadable, "a readable package stays available");
+        assert_eq!(view.title, "Real");
+        let _ = fs::remove_dir_all(&state.root);
     }
 
     #[test]

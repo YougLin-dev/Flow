@@ -76,6 +76,7 @@ pub(crate) fn rename_project(
         title: title.to_owned(),
         updated_at: now,
         last_opened_at,
+        fallback: false,
     };
     let _ = catalog::upsert(root, entry.clone());
     Ok(entry)
@@ -160,6 +161,7 @@ pub(crate) fn duplicate_project(
             title: title.to_owned(),
             updated_at: row.updated_at,
             last_opened_at: None,
+            fallback: false,
         }
     };
     temp.commit(root, &entry)?;
@@ -235,6 +237,7 @@ pub(crate) fn import_project(root: &Path, source: &str) -> Result<catalog::Entry
         title: row.title,
         updated_at: row.updated_at,
         last_opened_at: None,
+        fallback: false,
     };
     temp.commit(root, &entry)?;
     Ok(entry)

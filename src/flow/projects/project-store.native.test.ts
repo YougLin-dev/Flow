@@ -44,6 +44,7 @@ test("creates, lists, leases and releases projects", async () => {
   const first = await store.createProject("First", null);
   expect(first.projectId.length).toBe(32);
   expect(first.title).toBe("First");
+  expect(first.unreadable).toBe(false);
   const second = await store.createProject("Second", null);
   expect(second.projectId).not.toBe(first.projectId);
 

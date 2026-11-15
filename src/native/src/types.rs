@@ -20,7 +20,9 @@ pub struct ProjectInfo {
 /// One project in the managed projects root, as the list UI receives it.
 /// `path` is the absolute package database path; `open_here` and
 /// `open_elsewhere` are separate because probing this window's own held lock
-/// also reports "busy".
+/// also reports "busy". `unreadable` marks a fallback row: the package could
+/// not be read (or its identity disagrees with its directory), so its title
+/// is the directory name and opening it will fail.
 #[derive(Debug, Clone, PartialEq, JsObject)]
 pub struct ProjectEntry {
     pub project_id: String,
@@ -30,6 +32,7 @@ pub struct ProjectEntry {
     pub last_opened_at: Option<f64>,
     pub open_here: bool,
     pub open_elsewhere: bool,
+    pub unreadable: bool,
 }
 
 /// One transactional demo seed: the cards, the optional manual text result
