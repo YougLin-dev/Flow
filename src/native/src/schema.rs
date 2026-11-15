@@ -6,4 +6,5 @@
 //! triggers, so no schema is generated from entity definitions.
 
 pub(crate) mod maintenance;
+pub(crate) mod reset;
 pub mod v1;

@@ -471,6 +471,14 @@ impl Document {
         let db = this.with(|document| document.db.clone());
         off_thread(move || db.gc()).await
     }
+
+    /// Dev-only destructive reset of the open package: content and assets are
+    /// dropped, the project id, title and creation time survive. No v1 UI
+    /// calls this; a project delete/recreate goes through the project layer.
+    pub async fn reset(this: Instance<Self>) -> Result<(), String> {
+        let db = this.with(|document| document.db.clone());
+        off_thread(move || db.reset()).await
+    }
 }
 
 #[native_module("@flow/native")]

@@ -150,6 +150,48 @@ impl Database {
         })
     }
 
+    /// Dev-only destructive reset: drops every content row and recreates the
+    /// frozen schema, keeping the project id, title and creation time. The
+    /// asset directory is parked during the transaction and restored if it
+    /// fails; on success the trash is removed. Clears the undo history.
+    pub fn reset(&self) -> Result<(), String> {
+        let history = Arc::clone(&self.history);
+        let assets_dir = Arc::clone(&self.assets_dir);
+        let result = self.run(move |conn| {
+            let current = document::current(conn).map_err(|error| error.to_string())?;
+            let trash = park_assets(&assets_dir)?;
+            let outcome = schema::reset::reset_schema(
+                conn,
+                &current.project_id,
+                &current.title,
+                current.created_at,
+            );
+            match outcome {
+                Ok(()) => {
+                    if let Some(trash) = &trash {
+                        remove_asset_path(trash);
+                    }
+                    if let Ok(mut history) = history.lock() {
+                        history.clear();
+                    }
+                    Ok(())
+                }
+                Err(error) => {
+                    if let Some(trash) = &trash {
+                        // Best effort: the original directory is still intact
+                        // under the trash name if this fails.
+                        let _ = fs::rename(trash, &assets_dir.path);
+                    }
+                    Err(error)
+                }
+            }
+        });
+        if result.is_ok() {
+            self.clear_bounds_cache();
+        }
+        result
+    }
+
     /// The package identity, title, camera and derived counts.
     pub fn project_info(&self) -> Result<ProjectInfo, String> {
         let opened_clean = self.opened_clean;
@@ -718,6 +760,33 @@ impl Database {
             .recv()
             .map_err(|_| "the database worker stopped".to_owned())?
     }
+}
+
+/// Moves the package's asset directory aside before a destructive reset. The
+/// reset transaction renames it back on failure; success deletes it.
+fn park_assets(dir: &Path) -> Result<Option<PathBuf>, String> {
+    match fs::metadata(dir) {
+        Ok(_) => {}
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(error) => return Err(error.to_string()),
+    }
+    let trash = dir.with_file_name(format!(
+        "assets.trash-{}-{}",
+        crate::clock::now_ms(),
+        std::process::id()
+    ));
+    fs::rename(dir, &trash).map_err(|error| error.to_string())?;
+    Ok(Some(trash))
+}
+
+/// Best-effort removal of a parked asset directory after a committed reset.
+/// A leftover trash directory holds no live row, so failing here is harmless.
+fn remove_asset_path(path: &Path) {
+    let _ = if path.is_dir() {
+        fs::remove_dir_all(path)
+    } else {
+        fs::remove_file(path)
+    };
 }
 
 fn worker(path: &str, ready: Sender<Result<bool, String>>, jobs: Receiver<Job>) {
@@ -7920,6 +7989,58 @@ mod tests {
         assert!(db.asset_bytes(orphan_asset).is_err());
         assert!(db.assets_dir.join("notes.txt").exists());
         assert!(!db.assets_dir.join(&orphan_hash).exists());
+    }
+
+    #[test]
+    fn reset_clears_content_and_keeps_the_project_identity() {
+        let db = Database::open(":memory:").expect("open");
+        db.seed_document(seed_input()).expect("seed");
+        db.insert_nodes(vec![node("extra", "Extra", "", &[], 0.0, 300.0)])
+            .expect("extra node");
+        let asset = test_asset(&db, "reset-asset");
+        db.save_view(10.0, 20.0, 2.0).expect("save the view");
+        let before = db.project_info().expect("info before the reset");
+        let created_at = db
+            .run(|conn| {
+                document::current(conn)
+                    .map(|row| row.created_at)
+                    .map_err(|error| error.to_string())
+            })
+            .expect("read the creation time");
+        assert!(before.demo_seeded);
+
+        db.reset().expect("reset");
+
+        let after = db.project_info().expect("info after the reset");
+        assert_eq!(after.project_id, before.project_id, "identity survives");
+        assert_eq!(after.title, before.title);
+        assert_eq!((after.node_count, after.edge_count), (0.0, 0.0));
+        assert!(!after.demo_seeded);
+        assert_eq!(
+            (after.camera_x, after.camera_y, after.camera_zoom),
+            (0.0, 0.0, 1.0)
+        );
+        let created_after = db
+            .run(|conn| {
+                document::current(conn)
+                    .map(|row| row.created_at)
+                    .map_err(|error| error.to_string())
+            })
+            .expect("read the new creation time");
+        assert_eq!(created_after, created_at);
+        assert!(
+            !db.assets_dir.exists(),
+            "the parked asset directory is deleted"
+        );
+        assert!(db.asset_bytes(asset).is_err(), "asset rows are gone");
+
+        // The undo history was cleared, and the recreated schema still works.
+        let undo = db.undo().expect("undo after the reset");
+        assert!(undo.changed.is_empty() && undo.removed.is_empty());
+        db.insert_nodes(vec![node("new", "New", "", &[], 0.0, 0.0)])
+            .expect("insert after the reset");
+        assert_eq!(db.count().expect("count after the reset"), 1);
+        db.verify().expect("verify the recreated schema");
     }
 
     #[test]
