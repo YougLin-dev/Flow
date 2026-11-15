@@ -1,7 +1,7 @@
 /**
  * The one type-only seam over the Rust document core. Outside
- * `flow/document`, TSX imports these types here instead of `@flow/native`;
- * the runtime module stays document-only.
+ * `flow/document` and `flow/projects`, TSX imports these types here instead
+ * of `@flow/native`; those two areas are the only runtime importers.
  */
 export type {
   ChangeSet,
@@ -16,10 +16,12 @@ export type {
   NodeSummary,
   Overview,
   OverviewCard,
+  ProjectEntry,
   ProjectInfo,
   ResultBatchInput,
   ResultItemInput,
   SceneSnapshot,
   SearchHit,
+  SeedDocumentInput,
   Viewport,
 } from "@flow/native";

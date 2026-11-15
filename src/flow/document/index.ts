@@ -6,6 +6,7 @@ export {
   closeDocumentQuietly,
   openFlowDocument,
   type OpenedFlowDocument,
+  type OpenFlowDocumentOptions,
 } from "./lifecycle/document-session";
 export {
   applyOpenView,
@@ -14,9 +15,15 @@ export {
   type OpenView,
   type SavedCamera,
 } from "./lifecycle/open-report";
-export { shutdownWorkspace, type ShutdownPorts } from "./lifecycle/shutdown";
+export {
+  CLOSE_FAILED_AFTER_STOP,
+  closeStoppedWorker,
+  shutdownWorkspace,
+  type ShutdownPorts,
+} from "./lifecycle/shutdown";
 export {
   CONTENT,
+  demoSeed,
   IMAGE_NODE_ID,
   SEED_EDGE_ID,
   seedDocument,

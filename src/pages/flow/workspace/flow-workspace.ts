@@ -76,9 +76,10 @@ export interface FlowWorkspace {
   readonly dispose: () => void;
   /**
    * The quit path: stops runs, saves the camera, checkpoints and closes the
-   * package. Resolves when the document is closed; idempotent.
+   * package. Resolves with whether the document worker stopped (the project
+   * session releases its lease only then); idempotent.
    */
-  readonly shutdown: () => Promise<void>;
+  readonly shutdown: () => Promise<{ readonly closed: boolean }>;
 }
 
 /**
@@ -99,6 +100,10 @@ export function createFlowWorkspace(deps: FlowWorkspaceDeps): FlowWorkspace {
   let sized = false;
   let cameraReady = false;
   let shuttingDown = false;
+  let shutdownResult: { readonly closed: boolean } | null = null;
+  // The in-flight close, shared by every caller: a second quit path must
+  // observe the close that is already running, not a premature "not closed".
+  let shutdownTask: Promise<{ readonly closed: boolean }> | null = null;
 
   const scene = new FlowScene();
   const camera = new CanvasCamera();
@@ -453,28 +458,35 @@ export function createFlowWorkspace(deps: FlowWorkspaceDeps): FlowWorkspace {
   const dispose = (): void => {
     if (shuttingDown) return;
     shuttingDown = true;
+    // No close ran, so the project layer must keep its lease.
+    shutdownResult = { closed: false };
     stopLoaders();
     document?.dispose();
     forgetDocument();
   };
 
-  const shutdown = async (): Promise<void> => {
-    if (shuttingDown) return;
+  const shutdown = (): Promise<{ readonly closed: boolean }> => {
+    if (shutdownTask !== null) return shutdownTask;
+    if (shuttingDown) return Promise.resolve(shutdownResult ?? { closed: false });
     shuttingDown = true;
-    // A quit can race the open: wait for the handle it produces instead of
-    // leaving that package neither closed nor disposed.
-    const task = openingTask;
-    if (task !== null) await task;
-    // Before the camera has been fitted or restored it carries no view the
-    // user saw; saving it would overwrite the previous session's camera.
-    const view = cameraReady ? camera.view() : null;
-    await shutdownWorkspace({
-      runner,
-      document,
-      view: view === null ? null : { x: view.x, y: view.y, zoom: view.scale },
-      stopConsumers: stopLoaders,
-    });
-    forgetDocument();
+    shutdownTask = (async () => {
+      // A quit can race the open: wait for the handle it produces instead of
+      // leaving that package neither closed nor disposed.
+      const task = openingTask;
+      if (task !== null) await task;
+      // Before the camera has been fitted or restored it carries no view the
+      // user saw; saving it would overwrite the previous session's camera.
+      const view = cameraReady ? camera.view() : null;
+      shutdownResult = await shutdownWorkspace({
+        runner,
+        document,
+        view: view === null ? null : { x: view.x, y: view.y, zoom: view.scale },
+        stopConsumers: stopLoaders,
+      });
+      forgetDocument();
+      return shutdownResult;
+    })();
+    return shutdownTask;
   };
 
   return {

@@ -1,4 +1,9 @@
-import { manualTextResult, type Document, type NodeInput } from "../../shared";
+import {
+  manualTextResult,
+  type Document,
+  type NodeInput,
+  type SeedDocumentInput,
+} from "../../shared";
 import { portOffset } from "../../canvas";
 import { serializeSettings } from "../../nodes";
 
@@ -63,14 +68,10 @@ export function seedNodes(): NodeInput[] {
   ];
 }
 
-/**
- * Writes the M1 example into an empty document in one transaction: a text
- * node with one manual result, connected to an unrun image node. The seed is
- * marked on the document, so it never runs twice; it is not undo history.
- */
-export async function seedDocument(document: Document): Promise<void> {
+/** The M1 example as one transactional seed payload. */
+export function demoSeed(): SeedDocumentInput {
   const { batch, item } = manualTextResult(TEXT_NODE_ID, SEED_TEXT);
-  await document.seedDocument({
+  return {
     nodes: seedNodes(),
     edges: [
       {
@@ -87,5 +88,14 @@ export async function seedDocument(document: Document): Promise<void> {
     ],
     batch,
     item,
-  });
+  };
+}
+
+/**
+ * Writes the M1 example into an empty document in one transaction: a text
+ * node with one manual result, connected to an unrun image node. The seed is
+ * marked on the document, so it never runs twice; it is not undo history.
+ */
+export async function seedDocument(document: Document): Promise<void> {
+  await document.seedDocument(demoSeed());
 }

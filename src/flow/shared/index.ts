@@ -27,11 +27,13 @@ export type {
   NodeSummary,
   Overview,
   OverviewCard,
+  ProjectEntry,
   ProjectInfo,
   ResultBatchInput,
   ResultItemInput,
   SceneSnapshot,
   SearchHit,
+  SeedDocumentInput,
   Viewport,
 } from "./native-types";
 export {
