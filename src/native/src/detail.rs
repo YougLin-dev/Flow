@@ -40,7 +40,7 @@ pub fn node_detail(conn: &DatabaseConnection, id: &str) -> Result<Option<NodeDet
         Some(batch_id) => read_batch(conn, batch_id)?,
         None => None,
     };
-    let latest_batch = read_latest_batch(conn, id, batch.as_ref())?;
+    let latest_batch = read_latest_batch(conn, node.seq, batch.as_ref())?;
     let inputs = read_inputs(conn, id)?;
     let incoming = read_incoming(conn, id)?;
     Ok(Some(NodeDetail {
@@ -342,13 +342,17 @@ fn read_inputs(conn: &DatabaseConnection, node_id: &str) -> Result<Vec<InputItem
         .collect())
 }
 
+/// The newest batch of the node's current incarnation. Filtering by
+/// `node_seq` (not the caller-supplied id) keeps a re-created id from
+/// inheriting a deleted incarnation's batch and lets `result_batches_latest`
+/// serve the read.
 fn read_latest_batch(
     conn: &DatabaseConnection,
-    node_id: &str,
+    node_seq: i64,
     output: Option<&ResultBatchSummary>,
 ) -> Result<Option<ResultBatchSummary>, String> {
     let Some(batch) = result_batches::Entity::find()
-        .filter(result_batches::Column::NodeId.eq(node_id))
+        .filter(result_batches::Column::NodeSeq.eq(node_seq))
         .order_by_desc(result_batches::Column::Seq)
         .one(conn)
         .map_err(|error| error.to_string())?

@@ -1523,14 +1523,15 @@ fn empty_settle(txn: &DatabaseTransaction) -> Result<(ChangeSet, HistoryRefs), D
 
 /// Writes the demo seed in one transaction. It refuses a document that has
 /// already seeded or holds any node, so it can never duplicate a project.
+/// The flag reports whether it wrote, so a no-op seed leaves history alone.
 pub fn seed_document(
     conn: &DatabaseConnection,
     input: crate::types::SeedDocumentInput,
-) -> Result<ChangeSet, String> {
+) -> Result<(ChangeSet, bool), String> {
     conn.transaction::<_, _, DbErr>(|txn| {
         let document = document::current(txn)?;
         if document.demo_seeded != 0 {
-            return empty_change_tx(txn);
+            return Ok((empty_change_tx(txn)?, false));
         }
         if document.node_count != 0 || document.edge_count != 0 {
             return Err(DbErr::Custom(
@@ -1604,16 +1605,19 @@ pub fn seed_document(
         .exec(txn)?;
 
         let rev = finish_tx(txn)?;
-        Ok(ChangeSet {
-            rev: rev as f64,
-            changed: changed
-                .into_values()
-                .map(|row| node_row(&row).summary())
-                .collect(),
-            removed: Vec::new(),
-            edges_changed,
-            edges_removed: Vec::new(),
-        })
+        Ok((
+            ChangeSet {
+                rev: rev as f64,
+                changed: changed
+                    .into_values()
+                    .map(|row| node_row(&row).summary())
+                    .collect(),
+                removed: Vec::new(),
+                edges_changed,
+                edges_removed: Vec::new(),
+            },
+            true,
+        ))
     })
     .map_err(|error| error.to_string())
 }
@@ -1933,6 +1937,10 @@ pub fn apply_ops(conn: &DatabaseConnection, ops: &[HistoryOp]) -> Result<ApplyOu
                     dirty = true;
                 }
                 HistoryOp::Delete { id } => {
+                    // A redo can delete a node a user has started a new run
+                    // on since the undo; cancel it exactly like a fresh
+                    // delete before the row goes.
+                    cancel_running_batches_tx(txn, id)?;
                     let row = find_node_tx(txn, id)?;
                     // Mirror delete_nodes: edge snapshots on surviving nodes
                     // have no FK to the edge or item, so remove them here.

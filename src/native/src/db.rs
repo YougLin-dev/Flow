@@ -402,12 +402,13 @@ impl Database {
         })
     }
 
-    /// Writes the demo seed in one transaction and clears the undo history.
+    /// Writes the demo seed in one transaction. It clears the undo history
+    /// only when it wrote; an already-seeded document is left untouched.
     pub fn seed_document(&self, input: SeedDocumentInput) -> Result<ChangeSet, String> {
         let history = Arc::clone(&self.history);
         self.run(move |conn| {
-            let changes = mutation::seed_document(conn, input)?;
-            if let Ok(mut history) = history.lock() {
+            let (changes, seeded) = mutation::seed_document(conn, input)?;
+            if seeded && let Ok(mut history) = history.lock() {
                 history.clear();
             }
             Ok(changes)
@@ -2645,14 +2646,14 @@ mod tests {
     }
 
     #[test]
-    fn schema_cascades_edges_and_assets_with_their_nodes() {
+    fn schema_cascades_edges_and_inputs_with_their_nodes() {
         let db = Database::open(":memory:").expect("open");
         let schema = db
             .run(|conn| {
                 let statement = sea_orm::Statement::from_string(
                     sea_orm::DbBackend::Sqlite,
                     "SELECT name, sql FROM sqlite_master \
-                     WHERE name IN ('edges', 'node_assets')"
+                     WHERE name IN ('edges', 'node_inputs')"
                         .to_owned(),
                 );
                 let rows = conn
@@ -2670,12 +2671,56 @@ mod tests {
             })
             .expect("schema");
 
+        assert_eq!(schema.len(), 2, "both node-owned relations were found");
         for (name, sql) in schema {
             assert!(
                 sql.contains("ON DELETE CASCADE"),
                 "{name} must cascade when its node is deleted"
             );
         }
+    }
+
+    #[test]
+    fn a_referenced_asset_cannot_be_deleted() {
+        use crate::entity::assets;
+        use sea_orm::ActiveValue::Set;
+
+        let db = Database::open(":memory:").expect("open");
+        db.insert_nodes(vec![node("a", "A", "", &[], 0.0, 0.0)])
+            .expect("insert");
+        let asset = test_asset(&db, "asset-keep");
+        let input_asset = asset.clone();
+        db.run(move |conn| {
+            node_inputs::Entity::insert(node_inputs::ActiveModel {
+                id: Set("local-input".to_owned()),
+                node_id: Set("a".to_owned()),
+                position: Set(0),
+                port_id: Set("references".to_owned()),
+                kind: Set("image".to_owned()),
+                origin: Set("local".to_owned()),
+                edge_id: Set(None),
+                item_id: Set(None),
+                asset_id: Set(Some(input_asset)),
+                text: Set(String::new()),
+                meta_json: Set("{}".to_owned()),
+                created_at: Set(0),
+            })
+            .exec(conn)
+            .map(|_| ())
+            .map_err(|error| error.to_string())
+        })
+        .expect("attach the asset to an input");
+
+        let deleted = db.run(move |conn| {
+            assets::Entity::delete_by_id(asset)
+                .exec(conn)
+                .map(|_| ())
+                .map_err(|error| error.to_string())
+        });
+        assert!(
+            deleted.is_err(),
+            "an asset an input still uses must not be deleted"
+        );
     }
 
     #[test]
@@ -7113,6 +7158,28 @@ mod tests {
     }
 
     #[test]
+    fn verify_rejects_an_orphan_input_row() {
+        let db = Database::open(":memory:").expect("open");
+        test_asset(&db, "asset-orphan");
+        db.run(|conn| {
+            conn.execute_unprepared("PRAGMA foreign_keys = OFF")
+                .map_err(|error| error.to_string())?;
+            let inserted = conn.execute_unprepared(
+                "INSERT INTO node_inputs \
+                 (id, node_id, position, port_id, kind, origin, asset_id, text, meta_json, created_at) \
+                 VALUES ('orphan', 'missing', 0, 'references', 'image', 'local', \
+                         'asset-orphan', '', '{}', 0)",
+            );
+            conn.execute_unprepared("PRAGMA foreign_keys = ON")
+                .map_err(|error| error.to_string())?;
+            inserted.map(|_| ()).map_err(|error| error.to_string())
+        })
+        .expect("insert an orphan input with foreign keys off");
+        let error = db.verify().expect_err("verify must report the orphan row");
+        assert!(error.contains("foreign-key"), "{error}");
+    }
+
+    #[test]
     fn tags_are_stored_in_canonical_newline_form() {
         let db = Database::open(":memory:").expect("open");
         db.insert_nodes(vec![node(
@@ -7497,6 +7564,40 @@ mod tests {
         );
     }
 
+    #[test]
+    fn a_recreated_node_id_does_not_inherit_the_previous_incarnation_batches() {
+        let db = Database::open(":memory:").expect("open");
+        db.insert_nodes(vec![node("n", "N", "", &[], 0.0, 0.0)])
+            .expect("insert");
+        db.save_run(
+            run_batch("batch-old", "n", "done", None),
+            vec![text_item("item-old", "old result")],
+        )
+        .expect("run");
+        assert_eq!(
+            db.node_detail("n".to_owned())
+                .expect("detail")
+                .expect("node")
+                .latest_batch
+                .expect("latest batch")
+                .id,
+            "batch-old"
+        );
+
+        db.delete_nodes(vec!["n".to_owned()]).expect("delete");
+        db.insert_nodes(vec![node("n", "N", "new", &[], 10.0, 10.0)])
+            .expect("recreate the id");
+        let detail = db
+            .node_detail("n".to_owned())
+            .expect("detail")
+            .expect("the new node");
+        assert!(detail.batch.is_none(), "the new incarnation has no output");
+        assert!(
+            detail.latest_batch.is_none(),
+            "a re-created id must not inherit the dead incarnation's batch"
+        );
+    }
+
     fn seed_input() -> SeedDocumentInput {
         let mut text = node("seed-text", "Text", "", &["text"], 80.0, 120.0);
         text.settings_json = Some(r#"{"version":1,"prompt":"Describe a lake."}"#.to_owned());
@@ -7562,17 +7663,25 @@ mod tests {
         assert!(info.demo_seeded);
         assert_eq!((info.node_count, info.edge_count), (2.0, 1.0));
 
-        // A second seed is a no-op even after the user deletes every node:
-        // only a new project or a reset seeds again.
+        // The seed is not undo history.
+        assert!(db.undo().expect("undo after seed").changed.is_empty());
+
+        // A second seed is a no-op even after the user deletes every node,
+        // and it leaves the delete undoable: only a new project or a reset
+        // seeds again.
         db.delete_nodes(vec!["seed-text".to_owned(), "seed-image".to_owned()])
             .expect("delete the demo");
         assert_eq!(db.count().expect("empty nodes"), 0);
         let second = db.seed_document(seed_input()).expect("second seed");
         assert!(second.changed.is_empty());
         assert_eq!(db.count().expect("still empty"), 0);
-
-        // The seed is not undo history.
-        assert!(db.undo().expect("undo after seed").changed.is_empty());
+        let undone = db.undo().expect("undo the delete after a no-op seed");
+        let restored: BTreeSet<&str> = undone.changed.iter().map(|node| node.id.as_str()).collect();
+        assert!(
+            restored.contains("seed-text") && restored.contains("seed-image"),
+            "the no-op seed kept the delete undoable"
+        );
+        assert_eq!(db.count().expect("the demo is back"), 2);
     }
 
     #[test]
