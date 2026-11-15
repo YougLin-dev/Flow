@@ -11,11 +11,9 @@ use sea_orm::{
 };
 
 use crate::clock::now_ms;
-use crate::constants::DOCUMENT_ID;
+use crate::document;
 use crate::edge_index;
-use crate::entity::{
-    documents, edges, node_inputs, nodes, nodes_fts, nodes_rtree, result_batches, result_items,
-};
+use crate::entity::{edges, node_inputs, nodes, result_batches, result_items};
 use crate::history::{EdgeRow, HistoryOp, HistoryRefs, InputRow, NodeRow};
 use crate::types::{
     ChangeSet, EdgeInput, EdgePoint, EdgeSummary, InputItemInput, NodeBounds, NodeInput,
@@ -59,7 +57,7 @@ pub fn insert_nodes(conn: &DatabaseConnection, inputs: Vec<NodeInput>) -> Result
         }
         inverse.reverse();
 
-        let rev = bump_document_rev(txn)?;
+        let rev = finish_tx(txn)?;
         Ok(Mutation::new(
             ChangeSet {
                 rev: rev as f64,
@@ -111,7 +109,7 @@ pub fn move_nodes(
             });
         }
 
-        let rev = bump_document_rev(txn)?;
+        let rev = finish_tx(txn)?;
         Ok(Mutation::new(
             ChangeSet {
                 rev: rev as f64,
@@ -157,7 +155,7 @@ pub fn set_node_bounds(
             });
         }
 
-        let rev = bump_document_rev(txn)?;
+        let rev = finish_tx(txn)?;
         Ok(Mutation::new(
             ChangeSet {
                 rev: rev as f64,
@@ -181,13 +179,13 @@ pub fn set_node_text(
 ) -> Result<Mutation, String> {
     conn.transaction::<_, _, DbErr>(|txn| {
         let before = find_node_tx(txn, &id)?;
-        let tags_json = serde_json::to_string(&tags)
-            .map_err(|error| DbErr::Custom(format!("tags are not serializable: {error}")))?;
-        if before.title == title && before.tags_json == tags_json {
+        let tags = canonical_tags(&tags);
+        if before.title == title && before.tags == tags {
             return no_op(txn);
         }
+        let tags = tags_from(&tags);
         let row = update_text_tx(txn, &before, &title, &tags)?;
-        let rev = bump_document_rev(txn)?;
+        let rev = finish_tx(txn)?;
 
         Ok(Mutation::new(
             ChangeSet {
@@ -205,7 +203,7 @@ pub fn set_node_text(
             vec![HistoryOp::NodeText {
                 id,
                 title: before.title,
-                tags: serde_json::from_str(&before.tags_json).unwrap_or_default(),
+                tags: tags_from(&before.tags),
             }],
         ))
     })
@@ -279,7 +277,7 @@ pub fn delete_nodes(conn: &DatabaseConnection, ids: Vec<String>) -> Result<Mutat
             changed.push(node_row(&touch_node_tx(txn, &id)?).summary());
         }
 
-        let rev = bump_document_rev(txn)?;
+        let rev = finish_tx(txn)?;
         Ok(Mutation {
             changes: ChangeSet {
                 rev: rev as f64,
@@ -315,7 +313,7 @@ pub fn insert_edges(conn: &DatabaseConnection, inputs: Vec<EdgeInput>) -> Result
         }
         inverse.reverse();
 
-        let rev = bump_document_rev(txn)?;
+        let rev = finish_tx(txn)?;
         Ok(Mutation {
             changes: ChangeSet {
                 rev: rev as f64,
@@ -363,7 +361,7 @@ pub fn delete_edges(conn: &DatabaseConnection, ids: Vec<String>) -> Result<Mutat
         }
         inverse.reverse();
 
-        let rev = bump_document_rev(txn)?;
+        let rev = finish_tx(txn)?;
         Ok(Mutation {
             changes: ChangeSet {
                 rev: rev as f64,
@@ -416,7 +414,7 @@ pub fn connect_edges(
 
         let mut inverse = desired_inverse;
         inverse.reverse();
-        let rev = bump_document_rev(txn)?;
+        let rev = finish_tx(txn)?;
         Ok(Mutation {
             changes: ChangeSet {
                 rev: rev as f64,
@@ -557,6 +555,7 @@ pub fn update_edge(conn: &DatabaseConnection, input: EdgeInput) -> Result<Mutati
         let after = replace_edge_row_tx(
             txn,
             &EdgeRow {
+                seq: before.seq,
                 id: input.id.clone(),
                 from_id: input.from_id.clone(),
                 to_id: input.to_id.clone(),
@@ -622,7 +621,7 @@ pub fn update_edge(conn: &DatabaseConnection, input: EdgeInput) -> Result<Mutati
         }
         desired_inverse.reverse();
 
-        let rev = bump_document_rev(txn)?;
+        let rev = finish_tx(txn)?;
         Ok(Mutation {
             changes: ChangeSet {
                 rev: rev as f64,
@@ -664,12 +663,14 @@ pub fn add_input(conn: &DatabaseConnection, input: InputItemInput) -> Result<Mut
         let mut refs = HistoryRefs::default();
         if row.origin == "edge"
             && let Some(edge_id) = &row.edge_id
-            && let Some(edge) = edges::Entity::find_by_id(edge_id.clone()).one(txn)?
+            && let Some(edge) = edges::Entity::find()
+                .filter(edges::Column::Id.eq(edge_id.clone()))
+                .one(txn)?
         {
             refs.node(edge.from_id);
         }
 
-        let rev = bump_document_rev(txn)?;
+        let rev = finish_tx(txn)?;
         Ok(Mutation {
             changes: ChangeSet {
                 rev: rev as f64,
@@ -696,12 +697,14 @@ pub fn remove_input(conn: &DatabaseConnection, id: String) -> Result<Mutation, S
         let mut refs = HistoryRefs::default();
         if row.origin == "edge"
             && let Some(edge_id) = &row.edge_id
-            && let Some(edge) = edges::Entity::find_by_id(edge_id.clone()).one(txn)?
+            && let Some(edge) = edges::Entity::find()
+                .filter(edges::Column::Id.eq(edge_id.clone()))
+                .one(txn)?
         {
             refs.node(edge.from_id);
         }
 
-        let rev = bump_document_rev(txn)?;
+        let rev = finish_tx(txn)?;
         Ok(Mutation {
             changes: ChangeSet {
                 rev: rev as f64,
@@ -797,7 +800,7 @@ pub fn reorder_inputs(
         }
         let changed = vec![node_row(&touch_node_tx(txn, &node_id)?).summary()];
 
-        let rev = bump_document_rev(txn)?;
+        let rev = finish_tx(txn)?;
         Ok(Mutation {
             changes: ChangeSet {
                 rev: rev as f64,
@@ -841,7 +844,6 @@ pub fn sync_inputs(conn: &DatabaseConnection, node_id: String) -> Result<History
         }
 
         let incoming = edges::Entity::find()
-            .filter(edges::Column::DocumentId.eq(DOCUMENT_ID))
             .filter(edges::Column::ToId.eq(&node_id))
             .order_by_asc(edges::Column::Id)
             .all(txn)?;
@@ -907,7 +909,7 @@ pub fn sync_inputs(conn: &DatabaseConnection, node_id: String) -> Result<History
         }
 
         touch_node_tx(txn, &node_id)?;
-        bump_document_rev(txn)?;
+        finish_tx(txn)?;
         Ok(refs)
     })
     .map_err(|error| error.to_string())
@@ -972,7 +974,7 @@ pub fn set_node_settings(
         }
         inverse.reverse();
 
-        let rev = bump_document_rev(txn)?;
+        let rev = finish_tx(txn)?;
         Ok(Mutation {
             changes: ChangeSet {
                 rev: rev as f64,
@@ -1006,8 +1008,9 @@ pub fn set_manual_text(
         }
         let before = find_node_tx(txn, &id)?;
         let before_row = node_row(&before);
-        insert_batch_tx(txn, &batch)?;
+        insert_running_batch_tx(txn, &batch)?;
         insert_result_item_tx(txn, &batch.id, &item)?;
+        settle_batch_tx(txn, &batch.id, &batch.status, batch.error.as_deref())?;
 
         let updated = nodes::Entity::update(nodes::ActiveModel {
             seq: Unchanged(before.seq),
@@ -1020,7 +1023,6 @@ pub fn set_manual_text(
         })
         .exec(txn)?;
         let after = node_row(&updated);
-        refresh_fts_tx(txn, &updated)?;
         let mut changed = vec![after.summary()];
         changed.extend(
             mark_downstream_stale_tx(txn, &id)?
@@ -1033,7 +1035,7 @@ pub fn set_manual_text(
         let mut refs = HistoryRefs::default();
         refs.batch(Some(&batch.id));
         refs.asset(item.asset_id.as_deref());
-        let rev = bump_document_rev(txn)?;
+        let rev = finish_tx(txn)?;
         Ok(Mutation {
             changes: ChangeSet {
                 rev: rev as f64,
@@ -1103,10 +1105,11 @@ pub fn set_manual_upload(
         let valid_ports: BTreeSet<String> = items.iter().map(|item| item.port_id.clone()).collect();
         let before = find_node_tx(txn, &id)?;
         let before_row = node_row(&before);
-        insert_batch_tx(txn, &batch)?;
+        insert_running_batch_tx(txn, &batch)?;
         for item in &items {
             insert_result_item_tx(txn, &batch.id, item)?;
         }
+        settle_batch_tx(txn, &batch.id, &batch.status, batch.error.as_deref())?;
 
         let mut node = nodes::ActiveModel {
             seq: Unchanged(before.seq),
@@ -1129,11 +1132,9 @@ pub fn set_manual_upload(
         // connector indexes in step in the same transaction, so one undo
         // restores the output and the previous rectangle together.
         if bounds.is_some() {
-            sync_bounds_tx(txn, &before, &updated)?;
-            edge_index::sync_node_edges(txn, &updated.id)?;
+            scale_edge_offsets_tx(txn, &updated.id, before.height, updated.height)?;
         }
         let after = node_row(&updated);
-        refresh_fts_tx(txn, &updated)?;
         let reconciliation = reconcile_ports_tx(txn, &id, &valid_ports)?;
         let mut changed = vec![after.summary()];
         let mut touched = BTreeSet::new();
@@ -1222,7 +1223,7 @@ pub fn set_manual_upload(
         for item in &items {
             refs.asset(item.asset_id.as_deref());
         }
-        let rev = bump_document_rev(txn)?;
+        let rev = finish_tx(txn)?;
         Ok(Mutation {
             changes: ChangeSet {
                 rev: rev as f64,
@@ -1261,10 +1262,11 @@ pub fn insert_upload_node(
             ));
         }
         insert_node_tx(txn, &node)?;
-        insert_batch_tx(txn, &batch)?;
+        insert_running_batch_tx(txn, &batch)?;
         for item in &items {
             insert_result_item_tx(txn, &batch.id, item)?;
         }
+        settle_batch_tx(txn, &batch.id, &batch.status, batch.error.as_deref())?;
         let inserted = find_node_tx(txn, &node.id)?;
         let updated = nodes::Entity::update(nodes::ActiveModel {
             seq: Unchanged(inserted.seq),
@@ -1281,7 +1283,7 @@ pub fn insert_upload_node(
         for item in &items {
             refs.asset(item.asset_id.as_deref());
         }
-        let rev = bump_document_rev(txn)?;
+        let rev = finish_tx(txn)?;
         Ok(Mutation {
             changes: ChangeSet {
                 rev: rev as f64,
@@ -1298,8 +1300,280 @@ pub fn insert_upload_node(
     .map_err(|error| error.to_string())
 }
 
+/// Starts a provider run: inserts its batch running and marks the node
+/// running. The provider call happens in TSX between this and `settle_run`;
+/// neither write is undoable.
+pub fn begin_run(
+    conn: &DatabaseConnection,
+    batch: ResultBatchInput,
+) -> Result<(ChangeSet, HistoryRefs), String> {
+    conn.transaction::<_, _, DbErr>(|txn| {
+        if batch.status != "running" {
+            return Err(DbErr::Custom(
+                "a run must begin with a running batch".to_owned(),
+            ));
+        }
+        let node = find_node_tx(txn, &batch.node_id)?;
+        insert_running_batch_tx(txn, &batch)?;
+        let updated = nodes::Entity::update(nodes::ActiveModel {
+            seq: Unchanged(node.seq),
+            status: Set("running".to_owned()),
+            rev: Set(node.rev + 1),
+            updated_at: Set(now_ms()),
+            ..Default::default()
+        })
+        .exec(txn)?;
+        let mut refs = HistoryRefs::default();
+        refs.node(batch.node_id);
+        refs.batch(Some(&batch.id));
+        let rev = finish_tx(txn)?;
+        Ok((
+            ChangeSet {
+                rev: rev as f64,
+                changed: vec![node_row(&updated).summary()],
+                removed: Vec::new(),
+                edges_changed: Vec::new(),
+                edges_removed: Vec::new(),
+            },
+            refs,
+        ))
+    })
+    .map_err(|error| error.to_string())
+}
+
+/// Settles the running batch a provider call started: records the provider
+/// result metadata, adds its items, closes the batch and updates the node. A
+/// late settle for a batch that no longer runs (or a node that was deleted)
+/// is a no-op rather than an error.
+pub fn settle_run(
+    conn: &DatabaseConnection,
+    batch: ResultBatchInput,
+    items: Vec<ResultItemInput>,
+) -> Result<(ChangeSet, HistoryRefs), String> {
+    conn.transaction::<_, _, DbErr>(|txn| {
+        if batch.status == "running" {
+            return Err(DbErr::Custom(
+                "settle_run needs a terminal batch status".to_owned(),
+            ));
+        }
+        let Some(running) = result_batches::Entity::find()
+            .filter(result_batches::Column::Id.eq(&batch.id))
+            .one(txn)?
+        else {
+            return empty_settle(txn);
+        };
+        if running.status != "running" {
+            return empty_settle(txn);
+        }
+        if running.node_id != batch.node_id {
+            return Err(DbErr::Custom(
+                "the settled batch belongs to another node".to_owned(),
+            ));
+        }
+        if batch.status == "done" && items.is_empty() && running.item_count == 0 {
+            return Err(DbErr::Custom(
+                "a successful batch must contain at least one item".to_owned(),
+            ));
+        }
+
+        // The provider's metadata is only known after its call, so it is
+        // written while the batch still runs and locked by the settle.
+        result_batches::Entity::update_many()
+            .col_expr(
+                result_batches::Column::Provider,
+                Expr::value(batch.provider.clone()),
+            )
+            .col_expr(
+                result_batches::Column::Model,
+                Expr::value(batch.model.clone()),
+            )
+            .col_expr(
+                result_batches::Column::ParamsJson,
+                Expr::value(batch.params_json.clone()),
+            )
+            .filter(result_batches::Column::Id.eq(&batch.id))
+            .filter(result_batches::Column::Status.eq("running"))
+            .exec(txn)?;
+        for item in &items {
+            insert_result_item_tx(txn, &batch.id, item)?;
+        }
+        settle_batch_tx(txn, &batch.id, &batch.status, batch.error.as_deref())?;
+
+        let mut refs = HistoryRefs::default();
+        refs.batch(Some(&batch.id));
+        for item in &items {
+            refs.asset(item.asset_id.as_deref());
+        }
+        let mut changed = Vec::new();
+        if let Some(node) = find_node_opt_tx(txn, &batch.node_id)? {
+            refs.node(node.id.clone());
+            let body = items
+                .iter()
+                .find(|item| item.kind == "text")
+                .map(|item| item.text.clone())
+                .unwrap_or_else(|| node.body.clone());
+            let mut active = nodes::ActiveModel {
+                seq: Unchanged(node.seq),
+                status: Set(batch.status.clone()),
+                rev: Set(node.rev + 1),
+                updated_at: Set(now_ms()),
+                ..Default::default()
+            };
+            if batch.status == "done" {
+                active.output_batch_id = Set(Some(batch.id.clone()));
+                active.body = Set(body);
+            }
+            let updated = nodes::Entity::update(active).exec(txn)?;
+            changed.push(node_row(&updated).summary());
+            if batch.status == "done" {
+                for row in mark_downstream_stale_tx(txn, &batch.node_id)? {
+                    changed.push(node_row(&row).summary());
+                }
+                for target in downstream_output_targets_tx(txn, &batch.node_id)? {
+                    refs.node(target);
+                }
+            }
+        }
+
+        let rev = finish_tx(txn)?;
+        Ok((
+            ChangeSet {
+                rev: rev as f64,
+                changed,
+                removed: Vec::new(),
+                edges_changed: Vec::new(),
+                edges_removed: Vec::new(),
+            },
+            refs,
+        ))
+    })
+    .map_err(|error| error.to_string())
+}
+
+fn empty_settle(txn: &DatabaseTransaction) -> Result<(ChangeSet, HistoryRefs), DbErr> {
+    Ok((
+        ChangeSet {
+            rev: document::current_rev(txn)? as f64,
+            changed: Vec::new(),
+            removed: Vec::new(),
+            edges_changed: Vec::new(),
+            edges_removed: Vec::new(),
+        },
+        HistoryRefs::default(),
+    ))
+}
+
+/// Writes the demo seed in one transaction. It refuses a document that has
+/// already seeded or holds any node, so it can never duplicate a project.
+pub fn seed_document(
+    conn: &DatabaseConnection,
+    input: crate::types::SeedDocumentInput,
+) -> Result<ChangeSet, String> {
+    conn.transaction::<_, _, DbErr>(|txn| {
+        let document = document::current(txn)?;
+        if document.demo_seeded != 0 {
+            return empty_change_tx(txn);
+        }
+        if document.node_count != 0 || document.edge_count != 0 {
+            return Err(DbErr::Custom(
+                "the document is not empty; seed needs a new project".to_owned(),
+            ));
+        }
+        if input.nodes.is_empty() {
+            return Err(DbErr::Custom("a seed needs at least one node".to_owned()));
+        }
+        if input.batch.is_some() != input.item.is_some() {
+            return Err(DbErr::Custom(
+                "a seed's manual batch and item come together".to_owned(),
+            ));
+        }
+
+        let mut changed: BTreeMap<String, nodes::Model> = BTreeMap::new();
+        for node in &input.nodes {
+            let row = insert_node_tx(txn, node)?;
+            let model = find_node_tx(txn, &row.id)?;
+            changed.insert(model.id.clone(), model);
+        }
+
+        if let (Some(batch), Some(item)) = (&input.batch, &input.item) {
+            if batch.status != "done" {
+                return Err(DbErr::Custom(
+                    "a seed's manual batch must be done".to_owned(),
+                ));
+            }
+            insert_running_batch_tx(txn, batch)?;
+            insert_result_item_tx(txn, &batch.id, item)?;
+            settle_batch_tx(txn, &batch.id, &batch.status, batch.error.as_deref())?;
+            let node = find_node_tx(txn, &batch.node_id)?;
+            let updated = nodes::Entity::update(nodes::ActiveModel {
+                seq: Unchanged(node.seq),
+                body: Set(item.text.clone()),
+                status: Set("done".to_owned()),
+                output_batch_id: Set(Some(batch.id.clone())),
+                rev: Set(node.rev + 1),
+                updated_at: Set(now_ms()),
+                ..Default::default()
+            })
+            .exec(txn)?;
+            changed.insert(updated.id.clone(), updated);
+        }
+
+        let mut edges_changed = Vec::new();
+        for edge in &input.edges {
+            let connected = connect_edge_tx(txn, edge)?;
+            edges_changed.push(edge_summary(
+                &connected.edge,
+                &connected.source,
+                &connected.target,
+            ));
+        }
+        if !input.edges.is_empty() {
+            for edge in &input.edges {
+                if let Some(node) = find_node_opt_tx(txn, &edge.to_id)? {
+                    changed.insert(node.id.clone(), node);
+                }
+            }
+        }
+
+        // The marker makes the seed a one-time event: deleting every node and
+        // reopening does not reseed; only a new project or a reset does.
+        crate::entity::document::Entity::update(crate::entity::document::ActiveModel {
+            id: Unchanged(document::ROW_ID),
+            demo_seeded: Set(1),
+            updated_at: Set(now_ms()),
+            ..Default::default()
+        })
+        .exec(txn)?;
+
+        let rev = finish_tx(txn)?;
+        Ok(ChangeSet {
+            rev: rev as f64,
+            changed: changed
+                .into_values()
+                .map(|row| node_row(&row).summary())
+                .collect(),
+            removed: Vec::new(),
+            edges_changed,
+            edges_removed: Vec::new(),
+        })
+    })
+    .map_err(|error| error.to_string())
+}
+
+fn empty_change_tx(txn: &DatabaseTransaction) -> Result<ChangeSet, DbErr> {
+    Ok(ChangeSet {
+        rev: document::current_rev(txn)? as f64,
+        changed: Vec::new(),
+        removed: Vec::new(),
+        edges_changed: Vec::new(),
+        edges_removed: Vec::new(),
+    })
+}
+
 /// Stores a provider run's batch and items and switches the node's output to
-/// it (for a successful run). Provider runs are not undoable.
+/// it (for a successful run). This one-call form is for upload failures and
+/// other writes with no provider call in between; a provider run uses
+/// `begin_run` and `settle_run`.
 pub fn save_run(
     conn: &DatabaseConnection,
     batch: ResultBatchInput,
@@ -1313,10 +1587,11 @@ pub fn save_run(
                 "a successful batch must contain at least one item".to_owned(),
             ));
         }
-        insert_batch_tx(txn, &batch)?;
+        insert_running_batch_tx(txn, &batch)?;
         for item in &items {
             insert_result_item_tx(txn, &batch.id, item)?;
         }
+        settle_batch_tx(txn, &batch.id, &batch.status, batch.error.as_deref())?;
 
         let before = find_node_tx(txn, &family)?;
         let body = items
@@ -1346,7 +1621,6 @@ pub fn save_run(
 
         let mut changed = vec![node_row(&updated).summary()];
         if batch.status == "done" {
-            refresh_fts_tx(txn, &updated)?;
             for row in mark_downstream_stale_tx(txn, &family)? {
                 changed.push(node_row(&row).summary());
             }
@@ -1357,7 +1631,7 @@ pub fn save_run(
             }
         }
 
-        let rev = bump_document_rev(txn)?;
+        let rev = finish_tx(txn)?;
         Ok((
             ChangeSet {
                 rev: rev as f64,
@@ -1391,7 +1665,7 @@ pub fn set_node_status(
         .exec(txn)?;
         let mut refs = HistoryRefs::default();
         refs.node(id);
-        let rev = bump_document_rev(txn)?;
+        let rev = finish_tx(txn)?;
         Ok((
             ChangeSet {
                 rev: rev as f64,
@@ -1410,7 +1684,6 @@ pub fn set_node_status(
 pub fn recover_runs(conn: &DatabaseConnection) -> Result<(u32, HistoryRefs), String> {
     conn.transaction::<_, _, DbErr>(|txn| {
         let running_nodes = nodes::Entity::find()
-            .filter(nodes::Column::DocumentId.eq(DOCUMENT_ID))
             .filter(nodes::Column::Status.eq("running"))
             .all(txn)?;
         let running_batches = result_batches::Entity::find()
@@ -1432,6 +1705,10 @@ pub fn recover_runs(conn: &DatabaseConnection) -> Result<(u32, HistoryRefs), Str
                 result_batches::Column::Status,
                 sea_orm::sea_query::Expr::value("interrupted"),
             )
+            .col_expr(
+                result_batches::Column::FinishedAt,
+                sea_orm::sea_query::Expr::value(now_ms()),
+            )
             .filter(result_batches::Column::Status.eq("running"))
             .exec(txn)?;
 
@@ -1443,7 +1720,7 @@ pub fn recover_runs(conn: &DatabaseConnection) -> Result<(u32, HistoryRefs), Str
             refs.batch(Some(&batch.id));
         }
         if !running_nodes.is_empty() {
-            bump_document_rev(txn)?;
+            finish_tx(txn)?;
         }
         Ok((running_nodes.len() as u32, refs))
     })
@@ -1484,7 +1761,8 @@ fn op_is_stale(
     inserted_edges: &BTreeSet<String>,
 ) -> Result<bool, DbErr> {
     match op {
-        HistoryOp::Insert(row) => Ok(find_node_opt_tx(txn, &row.id)?.is_some()),
+        HistoryOp::Insert(row) => Ok(find_node_opt_tx(txn, &row.id)?.is_some()
+            || find_node_by_seq_opt_tx(txn, row.seq)?.is_some()),
         HistoryOp::Delete { id } => Ok(!node_available(txn, id, inserted_nodes)?),
         HistoryOp::NodeGeometry { id, .. }
         | HistoryOp::NodeText { id, .. }
@@ -1511,7 +1789,9 @@ fn op_is_stale(
             Ok(node.output_batch_id != *from_batch_id || node.body.as_str() != from_body.as_str())
         }
         HistoryOp::InsertEdge(row) => {
-            if find_edge_opt_tx(txn, &row.id)?.is_some() {
+            if find_edge_opt_tx(txn, &row.id)?.is_some()
+                || find_edge_by_seq_opt_tx(txn, row.seq)?.is_some()
+            {
                 return Ok(true);
             }
             if already_connected_tx(
@@ -1723,7 +2003,6 @@ pub fn apply_ops(conn: &DatabaseConnection, ops: &[HistoryOp]) -> Result<ApplyOu
                         ..Default::default()
                     })
                     .exec(txn)?;
-                    refresh_fts_tx(txn, &updated)?;
                     changed.push(node_row(&updated).summary());
                     for row in mark_downstream_stale_tx(txn, id)? {
                         changed.push(node_row(&row).summary());
@@ -1837,10 +2116,13 @@ pub fn apply_ops(conn: &DatabaseConnection, ops: &[HistoryOp]) -> Result<ApplyOu
             }
         }
 
+        // Geometry ops mark the nodes they moved; rebuild those connectors
+        // once, after the whole entry has applied.
+        edge_index::flush_geometry_tx(txn)?;
         let rev = if dirty {
-            bump_document_rev(txn)?
+            document::bump_rev(txn)?
         } else {
-            document_rev_tx(txn)?
+            document::current_rev(txn)?
         };
         Ok(ApplyOutcome::Applied(ChangeSet {
             rev: rev as f64,
@@ -1855,8 +2137,7 @@ pub fn apply_ops(conn: &DatabaseConnection, ops: &[HistoryOp]) -> Result<ApplyOu
 
 fn insert_node_tx(txn: &DatabaseTransaction, node: &NodeInput) -> Result<NodeRow, DbErr> {
     let now = now_ms();
-    let tags = serde_json::to_string(&node.tags)
-        .map_err(|error| DbErr::Custom(format!("tags are not serializable: {error}")))?;
+    let tags = canonical_tags(&node.tags);
     let data_json = node.data_json.clone().unwrap_or_else(|| "{}".to_owned());
     let settings_json = node
         .settings_json
@@ -1866,11 +2147,10 @@ fn insert_node_tx(txn: &DatabaseTransaction, node: &NodeInput) -> Result<NodeRow
     let inserted = nodes::Entity::insert(nodes::ActiveModel {
         seq: NotSet,
         id: Set(node.id.clone()),
-        document_id: Set(DOCUMENT_ID.to_owned()),
         kind: Set(node.kind.clone()),
         title: Set(node.title.clone()),
         body: Set(node.body.clone()),
-        tags_json: Set(tags),
+        tags: Set(tags.clone()),
         x: Set(node.x),
         y: Set(node.y),
         width: Set(node.width),
@@ -1886,26 +2166,13 @@ fn insert_node_tx(txn: &DatabaseTransaction, node: &NodeInput) -> Result<NodeRow
     })
     .exec(txn)?;
 
-    insert_indexes_tx(
-        txn,
-        NodeIndex {
-            seq: inserted.last_insert_id,
-            title: &node.title,
-            body: &node.body,
-            tags: &node.tags,
-            x: node.x,
-            y: node.y,
-            width: node.width,
-            height: node.height,
-        },
-    )?;
-
     Ok(NodeRow {
+        seq: inserted.last_insert_id,
         id: node.id.clone(),
         kind: node.kind.clone(),
         title: node.title.clone(),
         body: node.body.clone(),
-        tags: node.tags.clone(),
+        tags: tags_from(&tags),
         x: node.x,
         y: node.y,
         width: node.width,
@@ -1922,17 +2189,13 @@ fn insert_node_tx(txn: &DatabaseTransaction, node: &NodeInput) -> Result<NodeRow
 }
 
 fn insert_row_tx(txn: &DatabaseTransaction, row: &NodeRow) -> Result<(), DbErr> {
-    let tags = serde_json::to_string(&row.tags)
-        .map_err(|error| DbErr::Custom(format!("tags are not serializable: {error}")))?;
-
-    let inserted = nodes::Entity::insert(nodes::ActiveModel {
-        seq: NotSet,
+    nodes::Entity::insert(nodes::ActiveModel {
+        seq: Set(row.seq),
         id: Set(row.id.clone()),
-        document_id: Set(DOCUMENT_ID.to_owned()),
         kind: Set(row.kind.clone()),
         title: Set(row.title.clone()),
         body: Set(row.body.clone()),
-        tags_json: Set(tags),
+        tags: Set(canonical_tags(&row.tags)),
         x: Set(row.x),
         y: Set(row.y),
         width: Set(row.width),
@@ -1947,61 +2210,12 @@ fn insert_row_tx(txn: &DatabaseTransaction, row: &NodeRow) -> Result<(), DbErr> 
         updated_at: Set(row.updated_at),
     })
     .exec(txn)?;
-
-    insert_indexes_tx(
-        txn,
-        NodeIndex {
-            seq: inserted.last_insert_id,
-            title: &row.title,
-            body: &row.body,
-            tags: &row.tags,
-            x: row.x,
-            y: row.y,
-            width: row.width,
-            height: row.height,
-        },
-    )
-}
-
-/// A node's values that the spatial and search indexes need.
-struct NodeIndex<'a> {
-    seq: i32,
-    title: &'a str,
-    body: &'a str,
-    tags: &'a [String],
-    x: f64,
-    y: f64,
-    width: f64,
-    height: f64,
-}
-
-fn insert_indexes_tx(txn: &DatabaseTransaction, node: NodeIndex<'_>) -> Result<(), DbErr> {
-    nodes_rtree::Entity::insert(nodes_rtree::ActiveModel {
-        id: Set(node.seq),
-        min_x: Set(node.x),
-        max_x: Set(node.x + node.width),
-        min_y: Set(node.y),
-        max_y: Set(node.y + node.height),
-    })
-    .exec(txn)?;
-
-    nodes_fts::Entity::insert(nodes_fts::ActiveModel {
-        rowid: Set(node.seq),
-        title: Set(node.title.to_owned()),
-        body: Set(node.body.to_owned()),
-        tags: Set(node.tags.join(" ")),
-    })
-    .exec(txn)?;
-
     Ok(())
 }
 
 fn delete_node_tx(txn: &DatabaseTransaction, node: &nodes::Model) -> Result<(), DbErr> {
-    // The edge rows cascade with the node, which the edge RTree does not
-    // know about; drop their index rows first, while they still exist.
-    edge_index::remove_node_edges(txn, &node.id)?;
-    nodes_rtree::Entity::delete_by_id(node.seq).exec(txn)?;
-    nodes_fts::Entity::delete_by_id(node.seq).exec(txn)?;
+    // Edges, their input snapshots and the node's own inputs cascade in v1;
+    // the RTree and FTS triggers drop their rows with the node.
     nodes::Entity::delete_by_id(node.seq).exec(txn)?;
     Ok(())
 }
@@ -2022,17 +2236,6 @@ fn update_position_tx(
     })
     .exec(txn)?;
 
-    nodes_rtree::Entity::delete_by_id(updated.seq).exec(txn)?;
-    nodes_rtree::Entity::insert(nodes_rtree::ActiveModel {
-        id: Set(updated.seq),
-        min_x: Set(updated.x),
-        max_x: Set(updated.x + updated.width),
-        min_y: Set(updated.y),
-        max_y: Set(updated.y + updated.height),
-    })
-    .exec(txn)?;
-    edge_index::sync_node_edges(txn, &updated.id)?;
-
     Ok(node_row(&updated))
 }
 
@@ -2050,7 +2253,6 @@ fn set_node_bounds_batched(
     let mut nodes_by_id: HashMap<String, nodes::Model> = HashMap::new();
     for chunk in ids.chunks(400) {
         let rows = nodes::Entity::find()
-            .filter(nodes::Column::DocumentId.eq(DOCUMENT_ID))
             .filter(nodes::Column::Id.is_in(chunk.to_vec()))
             .all(txn)?;
         for row in rows {
@@ -2065,8 +2267,6 @@ fn set_node_bounds_batched(
 
     let mut changed = Vec::with_capacity(bounds.len());
     let mut pairs = Vec::with_capacity(bounds.len());
-    let mut updated_by_id: HashMap<String, nodes::Model> =
-        HashMap::with_capacity(nodes_by_id.len());
 
     for next in bounds {
         let before = nodes_by_id
@@ -2118,36 +2318,14 @@ fn set_node_bounds_batched(
             },
         ));
 
-        nodes_rtree::Entity::delete_by_id(before.seq).exec(txn)?;
-        nodes_rtree::Entity::insert(nodes_rtree::ActiveModel {
-            id: Set(before.seq),
-            min_x: Set(next.x),
-            max_x: Set(next.x + next.width),
-            min_y: Set(next.y),
-            max_y: Set(next.y + next.height),
-        })
-        .exec(txn)?;
-
         // The port layout is proportional to the card's height, so a resize
         // scales every touching edge's stored offsets by the same ratio. The
         // edge row is the fallback anchor when its card is outside a viewport
-        // read, and the connector RTree below is built from it.
+        // read, and the connector RTree is rebuilt from the dirty marker once
+        // the command applies.
         scale_edge_offsets_tx(txn, &next.id, before.height, next.height)?;
-
-        // The edge index must see the post-move geometry, with the original
-        // row kept for the history pair above.
-        let mut updated = before;
-        updated.x = next.x;
-        updated.y = next.y;
-        updated.width = next.width;
-        updated.height = next.height;
-        updated.rev = new_rev;
-        updated.updated_at = now;
-        nodes_by_id.insert(next.id.clone(), updated.clone());
-        updated_by_id.insert(next.id.clone(), updated);
     }
 
-    edge_index::sync_edges_for_nodes(txn, &updated_by_id)?;
     Ok((changed, pairs))
 }
 
@@ -2157,21 +2335,16 @@ fn update_text_tx(
     title: &str,
     tags: &[String],
 ) -> Result<NodeRow, DbErr> {
-    let tags_json = serde_json::to_string(tags)
-        .map_err(|error| DbErr::Custom(format!("tags are not serializable: {error}")))?;
-
     // Body is output-derived: a title/tags edit never restores or rewrites it.
     let updated = nodes::Entity::update(nodes::ActiveModel {
         seq: Unchanged(before.seq),
         title: Set(title.to_owned()),
-        tags_json: Set(tags_json),
+        tags: Set(canonical_tags(tags)),
         rev: Set(before.rev + 1),
         updated_at: Set(now_ms()),
         ..Default::default()
     })
     .exec(txn)?;
-
-    refresh_fts_tx(txn, &updated)?;
 
     Ok(node_row(&updated))
 }
@@ -2220,27 +2393,31 @@ fn restore_settings_tx(
     Ok(node_row(&updated))
 }
 
-/// Rewrites a node's search row from its current values. Body writes that
-/// update the node directly (manual edits and provider runs) must call this,
-/// or search keeps matching the old text.
-fn refresh_fts_tx(txn: &DatabaseTransaction, node: &nodes::Model) -> Result<(), DbErr> {
-    let tags: Vec<String> = serde_json::from_str(&node.tags_json).unwrap_or_default();
-    nodes_fts::Entity::delete_by_id(node.seq).exec(txn)?;
-    nodes_fts::Entity::insert(nodes_fts::ActiveModel {
-        rowid: Set(node.seq),
-        title: Set(node.title.clone()),
-        body: Set(node.body.clone()),
-        tags: Set(tags.join(" ")),
-    })
-    .exec(txn)?;
-    Ok(())
+/// The canonical `nodes.tags` form: one trimmed, non-empty tag per line. The
+/// v1 CHECK forbids leading, trailing and doubled newlines, so a tag that
+/// itself contains a newline is split into separate tags.
+fn canonical_tags(tags: &[String]) -> String {
+    tags.iter()
+        .flat_map(|tag| tag.split('\n'))
+        .map(str::trim)
+        .filter(|tag| !tag.is_empty())
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+fn tags_from(text: &str) -> Vec<String> {
+    text.split('\n')
+        .map(str::trim)
+        .filter(|tag| !tag.is_empty())
+        .map(str::to_owned)
+        .collect()
 }
 
 fn insert_edge_tx(txn: &DatabaseTransaction, input: &EdgeInput) -> Result<EdgeRow, DbErr> {
     let data_json = input.data_json.clone().unwrap_or_else(|| "{}".to_owned());
-    edges::Entity::insert(edges::ActiveModel {
+    let inserted = edges::Entity::insert(edges::ActiveModel {
+        seq: NotSet,
         id: Set(input.id.clone()),
-        document_id: Set(DOCUMENT_ID.to_owned()),
         from_id: Set(input.from_id.clone()),
         to_id: Set(input.to_id.clone()),
         from_port: Set(input.from_port.clone()),
@@ -2252,9 +2429,9 @@ fn insert_edge_tx(txn: &DatabaseTransaction, input: &EdgeInput) -> Result<EdgeRo
         data_json: Set(data_json.clone()),
     })
     .exec(txn)?;
-    edge_index::sync_edge(txn, &input.id)?;
 
     Ok(EdgeRow {
+        seq: inserted.last_insert_id,
         id: input.id.clone(),
         from_id: input.from_id.clone(),
         to_id: input.to_id.clone(),
@@ -2270,8 +2447,8 @@ fn insert_edge_tx(txn: &DatabaseTransaction, input: &EdgeInput) -> Result<EdgeRo
 
 fn insert_edge_row_tx(txn: &DatabaseTransaction, row: &EdgeRow) -> Result<(), DbErr> {
     edges::Entity::insert(edges::ActiveModel {
+        seq: Set(row.seq),
         id: Set(row.id.clone()),
-        document_id: Set(DOCUMENT_ID.to_owned()),
         from_id: Set(row.from_id.clone()),
         to_id: Set(row.to_id.clone()),
         from_port: Set(row.from_port.clone()),
@@ -2283,12 +2460,12 @@ fn insert_edge_row_tx(txn: &DatabaseTransaction, row: &EdgeRow) -> Result<(), Db
         data_json: Set(row.data_json.clone()),
     })
     .exec(txn)?;
-    edge_index::sync_edge(txn, &row.id)
+    Ok(())
 }
 
 fn replace_edge_row_tx(txn: &DatabaseTransaction, row: &EdgeRow) -> Result<EdgeRow, DbErr> {
     edges::Entity::update(edges::ActiveModel {
-        id: Unchanged(row.id.clone()),
+        seq: Unchanged(row.seq),
         from_id: Set(row.from_id.clone()),
         to_id: Set(row.to_id.clone()),
         from_port: Set(row.from_port.clone()),
@@ -2301,13 +2478,13 @@ fn replace_edge_row_tx(txn: &DatabaseTransaction, row: &EdgeRow) -> Result<EdgeR
         ..Default::default()
     })
     .exec(txn)?;
-    edge_index::sync_edge(txn, &row.id)?;
     Ok(row.clone())
 }
 
 fn delete_edge_tx(txn: &DatabaseTransaction, id: &str) -> Result<(), DbErr> {
-    edge_index::remove_edge(txn, id)?;
-    edges::Entity::delete_by_id(id.to_owned()).exec(txn)?;
+    edges::Entity::delete_many()
+        .filter(edges::Column::Id.eq(id))
+        .exec(txn)?;
     Ok(())
 }
 
@@ -2319,8 +2496,14 @@ fn find_node_tx(txn: &DatabaseTransaction, id: &str) -> Result<nodes::Model, DbE
 fn find_node_opt_tx(txn: &DatabaseTransaction, id: &str) -> Result<Option<nodes::Model>, DbErr> {
     nodes::Entity::find()
         .filter(nodes::Column::Id.eq(id))
-        .filter(nodes::Column::DocumentId.eq(DOCUMENT_ID))
         .one(txn)
+}
+
+fn find_node_by_seq_opt_tx(
+    txn: &DatabaseTransaction,
+    seq: i64,
+) -> Result<Option<nodes::Model>, DbErr> {
+    nodes::Entity::find_by_id(seq).one(txn)
 }
 
 /// Whether another edge already joins this ordered pair. Parallel duplicate
@@ -2334,7 +2517,6 @@ fn already_connected_tx(
     except_edge_id: &str,
 ) -> Result<bool, DbErr> {
     Ok(edges::Entity::find()
-        .filter(edges::Column::DocumentId.eq(DOCUMENT_ID))
         .filter(edges::Column::FromId.eq(from_id))
         .filter(edges::Column::FromPort.eq(from_port))
         .filter(edges::Column::ToId.eq(to_id))
@@ -2350,9 +2532,16 @@ fn find_edge_tx(txn: &DatabaseTransaction, id: &str) -> Result<edges::Model, DbE
 }
 
 fn find_edge_opt_tx(txn: &DatabaseTransaction, id: &str) -> Result<Option<edges::Model>, DbErr> {
-    edges::Entity::find_by_id(id.to_owned())
-        .filter(edges::Column::DocumentId.eq(DOCUMENT_ID))
+    edges::Entity::find()
+        .filter(edges::Column::Id.eq(id))
         .one(txn)
+}
+
+fn find_edge_by_seq_opt_tx(
+    txn: &DatabaseTransaction,
+    seq: i64,
+) -> Result<Option<edges::Model>, DbErr> {
+    edges::Entity::find_by_id(seq).one(txn)
 }
 
 /// An edge removed because its port at the edited node is no longer declared
@@ -2403,7 +2592,6 @@ fn reconcile_ports_tx(
 
 fn edges_for_node_tx(txn: &DatabaseTransaction, id: &str) -> Result<Vec<EdgeRow>, DbErr> {
     edges::Entity::find()
-        .filter(edges::Column::DocumentId.eq(DOCUMENT_ID))
         .filter(
             Condition::any()
                 .add(edges::Column::FromId.eq(id))
@@ -2419,24 +2607,63 @@ fn items_for_batch_tx(
 ) -> Result<Vec<result_items::Model>, DbErr> {
     result_items::Entity::find()
         .filter(result_items::Column::BatchId.eq(batch_id))
+        .order_by_asc(result_items::Column::PortId)
         .order_by_asc(result_items::Column::Position)
         .order_by_asc(result_items::Column::Id)
         .all(txn)
 }
 
-fn insert_batch_tx(txn: &DatabaseTransaction, batch: &ResultBatchInput) -> Result<(), DbErr> {
-    result_batches::Entity::insert(result_batches::ActiveModel {
+/// Inserts a batch in the running state the v1 triggers require, bound to the
+/// node's current incarnation (`node_seq`). Items may be added only now.
+fn insert_running_batch_tx(
+    txn: &DatabaseTransaction,
+    batch: &ResultBatchInput,
+) -> Result<i64, DbErr> {
+    let node = find_node_tx(txn, &batch.node_id)?;
+    let inserted = result_batches::Entity::insert(result_batches::ActiveModel {
+        seq: NotSet,
         id: Set(batch.id.clone()),
-        node_id: Set(batch.node_id.clone()),
+        node_id: Set(node.id),
+        node_seq: Set(node.seq),
         trigger: Set(batch.trigger.clone()),
         provider: Set(batch.provider.clone()),
         model: Set(batch.model.clone()),
         params_json: Set(batch.params_json.clone()),
-        status: Set(batch.status.clone()),
-        error: Set(batch.error.clone().unwrap_or_default()),
+        status: Set("running".to_owned()),
+        error: Set(None),
+        item_count: Set(0),
         created_at: Set(now_ms()),
+        finished_at: Set(None),
     })
     .exec(txn)?;
+    Ok(inserted.last_insert_id)
+}
+
+/// Settles a running batch. The v1 triggers require a non-running status to
+/// carry `finished_at`; a `done` batch must already hold at least one item.
+/// Settling a batch that is no longer running is a no-op.
+fn settle_batch_tx(
+    txn: &DatabaseTransaction,
+    batch_id: &str,
+    status: &str,
+    error: Option<&str>,
+) -> Result<(), DbErr> {
+    if status == "running" {
+        return Ok(());
+    }
+    result_batches::Entity::update_many()
+        .col_expr(
+            result_batches::Column::Status,
+            Expr::value(status.to_owned()),
+        )
+        .col_expr(
+            result_batches::Column::Error,
+            Expr::value(error.map(str::to_owned)),
+        )
+        .col_expr(result_batches::Column::FinishedAt, Expr::value(now_ms()))
+        .filter(result_batches::Column::Id.eq(batch_id))
+        .filter(result_batches::Column::Status.eq("running"))
+        .exec(txn)?;
     Ok(())
 }
 
@@ -2448,7 +2675,7 @@ fn insert_result_item_tx(
     result_items::Entity::insert(result_items::ActiveModel {
         id: Set(item.id.clone()),
         batch_id: Set(batch_id.to_owned()),
-        position: Set(item.position.max(0.0) as i32),
+        position: Set(item.position.max(0.0) as i64),
         port_id: Set(item.port_id.clone()),
         kind: Set(item.kind.clone()),
         text: Set(item.text.clone()),
@@ -2463,7 +2690,7 @@ fn insert_input_row_tx(txn: &DatabaseTransaction, row: &InputRow) -> Result<(), 
     node_inputs::Entity::insert(node_inputs::ActiveModel {
         id: Set(row.id.clone()),
         node_id: Set(row.node_id.clone()),
-        position: Set(row.position),
+        position: Set(row.position as i64),
         port_id: Set(row.port_id.clone()),
         kind: Set(row.kind.clone()),
         origin: Set(row.origin.clone()),
@@ -2554,7 +2781,7 @@ fn max_input_position_tx(
         .filter(node_inputs::Column::PortId.eq(port_id))
         .order_by_desc(node_inputs::Column::Position)
         .one(txn)?;
-    Ok(row.map_or(0, |row| row.position + 1))
+    Ok(row.map_or(0, |row| (row.position + 1) as i32))
 }
 
 fn inputs_for_port_tx(
@@ -2752,14 +2979,12 @@ fn downstream_output_targets_tx(
     source_id: &str,
 ) -> Result<Vec<String>, DbErr> {
     let edges = edges::Entity::find()
-        .filter(edges::Column::DocumentId.eq(DOCUMENT_ID))
         .filter(edges::Column::FromId.eq(source_id))
         .all(txn)?;
     let ids: Vec<String> = edges.into_iter().map(|edge| edge.to_id).collect();
     let mut targets = Vec::new();
     for chunk in ids.chunks(400) {
         let rows = nodes::Entity::find()
-            .filter(nodes::Column::DocumentId.eq(DOCUMENT_ID))
             .filter(nodes::Column::Id.is_in(chunk.to_vec()))
             .filter(nodes::Column::OutputBatchId.is_not_null())
             .all(txn)?;
@@ -2775,7 +3000,6 @@ fn mark_downstream_stale_tx(
     source_id: &str,
 ) -> Result<Vec<nodes::Model>, DbErr> {
     let edges = edges::Entity::find()
-        .filter(edges::Column::DocumentId.eq(DOCUMENT_ID))
         .filter(edges::Column::FromId.eq(source_id))
         .all(txn)?;
     let mut stale = Vec::new();
@@ -2785,29 +3009,6 @@ fn mark_downstream_stale_tx(
         }
     }
     Ok(stale)
-}
-
-/// The spatial side of a node's new bounds: its RTree entry and the stored
-/// connector offsets, which scale with the card's height. The edge index is
-/// the caller's (`edge_index::sync_node_edges`), so a command that already
-/// touches connectors syncs them once.
-fn sync_bounds_tx(
-    txn: &DatabaseTransaction,
-    before: &nodes::Model,
-    after: &nodes::Model,
-) -> Result<(), DbErr> {
-    nodes_rtree::Entity::delete_by_id(before.seq).exec(txn)?;
-    nodes_rtree::Entity::insert(nodes_rtree::ActiveModel {
-        id: Set(after.seq),
-        min_x: Set(after.x),
-        max_x: Set(after.x + after.width),
-        min_y: Set(after.y),
-        max_y: Set(after.y + after.height),
-    })
-    .exec(txn)?;
-
-    scale_edge_offsets_tx(txn, &after.id, before.height, after.height)?;
-    Ok(())
 }
 
 /// A card's port layout is proportional to its height: a resize scales every
@@ -2828,7 +3029,6 @@ fn scale_edge_offsets_tx(
             edges::Column::FromOffset,
             Expr::col(edges::Column::FromOffset).mul(Expr::value(ratio)),
         )
-        .filter(edges::Column::DocumentId.eq(DOCUMENT_ID))
         .filter(edges::Column::FromId.eq(node_id.to_owned()))
         .exec(txn)?;
     edges::Entity::update_many()
@@ -2836,7 +3036,6 @@ fn scale_edge_offsets_tx(
             edges::Column::ToOffset,
             Expr::col(edges::Column::ToOffset).mul(Expr::value(ratio)),
         )
-        .filter(edges::Column::DocumentId.eq(DOCUMENT_ID))
         .filter(edges::Column::ToId.eq(node_id.to_owned()))
         .exec(txn)?;
     Ok(())
@@ -2846,7 +3045,7 @@ fn input_row(row: &node_inputs::Model) -> InputRow {
     InputRow {
         id: row.id.clone(),
         node_id: row.node_id.clone(),
-        position: row.position,
+        position: row.position as i32,
         port_id: row.port_id.clone(),
         kind: row.kind.clone(),
         origin: row.origin.clone(),
@@ -2859,10 +3058,17 @@ fn input_row(row: &node_inputs::Model) -> InputRow {
     }
 }
 
+/// The end of every command transaction: rebuild the boxes of connectors
+/// whose endpoint moved, then bump the document revision.
+fn finish_tx(txn: &DatabaseTransaction) -> Result<i64, DbErr> {
+    edge_index::flush_geometry_tx(txn)?;
+    document::bump_rev(txn)
+}
+
 fn no_op(txn: &DatabaseTransaction) -> Result<Mutation, DbErr> {
     Ok(Mutation::new(
         ChangeSet {
-            rev: document_rev_tx(txn)? as f64,
+            rev: document::current_rev(txn)? as f64,
             changed: Vec::new(),
             removed: Vec::new(),
             edges_changed: Vec::new(),
@@ -2873,36 +3079,14 @@ fn no_op(txn: &DatabaseTransaction) -> Result<Mutation, DbErr> {
     ))
 }
 
-fn document_rev_tx(txn: &DatabaseTransaction) -> Result<i64, DbErr> {
-    documents::Entity::find_by_id(DOCUMENT_ID)
-        .one(txn)?
-        .map(|document| document.rev)
-        .ok_or_else(|| DbErr::RecordNotFound("the default document was not found".to_owned()))
-}
-
-fn bump_document_rev(txn: &DatabaseTransaction) -> Result<i64, DbErr> {
-    let document = documents::Entity::find_by_id(DOCUMENT_ID)
-        .one(txn)?
-        .ok_or_else(|| DbErr::RecordNotFound("the default document was not found".to_owned()))?;
-
-    let updated = documents::Entity::update(documents::ActiveModel {
-        id: Unchanged(document.id),
-        rev: Set(document.rev + 1),
-        updated_at: Set(now_ms()),
-        ..Default::default()
-    })
-    .exec(txn)?;
-
-    Ok(updated.rev)
-}
-
 fn node_row(node: &nodes::Model) -> NodeRow {
     NodeRow {
+        seq: node.seq,
         id: node.id.clone(),
         kind: node.kind.clone(),
         title: node.title.clone(),
         body: node.body.clone(),
-        tags: serde_json::from_str(&node.tags_json).unwrap_or_default(),
+        tags: tags_from(&node.tags),
         x: node.x,
         y: node.y,
         width: node.width,
@@ -2920,6 +3104,7 @@ fn node_row(node: &nodes::Model) -> NodeRow {
 
 fn edge_row(edge: &edges::Model) -> EdgeRow {
     EdgeRow {
+        seq: edge.seq,
         id: edge.id.clone(),
         from_id: edge.from_id.clone(),
         to_id: edge.to_id.clone(),

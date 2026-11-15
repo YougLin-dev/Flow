@@ -11,8 +11,7 @@ use sea_orm::{ConnectionTrait, DbBackend, Statement, Value};
 /// `0x464C4F57`, "FLOW".
 pub const APPLICATION_ID: i64 = 1_179_406_167;
 
-/// The v1 file version. `constants::SCHEMA_VERSION` is the legacy v5 ledger
-/// until the live open path switches to v1.
+/// The v1 file version stored in `PRAGMA user_version`.
 pub const USER_VERSION: i64 = 1;
 
 /// The frozen v1 DDL, stored verbatim beside this module.
@@ -335,7 +334,7 @@ fn is_blank_title(title: &str) -> bool {
 }
 
 /// Mirrors the DDL's camera CHECKs: finite and inside the frozen envelope.
-fn is_valid_camera(x: f64, y: f64, zoom: f64) -> bool {
+pub(crate) fn is_valid_camera(x: f64, y: f64, zoom: f64) -> bool {
     x.is_finite()
         && (-1.0e308..=1.0e308).contains(&x)
         && y.is_finite()

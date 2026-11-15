@@ -1,12 +1,11 @@
 //! Viewport reads. The RTree is queried first and cross-joined to `nodes`;
-//! `CROSS JOIN` is what keeps SQLite from scanning the document index.
+//! `CROSS JOIN` is what keeps SQLite from scanning the document table.
 
 use std::collections::HashMap;
 
 use sea_orm::sea_query::{Condition, Expr, ExprTrait, Order, Query, SelectStatement, SimpleExpr};
 use sea_orm::{ConnectionTrait, DatabaseConnection, FromQueryResult};
 
-use crate::constants::DOCUMENT_ID;
 use crate::entity::{nodes, nodes_rtree};
 use crate::types::{NodeSummary, OverviewCard, Viewport};
 
@@ -61,14 +60,14 @@ pub fn viewport(
         return Ok(Vec::new());
     }
 
-    let mut rows: HashMap<i32, ViewportRow> = HashMap::with_capacity(seqs.len());
+    let mut rows: HashMap<i64, ViewportRow> = HashMap::with_capacity(seqs.len());
     for chunk in seqs.chunks(SEQ_CHUNK) {
         let statement = viewport_rows_statement(chunk);
         let fetched = conn
             .query_all(&statement)
             .map_err(|error| error.to_string())?;
         for row in fetched {
-            let seq: i32 = row.try_get("", "seq").map_err(|error| error.to_string())?;
+            let seq: i64 = row.try_get("", "seq").map_err(|error| error.to_string())?;
             let viewport_row =
                 ViewportRow::from_query_result(&row, "").map_err(|error| error.to_string())?;
             rows.insert(seq, viewport_row);
@@ -89,7 +88,7 @@ fn viewport_seqs(
     rect: Viewport,
     margin: f64,
     limit: u64,
-) -> Result<Vec<i32>, String> {
+) -> Result<Vec<i64>, String> {
     let statement = viewport_seq_statement(rect, margin, limit);
     let rows = conn
         .query_all(&statement)
@@ -126,8 +125,8 @@ pub(crate) fn viewport_seq_statement(rect: Viewport, margin: f64, limit: u64) ->
 }
 
 /// The shape both the production read and the test-only reference share:
-/// RTree-first `CROSS JOIN`, document/rect filter, and the in-view/z/hash/id
-/// ordering that decides which cards survive the budget.
+/// RTree-first `CROSS JOIN`, rect filter, and the in-view/z/hash/id ordering
+/// that decides which cards survive the budget.
 fn ordered_viewport_query(rect: Viewport, margin: f64, limit: u64) -> SelectStatement {
     let margin = margin.max(0.0);
     let mut statement = document_cards_query(&rect, margin);
@@ -161,8 +160,8 @@ fn ordered_viewport_query(rect: Viewport, margin: f64, limit: u64) -> SelectStat
     statement
 }
 
-/// The RTree-first `CROSS JOIN` and the document/rect filter every spatial
-/// read shares.
+/// The RTree-first `CROSS JOIN` and the rect filter every spatial read
+/// shares.
 fn document_cards_query(rect: &Viewport, margin: f64) -> SelectStatement {
     let margin = margin.max(0.0);
     let min_x = rect.x - margin;
@@ -181,8 +180,7 @@ fn document_cards_query(rect: &Viewport, margin: f64) -> SelectStatement {
         .and_where(Expr::col((nodes_rtree::Entity, nodes_rtree::Column::MaxX)).gte(min_x))
         .and_where(Expr::col((nodes_rtree::Entity, nodes_rtree::Column::MinX)).lte(max_x))
         .and_where(Expr::col((nodes_rtree::Entity, nodes_rtree::Column::MaxY)).gte(min_y))
-        .and_where(Expr::col((nodes_rtree::Entity, nodes_rtree::Column::MinY)).lte(max_y))
-        .and_where(Expr::col((nodes::Entity, nodes::Column::DocumentId)).eq(DOCUMENT_ID));
+        .and_where(Expr::col((nodes_rtree::Entity, nodes_rtree::Column::MinY)).lte(max_y));
 
     statement
 }
@@ -219,8 +217,7 @@ pub(crate) fn overview_cards(
             (nodes::Entity, nodes::Column::Width),
             (nodes::Entity, nodes::Column::Height),
         ])
-        .from(nodes::Entity)
-        .and_where(Expr::col((nodes::Entity, nodes::Column::DocumentId)).eq(DOCUMENT_ID));
+        .from(nodes::Entity);
     if total > limit {
         // Keep roughly two candidates per drawn card: enough that the final
         // limit still fills, small enough that the sort stays cheap.
@@ -251,7 +248,7 @@ pub(crate) fn overview_cards(
 
 /// Phase 2: the summary columns for one `IN` chunk of kept seqs. Ordinary
 /// table, ordinary SeaQuery — no RTree join and no raw SQL.
-fn viewport_rows_statement(seqs: &[i32]) -> SelectStatement {
+fn viewport_rows_statement(seqs: &[i64]) -> SelectStatement {
     let mut statement = Query::select();
     statement
         .columns([
@@ -272,7 +269,6 @@ fn viewport_rows_statement(seqs: &[i32]) -> SelectStatement {
         ])
         .column((nodes::Entity, nodes::Column::Seq))
         .from(nodes::Entity)
-        .and_where(Expr::col((nodes::Entity, nodes::Column::DocumentId)).eq(DOCUMENT_ID))
         .and_where(Expr::col((nodes::Entity, nodes::Column::Seq)).is_in(seqs.to_vec()));
 
     statement

@@ -1,20 +1,19 @@
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{self, Receiver, Sender};
 use std::sync::{Arc, Mutex};
 
-use sea_orm::sea_query::Expr;
+use sea_orm::sea_query::{Expr, ExprTrait};
 use sea_orm::{
-    ActiveValue::Set, ColumnTrait, ConnectionTrait, DatabaseConnection, EntityTrait,
-    PaginatorTrait, QueryFilter, QuerySelect,
+    ActiveValue::Set, ActiveValue::Unchanged, ConnectionTrait, DatabaseConnection, EntityTrait,
+    FromQueryResult, QuerySelect,
 };
 
 use crate::asset;
-use crate::clock::now_ms;
-use crate::constants::DOCUMENT_ID;
 use crate::detail;
 use crate::document;
-use crate::entity::{documents, edges, nodes};
+use crate::entity::{document as document_row, nodes};
 #[cfg(test)]
 use crate::history::HistoryOp;
 use crate::history::{History, HistoryEntry, HistoryRefs};
@@ -24,15 +23,16 @@ use crate::schema;
 use crate::search;
 use crate::types::{
     AssetInput, AssetSummary, ChangeSet, EdgeInput, InputItemInput, InputItemSummary, NodeBounds,
-    NodeDetail, NodeInput, NodePreview, NodeSummary, Overview, ResultBatchInput, ResultItemInput,
-    SceneSnapshot, SearchFilters, SearchHit, Viewport,
+    NodeDetail, NodeInput, NodePreview, NodeSummary, Overview, ProjectInfo, ResultBatchInput,
+    ResultItemInput, SceneSnapshot, SearchFilters, SearchHit, SeedDocumentInput, Viewport,
 };
 use crate::viewport;
 
-/// A unit of work for the database thread. The enum keeps room for lifecycle
-/// jobs (`Close`) without changing the public `run` contract.
+/// A unit of work for the database thread.
 enum Job {
     Run(Box<dyn FnOnce(&DatabaseConnection) + Send + 'static>),
+    /// Marks the package cleanly closed, acknowledges, and stops the worker.
+    Close(Sender<Result<(), String>>),
 }
 
 /// The asset directory shared by a database's clones. An in-memory database
@@ -77,6 +77,7 @@ pub struct Database {
     /// The last document bounds, tagged with the revision they describe:
     /// Fit and the minimap's overview ask at the same revision at startup.
     bounds_cache: Arc<Mutex<Option<(i64, Viewport)>>>,
+    closed: Arc<AtomicBool>,
 }
 
 impl Database {
@@ -103,7 +104,156 @@ impl Database {
             history: Arc::new(Mutex::new(History::default())),
             assets_dir,
             bounds_cache: Arc::new(Mutex::new(None)),
+            closed: Arc::new(AtomicBool::new(false)),
         })
+    }
+
+    /// The package identity, title, camera and derived counts.
+    pub fn project_info(&self) -> Result<ProjectInfo, String> {
+        self.run(|conn| {
+            let document = document::current(conn).map_err(|error| error.to_string())?;
+            Ok(ProjectInfo {
+                project_id: document.project_id,
+                title: document.title,
+                camera_x: document.camera_x,
+                camera_y: document.camera_y,
+                camera_zoom: document.camera_zoom,
+                node_count: document.node_count as f64,
+                edge_count: document.edge_count as f64,
+                demo_seeded: document.demo_seeded != 0,
+            })
+        })
+    }
+
+    /// Persists the camera without bumping the undo-independent revision.
+    pub fn save_view(&self, x: f64, y: f64, zoom: f64) -> Result<(), String> {
+        if !schema::v1::is_valid_camera(x, y, zoom) {
+            return Err("the camera is outside the supported range".to_owned());
+        }
+        self.run(move |conn| {
+            document_row::Entity::update(document_row::ActiveModel {
+                id: Unchanged(document::ROW_ID),
+                camera_x: Set(x),
+                camera_y: Set(y),
+                camera_zoom: Set(zoom),
+                ..Default::default()
+            })
+            .exec(conn)
+            .map_err(|error| error.to_string())?;
+            Ok(())
+        })
+    }
+
+    /// Checks the SQLite file and its foreign keys. Kept off the open path:
+    /// the 100k fixture makes a full check expensive.
+    pub fn verify(&self) -> Result<(), String> {
+        self.run(|conn| {
+            let integrity = conn
+                .query_one_raw(sea_orm::Statement::from_string(
+                    conn.get_database_backend(),
+                    "PRAGMA quick_check".to_owned(),
+                ))
+                .map_err(|error| error.to_string())?
+                .ok_or_else(|| "quick_check returned no row".to_owned())?
+                .try_get_by_index::<String>(0)
+                .map_err(|error| error.to_string())?;
+            if integrity != "ok" {
+                return Err(format!(
+                    "the database failed its integrity check: {integrity}"
+                ));
+            }
+            let violations = conn
+                .query_all_raw(sea_orm::Statement::from_string(
+                    conn.get_database_backend(),
+                    "PRAGMA foreign_key_check".to_owned(),
+                ))
+                .map_err(|error| error.to_string())?;
+            if !violations.is_empty() {
+                return Err(format!(
+                    "the database has {} foreign-key violation(s)",
+                    violations.len()
+                ));
+            }
+            Ok(())
+        })
+    }
+
+    /// Tightens the conservative document bounds after deletes, and records
+    /// that they are exact. Maintenance only: it does not bump the revision.
+    pub fn compact_bounds(&self) -> Result<(), String> {
+        let result = self.run(|conn| {
+            conn.transaction::<_, _, sea_orm::DbErr>(|txn| {
+                #[derive(FromQueryResult)]
+                struct Bounds {
+                    min_x: Option<f64>,
+                    max_x: Option<f64>,
+                    min_y: Option<f64>,
+                    max_y: Option<f64>,
+                }
+                let bounds = nodes::Entity::find()
+                    .select_only()
+                    .expr_as(Expr::col(nodes::Column::X).min(), "min_x")
+                    .expr_as(
+                        Expr::col(nodes::Column::X)
+                            .add(Expr::col(nodes::Column::Width))
+                            .max(),
+                        "max_x",
+                    )
+                    .expr_as(Expr::col(nodes::Column::Y).min(), "min_y")
+                    .expr_as(
+                        Expr::col(nodes::Column::Y)
+                            .add(Expr::col(nodes::Column::Height))
+                            .max(),
+                        "max_y",
+                    )
+                    .into_model::<Bounds>()
+                    .one(txn)?
+                    .unwrap_or(Bounds {
+                        min_x: None,
+                        max_x: None,
+                        min_y: None,
+                        max_y: None,
+                    });
+                document_row::Entity::update(document_row::ActiveModel {
+                    id: Unchanged(document::ROW_ID),
+                    bounds_exact: Set(1),
+                    min_x: Set(bounds.min_x),
+                    max_x: Set(bounds.max_x),
+                    min_y: Set(bounds.min_y),
+                    max_y: Set(bounds.max_y),
+                    ..Default::default()
+                })
+                .exec(txn)?;
+                Ok(())
+            })
+            .map_err(|error| error.to_string())
+        });
+        if result.is_ok()
+            && let Ok(mut cache) = self.bounds_cache.lock()
+        {
+            *cache = None;
+        }
+        result
+    }
+
+    /// Marks the package cleanly closed and stops the worker. Idempotent: a
+    /// second call (or a call after the worker stopped) does nothing.
+    pub fn close(&self) -> Result<(), String> {
+        if self.closed.swap(true, Ordering::SeqCst) {
+            return Ok(());
+        }
+        let (result_tx, result_rx) = mpsc::channel();
+        let sent = self
+            .tx
+            .lock()
+            .map_err(|_| "the database worker lock is poisoned".to_owned())?
+            .send(Job::Close(result_tx));
+        if sent.is_err() {
+            return Ok(());
+        }
+        result_rx
+            .recv()
+            .map_err(|_| "the database worker stopped during close".to_owned())?
     }
 
     pub fn insert_nodes(&self, nodes: Vec<NodeInput>) -> Result<Mutation, String> {
@@ -211,7 +361,8 @@ impl Database {
         })
     }
 
-    /// Persists a completed, failed or cancelled provider run. Not undoable.
+    /// Persists a completed, failed or cancelled provider run in one call.
+    /// Provider runs use `begin_run`/`settle_run` instead. Not undoable.
     pub fn save_run(
         &self,
         batch: ResultBatchInput,
@@ -221,6 +372,44 @@ impl Database {
         self.run(move |conn| {
             let (changes, refs) = mutation::save_run(conn, batch, items)?;
             invalidate_history(&history, &refs);
+            Ok(changes)
+        })
+    }
+
+    /// Starts a provider run: a running batch and a running node. Not
+    /// undoable; a later non-history write invalidates pending entries.
+    pub fn begin_run(&self, batch: ResultBatchInput) -> Result<ChangeSet, String> {
+        let history = Arc::clone(&self.history);
+        self.run(move |conn| {
+            let (changes, refs) = mutation::begin_run(conn, batch)?;
+            invalidate_history(&history, &refs);
+            Ok(changes)
+        })
+    }
+
+    /// Settles the running batch a provider call started, adding its items.
+    /// A late or repeated settle is a no-op.
+    pub fn settle_run(
+        &self,
+        batch: ResultBatchInput,
+        items: Vec<ResultItemInput>,
+    ) -> Result<ChangeSet, String> {
+        let history = Arc::clone(&self.history);
+        self.run(move |conn| {
+            let (changes, refs) = mutation::settle_run(conn, batch, items)?;
+            invalidate_history(&history, &refs);
+            Ok(changes)
+        })
+    }
+
+    /// Writes the demo seed in one transaction and clears the undo history.
+    pub fn seed_document(&self, input: SeedDocumentInput) -> Result<ChangeSet, String> {
+        let history = Arc::clone(&self.history);
+        self.run(move |conn| {
+            let changes = mutation::seed_document(conn, input)?;
+            if let Ok(mut history) = history.lock() {
+                history.clear();
+            }
             Ok(changes)
         })
     }
@@ -461,6 +650,9 @@ impl Database {
         T: Send + 'static,
         F: FnOnce(&DatabaseConnection) -> Result<T, String> + Send + 'static,
     {
+        if self.closed.load(Ordering::SeqCst) {
+            return Err("the database is closed".to_owned());
+        }
         let (result_tx, result_rx) = mpsc::channel();
         let job = Job::Run(Box::new(move |conn| {
             // A panic that unwinds through a SeaORM transaction can still
@@ -497,11 +689,23 @@ fn worker(path: &str, ready: Sender<Result<(), String>>, jobs: Receiver<Job>) {
     };
 
     for job in jobs {
-        // A Run body reports its own error. This outer guard keeps a future
-        // lifecycle job from killing the only worker thread.
-        let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| match job {
-            Job::Run(run) => run(&conn),
-        }));
+        match job {
+            // A Run body reports its own error. This outer guard keeps a
+            // panicking job from killing the only worker thread.
+            Job::Run(run) => {
+                let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| run(&conn)));
+            }
+            Job::Close(ack) => {
+                let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                    conn.execute_unprepared("UPDATE document SET clean_shutdown = 1 WHERE id = 1")
+                        .map(|_| ())
+                        .map_err(|error| error.to_string())
+                }))
+                .unwrap_or_else(|_| Err("the database job panicked".to_owned()));
+                let _ = ack.send(result);
+                break;
+            }
+        }
     }
 }
 
@@ -515,11 +719,33 @@ fn open_connection(path: &str) -> Result<DatabaseConnection, String> {
 
     let url = sqlite_url(path)?;
     let conn = sea_orm::Database::connect(url.as_str()).map_err(|error| error.to_string())?;
+    schema::v1::configure(&conn).map_err(|error| package_error(path, error))?;
+
+    // Inspect before tuning the file: setting WAL would write to a foreign
+    // database even though the guard then refuses it.
+    match schema::v1::inspect(&conn).map_err(|error| package_error(path, error))? {
+        schema::v1::FileState::New => {
+            schema::v1::create(&conn, "Flow").map_err(|error| package_error(path, error))?;
+        }
+        schema::v1::FileState::Current(_) => {}
+    }
     configure(&conn, path)?;
-    schema::migrate(&conn)?;
-    ensure_document(&conn)?;
+
+    // The flag stays 0 for the whole session; `close` sets it once the
+    // document has been written out cleanly.
+    conn.execute_unprepared("UPDATE document SET clean_shutdown = 0 WHERE id = 1")
+        .map_err(|error| error.to_string())?;
 
     Ok(conn)
+}
+
+/// Adds the package path and a recovery suggestion to a guard error. The
+/// guard itself sees only the connection.
+fn package_error(path: &str, error: String) -> String {
+    format!(
+        "{path}: {error}. The file is not a compatible Flow project package; \
+         delete it and its assets directory, or open a new project."
+    )
 }
 
 fn empty_change(conn: &DatabaseConnection) -> Result<ChangeSet, String> {
@@ -582,43 +808,25 @@ fn cached_bounds(
 }
 
 fn count(conn: &DatabaseConnection) -> Result<u32, String> {
-    nodes::Entity::find()
-        .filter(nodes::Column::DocumentId.eq(DOCUMENT_ID))
-        .count(conn)
-        .map(|count| count as u32)
-        .map_err(|error| error.to_string())
+    let document = document::current(conn).map_err(|error| error.to_string())?;
+    Ok(std::cmp::Ord::max(document.node_count, 0) as u32)
 }
 
 fn edge_count(conn: &DatabaseConnection) -> Result<u32, String> {
-    edges::Entity::find()
-        .filter(edges::Column::DocumentId.eq(DOCUMENT_ID))
-        .count(conn)
-        .map(|count| count as u32)
-        .map_err(|error| error.to_string())
+    let document = document::current(conn).map_err(|error| error.to_string())?;
+    Ok(std::cmp::Ord::max(document.edge_count, 0) as u32)
 }
 
-/// Whether any node exists, in one `SELECT 1 … LIMIT 1` instead of a count.
+/// Whether any node exists, read from the trigger-maintained document
+/// counters in one primary-key row.
 fn has_nodes(conn: &DatabaseConnection) -> Result<bool, String> {
-    nodes::Entity::find()
-        .filter(nodes::Column::DocumentId.eq(DOCUMENT_ID))
-        .select_only()
-        .expr(Expr::val(1))
-        .into_tuple::<i32>()
-        .one(conn)
-        .map(|row| row.is_some())
-        .map_err(|error| error.to_string())
+    Ok(count(conn)? > 0)
 }
 
-/// Whether any edge exists, in one `SELECT 1 … LIMIT 1` instead of a count.
+/// Whether any edge exists, read from the trigger-maintained document
+/// counters in one primary-key row.
 fn has_edges(conn: &DatabaseConnection) -> Result<bool, String> {
-    edges::Entity::find()
-        .filter(edges::Column::DocumentId.eq(DOCUMENT_ID))
-        .select_only()
-        .expr(Expr::val(1))
-        .into_tuple::<i32>()
-        .one(conn)
-        .map(|row| row.is_some())
-        .map_err(|error| error.to_string())
+    Ok(edge_count(conn)? > 0)
 }
 
 pub(crate) fn sqlite_url(path: &str) -> Result<String, String> {
@@ -670,36 +878,16 @@ fn configure(conn: &DatabaseConnection, path: &str) -> Result<(), String> {
     Ok(())
 }
 
-fn ensure_document(conn: &DatabaseConnection) -> Result<(), String> {
-    let exists = documents::Entity::find_by_id(DOCUMENT_ID)
-        .one(conn)
-        .map_err(|error| error.to_string())?
-        .is_some();
-    if exists {
-        return Ok(());
-    }
-
-    let now = now_ms();
-    documents::Entity::insert(documents::ActiveModel {
-        id: Set(DOCUMENT_ID.to_owned()),
-        title: Set("Flow".to_owned()),
-        rev: Set(0),
-        created_at: Set(now),
-        updated_at: Set(now),
-    })
-    .exec(conn)
-    .map_err(|error| error.to_string())?;
-
-    Ok(())
-}
 #[cfg(test)]
 mod tests {
     use std::collections::BTreeSet;
     use std::sync::atomic::{AtomicU64, Ordering};
 
     use super::*;
-    use crate::entity::{result_batches, result_items};
+    use crate::clock::now_ms;
+    use crate::entity::{edges, node_inputs, nodes, result_batches};
     use crate::types::EdgePoint;
+    use sea_orm::{ColumnTrait, QueryFilter};
 
     fn current_rev(db: &Database) -> i64 {
         db.run(|conn| document::current_rev(conn).map_err(|error| error.to_string()))
@@ -765,6 +953,21 @@ mod tests {
         )
         .expect("manual edit");
         db
+    }
+
+    /// Imports a tiny, deterministic asset under `id`. v1 requires an asset
+    /// row for every image result item and every local input.
+    fn test_asset(db: &Database, id: &str) -> String {
+        db.import_asset(AssetInput {
+            id: id.to_owned(),
+            kind: "image".to_owned(),
+            name: format!("{id}.png"),
+            mime: "image/png".to_owned(),
+            bytes: format!("test asset bytes: {id}").into_bytes(),
+            meta_json: None,
+        })
+        .expect("import test asset")
+        .id
     }
 
     fn node(id: &str, title: &str, body: &str, tags: &[&str], x: f64, y: f64) -> NodeInput {
@@ -1007,8 +1210,19 @@ mod tests {
 
         db.move_nodes(vec!["a".to_owned()], 50.0, 25.0)
             .expect("move");
+        // The v1 trigger envelope covers the old and the new rect until
+        // compaction; Fit therefore never clips a card that just moved.
         let moved = db.bounds().expect("bounds after move");
-        assert_eq!((moved.x, moved.y), (50.0, 25.0));
+        assert_eq!(
+            (moved.x, moved.y, moved.width, moved.height),
+            (0.0, 0.0, 250.0, 109.0)
+        );
+        db.compact_bounds().expect("compact bounds");
+        let exact = db.bounds().expect("bounds after compaction");
+        assert_eq!(
+            (exact.x, exact.y, exact.width, exact.height),
+            (50.0, 25.0, 200.0, 84.0)
+        );
     }
 
     #[test]
@@ -1571,15 +1785,16 @@ mod tests {
     }
 
     fn add_local_input(db: &Database, node_id: &str, id: &str, port: &str, text: &str) {
+        let asset = test_asset(db, &format!("asset-{id}"));
         db.add_input(InputItemInput {
             id: id.to_owned(),
             node_id: node_id.to_owned(),
             port_id: port.to_owned(),
-            kind: "text".to_owned(),
+            kind: "image".to_owned(),
             origin: "local".to_owned(),
             edge_id: None,
             item_id: None,
-            asset_id: None,
+            asset_id: Some(asset),
             text: text.to_owned(),
             meta_json: None,
         })
@@ -1653,6 +1868,7 @@ mod tests {
         upload.settings_json = Some(r#"{"version":1,"media":["image"]}"#.to_owned());
         db.insert_nodes(vec![upload, node("target", "Target", "", &[], 400.0, 0.0)])
             .expect("insert");
+        test_asset(db, "asset-cat");
         db.set_manual_upload(
             "source".to_owned(),
             r#"{"version":1,"media":["image"]}"#.to_owned(),
@@ -2158,7 +2374,6 @@ mod tests {
             db.run(|conn| {
                 nodes::Entity::find()
                     .filter(nodes::Column::Id.eq("styled"))
-                    .filter(nodes::Column::DocumentId.eq(DOCUMENT_ID))
                     .one(conn)
                     .map_err(|error| error.to_string())
             })
@@ -2227,10 +2442,10 @@ mod tests {
         );
 
         let after_row = read_stored();
-        assert_eq!(after_row.tags_json, before_row.tags_json);
-        assert_eq!(after_row.tags_json, "[\"alpha\",\"β\"]");
+        assert_eq!(after_row.tags, before_row.tags);
+        assert_eq!(after_row.tags, "alpha\nβ");
         assert_eq!(after_row.kind, before_row.kind);
-        assert_eq!(after_row.document_id, before_row.document_id);
+        assert_eq!(after_row.seq, before_row.seq);
         assert_eq!(after_row.created_at, before_row.created_at);
         assert_eq!(after_row.data_json, before_row.data_json);
         assert_eq!(after_row.settings_json, before_row.settings_json);
@@ -2459,8 +2674,7 @@ mod tests {
     }
 
     #[test]
-    fn deleting_a_node_cascades_edges_and_node_assets() {
-        use crate::entity::{assets, edges, node_assets};
+    fn deleting_a_node_cascades_its_edges_and_inputs() {
         use sea_orm::{ActiveValue::Set, PaginatorTrait};
 
         let db = Database::open(":memory:").expect("open");
@@ -2469,24 +2683,12 @@ mod tests {
             node("b", "B", "", &[], 300.0, 0.0),
         ])
         .expect("insert nodes");
+        test_asset(&db, "asset-local");
 
         db.run(|conn| {
-            assets::Entity::insert(assets::ActiveModel {
-                id: Set("asset".to_owned()),
-                hash: Set("hash".to_owned()),
-                kind: Set("image".to_owned()),
-                name: Set("asset.png".to_owned()),
-                mime: Set("image/png".to_owned()),
-                size: Set(1),
-                meta_json: Set("{}".to_owned()),
-                created_at: Set(0),
-            })
-            .exec(conn)
-            .map_err(|error| error.to_string())?;
-
             edges::Entity::insert(edges::ActiveModel {
+                seq: sea_orm::ActiveValue::NotSet,
                 id: Set("edge".to_owned()),
-                document_id: Set(DOCUMENT_ID.to_owned()),
                 from_id: Set("a".to_owned()),
                 to_id: Set("b".to_owned()),
                 from_port: Set("out".to_owned()),
@@ -2499,30 +2701,37 @@ mod tests {
             })
             .exec(conn)
             .map_err(|error| error.to_string())?;
-
-            node_assets::Entity::insert(node_assets::ActiveModel {
-                node_id: Set("a".to_owned()),
-                asset_id: Set("asset".to_owned()),
-                role: Set("preview".to_owned()),
+            node_inputs::Entity::insert(node_inputs::ActiveModel {
+                id: Set("local-input".to_owned()),
+                node_id: Set("b".to_owned()),
+                port_id: Set("references".to_owned()),
+                position: Set(0),
+                kind: Set("image".to_owned()),
+                origin: Set("local".to_owned()),
+                edge_id: Set(None),
+                item_id: Set(None),
+                asset_id: Set(Some("asset-local".to_owned())),
+                text: Set("local".to_owned()),
+                meta_json: Set("{}".to_owned()),
+                created_at: Set(0),
             })
             .exec(conn)
             .map_err(|error| error.to_string())?;
-
             Ok(())
         })
         .expect("insert relations");
 
-        db.delete_nodes(vec!["a".to_owned()]).expect("delete node");
+        db.delete_nodes(vec!["b".to_owned()]).expect("delete node");
 
         let counts = db
             .run(|conn| {
                 let edges = edges::Entity::find()
                     .count(conn)
                     .map_err(|error| error.to_string())?;
-                let node_assets = node_assets::Entity::find()
+                let inputs = node_inputs::Entity::find()
                     .count(conn)
                     .map_err(|error| error.to_string())?;
-                Ok((edges, node_assets))
+                Ok((edges, inputs))
             })
             .expect("count relations");
 
@@ -2643,16 +2852,17 @@ mod tests {
         let db = Database::open(":memory:").expect("open");
         db.insert_nodes(vec![node("n", "N", "", &[], 0.0, 0.0)])
             .expect("insert");
+        test_asset(&db, "asset-input");
         let row = crate::history::InputRow {
             id: "input-1".to_owned(),
             node_id: "n".to_owned(),
             position: 0,
             port_id: "out".to_owned(),
-            kind: "text".to_owned(),
+            kind: "image".to_owned(),
             origin: "local".to_owned(),
             edge_id: None,
             item_id: None,
-            asset_id: None,
+            asset_id: Some("asset-input".to_owned()),
             text: "one".to_owned(),
             meta_json: "{}".to_owned(),
             created_at: 0,
@@ -2692,6 +2902,7 @@ mod tests {
             node("target", "Target", "", &[], 400.0, 0.0),
         ])
         .expect("insert nodes");
+        test_asset(&db, "asset-image");
 
         // One batch, two output ports: only the connected port's items may
         // snapshot into the target.
@@ -2713,7 +2924,7 @@ mod tests {
                     port_id: "image".to_owned(),
                     kind: "image".to_owned(),
                     text: String::new(),
-                    asset_id: None,
+                    asset_id: Some("asset-image".to_owned()),
                     meta_json: None,
                 },
                 ResultItemInput {
@@ -2833,15 +3044,16 @@ mod tests {
             data_json: None,
         })
         .expect("connect");
+        test_asset(&db, "asset-local");
         db.add_input(InputItemInput {
             id: "local".to_owned(),
             node_id: "image".to_owned(),
             port_id: "in".to_owned(),
-            kind: "text".to_owned(),
+            kind: "image".to_owned(),
             origin: "local".to_owned(),
             edge_id: None,
             item_id: None,
-            asset_id: None,
+            asset_id: Some("asset-local".to_owned()),
             text: "Local".to_owned(),
             meta_json: None,
         })
@@ -3015,6 +3227,7 @@ mod tests {
         upload.kind = "upload".to_owned();
         upload.settings_json = Some(r#"{"version":1,"media":[]}"#.to_owned());
         db.insert_nodes(vec![upload]).expect("insert");
+        test_asset(&db, "asset-cat");
 
         let changes = db
             .set_manual_upload(
@@ -3108,6 +3321,7 @@ mod tests {
         upload.kind = "upload".to_owned();
         upload.settings_json = Some("{}".to_owned());
         db.insert_nodes(vec![upload]).expect("insert");
+        test_asset(&db, "asset-cat");
         db.set_manual_upload(
             "upload".to_owned(),
             r#"{"version":1,"media":["image"]}"#.to_owned(),
@@ -3178,6 +3392,8 @@ mod tests {
         upload.kind = "upload".to_owned();
         upload.settings_json = Some(r#"{"version":1,"media":[]}"#.to_owned());
         db.insert_nodes(vec![upload]).expect("insert");
+        test_asset(&db, "asset-cat");
+        test_asset(&db, "asset-dog");
 
         let upload = |batch_id: &str,
                       item_id: &str,
@@ -3274,6 +3490,7 @@ mod tests {
         let mut upload = node("copy", "Upload", "cat.png", &["upload"], 24.0, 24.0);
         upload.kind = "upload".to_owned();
         upload.settings_json = Some(r#"{"version":1,"media":["image"]}"#.to_owned());
+        test_asset(&db, "asset-cat");
         db.insert_upload_node(
             upload,
             ResultBatchInput {
@@ -3328,6 +3545,7 @@ mod tests {
         upload.settings_json = Some(r#"{"version":1,"media":[]}"#.to_owned());
         db.insert_nodes(vec![upload, node("target", "Target", "", &[], 400.0, 0.0)])
             .expect("insert");
+        test_asset(&db, "asset-cat");
         db.connect_edge(EdgeInput {
             id: "edge-upload".to_owned(),
             from_id: "upload".to_owned(),
@@ -3587,7 +3805,16 @@ mod tests {
         let db = Database::open(":memory:").expect("open");
         db.insert_nodes(vec![node("n", "N", "", &[], 0.0, 0.0)])
             .expect("insert");
-        db.clear_history().expect("clear insert history");
+        db.import_asset(AssetInput {
+            id: "asset-1".to_owned(),
+            kind: "image".to_owned(),
+            name: "one.svg".to_owned(),
+            mime: "image/svg+xml".to_owned(),
+            bytes: b"<svg/>".to_vec(),
+            meta_json: None,
+        })
+        .expect("import asset");
+        db.clear_history().expect("clear setup history");
         db.add_input(InputItemInput {
             id: "input-1".to_owned(),
             node_id: "n".to_owned(),
@@ -3602,15 +3829,17 @@ mod tests {
         })
         .expect("add asset input");
 
+        // The same bytes under a new requested id resolve to the first row
+        // and invalidate the entry that references it.
         db.import_asset(AssetInput {
-            id: "asset-1".to_owned(),
+            id: "asset-2".to_owned(),
             kind: "image".to_owned(),
-            name: "one.svg".to_owned(),
+            name: "one-copy.svg".to_owned(),
             mime: "image/svg+xml".to_owned(),
             bytes: b"<svg/>".to_vec(),
             meta_json: None,
         })
-        .expect("import asset");
+        .expect("re-import the same bytes");
 
         let undone = db.undo().expect("undo after the asset import");
         assert!(undone.changed.is_empty());
@@ -3827,10 +4056,14 @@ mod tests {
             meta_json: None,
         })
         .expect("import");
+        // The v1 CHECK refuses a malformed hash on an ordinary write; bypass
+        // it to exercise the read path's own guard.
+        direct_write(&db, "PRAGMA ignore_check_constraints = ON");
         direct_write(
             &db,
             "UPDATE assets SET hash = '../escape' WHERE id = 'asset-1'",
         );
+        direct_write(&db, "PRAGMA ignore_check_constraints = OFF");
 
         let error = db
             .asset_bytes("asset-1".to_owned())
@@ -4081,15 +4314,16 @@ mod tests {
         db.insert_nodes(vec![node("n", "N", "", &[], 0.0, 0.0)])
             .expect("insert");
         for (id, text) in [("one", "One"), ("two", "Two")] {
+            test_asset(&db, &format!("asset-{id}"));
             db.add_input(InputItemInput {
                 id: id.to_owned(),
                 node_id: "n".to_owned(),
                 port_id: "out".to_owned(),
-                kind: "text".to_owned(),
+                kind: "image".to_owned(),
                 origin: "local".to_owned(),
                 edge_id: None,
                 item_id: None,
-                asset_id: None,
+                asset_id: Some(format!("asset-{id}")),
                 text: text.to_owned(),
                 meta_json: None,
             })
@@ -4291,7 +4525,8 @@ mod tests {
         .expect("reconnect the same pair");
         let offset = || {
             db.run(|conn| {
-                edges::Entity::find_by_id("e1".to_owned())
+                edges::Entity::find()
+                    .filter(edges::Column::Id.eq("e1"))
                     .one(conn)
                     .map_err(|error| error.to_string())
             })
@@ -4350,7 +4585,8 @@ mod tests {
         assert!(undone.changed.is_empty());
         let edge = db
             .run(|conn| {
-                edges::Entity::find_by_id("e1".to_owned())
+                edges::Entity::find()
+                    .filter(edges::Column::Id.eq("e1"))
                     .one(conn)
                     .map_err(|error| error.to_string())
             })
@@ -4367,15 +4603,16 @@ mod tests {
             .expect("insert a");
         db.insert_nodes(vec![node("t", "T", "", &[], 400.0, 0.0)])
             .expect("insert t");
+        test_asset(&db, "asset-local-t");
         db.add_input(InputItemInput {
             id: "local-t".to_owned(),
             node_id: "t".to_owned(),
             port_id: "out".to_owned(),
-            kind: "text".to_owned(),
+            kind: "image".to_owned(),
             origin: "local".to_owned(),
             edge_id: None,
             item_id: None,
-            asset_id: None,
+            asset_id: Some("asset-local-t".to_owned()),
             text: "local".to_owned(),
             meta_json: None,
         })
@@ -4661,6 +4898,7 @@ mod tests {
         upload.kind = "upload".to_owned();
         upload.settings_json = Some("{}".to_owned());
         db.insert_nodes(vec![upload]).expect("insert");
+        test_asset(&db, "asset-cat");
         db.set_manual_upload(
             "upload".to_owned(),
             r#"{"version":1,"media":["image"]}"#.to_owned(),
@@ -5310,6 +5548,7 @@ mod tests {
     fn replacing_an_upload_drops_an_edge_whose_output_port_is_gone() {
         let db = Database::open(":memory:").expect("open");
         upload_with_edge_to_target(&db);
+        test_asset(&db, "asset-clip");
         db.clear_history().expect("clear setup history");
 
         let changes = db
@@ -5467,6 +5706,7 @@ mod tests {
             node("target-b", "B", "", &[], 800.0, 0.0),
         ])
         .expect("insert");
+        test_asset(&db, "asset-cat");
         db.set_manual_upload(
             "source".to_owned(),
             r#"{"version":1,"media":["image"]}"#.to_owned(),
@@ -5575,6 +5815,8 @@ mod tests {
             node("target-b", "B", "", &[], 800.0, 0.0),
         ])
         .expect("insert");
+        test_asset(&db, "asset-image");
+        test_asset(&db, "asset-video");
         db.save_run(
             ResultBatchInput {
                 id: "batch-source".to_owned(),
@@ -5804,6 +6046,7 @@ mod tests {
     fn replacing_an_upload_keeps_an_edge_whose_port_survives() {
         let db = Database::open(":memory:").expect("open");
         upload_with_edge_to_target(&db);
+        test_asset(&db, "asset-dog");
         db.save_run(
             ResultBatchInput {
                 id: "batch-target".to_owned(),
@@ -5889,15 +6132,16 @@ mod tests {
             ("b", "references", "B"),
             ("c", "prompt", "C"),
         ] {
+            test_asset(&db, &format!("asset-{id}"));
             db.add_input(InputItemInput {
                 id: id.to_owned(),
                 node_id: "n".to_owned(),
                 port_id: port.to_owned(),
-                kind: "text".to_owned(),
+                kind: "image".to_owned(),
                 origin: "local".to_owned(),
                 edge_id: None,
                 item_id: None,
-                asset_id: None,
+                asset_id: Some(format!("asset-{id}")),
                 text: text.to_owned(),
                 meta_json: None,
             })
@@ -5937,15 +6181,16 @@ mod tests {
             ("b", "references", "B"),
             ("c", "prompt", "C"),
         ] {
+            test_asset(&db, &format!("asset-{id}"));
             db.add_input(InputItemInput {
                 id: id.to_owned(),
                 node_id: "n".to_owned(),
                 port_id: port.to_owned(),
-                kind: "text".to_owned(),
+                kind: "image".to_owned(),
                 origin: "local".to_owned(),
                 edge_id: None,
                 item_id: None,
-                asset_id: None,
+                asset_id: Some(format!("asset-{id}")),
                 text: text.to_owned(),
                 meta_json: None,
             })
@@ -6014,6 +6259,10 @@ mod tests {
             node("target", "Target", "", &[], 400.0, 0.0),
         ])
         .expect("insert");
+        test_asset(&db, "asset-one");
+        test_asset(&db, "asset-two");
+        test_asset(&db, "asset-a");
+        test_asset(&db, "asset-b");
         db.save_run(
             ResultBatchInput {
                 id: "batch-source".to_owned(),
@@ -6216,15 +6465,16 @@ mod tests {
         db.insert_nodes(vec![node("n", "N", "", &[], 0.0, 0.0)])
             .expect("insert");
         for (id, text) in [("a", "A"), ("b", "B"), ("c", "C")] {
+            test_asset(&db, &format!("asset-{id}"));
             db.add_input(InputItemInput {
                 id: id.to_owned(),
                 node_id: "n".to_owned(),
                 port_id: "references".to_owned(),
-                kind: "text".to_owned(),
+                kind: "image".to_owned(),
                 origin: "local".to_owned(),
                 edge_id: None,
                 item_id: None,
-                asset_id: None,
+                asset_id: Some(format!("asset-{id}")),
                 text: text.to_owned(),
                 meta_json: None,
             })
@@ -6383,15 +6633,16 @@ mod tests {
         db.insert_nodes(vec![node("n", "N", "", &[], 0.0, 0.0)])
             .expect("insert");
         for (id, text) in [("one", "One"), ("two", "Two")] {
+            test_asset(&db, &format!("asset-{id}"));
             db.add_input(InputItemInput {
                 id: id.to_owned(),
                 node_id: "n".to_owned(),
                 port_id: "out".to_owned(),
-                kind: "text".to_owned(),
+                kind: "image".to_owned(),
                 origin: "local".to_owned(),
                 edge_id: None,
                 item_id: None,
-                asset_id: None,
+                asset_id: Some(format!("asset-{id}")),
                 text: text.to_owned(),
                 meta_json: None,
             })
@@ -6654,6 +6905,567 @@ mod tests {
         assert_eq!(detail.batch, None);
     }
 
+    fn temp_database(label: &str) -> (std::path::PathBuf, String) {
+        static NEXT: AtomicU64 = AtomicU64::new(0);
+        let path = std::env::temp_dir().join(format!(
+            "flow-{label}-{}-{}-{}.db",
+            std::process::id(),
+            now_ms(),
+            NEXT.fetch_add(1, Ordering::Relaxed)
+        ));
+        let as_string = path.to_string_lossy().into_owned();
+        (path, as_string)
+    }
+
+    fn remove_database_files(path: &std::path::Path) {
+        for suffix in ["", "-wal", "-shm"] {
+            remove_path_retrying(std::path::Path::new(&format!("{}{suffix}", path.display())));
+        }
+    }
+
+    fn write_raw_database(path: &str, sql: &str) {
+        let url = sqlite_url(path).expect("raw database URL");
+        let conn = sea_orm::Database::connect(url.as_str()).expect("open raw database");
+        conn.execute_unprepared(sql).expect("write raw database");
+    }
+
+    #[test]
+    fn opening_an_empty_file_creates_a_v1_package() {
+        let db = Database::open(":memory:").expect("open");
+        let info = db.project_info().expect("project info");
+        assert_eq!(info.title, "Flow");
+        assert_eq!(info.project_id.len(), 32);
+        assert!(
+            info.project_id
+                .bytes()
+                .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte)),
+            "a project id is 32 lowercase hex characters"
+        );
+        assert!(!info.demo_seeded);
+        assert_eq!((info.node_count, info.edge_count), (0.0, 0.0));
+        assert_eq!(
+            (info.camera_x, info.camera_y, info.camera_zoom),
+            (0.0, 0.0, 1.0)
+        );
+
+        let pragmas = db
+            .run(|conn| {
+                let read = |name: &str| {
+                    conn.query_one_raw(sea_orm::Statement::from_string(
+                        conn.get_database_backend(),
+                        format!("PRAGMA {name}"),
+                    ))
+                    .map_err(|error| error.to_string())?
+                    .ok_or_else(|| format!("PRAGMA {name} returned no row"))?
+                    .try_get_by_index::<i64>(0)
+                    .map_err(|error| error.to_string())
+                };
+                let clean = conn
+                    .query_one_raw(sea_orm::Statement::from_string(
+                        conn.get_database_backend(),
+                        "SELECT clean_shutdown FROM document WHERE id = 1".to_owned(),
+                    ))
+                    .map_err(|error| error.to_string())?
+                    .ok_or_else(|| "missing document row".to_owned())?
+                    .try_get_by_index::<i64>(0)
+                    .map_err(|error| error.to_string())?;
+                Ok((
+                    read("application_id")?,
+                    read("user_version")?,
+                    read("foreign_keys")?,
+                    read("recursive_triggers")?,
+                    clean,
+                ))
+            })
+            .expect("read pragmas");
+        assert_eq!(pragmas.0, schema::v1::APPLICATION_ID);
+        assert_eq!(pragmas.1, schema::v1::USER_VERSION);
+        assert_eq!(pragmas.2, 1, "foreign keys are on");
+        assert_eq!(pragmas.3, 0, "recursive triggers stay off");
+        assert_eq!(pragmas.4, 0, "an open package is dirty");
+    }
+
+    #[test]
+    fn opening_refuses_foreign_and_legacy_files_without_dropping_them() {
+        let (foreign_path, foreign) = temp_database("foreign");
+        write_raw_database(
+            &foreign,
+            "CREATE TABLE notes (body TEXT); INSERT INTO notes VALUES ('keep');",
+        );
+        let error = match Database::open(&foreign) {
+            Ok(_) => panic!("a foreign database must be refused"),
+            Err(error) => error,
+        };
+        assert!(error.contains("not a Flow database"), "{error}");
+        assert!(error.contains(&foreign), "the error names the package path");
+        let kept = {
+            let url = sqlite_url(&foreign).expect("raw URL");
+            let conn = sea_orm::Database::connect(url.as_str()).expect("reopen raw database");
+            let row = conn
+                .query_one_raw(sea_orm::Statement::from_string(
+                    conn.get_database_backend(),
+                    "SELECT body FROM notes".to_owned(),
+                ))
+                .expect("read foreign row")
+                .expect("foreign row survives");
+            row.try_get_by_index::<String>(0).expect("foreign body")
+        };
+        assert_eq!(kept, "keep");
+        remove_database_files(&foreign_path);
+
+        let (legacy_path, legacy) = temp_database("legacy");
+        write_raw_database(
+            &legacy,
+            "CREATE TABLE documents (id TEXT PRIMARY KEY); \
+             CREATE TABLE nodes (id TEXT PRIMARY KEY); \
+             INSERT INTO documents VALUES ('default');",
+        );
+        let error = match Database::open(&legacy) {
+            Ok(_) => panic!("a v5 development file must be refused"),
+            Err(error) => error,
+        };
+        assert!(error.contains("not a Flow database"), "{error}");
+        remove_database_files(&legacy_path);
+    }
+
+    #[test]
+    fn close_marks_the_package_clean_and_stops_the_worker() {
+        let (path, database) = temp_database("close");
+        {
+            let db = Database::open(&database).expect("open");
+            db.close().expect("close");
+            assert!(
+                db.count().is_err(),
+                "a job after close must not reach SQLite"
+            );
+            db.close().expect("a second close is a no-op");
+        }
+
+        let url = sqlite_url(&database).expect("raw URL");
+        let conn = sea_orm::Database::connect(url.as_str()).expect("reopen raw database");
+        let clean = conn
+            .query_one_raw(sea_orm::Statement::from_string(
+                conn.get_database_backend(),
+                "SELECT clean_shutdown FROM document WHERE id = 1".to_owned(),
+            ))
+            .expect("read clean flag")
+            .expect("document row")
+            .try_get_by_index::<i64>(0)
+            .expect("clean flag");
+        assert_eq!(clean, 1, "close records a clean shutdown");
+        drop(conn);
+
+        // Reopening marks the package dirty again until the next close.
+        {
+            let db = Database::open(&database).expect("reopen");
+            let dirty = db
+                .run(|conn| {
+                    conn.query_one_raw(sea_orm::Statement::from_string(
+                        conn.get_database_backend(),
+                        "SELECT clean_shutdown FROM document WHERE id = 1".to_owned(),
+                    ))
+                    .map_err(|error| error.to_string())?
+                    .ok_or_else(|| "missing document row".to_owned())?
+                    .try_get_by_index::<i64>(0)
+                    .map_err(|error| error.to_string())
+                })
+                .expect("read clean flag");
+            assert_eq!(dirty, 0);
+        }
+        remove_database_files(&path);
+    }
+
+    #[test]
+    fn save_view_persists_without_bumping_the_revision() {
+        let db = Database::open(":memory:").expect("open");
+        let before = current_rev(&db);
+        db.save_view(120.0, -40.0, 2.5).expect("save view");
+        let info = db.project_info().expect("project info");
+        assert_eq!(
+            (info.camera_x, info.camera_y, info.camera_zoom),
+            (120.0, -40.0, 2.5)
+        );
+        assert_eq!(current_rev(&db), before, "the camera is not an undo step");
+
+        for (x, y, zoom) in [
+            (f64::NAN, 0.0, 1.0),
+            (0.0, f64::INFINITY, 1.0),
+            (0.0, 0.0, 0.0),
+        ] {
+            let error = db
+                .save_view(x, y, zoom)
+                .expect_err("an invalid camera must be refused");
+            assert!(error.contains("camera"), "{error}");
+        }
+    }
+
+    #[test]
+    fn verify_accepts_a_healthy_package() {
+        let db = Database::open(":memory:").expect("open");
+        db.insert_nodes(vec![node("a", "A", "", &[], 0.0, 0.0)])
+            .expect("insert");
+        db.verify().expect("a healthy package passes verification");
+    }
+
+    #[test]
+    fn tags_are_stored_in_canonical_newline_form() {
+        let db = Database::open(":memory:").expect("open");
+        db.insert_nodes(vec![node(
+            "tagged",
+            "Tagged",
+            "",
+            &[" alpha ", "", "beta\ngamma"],
+            0.0,
+            0.0,
+        )])
+        .expect("insert");
+        let tags = db
+            .run(|conn| {
+                nodes::Entity::find()
+                    .filter(nodes::Column::Id.eq("tagged"))
+                    .one(conn)
+                    .map(|row| row.map(|row| row.tags))
+                    .map_err(|error| error.to_string())
+            })
+            .expect("read tags")
+            .expect("tagged node");
+        assert_eq!(tags, "alpha\nbeta\ngamma");
+        let hits = db
+            .search("gamma".to_owned(), SearchFilters::default(), 20)
+            .expect("search a tag");
+        assert_eq!(hits.len(), 1);
+        assert_eq!(hits[0].id, "tagged");
+    }
+
+    #[test]
+    fn a_provider_run_is_inserted_running_then_settled() {
+        let db = Database::open(":memory:").expect("open");
+        db.insert_nodes(vec![node("a", "A", "", &[], 0.0, 0.0)])
+            .expect("insert");
+        db.save_run(
+            ResultBatchInput {
+                id: "batch-failed".to_owned(),
+                node_id: "a".to_owned(),
+                trigger: "run".to_owned(),
+                provider: "mock-text".to_owned(),
+                model: "mock-text".to_owned(),
+                params_json: "{}".to_owned(),
+                status: "failed".to_owned(),
+                error: Some("prompt is empty".to_owned()),
+            },
+            Vec::new(),
+        )
+        .expect("save a failed run");
+        let (status, error, item_count, finished_at) = db
+            .run(|conn| {
+                result_batches::Entity::find()
+                    .filter(result_batches::Column::Id.eq("batch-failed"))
+                    .one(conn)
+                    .map(|row| {
+                        row.map(|row| (row.status, row.error, row.item_count, row.finished_at))
+                    })
+                    .map_err(|error| error.to_string())
+            })
+            .expect("read batch")
+            .expect("batch row");
+        assert_eq!(status, "failed");
+        assert_eq!(error.as_deref(), Some("prompt is empty"));
+        assert_eq!(item_count, 0);
+        assert!(finished_at.is_some(), "a settled batch is finished");
+
+        db.save_run(
+            ResultBatchInput {
+                id: "batch-done".to_owned(),
+                node_id: "a".to_owned(),
+                trigger: "run".to_owned(),
+                provider: "mock-text".to_owned(),
+                model: "mock-text".to_owned(),
+                params_json: "{}".to_owned(),
+                status: "done".to_owned(),
+                error: None,
+            },
+            vec![ResultItemInput {
+                id: "item-done".to_owned(),
+                position: 0.0,
+                port_id: "out".to_owned(),
+                kind: "text".to_owned(),
+                text: "result".to_owned(),
+                asset_id: None,
+                meta_json: None,
+            }],
+        )
+        .expect("save a successful run");
+        let (status, item_count) = db
+            .run(|conn| {
+                result_batches::Entity::find()
+                    .filter(result_batches::Column::Id.eq("batch-done"))
+                    .one(conn)
+                    .map(|row| row.map(|row| (row.status, row.item_count)))
+                    .map_err(|error| error.to_string())
+            })
+            .expect("read done batch")
+            .expect("done row");
+        assert_eq!((status.as_str(), item_count), ("done", 1));
+
+        // The triggers own the state machine: a settled insert or a late item
+        // write is refused rather than silently stored.
+        let late_insert = db.run(|conn| {
+            conn.execute_unprepared(
+                "INSERT INTO result_batches \
+                 (id, node_id, node_seq, trigger, status, created_at) \
+                 VALUES ('batch-direct', 'a', 1, 'run', 'done', 0)",
+            )
+            .map(|_| ())
+            .map_err(|error| error.to_string())
+        });
+        assert!(late_insert.is_err(), "a batch must be inserted running");
+        let late_item = db.run(|conn| {
+            conn.execute_unprepared(
+                "INSERT INTO result_items (id, batch_id, position, port_id, kind, text) \
+                 VALUES ('late', 'batch-done', 1, 'out', 'text', 'late')",
+            )
+            .map(|_| ())
+            .map_err(|error| error.to_string())
+        });
+        assert!(late_item.is_err(), "items only enter a running batch");
+    }
+
+    #[test]
+    fn begin_and_settle_a_provider_run() {
+        let db = Database::open(":memory:").expect("open");
+        db.insert_nodes(vec![node("a", "A", "", &[], 0.0, 0.0)])
+            .expect("insert");
+        let begun = db
+            .begin_run(ResultBatchInput {
+                id: "batch-run".to_owned(),
+                node_id: "a".to_owned(),
+                trigger: "run".to_owned(),
+                provider: "mock-text".to_owned(),
+                model: "mock-text".to_owned(),
+                params_json: "{}".to_owned(),
+                status: "running".to_owned(),
+                error: None,
+            })
+            .expect("begin run");
+        assert_eq!(begun.changed[0].status, "running");
+        assert_eq!(begun.changed[0].output_batch_id, None);
+        let running = db
+            .run(|conn| {
+                result_batches::Entity::find()
+                    .filter(result_batches::Column::Id.eq("batch-run"))
+                    .one(conn)
+                    .map(|row| row.map(|row| (row.status, row.finished_at)))
+                    .map_err(|error| error.to_string())
+            })
+            .expect("read batch")
+            .expect("batch row");
+        assert_eq!(running, ("running".to_owned(), None));
+
+        let settled = db
+            .settle_run(
+                ResultBatchInput {
+                    id: "batch-run".to_owned(),
+                    node_id: "a".to_owned(),
+                    trigger: "run".to_owned(),
+                    provider: "mock-text".to_owned(),
+                    model: "mock-text".to_owned(),
+                    params_json: r#"{"prompt":"p"}"#.to_owned(),
+                    status: "done".to_owned(),
+                    error: None,
+                },
+                vec![ResultItemInput {
+                    id: "item-run".to_owned(),
+                    position: 0.0,
+                    port_id: "text".to_owned(),
+                    kind: "text".to_owned(),
+                    text: "run result".to_owned(),
+                    asset_id: None,
+                    meta_json: None,
+                }],
+            )
+            .expect("settle run");
+        assert_eq!(settled.changed[0].status, "done");
+        assert_eq!(
+            settled.changed[0].output_batch_id.as_deref(),
+            Some("batch-run")
+        );
+        assert_eq!(settled.changed[0].body, "run result");
+        let settled_row = db
+            .run(|conn| {
+                result_batches::Entity::find()
+                    .filter(result_batches::Column::Id.eq("batch-run"))
+                    .one(conn)
+                    .map(|row| row.map(|row| (row.status, row.item_count, row.finished_at)))
+                    .map_err(|error| error.to_string())
+            })
+            .expect("read settled batch")
+            .expect("settled row");
+        assert_eq!(settled_row.0, "done");
+        assert_eq!(settled_row.1, 1);
+        assert!(settled_row.2.is_some());
+
+        // A repeated or absent settle changes nothing and does not bump the
+        // revision.
+        let before = current_rev(&db);
+        let settle_input = |id: &str| ResultBatchInput {
+            id: id.to_owned(),
+            node_id: "a".to_owned(),
+            trigger: "run".to_owned(),
+            provider: "mock-text".to_owned(),
+            model: "mock-text".to_owned(),
+            params_json: "{}".to_owned(),
+            status: "failed".to_owned(),
+            error: None,
+        };
+        let repeated = db
+            .settle_run(settle_input("batch-run"), Vec::new())
+            .expect("repeated settle");
+        assert!(repeated.changed.is_empty());
+        assert_eq!(repeated.rev, before as f64);
+        let missing = db
+            .settle_run(settle_input("batch-missing"), Vec::new())
+            .expect("late settle");
+        assert!(missing.changed.is_empty());
+        assert_eq!(current_rev(&db), before);
+    }
+
+    fn seed_input() -> SeedDocumentInput {
+        let mut text = node("seed-text", "Text", "", &["text"], 80.0, 120.0);
+        text.settings_json = Some(r#"{"version":1,"prompt":"Describe a lake."}"#.to_owned());
+        let mut image = node("seed-image", "Image", "", &["image"], 520.0, 120.0);
+        image.kind = "image".to_owned();
+        SeedDocumentInput {
+            nodes: vec![text, image],
+            edges: vec![EdgeInput {
+                id: "seed-edge".to_owned(),
+                from_id: "seed-text".to_owned(),
+                to_id: "seed-image".to_owned(),
+                from_port: "text".to_owned(),
+                to_port: "prompt".to_owned(),
+                port_kind: "text".to_owned(),
+                from_offset: 110.0,
+                to_offset: 110.0,
+                kind: "flow".to_owned(),
+                data_json: None,
+            }],
+            batch: Some(ResultBatchInput {
+                id: "seed-batch".to_owned(),
+                node_id: "seed-text".to_owned(),
+                trigger: "manual".to_owned(),
+                provider: "manual".to_owned(),
+                model: String::new(),
+                params_json: "{}".to_owned(),
+                status: "done".to_owned(),
+                error: None,
+            }),
+            item: Some(ResultItemInput {
+                id: "seed-item".to_owned(),
+                position: 0.0,
+                port_id: "text".to_owned(),
+                kind: "text".to_owned(),
+                text: "A calm lake.".to_owned(),
+                asset_id: None,
+                meta_json: None,
+            }),
+        }
+    }
+
+    #[test]
+    fn seed_document_writes_the_example_and_only_once() {
+        let db = Database::open(":memory:").expect("open");
+        let changes = db.seed_document(seed_input()).expect("seed");
+        assert_eq!(db.count().expect("nodes"), 2);
+        assert_eq!(db.edge_count().expect("edges"), 1);
+        assert_eq!(changes.edges_changed.len(), 1);
+        let text = db
+            .node_detail("seed-text".to_owned())
+            .expect("detail")
+            .expect("text detail");
+        assert_eq!(text.node.status, "done");
+        assert_eq!(text.node.body, "A calm lake.");
+        assert_eq!(text.batch.expect("batch").items[0].text, "A calm lake.");
+        let image = db
+            .node_detail("seed-image".to_owned())
+            .expect("detail")
+            .expect("image detail");
+        assert_eq!(image.inputs.len(), 1);
+        assert_eq!(image.inputs[0].item_id.as_deref(), Some("seed-item"));
+        let info = db.project_info().expect("project info");
+        assert!(info.demo_seeded);
+        assert_eq!((info.node_count, info.edge_count), (2.0, 1.0));
+
+        // A second seed is a no-op even after the user deletes every node:
+        // only a new project or a reset seeds again.
+        db.delete_nodes(vec!["seed-text".to_owned(), "seed-image".to_owned()])
+            .expect("delete the demo");
+        assert_eq!(db.count().expect("empty nodes"), 0);
+        let second = db.seed_document(seed_input()).expect("second seed");
+        assert!(second.changed.is_empty());
+        assert_eq!(db.count().expect("still empty"), 0);
+
+        // The seed is not undo history.
+        assert!(db.undo().expect("undo after seed").changed.is_empty());
+    }
+
+    #[test]
+    fn seed_document_refuses_a_non_empty_document_and_rolls_back() {
+        let db = Database::open(":memory:").expect("open");
+        db.insert_nodes(vec![node("existing", "Existing", "", &[], 0.0, 0.0)])
+            .expect("insert");
+        let error = db
+            .seed_document(seed_input())
+            .expect_err("a non-empty document must be refused");
+        assert!(error.contains("not empty"), "{error}");
+        assert_eq!(db.count().expect("count"), 1);
+
+        let db = Database::open(":memory:").expect("open");
+        let mut input = seed_input();
+        input.edges[0].to_id = "missing".to_owned();
+        let error = db
+            .seed_document(input)
+            .expect_err("an edge to a missing node must fail");
+        assert!(error.contains("missing"), "{error}");
+        assert_eq!(db.count().expect("rolled back nodes"), 0);
+        assert_eq!(db.edge_count().expect("rolled back edges"), 0);
+        assert!(!db.project_info().expect("project info").demo_seeded);
+    }
+
+    #[test]
+    fn recovering_a_running_batch_settles_it_with_a_finish_time() {
+        let db = Database::open(":memory:").expect("open");
+        db.insert_nodes(vec![node("a", "A", "", &[], 0.0, 0.0)])
+            .expect("insert");
+        db.set_node_status("a".to_owned(), "running".to_owned())
+            .expect("running");
+        db.save_run(
+            ResultBatchInput {
+                id: "batch-running".to_owned(),
+                node_id: "a".to_owned(),
+                trigger: "run".to_owned(),
+                provider: "mock-text".to_owned(),
+                model: "mock-text".to_owned(),
+                params_json: "{}".to_owned(),
+                status: "running".to_owned(),
+                error: None,
+            },
+            Vec::new(),
+        )
+        .expect("running batch");
+        assert_eq!(db.recover_runs().expect("recover"), 1);
+        let (status, finished_at) = db
+            .run(|conn| {
+                result_batches::Entity::find()
+                    .filter(result_batches::Column::Id.eq("batch-running"))
+                    .one(conn)
+                    .map(|row| row.map(|row| (row.status, row.finished_at)))
+                    .map_err(|error| error.to_string())
+            })
+            .expect("read batch")
+            .expect("batch row");
+        assert_eq!(status, "interrupted");
+        assert!(finished_at.is_some(), "recovery settles the batch");
+    }
+
     #[test]
     fn empty_document_has_no_nodes_or_edges() {
         fn is_empty(conn: &DatabaseConnection) -> Result<bool, String> {
@@ -6741,7 +7553,6 @@ mod tests {
 
         let conn = open_connection(":memory:").expect("open memory database");
         let nodes_statement = nodes::Entity::find()
-            .filter(nodes::Column::DocumentId.eq(DOCUMENT_ID))
             .filter(nodes::Column::Status.eq("running"))
             .select_only()
             .column(nodes::Column::Id)
@@ -6769,7 +7580,9 @@ mod tests {
             id,
             position: position as f64,
             port_id: "out".to_owned(),
-            kind: "image".to_owned(),
+            // v1 requires an asset for every image item. Assetless preview
+            // fixtures model the text result, which needs none.
+            kind: if asset_id.is_some() { "image" } else { "text" }.to_owned(),
             text,
             asset_id: asset_id.map(str::to_owned),
             meta_json: None,
@@ -6811,18 +7624,13 @@ mod tests {
     fn preview_items_stay_bounded_without_losing_total_count() {
         let db = Database::open(":memory:").expect("open");
         db.insert_nodes(vec![
+            // A node with no output has no current batch to preview.
             node("empty", "Empty", "", &[], 0.0, 0.0),
             node("single", "Single", "", &[], 300.0, 0.0),
             node("six", "Six", "", &[], 600.0, 0.0),
         ])
         .expect("insert preview nodes");
 
-        let empty_batch = preview_run(
-            &db,
-            "empty",
-            "preview-empty",
-            vec![preview_item("empty-0".to_owned(), 0, None)],
-        );
         preview_run(
             &db,
             "single",
@@ -6837,16 +7645,22 @@ mod tests {
                 .map(|position| preview_item(format!("six-{position}"), position, None))
                 .collect(),
         );
-        // A current batch can keep its node link after its items are gone; a
-        // preview still reports that node with an empty list and zero count.
-        db.run(move |conn| {
-            result_items::Entity::delete_many()
-                .filter(result_items::Column::BatchId.eq(empty_batch.as_str()))
-                .exec(conn)
-                .map(|_| ())
-                .map_err(|error| error.to_string())
-        })
-        .expect("remove empty batch items");
+        // v1 refuses to settle a `done` batch with no items, so a node with
+        // an output always has something to preview.
+        let empty_done = db.save_run(
+            ResultBatchInput {
+                id: "preview-empty".to_owned(),
+                node_id: "empty".to_owned(),
+                trigger: "run".to_owned(),
+                provider: "mock-image".to_owned(),
+                model: "mock-image".to_owned(),
+                params_json: "{}".to_owned(),
+                status: "done".to_owned(),
+                error: None,
+            },
+            Vec::new(),
+        );
+        assert!(empty_done.is_err(), "a done batch needs an item");
 
         let ids = vec!["empty".to_owned(), "single".to_owned(), "six".to_owned()];
         let previews = db.previews(ids.clone()).expect("previews");
@@ -6854,6 +7668,10 @@ mod tests {
             .run(move |conn| detail::previews_reference(conn, ids))
             .expect("reference previews");
         assert_eq!(previews, reference);
+        assert!(
+            previews.iter().all(|preview| preview.node_id != "empty"),
+            "a node without an output has no preview"
+        );
 
         let by_node = |id: &str| {
             previews
@@ -6861,9 +7679,6 @@ mod tests {
                 .find(|preview| preview.node_id == id)
                 .unwrap_or_else(|| panic!("missing {id} preview"))
         };
-        let empty = by_node("empty");
-        assert_eq!(empty.item_count, 0.0);
-        assert!(empty.items.is_empty());
         let single = by_node("single");
         assert_eq!(single.item_count, 1.0);
         assert_eq!(single.items.len(), 1);
@@ -6878,7 +7693,7 @@ mod tests {
     }
 
     #[test]
-    fn preview_items_keep_position_then_id_order() {
+    fn preview_items_order_by_position_with_an_id_tiebreak() {
         let db = Database::open(":memory:").expect("open");
         db.insert_nodes(vec![node("ordered", "Ordered", "", &[], 0.0, 0.0)])
             .expect("insert preview node");
@@ -6887,10 +7702,10 @@ mod tests {
             "ordered",
             "preview-ordered",
             vec![
-                preview_item("b".to_owned(), 1, None),
+                preview_item("b".to_owned(), 2, None),
                 preview_item("a".to_owned(), 1, None),
                 preview_item("z".to_owned(), 0, None),
-                preview_item("c".to_owned(), 1, None),
+                preview_item("c".to_owned(), 3, None),
             ],
         );
 
@@ -6903,11 +7718,17 @@ mod tests {
         let ordered = &previews[0];
         assert_eq!(ordered.item_count, 4.0);
         let returned: Vec<&str> = ordered.items.iter().map(|item| item.id.as_str()).collect();
-        assert_eq!(
-            returned,
-            vec!["z", "a", "b", "c"],
-            "position first, then id"
-        );
+        assert_eq!(returned, vec!["z", "a", "b", "c"], "position order");
+
+        // v1 makes positions unique per `(batch, port)`, so stored ties
+        // cannot occur; the query still names id as the deterministic
+        // tiebreak.
+        let (sql, _) = detail::preview_items_statement(&["batch".to_owned()])
+            .build(sea_orm::sea_query::SqliteQueryBuilder);
+        let upper = sql.to_ascii_uppercase();
+        assert!(upper.contains("ORDER BY \"BATCH_ID\" ASC"), "{sql}");
+        assert!(upper.contains("\"POSITION\" ASC"), "{sql}");
+        assert!(upper.contains("\"ID\" ASC"), "{sql}");
     }
 
     #[test]
@@ -6990,6 +7811,15 @@ mod tests {
             meta_json: None,
         })
         .expect("import shared asset");
+        db.import_asset(AssetInput {
+            id: "other-asset".to_owned(),
+            kind: "image".to_owned(),
+            name: "other.png".to_owned(),
+            mime: "image/png".to_owned(),
+            bytes: benchmark_png(1),
+            meta_json: None,
+        })
+        .expect("import second asset");
         let mut first = node("image-a", "Image A", "", &[], 0.0, 0.0);
         first.kind = "image".to_owned();
         let mut second = node("image-b", "Image B", "", &[], 400.0, 0.0);
@@ -7002,7 +7832,7 @@ mod tests {
             "batch-a",
             vec![
                 preview_item("a-0".to_owned(), 0, Some("shared-asset")),
-                preview_item("a-1".to_owned(), 1, Some("missing-asset")),
+                preview_item("a-1".to_owned(), 1, Some("other-asset")),
                 preview_item("a-2".to_owned(), 2, None),
                 preview_item("a-3".to_owned(), 3, Some("shared-asset")),
             ],
@@ -7013,7 +7843,7 @@ mod tests {
             "batch-b",
             vec![
                 preview_item("b-0".to_owned(), 0, Some("shared-asset")),
-                preview_item("b-1".to_owned(), 1, Some("missing-asset")),
+                preview_item("b-1".to_owned(), 1, Some("other-asset")),
             ],
         );
 
@@ -7032,11 +7862,8 @@ mod tests {
         assert_eq!(a.items.len(), 4);
         assert_eq!(a.items[0].asset_id.as_deref(), Some("shared-asset"));
         assert!(a.items[0].asset.is_some());
-        assert_eq!(a.items[1].asset_id.as_deref(), Some("missing-asset"));
-        assert!(
-            a.items[1].asset.is_none(),
-            "a missing asset stays an item without metadata"
-        );
+        assert_eq!(a.items[1].asset_id.as_deref(), Some("other-asset"));
+        assert!(a.items[1].asset.is_some());
         assert!(a.items[2].asset.is_none(), "an item without an asset id");
         assert_eq!(a.items[3].asset_id.as_deref(), Some("shared-asset"));
         assert!(
@@ -7044,14 +7871,31 @@ mod tests {
             "a repeated asset still resolves"
         );
 
+        // v1 refuses an item whose asset row does not exist, so a preview can
+        // never meet the missing-asset case this test used to model.
+        let missing = db.save_run(
+            ResultBatchInput {
+                id: "batch-missing".to_owned(),
+                node_id: "image-a".to_owned(),
+                trigger: "run".to_owned(),
+                provider: "mock-image".to_owned(),
+                model: "mock-image".to_owned(),
+                params_json: "{}".to_owned(),
+                status: "done".to_owned(),
+                error: None,
+            },
+            vec![preview_item("missing".to_owned(), 0, Some("missing-asset"))],
+        );
+        assert!(missing.is_err(), "a missing asset row must be refused");
+
         let b = previews
             .iter()
             .find(|preview| preview.node_id == "image-b")
             .expect("image-b preview");
         assert_eq!(b.item_count, 2.0);
         assert_eq!(b.items.len(), 2);
-        assert_eq!(b.items[1].asset_id.as_deref(), Some("missing-asset"));
-        assert!(b.items[1].asset.is_none());
+        assert_eq!(b.items[1].asset_id.as_deref(), Some("other-asset"));
+        assert!(b.items[1].asset.is_some());
     }
 
     #[test]

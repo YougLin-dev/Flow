@@ -6,6 +6,9 @@ use crate::types::{EdgeSummary, NodeSummary};
 /// search entries.
 #[derive(Debug, Clone)]
 pub struct NodeRow {
+    /// The immutable insertion key the node's batches, RTree and FTS rows are
+    /// bound to. An undo restores the same value.
+    pub seq: i64,
     pub id: String,
     pub kind: String,
     pub title: String,
@@ -49,6 +52,9 @@ impl NodeRow {
 /// A complete edge row, kept so deleting a node can restore its edges.
 #[derive(Debug, Clone)]
 pub struct EdgeRow {
+    /// The immutable insertion key the edge RTree is keyed by. An undo
+    /// restores the same value.
+    pub seq: i64,
     pub id: String,
     pub from_id: String,
     pub to_id: String,

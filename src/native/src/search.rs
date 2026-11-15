@@ -8,7 +8,6 @@
 use sea_orm::sea_query::{Alias, Condition, Expr, ExprTrait, Order, Query, SelectStatement};
 use sea_orm::{ConnectionTrait, DatabaseConnection, FromQueryResult};
 
-use crate::constants::DOCUMENT_ID;
 use crate::entity::{nodes, nodes_fts};
 use crate::types::{SearchFilters, SearchHit};
 
@@ -78,8 +77,7 @@ pub(crate) fn fts_statement(match_query: &str, kind: Option<&str>, limit: u64) -
         .and_where(Expr::cust_with_values(
             "nodes_fts MATCH ?",
             [match_query.to_owned()],
-        ))
-        .and_where(Expr::col((nodes::Entity, nodes::Column::DocumentId)).eq(DOCUMENT_ID));
+        ));
 
     if let Some(kind) = kind {
         statement.and_where(Expr::col((nodes::Entity, nodes::Column::Kind)).eq(kind));
@@ -87,6 +85,7 @@ pub(crate) fn fts_statement(match_query: &str, kind: Option<&str>, limit: u64) -
 
     statement
         .order_by_expr(Expr::cust("score"), Order::Desc)
+        .order_by((nodes::Entity, nodes::Column::Id), Order::Asc)
         .limit(limit);
 
     statement
@@ -101,7 +100,7 @@ fn like_statement(query: &str, kind: Option<&str>, limit: u64) -> SelectStatemen
         let pattern = format!("%{}%", escape_like(term));
         matches = matches.add(Expr::cust_with_values(
             "(nodes.title LIKE ? ESCAPE '\\' OR nodes.body LIKE ? ESCAPE '\\' \
-             OR nodes.tags_json LIKE ? ESCAPE '\\')",
+             OR nodes.tags LIKE ? ESCAPE '\\')",
             [pattern.clone(), pattern.clone(), pattern],
         ));
     }
@@ -117,7 +116,6 @@ fn like_statement(query: &str, kind: Option<&str>, limit: u64) -> SelectStatemen
         )
         .expr_as(Expr::val(0.0), Alias::new("score"))
         .from(nodes::Entity)
-        .and_where(Expr::col((nodes::Entity, nodes::Column::DocumentId)).eq(DOCUMENT_ID))
         .and_where(matches.into());
 
     if let Some(kind) = kind {

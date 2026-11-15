@@ -3,13 +3,12 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use sea_orm::sea_query::{Alias, Expr, ExprTrait, Query};
+use sea_orm::sea_query::{Expr, ExprTrait, Query};
 use sea_orm::{
     ColumnTrait, Condition, ConnectionTrait, DatabaseConnection, EntityTrait, FromQueryResult,
-    PaginatorTrait, QueryFilter,
+    QueryFilter,
 };
 
-use crate::constants::DOCUMENT_ID;
 use crate::document;
 use crate::edge_index;
 use crate::entity::{edges, nodes};
@@ -62,58 +61,24 @@ pub fn snapshot(
 pub fn get_node(conn: &DatabaseConnection, id: &str) -> Result<Option<NodeSummary>, String> {
     let row = nodes::Entity::find()
         .filter(nodes::Column::Id.eq(id))
-        .filter(nodes::Column::DocumentId.eq(DOCUMENT_ID))
         .one(conn)
         .map_err(|error| error.to_string())?;
     Ok(row.map(|row| node_summary(&row)))
 }
 
+/// The whole document's content bounds. The v1 triggers maintain them on the
+/// singleton `document` row, so Fit is one primary-key read.
 pub fn bounds(conn: &DatabaseConnection) -> Result<Viewport, String> {
-    let mut query = Query::select();
-    query
-        .expr_as(
-            Expr::col((nodes::Entity, nodes::Column::X)).min(),
-            Alias::new("min_x"),
-        )
-        .expr_as(
-            Expr::col((nodes::Entity, nodes::Column::X))
-                .add(Expr::col((nodes::Entity, nodes::Column::Width)))
-                .max(),
-            Alias::new("max_x"),
-        )
-        .expr_as(
-            Expr::col((nodes::Entity, nodes::Column::Y)).min(),
-            Alias::new("min_y"),
-        )
-        .expr_as(
-            Expr::col((nodes::Entity, nodes::Column::Y))
-                .add(Expr::col((nodes::Entity, nodes::Column::Height)))
-                .max(),
-            Alias::new("max_y"),
-        )
-        .from(nodes::Entity)
-        .and_where(Expr::col((nodes::Entity, nodes::Column::DocumentId)).eq(DOCUMENT_ID));
-
-    let row = conn.query_one(&query).map_err(|error| error.to_string())?;
-    let Some(row) = row else {
-        return Ok(empty_bounds());
-    };
-
-    let min_x: Option<f64> = row
-        .try_get("", "min_x")
-        .map_err(|error| error.to_string())?;
-    let max_x: Option<f64> = row
-        .try_get("", "max_x")
-        .map_err(|error| error.to_string())?;
-    let min_y: Option<f64> = row
-        .try_get("", "min_y")
-        .map_err(|error| error.to_string())?;
-    let max_y: Option<f64> = row
-        .try_get("", "max_y")
-        .map_err(|error| error.to_string())?;
-
-    match (min_x, max_x, min_y, max_y) {
-        (Some(min_x), Some(max_x), Some(min_y), Some(max_y)) => Ok(Viewport {
+    let document = document::current(conn).map_err(|error| error.to_string())?;
+    match (
+        document.node_count,
+        document.min_x,
+        document.max_x,
+        document.min_y,
+        document.max_y,
+    ) {
+        (0, _, _, _, _) => Ok(empty_bounds()),
+        (_, Some(min_x), Some(max_x), Some(min_y), Some(max_y)) => Ok(Viewport {
             x: min_x,
             y: min_y,
             width: (max_x - min_x).max(1.0),
@@ -126,18 +91,15 @@ pub fn bounds(conn: &DatabaseConnection) -> Result<Viewport, String> {
 /// The minimap's read: a deterministic, capped sample of card rectangles and
 /// the document revision, for bounds the caller already read (and cached).
 pub fn overview(conn: &DatabaseConnection, bounds: Viewport) -> Result<Overview, String> {
-    let rev = document::current_rev(conn).map_err(|error| error.to_string())?;
-    let total = nodes::Entity::find()
-        .filter(nodes::Column::DocumentId.eq(DOCUMENT_ID))
-        .count(conn)
-        .map_err(|error| error.to_string())?;
+    let document = document::current(conn).map_err(|error| error.to_string())?;
+    let total = std::cmp::Ord::max(document.node_count, 0) as u64;
     let cards = if bounds.width > 0.0 && bounds.height > 0.0 {
         viewport::overview_cards(conn, total, OVERVIEW_LIMIT)?
     } else {
         Vec::new()
     };
     Ok(Overview {
-        rev: rev as f64,
+        rev: document.rev as f64,
         bounds,
         cards,
     })
@@ -159,7 +121,6 @@ fn edges_for_scene(
         let ids: Vec<String> = nodes.iter().map(|node| node.id.clone()).collect();
         for chunk in ids.chunks(EDGE_CHUNK) {
             let rows = edges::Entity::find()
-                .filter(edges::Column::DocumentId.eq(DOCUMENT_ID))
                 .filter(
                     Condition::any()
                         .add(edges::Column::FromId.is_in(chunk.to_vec()))
@@ -216,7 +177,6 @@ fn edges_for_scene(
                 (nodes::Entity, nodes::Column::Width),
             ])
             .from(nodes::Entity)
-            .and_where(Expr::col((nodes::Entity, nodes::Column::DocumentId)).eq(DOCUMENT_ID))
             .and_where(Expr::col((nodes::Entity, nodes::Column::Id)).is_in(chunk.to_vec()));
         let rows = conn
             .query_all(&statement)

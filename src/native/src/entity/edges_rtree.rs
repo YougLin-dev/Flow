@@ -1,8 +1,9 @@
 use sea_orm::entity::prelude::*;
 
-/// The RTree view of a connector's world-space curve bounds. Its `id` is the
-/// edge's SQLite rowid: `edges.id` is a string, and an RTree key must be an
-/// integer. See `edge_index.rs` for the bounds and their maintenance.
+/// The RTree view of a connector's world-space curve bounds. Its `id` is
+/// `edges.seq`. The v1 triggers write the row when the edge or its endpoints
+/// change; `edge_index::flush_geometry_tx` rebuilds the rows of edges whose
+/// endpoint node moved. The entity is read-only for the app.
 #[derive(Clone, Debug, PartialEq, DeriveEntityModel)]
 #[sea_orm(table_name = "edges_rtree")]
 pub struct Model {

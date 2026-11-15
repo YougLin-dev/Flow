@@ -1,5 +1,8 @@
 use sea_orm::entity::prelude::*;
 
+/// Metadata for content-addressed bytes under the package's `assets/`
+/// directory. The first writer of a hash wins; result items and local inputs
+/// reference the row by `id`.
 #[derive(Clone, Debug, PartialEq, DeriveEntityModel)]
 #[sea_orm(table_name = "assets")]
 pub struct Model {
@@ -17,13 +20,21 @@ pub struct Model {
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
 pub enum Relation {
-    #[sea_orm(has_many = "super::node_assets::Entity")]
-    Nodes,
+    #[sea_orm(has_many = "super::result_items::Entity")]
+    ResultItems,
+    #[sea_orm(has_many = "super::node_inputs::Entity")]
+    NodeInputs,
 }
 
-impl Related<super::node_assets::Entity> for Entity {
+impl Related<super::result_items::Entity> for Entity {
     fn to() -> RelationDef {
-        Relation::Nodes.def()
+        Relation::ResultItems.def()
+    }
+}
+
+impl Related<super::node_inputs::Entity> for Entity {
+    fn to() -> RelationDef {
+        Relation::NodeInputs.def()
     }
 }
 

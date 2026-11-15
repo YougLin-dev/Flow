@@ -3,15 +3,12 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use sea_orm::sea_query::{
-    Alias, Expr, ExprTrait, Func, Order, Query, SelectStatement, WindowStatement,
-};
+use sea_orm::sea_query::{Alias, Expr, ExprTrait, Order, Query, SelectStatement, WindowStatement};
 use sea_orm::{
     ColumnTrait, ConnectionTrait, DatabaseConnection, EntityTrait, FromQueryResult, QueryFilter,
     QueryOrder, QuerySelect,
 };
 
-use crate::constants::DOCUMENT_ID;
 use crate::entity::{assets, edges, node_inputs, nodes, result_batches, result_items};
 use crate::types::{
     AssetSummary, InputItemSummary, NodeDetail, NodePreview, NodeSummary, PortIncoming,
@@ -59,7 +56,6 @@ pub fn node_detail(conn: &DatabaseConnection, id: &str) -> Result<Option<NodeDet
 /// is edge-based, so this stays right when a source has produced no items.
 fn read_incoming(conn: &DatabaseConnection, node_id: &str) -> Result<Vec<PortIncoming>, String> {
     let rows = edges::Entity::find()
-        .filter(edges::Column::DocumentId.eq(DOCUMENT_ID))
         .filter(edges::Column::ToId.eq(node_id))
         .all(conn)
         .map_err(|error| error.to_string())?;
@@ -83,7 +79,6 @@ pub fn previews(conn: &DatabaseConnection, ids: Vec<String>) -> Result<Vec<NodeP
         // The projection stops at the two fields previews use, instead of
         // deserializing a whole node row for every card.
         let nodes = nodes::Entity::find()
-            .filter(nodes::Column::DocumentId.eq(DOCUMENT_ID))
             .filter(nodes::Column::Id.is_in(chunk.to_vec()))
             .select_only()
             .columns([nodes::Column::Id, nodes::Column::OutputBatchId])
@@ -206,22 +201,19 @@ fn read_preview_items(
 }
 
 /// The exact count of every requested batch, including the items the preview
-/// query deliberately leaves out.
+/// query deliberately leaves out. The v1 triggers derive `item_count` from
+/// the batch's items, so this is one narrow read per chunk.
 fn read_preview_counts(
     conn: &DatabaseConnection,
     batch_ids: &[String],
 ) -> Result<BTreeMap<String, usize>, String> {
     let mut counts = BTreeMap::new();
     for chunk in batch_ids.chunks(CHUNK) {
-        let rows = result_items::Entity::find()
-            .filter(result_items::Column::BatchId.is_in(chunk.to_vec()))
+        let rows = result_batches::Entity::find()
+            .filter(result_batches::Column::Id.is_in(chunk.to_vec()))
             .select_only()
-            .column(result_items::Column::BatchId)
-            .expr_as(
-                Func::count(Expr::col(result_items::Column::Id)),
-                "item_count",
-            )
-            .group_by(result_items::Column::BatchId)
+            .column_as(result_batches::Column::Id, "batch_id")
+            .column(result_batches::Column::ItemCount)
             .into_model::<PreviewCountRow>()
             .all(conn)
             .map_err(|error| error.to_string())?;
@@ -240,7 +232,6 @@ pub(crate) fn preview_items_statement(batch_ids: &[String]) -> SelectStatement {
 fn find_node(conn: &DatabaseConnection, id: &str) -> Result<Option<nodes::Model>, String> {
     nodes::Entity::find()
         .filter(nodes::Column::Id.eq(id))
-        .filter(nodes::Column::DocumentId.eq(DOCUMENT_ID))
         .one(conn)
         .map_err(|error| error.to_string())
 }
@@ -249,7 +240,8 @@ fn read_batch(
     conn: &DatabaseConnection,
     batch_id: &str,
 ) -> Result<Option<ResultBatchSummary>, String> {
-    let Some(batch) = result_batches::Entity::find_by_id(batch_id.to_owned())
+    let Some(batch) = result_batches::Entity::find()
+        .filter(result_batches::Column::Id.eq(batch_id))
         .one(conn)
         .map_err(|error| error.to_string())?
     else {
@@ -257,6 +249,7 @@ fn read_batch(
     };
     let items = result_items::Entity::find()
         .filter(result_items::Column::BatchId.eq(batch_id))
+        .order_by_asc(result_items::Column::PortId)
         .order_by_asc(result_items::Column::Position)
         .order_by_asc(result_items::Column::Id)
         .all(conn)
@@ -283,6 +276,7 @@ fn read_batch(
 fn read_inputs(conn: &DatabaseConnection, node_id: &str) -> Result<Vec<InputItemSummary>, String> {
     let rows = node_inputs::Entity::find()
         .filter(node_inputs::Column::NodeId.eq(node_id))
+        .order_by_asc(node_inputs::Column::PortId)
         .order_by_asc(node_inputs::Column::Position)
         .order_by_asc(node_inputs::Column::Id)
         .all(conn)
@@ -355,8 +349,7 @@ fn read_latest_batch(
 ) -> Result<Option<ResultBatchSummary>, String> {
     let Some(batch) = result_batches::Entity::find()
         .filter(result_batches::Column::NodeId.eq(node_id))
-        .order_by_desc(result_batches::Column::CreatedAt)
-        .order_by_desc(result_batches::Column::Id)
+        .order_by_desc(result_batches::Column::Seq)
         .one(conn)
         .map_err(|error| error.to_string())?
     else {
@@ -438,7 +431,6 @@ pub(crate) fn previews_reference(
     let mut found = Vec::new();
     for chunk in ids.chunks(CHUNK) {
         let nodes = nodes::Entity::find()
-            .filter(nodes::Column::DocumentId.eq(DOCUMENT_ID))
             .filter(nodes::Column::Id.is_in(chunk.to_vec()))
             .all(conn)
             .map_err(|error| error.to_string())?;

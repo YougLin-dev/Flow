@@ -3,22 +3,21 @@
 //! SQLite virtual tables have no ORM schema, so this module is the edge
 //! index's adapter. A scene read uses it to find a connector whose curve
 //! crosses the viewport while both of its cards are outside the node read.
-//! The box mirrors the v1 `edge_boxes` view and the canvas connector box: it
-//! moves the edge DTO's card-edge points to the port centres
-//! (`PORT_CENTER_GAP` 14), encloses the cubic's control points with the
-//! 60–260 reach, and adds `EDGE_PADDING` 4 for the stroke; every edge or
-//! node write that changes it refreshes the row in the same transaction.
+//! The box mirrors the canvas connector box: it moves the edge DTO's
+//! card-edge points to the port centres (`PORT_CENTER_GAP` 14), encloses the
+//! cubic's control points with the 60–260 reach, and adds `EDGE_PADDING` 4
+//! for the stroke.
+//!
+//! The frozen v1 schema owns the rows: triggers fill and refresh an edge's
+//! box from the `edge_boxes` view when the edge changes, and record a moved
+//! node in `nodes_geometry_dirty`. `flush_geometry_tx` rebuilds the boxes of
+//! every connector touching a moved node once per command, then clears the
+//! marker table. No app write touches `edges_rtree` directly.
 
-use std::collections::{BTreeMap, BTreeSet, HashMap};
+use sea_orm::sea_query::{Expr, ExprTrait, Order, Query, SelectStatement};
+use sea_orm::{ConnectionTrait, DbErr, FromQueryResult};
 
-use sea_orm::sea_query::{Condition, Expr, ExprTrait, Order, Query, SelectStatement, Value};
-use sea_orm::{
-    ColumnTrait, ConnectionTrait, DbBackend, DbErr, EntityTrait, FromQueryResult, QueryFilter, Set,
-    Statement,
-};
-
-use crate::constants::DOCUMENT_ID;
-use crate::entity::{edges, edges_rtree, nodes};
+use crate::entity::edges;
 use crate::types::{EdgePoint, Viewport};
 
 /// How far outside a card's border its port icon's centre sits. Mirrors
@@ -31,7 +30,10 @@ pub const EDGE_PADDING: f64 = 4.0;
 /// The world box around a connector's whole cubic: `(min_x, max_x, min_y,
 /// max_y)`. `from` and `to` are the card-edge points carried by the edge
 /// DTO; the box shifts them to the port icons' centres and adds the stroke
-/// padding, exactly like the v1 `edge_boxes` view.
+/// padding, exactly like the v1 `edge_boxes` view. The app never computes an
+/// edge box in Rust now that the triggers own the index; this is the oracle
+/// the frozen SQL and the TSX geometry are tested against.
+#[cfg_attr(not(test), allow(dead_code))]
 pub fn connection_bounds(from: EdgePoint, to: EdgePoint) -> (f64, f64, f64, f64) {
     let from_x = from.x + PORT_CENTER_GAP;
     let to_x = to.x - PORT_CENTER_GAP;
@@ -75,8 +77,8 @@ pub(crate) fn viewport_statement(rect: &Viewport, margin: f64) -> SelectStatemen
     let mut statement = Query::select();
     statement
         .columns([
+            (edges::Entity, edges::Column::Seq),
             (edges::Entity, edges::Column::Id),
-            (edges::Entity, edges::Column::DocumentId),
             (edges::Entity, edges::Column::FromId),
             (edges::Entity, edges::Column::ToId),
             (edges::Entity, edges::Column::FromPort),
@@ -87,263 +89,66 @@ pub(crate) fn viewport_statement(rect: &Viewport, margin: f64) -> SelectStatemen
             (edges::Entity, edges::Column::Kind),
             (edges::Entity, edges::Column::DataJson),
         ])
-        .from(edges_rtree::Entity)
+        .from(crate::entity::edges_rtree::Entity)
         .cross_join(edges::Entity)
-        // `edges.id` is a string; the RTree key is the edge's rowid.
-        .and_where(Expr::cust("edges.rowid = edges_rtree.id"))
-        .and_where(Expr::col((edges_rtree::Entity, edges_rtree::Column::MaxX)).gte(min_x))
-        .and_where(Expr::col((edges_rtree::Entity, edges_rtree::Column::MinX)).lte(max_x))
-        .and_where(Expr::col((edges_rtree::Entity, edges_rtree::Column::MaxY)).gte(min_y))
-        .and_where(Expr::col((edges_rtree::Entity, edges_rtree::Column::MinY)).lte(max_y))
-        .and_where(Expr::col((edges::Entity, edges::Column::DocumentId)).eq(DOCUMENT_ID))
+        // Both keys are the edge's insertion sequence in v1.
+        .and_where(Expr::col((edges::Entity, edges::Column::Seq)).equals((
+            crate::entity::edges_rtree::Entity,
+            crate::entity::edges_rtree::Column::Id,
+        )))
+        .and_where(
+            Expr::col((
+                crate::entity::edges_rtree::Entity,
+                crate::entity::edges_rtree::Column::MaxX,
+            ))
+            .gte(min_x),
+        )
+        .and_where(
+            Expr::col((
+                crate::entity::edges_rtree::Entity,
+                crate::entity::edges_rtree::Column::MinX,
+            ))
+            .lte(max_x),
+        )
+        .and_where(
+            Expr::col((
+                crate::entity::edges_rtree::Entity,
+                crate::entity::edges_rtree::Column::MaxY,
+            ))
+            .gte(min_y),
+        )
+        .and_where(
+            Expr::col((
+                crate::entity::edges_rtree::Entity,
+                crate::entity::edges_rtree::Column::MinY,
+            ))
+            .lte(max_y),
+        )
         .order_by((edges::Entity, edges::Column::Id), Order::Asc);
 
     statement
 }
 
-/// Recomputes one connector's box from its current endpoints. An edge whose
-/// endpoint rows are missing loses its index row instead of keeping a stale
-/// box; the endpoint rows can only be missing mid-undo, and the restore of
-/// the node refreshes the edge again.
-pub fn sync_edge(conn: &impl ConnectionTrait, edge_id: &str) -> Result<(), DbErr> {
-    let Some(edge) = find_edge(conn, edge_id)? else {
-        return remove_edge(conn, edge_id);
-    };
-    match (
-        find_node(conn, &edge.from_id)?,
-        find_node(conn, &edge.to_id)?,
-    ) {
-        (Some(from), Some(to)) => write_bounds(conn, &edge, &from, &to),
-        _ => remove_edge(conn, edge_id),
-    }
-}
-
-/// Recomputes every connector that touches a node after its geometry moved
-/// or resized.
-pub fn sync_node_edges(conn: &impl ConnectionTrait, node_id: &str) -> Result<(), DbErr> {
-    let Some(node) = find_node(conn, node_id)? else {
-        return Ok(());
-    };
-    let rows = edges::Entity::find()
-        .filter(edges::Column::DocumentId.eq(DOCUMENT_ID))
-        .filter(
-            Condition::any()
-                .add(edges::Column::FromId.eq(node_id))
-                .add(edges::Column::ToId.eq(node_id)),
-        )
-        .all(conn)?;
-    for edge in rows {
-        let from = if edge.from_id == node_id {
-            Some(node.clone())
-        } else {
-            find_node(conn, &edge.from_id)?
-        };
-        let to = if edge.to_id == node_id {
-            Some(node.clone())
-        } else {
-            find_node(conn, &edge.to_id)?
-        };
-        match (from, to) {
-            (Some(from), Some(to)) => write_bounds(conn, &edge, &from, &to)?,
-            _ => remove_edge(conn, &edge.id)?,
-        }
-    }
+/// Rebuilds the connector boxes of every edge touching a moved or resized
+/// node and clears the markers. Runs once per command transaction; with no
+/// dirty nodes it is three cheap statements.
+pub fn flush_geometry_tx(txn: &impl ConnectionTrait) -> Result<(), DbErr> {
+    txn.execute_unprepared(
+        "DELETE FROM edges_rtree \
+         WHERE id IN (SELECT e.seq FROM edges AS e \
+                      JOIN nodes_geometry_dirty AS d \
+                        ON d.node_id = e.from_id OR d.node_id = e.to_id)",
+    )?;
+    txn.execute_unprepared(
+        "INSERT INTO edges_rtree (id, min_x, max_x, min_y, max_y) \
+         SELECT b.id, b.min_x, b.max_x, b.min_y, b.max_y \
+           FROM edge_boxes AS b \
+          WHERE b.id IN (SELECT e.seq FROM edges AS e \
+                         JOIN nodes_geometry_dirty AS d \
+                           ON d.node_id = e.from_id OR d.node_id = e.to_id)",
+    )?;
+    txn.execute_unprepared("DELETE FROM nodes_geometry_dirty")?;
     Ok(())
-}
-
-/// Recomputes every connector touching any of the moved nodes after a batched
-/// geometry write. The union of incident edges is loaded once per chunk, and
-/// the far endpoints that were not moved are resolved with one chunked `IN`
-/// query, so a connector whose two cards both moved is written exactly once.
-pub fn sync_edges_for_nodes(
-    conn: &impl ConnectionTrait,
-    nodes_by_id: &HashMap<String, nodes::Model>,
-) -> Result<(), DbErr> {
-    if nodes_by_id.is_empty() {
-        return Ok(());
-    }
-
-    let ids: Vec<String> = nodes_by_id.keys().cloned().collect();
-    let mut edges_by_id: BTreeMap<String, edges::Model> = BTreeMap::new();
-    for chunk in ids.chunks(400) {
-        let in_chunk = chunk.to_vec();
-        let rows = edges::Entity::find()
-            .filter(edges::Column::DocumentId.eq(DOCUMENT_ID))
-            .filter(
-                Condition::any()
-                    .add(edges::Column::FromId.is_in(in_chunk.clone()))
-                    .add(edges::Column::ToId.is_in(in_chunk)),
-            )
-            .all(conn)?;
-        for edge in rows {
-            edges_by_id.insert(edge.id.clone(), edge);
-        }
-    }
-
-    let mut far_ids: BTreeSet<String> = BTreeSet::new();
-    for edge in edges_by_id.values() {
-        if !nodes_by_id.contains_key(&edge.from_id) {
-            far_ids.insert(edge.from_id.clone());
-        }
-        if !nodes_by_id.contains_key(&edge.to_id) {
-            far_ids.insert(edge.to_id.clone());
-        }
-    }
-    let far_ids: Vec<String> = far_ids.into_iter().collect();
-    let mut far_by_id: HashMap<String, nodes::Model> = HashMap::new();
-    for chunk in far_ids.chunks(400) {
-        let rows = nodes::Entity::find()
-            .filter(nodes::Column::DocumentId.eq(DOCUMENT_ID))
-            .filter(nodes::Column::Id.is_in(chunk.to_vec()))
-            .all(conn)?;
-        for node in rows {
-            far_by_id.insert(node.id.clone(), node);
-        }
-    }
-
-    for edge in edges_by_id.values() {
-        let from = nodes_by_id
-            .get(&edge.from_id)
-            .or_else(|| far_by_id.get(&edge.from_id));
-        let to = nodes_by_id
-            .get(&edge.to_id)
-            .or_else(|| far_by_id.get(&edge.to_id));
-        match (from, to) {
-            (Some(from), Some(to)) => write_bounds(conn, edge, from, to)?,
-            _ => remove_edge(conn, &edge.id)?,
-        }
-    }
-    Ok(())
-}
-
-/// Drops one edge's index row. Call it before the edge row itself goes.
-pub fn remove_edge(conn: &impl ConnectionTrait, edge_id: &str) -> Result<(), DbErr> {
-    conn.execute_raw(Statement::from_sql_and_values(
-        DbBackend::Sqlite,
-        "DELETE FROM edges_rtree WHERE id IN (SELECT rowid FROM edges WHERE id = ?)",
-        [Value::from(edge_id)],
-    ))?;
-    Ok(())
-}
-
-/// Drops the index rows of every edge touching a node. Call it before the
-/// node row goes, while the cascade has not removed the edges yet.
-pub fn remove_node_edges(conn: &impl ConnectionTrait, node_id: &str) -> Result<(), DbErr> {
-    conn.execute_raw(Statement::from_sql_and_values(
-        DbBackend::Sqlite,
-        "DELETE FROM edges_rtree WHERE id IN \
-         (SELECT rowid FROM edges WHERE from_id = ? OR to_id = ?)",
-        [Value::from(node_id), Value::from(node_id)],
-    ))?;
-    Ok(())
-}
-
-fn write_bounds(
-    conn: &impl ConnectionTrait,
-    edge: &edges::Model,
-    from: &nodes::Model,
-    to: &nodes::Model,
-) -> Result<(), DbErr> {
-    let Some(rowid) = edge_rowid(conn, &edge.id)? else {
-        return Ok(());
-    };
-    let (min_x, max_x, min_y, max_y) = connection_bounds(
-        EdgePoint::output(from.x, from.y, from.width, edge.from_offset),
-        EdgePoint::input(to.x, to.y, edge.to_offset),
-    );
-    edges_rtree::Entity::delete_by_id(rowid).exec(conn)?;
-    edges_rtree::Entity::insert(edges_rtree::ActiveModel {
-        id: Set(rowid),
-        min_x: Set(min_x),
-        max_x: Set(max_x),
-        min_y: Set(min_y),
-        max_y: Set(max_y),
-    })
-    .exec(conn)?;
-    Ok(())
-}
-
-fn find_node(conn: &impl ConnectionTrait, id: &str) -> Result<Option<nodes::Model>, DbErr> {
-    nodes::Entity::find()
-        .filter(nodes::Column::Id.eq(id))
-        .filter(nodes::Column::DocumentId.eq(DOCUMENT_ID))
-        .one(conn)
-}
-
-fn find_edge(conn: &impl ConnectionTrait, id: &str) -> Result<Option<edges::Model>, DbErr> {
-    edges::Entity::find_by_id(id.to_owned())
-        .filter(edges::Column::DocumentId.eq(DOCUMENT_ID))
-        .one(conn)
-}
-
-fn edge_rowid(conn: &impl ConnectionTrait, id: &str) -> Result<Option<i64>, DbErr> {
-    let statement = Statement::from_sql_and_values(
-        DbBackend::Sqlite,
-        "SELECT rowid AS seq FROM edges WHERE id = ?",
-        [Value::from(id)],
-    );
-    conn.query_one_raw(statement)?
-        .map(|row| row.try_get::<i64>("", "seq"))
-        .transpose()
-}
-
-/// Fills the index from the edge and node tables. Runs once when migration 3
-/// lands and is idempotent: a rebuild replaces every row. A database older
-/// than the typed-port schema has no port-offset columns yet; migration 5
-/// resets it right after, so there is nothing to index there.
-pub fn backfill(conn: &impl ConnectionTrait) -> Result<(), DbErr> {
-    conn.execute_unprepared("DELETE FROM edges_rtree")?;
-    if !has_column(conn, "edges", "from_offset")? {
-        return Ok(());
-    }
-    let statement = Statement::from_string(
-        DbBackend::Sqlite,
-        "SELECT edges.rowid AS seq, \
-                f.x AS from_x, f.y AS from_y, f.width AS from_width, \
-                edges.from_offset AS from_offset, \
-                t.x AS to_x, t.y AS to_y, edges.to_offset AS to_offset \
-         FROM edges \
-         JOIN nodes AS f ON f.id = edges.from_id \
-         JOIN nodes AS t ON t.id = edges.to_id"
-            .to_owned(),
-    );
-    for row in conn.query_all_raw(statement)? {
-        let seq: i64 = row.try_get("", "seq")?;
-        let (min_x, max_x, min_y, max_y) = connection_bounds(
-            EdgePoint::output(
-                row.try_get("", "from_x")?,
-                row.try_get("", "from_y")?,
-                row.try_get("", "from_width")?,
-                row.try_get("", "from_offset")?,
-            ),
-            EdgePoint::input(
-                row.try_get("", "to_x")?,
-                row.try_get("", "to_y")?,
-                row.try_get("", "to_offset")?,
-            ),
-        );
-        edges_rtree::Entity::insert(edges_rtree::ActiveModel {
-            id: Set(seq),
-            min_x: Set(min_x),
-            max_x: Set(max_x),
-            min_y: Set(min_y),
-            max_y: Set(max_y),
-        })
-        .exec(conn)?;
-    }
-    Ok(())
-}
-
-/// Whether `table` has a column named `column` (SQLite's `PRAGMA table_info`).
-fn has_column(conn: &impl ConnectionTrait, table: &str, column: &str) -> Result<bool, DbErr> {
-    let statement =
-        Statement::from_string(DbBackend::Sqlite, format!("PRAGMA table_info({table})"));
-    for row in conn.query_all_raw(statement)? {
-        if row.try_get::<String>("", "name")? == column {
-            return Ok(true);
-        }
-    }
-    Ok(false)
 }
 
 #[cfg(test)]
@@ -364,7 +169,7 @@ mod tests {
         )
         .to_string(SqliteQueryBuilder);
         assert!(sql.contains("FROM \"edges_rtree\" CROSS JOIN \"edges\""));
-        assert!(sql.contains("edges.rowid = edges_rtree.id"));
+        assert!(sql.contains("\"edges\".\"seq\" = \"edges_rtree\".\"id\""));
     }
 
     #[test]

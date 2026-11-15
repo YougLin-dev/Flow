@@ -1,5 +1,30 @@
 use nsh_core::prelude::*;
 
+/// The identity, saved camera and derived counters of the open project
+/// package. `project_id` is minted once and never changes.
+#[derive(Debug, Clone, PartialEq, JsObject)]
+pub struct ProjectInfo {
+    pub project_id: String,
+    pub title: String,
+    pub camera_x: f64,
+    pub camera_y: f64,
+    pub camera_zoom: f64,
+    pub node_count: f64,
+    pub edge_count: f64,
+    pub demo_seeded: bool,
+}
+
+/// One transactional demo seed: the cards, the optional manual text result
+/// they start with, and the edges between them. The document refuses it once
+/// it has seeded or holds any node.
+#[derive(Debug, Clone, PartialEq, JsObject)]
+pub struct SeedDocumentInput {
+    pub nodes: Vec<NodeInput>,
+    pub edges: Vec<EdgeInput>,
+    pub batch: Option<ResultBatchInput>,
+    pub item: Option<ResultItemInput>,
+}
+
 /// A world-space rectangle used to query the canvas viewport.
 #[derive(Debug, Clone, PartialEq, JsObject)]
 pub struct Viewport {
@@ -190,7 +215,7 @@ pub struct ResultBatchSummary {
     pub model: String,
     pub params_json: String,
     pub status: String,
-    pub error: String,
+    pub error: Option<String>,
     pub created_at: f64,
     pub items: Vec<ResultItemSummary>,
 }
