@@ -971,7 +971,7 @@ Close or `close()` the document, or run `PRAGMA wal_checkpoint(TRUNCATE)`. Copy 
 
 ### 9.7 Benchmark and smoke contract
 
-Keep the exact cargo filter `db::tests::seed_benchmark_database` and `FLOW_BENCH_DB` (`scripts/smoke-100k.mjs:37-52`); keep deleting db/-wal/-shm and add the project assets directory. Bump `FIXTURE_VERSION` whenever geometry/status/batch shape changes; the docs currently say `100k-grid-edges-images-v1` while `db.rs:3761` says `v2-typed-ports`, so re-baseline `docs/testing.md` and `docs/plans/rust-core.md` together. The seeder must insert batches as `running`, insert items, then settle; image items need assets. Update the stale smoke waits to enable `flowZoomProbe`/`flowSelectionProbe` and read `id:zoom-probe`/`id:canvas-probe` (`scripts/smoke-100k.mjs:58-93`; `src/pages/flow/FlowPage.tsx:96-101`).
+Keep the exact cargo filter `db::tests::seed_benchmark_database` and `FLOW_BENCH_DB` (`scripts/smoke-100k.mjs:37-52`); the smoke now deletes the db/-wal/-shm and the package assets directory before re-seeding. `FIXTURE_VERSION` is `100k-grid-edges-images-v2-typed-ports`; `docs/testing.md` and `docs/plans/rust-core.md` are re-baselined to it together. The seeder inserts batches as `running`, inserts items, then settles; image items have assets. The smoke runs `src/Smoke100k.host.test.tsx`, which opens with `flowZoomProbe`/`flowSelectionProbe` and waits on `id:zoom-probe`/`id:canvas-probe` state instead of painted text or fixed sleeps; every other test run skips it on the bench-path gate.
 
 ## 10. SeaORM entity/module mapping
 

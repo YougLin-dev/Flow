@@ -39,14 +39,15 @@ cargo test --manifest-path src/native/Cargo.toml --release \
   db::tests::hundred_thousand_nodes_benchmark -- --ignored --nocapture --test-threads=1
 ```
 
-The `100k-grid-edges-images-v1` fixture is file-backed and builds 100,000 grid
-nodes, 99,000 within-row connectors, and 2,000 image nodes with four-item
-image batches linked to real PNG assets. It prints avg/p95/max with row counts
-for Fit, 0.15 and 0.40 scene reads (nodes and edges), previews, public
-1,000-node set/undo/redo cycles, open/migrate plus recovery, and the common
-and CJK searches. It asserts counts, geometry and stable row shapes, never
-timings. The measured table, with its machine and build provenance, is in
-[`plans/rust-core.md`](plans/rust-core.md#full-fixture-100k-grid-edges-images-v1).
+The `100k-grid-edges-images-v2-typed-ports` fixture is file-backed and builds
+100,000 grid nodes, 99,000 within-row connectors, and 2,000 image nodes with
+four-item image batches linked to real PNG assets. It prints avg/p95/max with
+row counts for Fit, 0.15 and 0.40 scene reads (nodes and edges), previews,
+public 1,000-node set/undo/redo cycles, open/migrate plus recovery, the common
+and CJK searches, and the `gc`/`compactBounds` maintenance commands. It
+asserts counts, geometry and stable row shapes, never timings. The measured
+table, with its machine and build provenance, is in
+[`plans/rust-core.md`](plans/rust-core.md#v1-core-fixture-100k-grid-edges-images-v2-typed-ports).
 
 Test paths below are relative to `src/` unless stated otherwise.
 
@@ -67,25 +68,30 @@ in the fast gate; the host run only repeats the platform-sensitive checks.
 Pure unit tests are never sent to the host: they cannot observe a platform
 difference, so a second run there would only cost time.
 
-`bun run test:100k` is a real-host smoke, not part of `bun run test`: an
-ignored Rust seed writes the same 100,000-node / 99,000-edge text graph as the
-release benchmark's `100k-grid-edges-images-v1` fixture into
+`bun run test:100k` is a real-host smoke, not part of `bun run test`: the
+script deletes the package's `assets/` directory and an ignored Rust seed
+deletes the database files before writing the same 100,000-node /
+99,000-edge text graph as the release benchmark's
+`100k-grid-edges-images-v2-typed-ports` fixture into
 `.nsh/bench/flow-100k.db`, but deliberately leaves its 2,000 image nodes as
 text and stores no image batches. (At this commit image previews are data URLs
 that QuickJS and native `Image` decode; that separate cost would mask graph
 and canvas work. The Rust benchmark still reads the persisted image assets.)
-The smoke points the app at the database with `FLOW_DB_PATH`, then pans,
-zooms, searches for the last node, reveals and selects it, closes that card's
-composer, fits the document and saves screenshots (`flow-100k-reveal.png`,
-`flow-100k-overview.png`). It runs `nsh test` with `--target`, `--trace`,
-`--fps` and `--verbose`, so it emits timestamped `100k smoke marker:` phase
-lines, mount batches per step, engine `nsh::perf` records and `nsh::fps`
-monitor lines. That is a **development-host** profile, not the release Rust
-benchmark: it includes test-host setup and paint, and its wall times are
-observations, not thresholds. Review the screenshots manually and treat their
-artifacts as git-ignored evidence. At the Fit scale (~5%) each card is only a
-few pixels tall; the smoke checks the 6% overview instead. A minimum-size or
-cluster representation at very low zoom is still to be designed.
+The smoke points the app at the database with `FLOW_DB_PATH` and runs
+`src/Smoke100k.host.test.tsx` with `--target`, `--trace`, `--fps` and
+`--verbose`. The test opens with `flowZoomProbe`/`flowSelectionProbe`, then
+pans, zooms, searches for the last node, reveals and selects it, closes that
+card's composer, fits the document (5%), zooms once more and saves screenshots
+(`flow-100k-reveal.png`, `flow-100k-overview.png`). Every wait reads probe
+state, not painted text; every other `nsh test` run skips the test because
+the gate is the `flow-100k` bench path in `FLOW_DB_PATH`. That is a
+**development-host** profile, not the release Rust benchmark: it includes
+test-host setup and paint, and its wall times are observations, not
+thresholds. Review the screenshots manually and treat their artifacts as
+git-ignored evidence. At the Fit scale (~5%) each card is only a few pixels
+tall; the overview screenshot is taken after one more zoom step. A
+minimum-size or cluster representation at very low zoom is still to be
+designed.
 
 ## Measuring performance
 
@@ -174,9 +180,9 @@ response metrics:
   plus `fps shown/refresh` and `over`; do not infer smoothness from `fps`
   alone. Repeat while idle to measure baseline engine wakeups.
 - **Large document/low zoom**: run `bun run test:100k`, review its ignored
-  screenshots, and inspect the timestamped phases plus the pan, zoom,
-  search-reveal, Fit and trace/fps costs. Its database is the text-only
-  variant of the synthetic `100k-grid-edges-images-v1` fixture; the ignored
+  screenshots, and inspect the pan, zoom, search-reveal, Fit and trace/fps
+  costs. Its database is the text-only variant of the synthetic
+  `100k-grid-edges-images-v2-typed-ports` fixture; the ignored
   release Rust benchmark covers the image-rich file-backed variant. Record
   which fixture revision and host profile generated a run when comparing.
   Future benchmark additions are manual evidence, not CI timing gates.
@@ -421,7 +427,7 @@ easiest observable: it is `—` before the first fit and `<n>%` afterwards.
   filtering itself is asserted through the Rust search tests; the palette's arrow bindings are
   wired to the visible active row but are not asserted through the native view
   tree. The real-host 100k smoke exercises the camera reveal and records
-  timestamped phases plus trace/fps evidence.
+  trace/fps evidence.
 - `flow/nodes/node-kinds.ts` and `flow/canvas/geometry/connection.ts`: direct unit tests for settings
   parsing/clamping, connection rules, port points, sampled curves and hit
   distances.

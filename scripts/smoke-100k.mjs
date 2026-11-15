@@ -18,8 +18,8 @@
  * screenshots live under `.nsh/bench` and are not committed.
  */
 import { spawnSync } from "node:child_process";
-import { mkdirSync } from "node:fs";
-import { dirname, resolve } from "node:path";
+import { mkdirSync, rmSync } from "node:fs";
+import { dirname, join, resolve } from "node:path";
 
 const targets = { win32: "windows", darwin: "macos", linux: "linux" };
 const target = targets[process.platform];
@@ -29,9 +29,10 @@ if (!target) {
 }
 
 const dbPath = resolve(".nsh/bench/flow-100k.db");
-const revealPath = resolve(".nsh/bench/flow-100k-reveal.png");
-const overviewPath = resolve(".nsh/bench/flow-100k-overview.png");
 mkdirSync(dirname(dbPath), { recursive: true });
+// The fixture is a package: the database and its asset directory. A stale
+// assets tree from an older fixture version would be read by the new rows.
+rmSync(join(dirname(dbPath), "assets"), { recursive: true, force: true });
 
 const seedStarted = Date.now();
 const seed = spawnSync(
@@ -55,50 +56,11 @@ console.log(
   "100k smoke profile: release Rust fixture seed, then a development host via nsh test --target with --trace/--fps/--verbose; these are not release-host timings",
 );
 
-const steps = `
-console.log("100k smoke marker: start at=" + Date.now())
-await app.waitUntil(() => app.texts().some((text) => /^[0-9]+%$/.test(text)), { timeout: 30000 })
-console.log("100k smoke marker: ready at=" + Date.now())
-for (let i = 0; i < 8; i += 1) await app.keyboard.press("right")
-for (let i = 0; i < 3; i += 1) await app.keyboard.press("up")
-console.log("100k smoke marker: after-pan at=" + Date.now())
-await app.keyboard.press("mod+=")
-await app.keyboard.press("mod+=")
-console.log("100k smoke marker: after-zoom at=" + Date.now())
-await app.keyboard.press("mod+k")
-await app.waitUntil(() => app.shows("id:search-input"), { timeout: 30000 })
-console.log("100k smoke marker: search-open at=" + Date.now())
-await app.type("id:search-input", "Node 99999")
-await app.waitUntil(() => app.shows("id:search-result-n99999"), { timeout: 60000 })
-console.log("100k smoke marker: search-typed at=" + Date.now())
-await app.submit("id:search-input")
-await app.waitUntil(() => app.texts().some((text) => text.includes("1 card selected")), { timeout: 60000 })
-console.log("100k smoke marker: search-revealed at=" + Date.now())
-await app.screenshot(${JSON.stringify(revealPath)})
-console.log("100k smoke marker: reveal-screenshot at=" + Date.now())
-await app.keyboard.press("escape")
-await app.waitUntil(() => app.texts().some((text) => text === "Fit"), { timeout: 30000 })
-console.log("100k smoke marker: composer-closed at=" + Date.now())
-await app.press("Fit")
-console.log("100k smoke zoom after Fit: " + app.texts().filter(t => /%$/.test(t)).join(","))
-await app.waitUntil(() => app.texts().some((text) => text === "5%"), { timeout: 60000 })
-await app.wait(250)
-await app.keyboard.press("mod+=")
-console.log("100k smoke zoom after mod+=: " + app.texts().filter(t => /%$/.test(t)).join(","))
-await app.waitUntil(() => app.texts().some((text) => text === "6%"), { timeout: 60000 })
-await app.wait(250)
-console.log("100k smoke marker: fit-overview at=" + Date.now())
-await app.screenshot(${JSON.stringify(overviewPath)})
-console.log("100k smoke marker: overview-screenshot at=" + Date.now())
-console.log("100k UI smoke passed:", app.texts().join(" | "))
-`;
-
 const result = spawnSync(
   "nsh",
-  ["test", "src/App.tsx", "--target", target, "--trace", "--fps", "--verbose"],
+  ["test", "src/Smoke100k.host.test.tsx", "--target", target, "--trace", "--fps", "--verbose"],
   {
-    input: steps,
-    stdio: ["pipe", "inherit", "inherit"],
+    stdio: "inherit",
     env: { ...process.env, FLOW_DB_PATH: dbPath },
   },
 );
