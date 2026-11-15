@@ -78,7 +78,8 @@ canvas stays in TSX and owns only the scene model and its views.
   frozen schema.
 - Ordinary tables are SeaORM entities; SeaQuery builds dynamic filters and
   joins. Only the FTS5/RTree virtual-table adapters (`schema/v1.sql`,
-  `search.rs`, `edge_index.rs`) contain static SQLite SQL.
+  `schema/maintenance.rs`, `search.rs`, `edge_index.rs`) contain static
+  SQLite SQL.
 - Database work runs on NSH's blocking pool, then through a handle to one
   dedicated database worker thread. That thread owns the connection, which
   keeps the single-writer design and avoids sending SeaORM's sync Rusqlite
@@ -95,16 +96,22 @@ canvas stays in TSX and owns only the scene model and its views.
   database: before the first launch of this build, delete `.nsh/dev/flow.db`
   (and its `-wal`/`-shm` files) and `.nsh/dev/assets`.
 - The package records its lifecycle. On quit the workspace stops in-flight
-  runs (their batches settle cancelled), saves the camera with `saveView`,
-  then calls `close()`: the WAL is checkpointed, `clean_shutdown` is set and
-  the file is released before the call resolves. `projectInfo` reports the
-  flag the package had before this open; a `false` (unclean) value schedules
-  `verify()` after the first scene read, while a new or cleanly closed
+  runs (their batches settle cancelled), then saves the camera and
+  checkpoints in one `closeWithView` job: the WAL is checkpointed,
+  `clean_shutdown` is set and the file is released before the call resolves.
+  A close requested while reads sit in the worker queue lets those reads
+  answer without touching SQLite, so a quit does not wait for stale work.
+  `projectInfo` reports the flag the package had before this open; a `false`
+  (unclean) value schedules `verify()` once the first scene read has settled
+  and the shell has been responsive briefly, while a new or cleanly closed
   package does no integrity scan. `verify()` runs SQLite's integrity and
   foreign-key checks, compares and rebuilds the FTS index and both RTrees
   when they drifted, flushes leftover connector markers and compacts the
-  document bounds. A saved camera is restored instead of fitting; only a
-  never-saved package has the `0, 0, 1` default.
+  document bounds; a failed verify leaves the package due for recovery even
+  after close. A saved camera is restored instead of fitting. The frozen
+  schema has no saved-view marker, so the `0, 0, 1` default is the
+  never-saved sentinel; a view saved at exactly that value is
+  indistinguishable and refits.
 - `FlowScene` is driven from `scene(rect, margin)` snapshots. Drag/resize,
   add, delete and connect each send one command; undo/redo return change sets.
   A card is stored as an axis-aligned world rectangle, so gestures commit a

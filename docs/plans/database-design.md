@@ -920,7 +920,7 @@ The project layer above the document core owns the managed projects root, the pr
 | matching `application_id`, `user_version` > 1                                                            | Refuse as newer                                                                                                 |
 | matching id, missing/invalid `document` row, `project_id`, camera, required tables/view/indexes/triggers | Refuse; suggest `verify()` or a project reset/deletion                                                          |
 
-`PRAGMA quick_check` is not on the open path. Open sets `document.clean_shutdown=0`; an explicit `close()` checkpoints WAL, sets it to 1 and closes. On the next open, a `0` schedules the post-open `verify()` job (quick_check, FTS/RTree checks, dirty flush, bounds compaction, GC). The 300 ms open budget is preserved; a normal clean open does no integrity scan.
+`PRAGMA quick_check` is not on the open path. Open sets `document.clean_shutdown=0`; an explicit `close()` (or `closeWithView`, which saves the camera in the same job) checkpoints WAL, sets it to 1 and closes. On the next open, a `0` schedules the post-open `verify()` job (quick_check, FTS/RTree checks, dirty flush, bounds compaction); GC remains a later maintenance step and does not run in this job yet. The 300 ms open budget is preserved; a normal clean open does no integrity scan.
 
 ### 9.2 Frozen migrations
 
