@@ -3,7 +3,6 @@ import { effect } from "nsh";
 import type { EdgeSummary, NodeSummary, SceneSnapshot } from "@flow/native";
 import type { BoxGeometry } from "../../../shared";
 import { FlowScene } from "./scene";
-import { portAt } from "./scene-ports";
 
 function node(id: string, x: number, y: number, overrides: Partial<NodeSummary> = {}): NodeSummary {
   return {
@@ -219,60 +218,6 @@ test("notifies geometry bindings when a change set moves a card", () => {
   expect(xs.at(-1)).toBe(90);
 });
 
-test("isSelected answers from the selection ranks", () => {
-  const scene = new FlowScene();
-  scene.apply(snapshot([node("a", 0, 0), node("b", 300, 0)]));
-
-  scene.select(["b", "a"]);
-  expect(scene.isSelected("a")).toBe(true);
-  expect(scene.isSelected("b")).toBe(true);
-  expect(scene.isSelected("c")).toBe(false);
-
-  scene.select([]);
-  expect(scene.isSelected("a")).toBe(false);
-  expect(scene.isSelected("b")).toBe(false);
-  scene.select(["missing-id"]);
-  expect(scene.isSelected("missing-id")).toBe(false);
-  expect(scene.selectedIds()).toEqual([]);
-});
-
-test("isSelected stays consistent through a snapshot that prunes the scene", () => {
-  const scene = new FlowScene();
-  scene.apply(snapshot([node("a", 0, 0), node("b", 300, 0)]));
-  scene.select(["a", "b"]);
-
-  scene.apply(snapshot([node("c", 600, 0)]));
-  expect(scene.isSelected("a")).toBe(true);
-  expect(scene.isSelected("b")).toBe(true);
-
-  scene.applyChangeSet({ changed: [], removed: ["a"], edgesChanged: [], edgesRemoved: [] });
-  expect(scene.isSelected("a")).toBe(false);
-  expect(scene.isSelected("b")).toBe(true);
-});
-
-test("selecting flips only the newly selected cards' keyed flags", () => {
-  const scene = new FlowScene();
-  scene.apply(snapshot([node("a", 0, 0), node("b", 300, 0), node("c", 600, 0)]));
-  const runs = { a: 0, b: 0, c: 0 };
-  effect(() => {
-    scene.isSelectedKeyed("a");
-    runs.a += 1;
-  });
-  effect(() => {
-    scene.isSelectedKeyed("b");
-    runs.b += 1;
-  });
-  effect(() => {
-    scene.isSelectedKeyed("c");
-    runs.c += 1;
-  });
-
-  scene.select(["a", "b"]);
-  expect(runs).toEqual({ a: 2, b: 2, c: 1 });
-  scene.select(["b"]);
-  expect(runs).toEqual({ a: 3, b: 2, c: 1 });
-});
-
 test("the connection target flag follows setConnectionTarget", () => {
   const scene = new FlowScene();
   scene.apply(snapshot([node("a", 0, 0), node("b", 300, 0)]));
@@ -293,94 +238,6 @@ test("the connection target flag follows setConnectionTarget", () => {
   expect([runsA, runsB]).toEqual([3, 2]);
   scene.setConnectionTarget(null);
   expect([runsA, runsB]).toEqual([3, 3]);
-});
-
-test("a change set that removes a card drops its keyed flags", () => {
-  const scene = new FlowScene();
-  scene.apply(snapshot([node("a", 0, 0)]));
-  scene.select(["a"]);
-  let runsA = 0;
-  let runsOther = 0;
-  effect(() => {
-    scene.isSelectedKeyed("a");
-    runsA += 1;
-  });
-  effect(() => {
-    scene.isSelectedKeyed("b");
-    runsOther += 1;
-  });
-
-  scene.applyChangeSet({ changed: [], removed: ["a"], edgesChanged: [], edgesRemoved: [] });
-  expect(scene.isSelectedKeyed("a")).toBe(false);
-  expect(runsA).toBe(2);
-  expect(runsOther).toBe(1);
-});
-
-test("selecting a card clears the selected edge", () => {
-  const scene = new FlowScene();
-  scene.apply(snapshot([node("a", 0, 0), node("b", 300, 0)], [edge("a-b", "a", "b")]));
-  scene.selectEdge("a-b");
-
-  scene.select(["a"]);
-  expect(scene.selectedEdge()).toBeNull();
-});
-
-test("selects, toggles and ignores unknown cards", () => {
-  const scene = new FlowScene();
-  scene.apply(snapshot([node("a", 0, 0), node("b", 300, 0)]));
-
-  scene.select(["a", "a", "ghost"]);
-  expect(scene.selectedIds()).toEqual(["a"]);
-
-  scene.toggleSelected("b");
-  expect(scene.selectedIds()).toEqual(["a", "b"]);
-  scene.toggleSelected("a");
-  expect(scene.selectedIds()).toEqual(["b"]);
-
-  scene.select([]);
-  expect(scene.selectedIds()).toEqual([]);
-});
-
-test("raises selected cards above unselected ones for drawing and hits", () => {
-  const scene = new FlowScene();
-  scene.apply(snapshot([node("a", 0, 0, { z: 5 }), node("b", 50, 40)]));
-
-  // The document z still decides between unselected cards.
-  expect(scene.nodeAt(60, 50)).toBe("a");
-  expect(scene.cardZ("a")).toBeGreaterThan(scene.cardZ("b"));
-
-  // Selecting b lifts it above every unselected card, whatever its z, and
-  // the frame's wash sits above the selected group.
-  scene.select(["b"]);
-  expect(scene.cardZ("b")).toBeGreaterThan(scene.cardZ("a"));
-  expect(scene.frameZ()).toBeGreaterThan(scene.cardZ("a"));
-  expect(scene.frameZ()).toBeGreaterThan(scene.cardZ("b"));
-  expect(scene.nodeAt(60, 50)).toBe("b");
-  // The frame's world bounds include the card's title row.
-  expect(scene.selectionBounds()).toEqual({ x: 50, y: 14, width: 200, height: 110 });
-
-  // The selected group stacks in selection order: the last one draws on top.
-  scene.select(["b", "a"]);
-  expect(scene.cardZ("a")).toBeGreaterThan(scene.cardZ("b"));
-  expect(scene.selectionBounds()).toEqual({ x: 0, y: -26, width: 250, height: 150 });
-  // Group ports sit above the frame; the preview stays above them.
-  expect(scene.selectionPortsZ()).toBeGreaterThan(scene.frameZ());
-  expect(scene.previewZ()).toBeGreaterThan(scene.selectionPortsZ());
-});
-
-test("raises a card in the same update as its selection", () => {
-  const scene = new FlowScene();
-  scene.apply(snapshot([node("a", 0, 0), node("b", 300, 0)]));
-
-  const zs: number[] = [];
-  effect(() => {
-    zs.push(scene.cardZ("b"));
-  });
-
-  scene.select(["b"]);
-  // The binding reading the depth sees the elevated value at once, without
-  // waiting for a later render to catch up with the selection.
-  expect(zs.at(-1)).toBeGreaterThan(scene.cardZ("a"));
 });
 
 test("keeps transient geometry ahead of the document until it is committed", () => {
@@ -499,63 +356,6 @@ test("a snapshot updates the selected edge and the lists in one round", () => {
   expect(runs).toBe(before + 1);
   expect(scene.selectedEdge()).toBeNull();
   expect(scene.edgeCount()).toBe(0);
-});
-
-test("finds ports, cards and connectors in world coordinates", () => {
-  const scene = new FlowScene();
-  scene.apply(snapshot([node("a", 0, 0), node("b", 300, 0)], [edge("a-b", "a", "b")]));
-
-  expect(portAt(scene, 214, 42)).toMatchObject({
-    nodeId: "a",
-    side: "out",
-    portId: "text",
-    portKind: "text",
-    offset: 42,
-    point: { x: 214, y: 42 },
-  });
-  expect(portAt(scene, 286, 28)).toMatchObject({
-    nodeId: "b",
-    side: "in",
-    portId: "prompt",
-    point: { x: 286, y: 28 },
-  });
-  expect(scene.nodeAt(100, 30)).toBe("a");
-  expect(scene.nodeAt(250, 30)).toBeNull();
-  expect(scene.edgeAt(250, 42)).toBe("a-b");
-  expect(scene.kindOf("a")).toBe("text");
-});
-
-test("the topmost card owns an overlapping port", () => {
-  const scene = new FlowScene();
-  scene.apply(snapshot([node("low", 0, 0, { z: 0 }), node("high", 0, 0, { z: 5 })]));
-
-  expect(portAt(scene, 214, 46)?.nodeId).toBe("high");
-});
-
-test("the nearest port wins when one card's reaches overlap", () => {
-  const scene = new FlowScene();
-  scene.apply(snapshot([node("a", 0, 0)], []));
-
-  // The prompt (28) and image references (56) centres are 28 apart; a point
-  // 6 from the prompt is inside both reaches, and must take the prompt even
-  // though the references port comes later in the schema.
-  expect(portAt(scene, -14, 34)?.portId).toBe("prompt");
-  expect(portAt(scene, -14, 50)?.portId).toBe("references");
-});
-
-test("a card under the pointer hides a lower card's port", () => {
-  const scene = new FlowScene();
-  scene.apply(snapshot([node("a", 0, 0), node("cover", 190, 0, { z: 5 })]));
-
-  // (204, 42) is on a's output port but the cover card is in front of it.
-  expect(portAt(scene, 204, 42)).toBeNull();
-});
-
-test("picks the topmost card under a point", () => {
-  const scene = new FlowScene();
-  scene.apply(snapshot([node("low", 0, 0, { z: 0 }), node("high", 40, 20, { z: 5 })]));
-
-  expect(scene.nodeAt(100, 50)).toBe("high");
 });
 
 test("previews only the cards in the scene", () => {

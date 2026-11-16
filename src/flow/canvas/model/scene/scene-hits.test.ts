@@ -7,6 +7,7 @@ import {
   EDGE_HIT_DISTANCE,
 } from "../../geometry/connection";
 import { FlowScene } from "./scene";
+import { portAt } from "./scene-ports";
 
 function node(id: string, x: number, y: number, overrides: Partial<NodeSummary> = {}): NodeSummary {
   return {
@@ -261,4 +262,61 @@ test("knows whether a pair is already connected", () => {
   scene.apply(snapshot([node("a", 0, 0), node("b", 300, 0)], [edge("a-b", "a", "b")]));
   expect(scene.hasEdge("a", "b")).toBe(true);
   expect(scene.hasEdge("b", "a")).toBe(false);
+});
+
+test("finds ports, cards and connectors in world coordinates", () => {
+  const scene = new FlowScene();
+  scene.apply(snapshot([node("a", 0, 0), node("b", 300, 0)], [edge("a-b", "a", "b")]));
+
+  expect(portAt(scene, 214, 42)).toMatchObject({
+    nodeId: "a",
+    side: "out",
+    portId: "text",
+    portKind: "text",
+    offset: 42,
+    point: { x: 214, y: 42 },
+  });
+  expect(portAt(scene, 286, 28)).toMatchObject({
+    nodeId: "b",
+    side: "in",
+    portId: "prompt",
+    point: { x: 286, y: 28 },
+  });
+  expect(scene.nodeAt(100, 30)).toBe("a");
+  expect(scene.nodeAt(250, 30)).toBeNull();
+  expect(scene.edgeAt(250, 42)).toBe("a-b");
+  expect(scene.kindOf("a")).toBe("text");
+});
+
+test("the topmost card owns an overlapping port", () => {
+  const scene = new FlowScene();
+  scene.apply(snapshot([node("low", 0, 0, { z: 0 }), node("high", 0, 0, { z: 5 })]));
+
+  expect(portAt(scene, 214, 46)?.nodeId).toBe("high");
+});
+
+test("the nearest port wins when one card's reaches overlap", () => {
+  const scene = new FlowScene();
+  scene.apply(snapshot([node("a", 0, 0)], []));
+
+  // The prompt (28) and image references (56) centres are 28 apart; a point
+  // 6 from the prompt is inside both reaches, and must take the prompt even
+  // though the references port comes later in the schema.
+  expect(portAt(scene, -14, 34)?.portId).toBe("prompt");
+  expect(portAt(scene, -14, 50)?.portId).toBe("references");
+});
+
+test("a card under the pointer hides a lower card's port", () => {
+  const scene = new FlowScene();
+  scene.apply(snapshot([node("a", 0, 0), node("cover", 190, 0, { z: 5 })]));
+
+  // (204, 42) is on a's output port but the cover card is in front of it.
+  expect(portAt(scene, 204, 42)).toBeNull();
+});
+
+test("picks the topmost card under a point", () => {
+  const scene = new FlowScene();
+  scene.apply(snapshot([node("low", 0, 0, { z: 0 }), node("high", 40, 20, { z: 5 })]));
+
+  expect(scene.nodeAt(100, 50)).toBe("high");
 });

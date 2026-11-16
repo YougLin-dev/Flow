@@ -8,7 +8,7 @@
   structure enforcement). Phase 6/7 were re-baselined on 2026-11-16 after the
   database v1 and project-layer work; §16.3 records the measurements and
   decisions. Phase 6 is done (2026-11-16, §16.4); Phase 7 runs in six review
-  batches, with 7-0 through 7-4 done.
+  batches, with 7-0 through 7-7 done.
 - **Scope:** `src/` (TSX app) and `src/native/` (Rust document core).
 - **Related:** [standards](../standards.md), [architecture](../architecture.md),
   [conventions](../conventions.md), [testing](../testing.md),
@@ -803,8 +803,10 @@ Rules that make this more than a diagram:
 `frame-surface.ts` and `record-equality.ts` currently import `FlowScene`
 from `scene.ts`, while `scene.ts` calls them. Introduce `SceneReader` in
 `scene-types.ts` (the read surface: `node`, `cardRect`, `nodes`, `edges`,
-`nodeAt`, `cardDepth`, `incomingByPort`, `edgePorts`). The query modules take
-`SceneReader`; `FlowScene` satisfies it implicitly. In parallel,
+`selection`, `cardDepth`, `incomingByPort`, `edgePorts`). The query modules
+take `SceneReader`; `FlowScene` satisfies it implicitly. `hitNode`/`hitEdge`
+are free functions in `scene-hits.ts`, with thin `FlowScene.nodeAt`/`edgeAt`
+delegates for the views. In parallel,
 `resize-handles.ts` imports `CanvasCursor` from `canvas-controller.ts`; move
 `CanvasCursor` to `model/cursor.ts`. These are type-level changes only.
 
@@ -978,7 +980,8 @@ outside `components/probes`/`test/`."
   `test-support-in-production` immediately (not in Phase 5).
 - When a module splits, split its test file by the same behavior boundaries
   (`scene.test.ts` → `scene-reads`, `scene-selection`, `scene-hits`,
-  `scene-overrides`). Do not keep a 600-line test for a 200-line module. The
+  `scene-records`, `scene-overrides`). Do not keep a 600-line test for a
+  200-line module. The
   existing `scene-hit.test.ts` is renamed `scene-hits.test.ts` in the same
   PR, so one hit suite remains.
 - Keep the levels: pure unit tests for geometry, headless model tests for
@@ -1636,10 +1639,24 @@ assertion: the drag publishes no
 probe or text a host test could read; the host suite passes without changes
 (14 platform tests plus the smoke test on this machine).
 7-5. **Scene: hits.** Extract `scene-hits.ts`; rename the hit test and move
-the hit cases out of `scene.test.ts`.
+the hit cases out of `scene.test.ts`. Done 2026-11-16: `hitNode`/`hitEdge`
+read a `SceneReader`, `FlowScene` delegates and `scene-ports` calls
+`hitNode` directly; `scene-hit.test.ts` became `scene-hits.test.ts`, whose
+12 existing cases plus the five card/port hit cases moved out of
+`scene.test.ts` now run there (17 tests; `scene.test.ts` keeps its
+remaining 18).
 7-6. **Scene: records and overrides.** Extract the pure helpers with their
-tests; keep per-id signals and keyed flags in the class.
-7-7. **Scene: selection.** Extract `scene-selection.ts`; add its test.
+tests; keep per-id signals and keyed flags in the class. Done 2026-11-16:
+`scene-records.ts` holds record retention (`keepNode`/`keepEdge`), the
+pair-key/topology helpers and `rectOfNode`; `scene-overrides.ts` holds
+`changedBounds` and `settledOverrideIds`; both have their own tests. The
+class keeps the maps (including the pair-index cache), signals and keyed
+flags.
+7-7. **Scene: selection.** Extract `scene-selection.ts`; add its test. Done
+2026-11-16: normalization, equality, ranks and bounds are free functions
+with helper tests, and the eight selection/depth/flag cases moved out of
+`scene.test.ts`; the class keeps the selection signals, keyed flags and
+ranks cache.
 7-8. **CanvasController: drag/resize and marquee** pure helpers with unit
 tests.
 7-9. **CanvasController: hit priority** shared by down and hover; down/up/

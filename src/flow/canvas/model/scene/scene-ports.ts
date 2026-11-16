@@ -12,6 +12,7 @@ import {
   type PortSide,
 } from "../../geometry/connection";
 import { type PortKind, portsOfNode } from "../../../nodes";
+import { hitNode } from "./scene-hits";
 import type { SceneReader } from "./scene-types";
 
 /** One typed port under a pointer. `point` is the icon's centre, where its
@@ -78,7 +79,7 @@ export function portAt(
         // Another card covers the port's icon, even though the icon sits just
         // outside a card's body; the topmost card under it owns the press.
         const center = portCenter(rect, portSide, offset);
-        const covered = scene.nodeAt(center.x, center.y);
+        const covered = hitNode(scene, center.x, center.y);
         if (covered !== null && covered !== node.id) continue;
         // The reaches of one card's ports overlap at this size; the nearer
         // icon wins, so a press between two ports grabs the intended one.
@@ -144,7 +145,7 @@ export function nearestPort(
       const centerY = rect.y + offset;
       // The same occlusion rule as portAt: a card covering the icon owns the
       // press, so a release never snaps to a hidden port.
-      const covered = scene.nodeAt(centerX, centerY);
+      const covered = hitNode(scene, centerX, centerY);
       if (covered !== null && covered !== node.id) continue;
       const dx = centerX - x;
       const dy = centerY - y;

@@ -31,7 +31,6 @@ export interface SceneReader {
   selection(): readonly string[];
   cardRect(id: string): BoxGeometry | null;
   cardDepth(id: string): number;
-  nodeAt(x: number, y: number, withTitle?: boolean): string | null;
   edgePorts(edge: EdgeSummary): { from: Point; to: Point } | null;
   incomingByPort(): ReadonlyMap<string, number>;
 }

@@ -143,6 +143,8 @@ is also complete: the final `db/`, `mutation/` and `rows.rs` production
 layout is in
 [the plan's Appendix B](plans/code-organization.md#appendix-b--rust-placement-map)
 and the README production tree; Appendix B also lists the test-module layout.
-Do not add a new file at the
+Phase 7 batch 3 split the scene's queries into `scene-hits`, `scene-selection`,
+`scene-records` and `scene-overrides`; `FlowScene` remains the single state
+owner. Do not add a new file at the
 `components/`, `flow/` or `pages/` root:
 `scripts/structure.mjs` fails it.

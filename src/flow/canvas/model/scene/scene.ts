@@ -6,7 +6,6 @@
  */
 import { batch, signal, type Signal, untracked } from "nsh";
 import {
-  containsPoint,
   KeyedFlags,
   sameRectWithin,
   type BoxGeometry,
@@ -16,16 +15,18 @@ import {
   type Point,
   type SceneSnapshot,
 } from "../../../shared";
-import {
-  connectionBounds,
-  distanceToConnection,
-  EDGE_HIT_DISTANCE,
-  PORT_CENTER_GAP,
-  portCenter,
-} from "../../geometry/connection";
-import { CARD_TITLE_BAND } from "../cards/card-layout";
+import { PORT_CENTER_GAP, portCenter } from "../../geometry/connection";
 import { hasImageOutput } from "../../../nodes";
-import { sameEdge, sameNode, samePreviewMap, samePreviewView } from "./record-equality";
+import { samePreviewMap, samePreviewView } from "./record-equality";
+import { hitEdge, hitNode } from "./scene-hits";
+import { changedBounds, settledOverrideIds } from "./scene-overrides";
+import { keepEdge, keepNode, pairKey, rectOfNode, samePairs, topologyPairs } from "./scene-records";
+import {
+  normalizeSelection,
+  sameSelection,
+  selectionBoundsOf,
+  selectionRanksOf,
+} from "./scene-selection";
 import type { ConnectionPreview, PreviewView, SceneReader } from "./scene-types";
 import { edgePortOffsets } from "./scene-ports";
 
@@ -62,7 +63,7 @@ export class FlowScene implements SceneReader {
   private readonly targetFlags = new KeyedFlags();
   /** The selection the ranks were built from, and its 1-based ranks. */
   private ranksFor: readonly string[] | null = null;
-  private readonly ranks = new Map<string, number>();
+  private ranks = new Map<string, number>();
   /** A stacking base above every card's own z; selected cards start here. */
   private baseZ = 1;
 
@@ -78,11 +79,7 @@ export class FlowScene implements SceneReader {
       for (const id of this.selection()) seen.add(id);
 
       for (const node of nodes) {
-        const previous = this.byId.get(node.id);
-        this.byId.set(
-          node.id,
-          previous !== undefined && sameNode(previous, node) ? previous : node,
-        );
+        this.byId.set(node.id, keepNode(this.byId.get(node.id), node));
         this.setApplied(node);
       }
       for (const [id] of this.byId) {
@@ -107,8 +104,7 @@ export class FlowScene implements SceneReader {
       // reading the lists wakes only for a real change.
       const retained = new Map<string, EdgeSummary>();
       for (const edge of snapshot.edges) {
-        const previous = this.edgeById.get(edge.id);
-        retained.set(edge.id, previous !== undefined && sameEdge(previous, edge) ? previous : edge);
+        retained.set(edge.id, keepEdge(this.edgeById.get(edge.id), edge));
       }
       this.edgeById.clear();
       for (const [id, edge] of retained) this.edgeById.set(id, edge);
@@ -138,14 +134,11 @@ export class FlowScene implements SceneReader {
     // The cards, connectors and resolved overrides are one command result.
     batch(() => {
       for (const node of changes.changed) {
-        const previous = this.byId.get(node.id);
-        this.byId.set(
-          node.id,
-          previous !== undefined && sameNode(previous, node) ? previous : node,
-        );
+        this.byId.set(node.id, keepNode(this.byId.get(node.id), node));
         this.setApplied(node);
-        const override = this.overrideRects.get(node.id);
-        if (override && sameRectWithin(override, rectOfNode(node))) this.dropOverride(node.id);
+      }
+      for (const id of settledOverrideIds(changes.changed, this.overrideRects)) {
+        this.dropOverride(id);
       }
       for (const id of changes.removed) {
         this.byId.delete(id);
@@ -171,10 +164,7 @@ export class FlowScene implements SceneReader {
                 fromPoint: edge.fromPoint ?? previous.fromPoint ?? null,
                 toPoint: edge.toPoint ?? previous.toPoint ?? null,
               };
-        this.edgeById.set(
-          edge.id,
-          previous !== undefined && sameEdge(previous, merged) ? previous : merged,
-        );
+        this.edgeById.set(edge.id, keepEdge(previous, merged));
       }
       for (const id of changes.edgesRemoved) {
         if (this.edgeById.delete(id)) this.edgePairs = null;
@@ -203,13 +193,7 @@ export class FlowScene implements SceneReader {
 
   /** The geometry changed by a drag or resize since the last snapshot. */
   commitBounds(): NodeBounds[] {
-    const changed: NodeBounds[] = [];
-    for (const [id, rect] of this.overrideRects) {
-      const applied = this.applied.get(id);
-      if (!applied) continue;
-      if (!sameRectWithin(applied, rect)) changed.push({ id, ...rect });
-    }
-    return changed;
+    return changedBounds(this.overrideRects, this.applied);
   }
 
   /** The transient geometry being dragged or resized, ahead of the document. */
@@ -271,15 +255,12 @@ export class FlowScene implements SceneReader {
   select(ids: readonly string[]): void {
     // The card selection and cleared edge selection are one selection state.
     batch(() => {
-      const next: string[] = [];
-      for (const id of ids) {
-        if (this.byId.has(id) && !next.includes(id)) next.push(id);
-      }
+      const next = normalizeSelection(ids, (id) => this.byId.has(id));
       // Selecting cards is a different selection than an edge; leaving a stale
       // edge selected would make Delete act on the wrong thing.
       if (next.length > 0 && this.selectedEdge() !== null) this.selectedEdge.set(null);
       const current = this.selection();
-      if (next.length === current.length && next.every((id, index) => id === current[index])) {
+      if (sameSelection(next, current)) {
         this.selectedFlags.set(next);
         return;
       }
@@ -402,22 +383,7 @@ export class FlowScene implements SceneReader {
    * when none are selected. The selection frame draws it with the world.
    */
   selectionBounds(): BoxGeometry | null {
-    const ids = this.selection();
-    if (ids.length === 0) return null;
-    let left = Number.POSITIVE_INFINITY;
-    let top = Number.POSITIVE_INFINITY;
-    let right = Number.NEGATIVE_INFINITY;
-    let bottom = Number.NEGATIVE_INFINITY;
-    for (const id of ids) {
-      const rect = this.cardRect(id);
-      if (!rect) continue;
-      left = Math.min(left, rect.x);
-      top = Math.min(top, rect.y - CARD_TITLE_BAND);
-      right = Math.max(right, rect.x + rect.width);
-      bottom = Math.max(bottom, rect.y + rect.height);
-    }
-    if (!Number.isFinite(left) || !Number.isFinite(top)) return null;
-    return { x: left, y: top, width: right - left, height: bottom - top };
+    return selectionBoundsOf(this.selection(), (id) => this.cardRect(id));
   }
 
   /**
@@ -429,8 +395,7 @@ export class FlowScene implements SceneReader {
     const selection = this.selection();
     if (selection !== this.ranksFor) {
       this.ranksFor = selection;
-      this.ranks.clear();
-      selection.forEach((id, index) => this.ranks.set(id, index + 1));
+      this.ranks = selectionRanksOf(selection);
     }
     return this.ranks;
   }
@@ -450,42 +415,14 @@ export class FlowScene implements SceneReader {
     return this.edgeById.get(id) ?? null;
   }
 
-  /**
-   * The topmost card under a world point. `withTitle` also accepts the title
-   * row above the card, for a menu opened on the card's own chrome.
-   */
+  /** The topmost card under a world point; see `hitNode`. */
   nodeAt(x: number, y: number, withTitle = false): string | null {
-    let hit: { id: string; z: number } | null = null;
-    for (const node of this.byId.values()) {
-      const rect = this.cardRect(node.id);
-      if (!rect) continue;
-      const top = rect.y - (withTitle ? CARD_TITLE_BAND : 0);
-      const inside =
-        x >= rect.x && x <= rect.x + rect.width && y >= top && y <= rect.y + rect.height;
-      if (!inside) continue;
-      const depth = this.cardDepth(node.id);
-      if (hit === null || depth >= hit.z) hit = { id: node.id, z: depth };
-    }
-    return hit?.id ?? null;
+    return hitNode(this, x, y, withTitle);
   }
 
-  /** The connector near a world point, if any. */
+  /** The connector near a world point, if any; see `hitEdge`. */
   edgeAt(x: number, y: number): string | null {
-    let nearest: { id: string; distance: number } | null = null;
-    for (const edge of this.edgeById.values()) {
-      const ports = this.edgePorts(edge);
-      if (!ports) continue;
-      // A cubic and its samples lie inside the control-point box; a point
-      // beyond the hit distance of that box cannot reach the curve. The exact
-      // sample still decides, and the box comparison stays inclusive.
-      const box = connectionBounds(ports.from, ports.to);
-      if (!containsPoint(box, x, y, EDGE_HIT_DISTANCE)) continue;
-      const distance = distanceToConnection(ports.from, ports.to, { x, y });
-      if (distance <= EDGE_HIT_DISTANCE && (!nearest || distance < nearest.distance)) {
-        nearest = { id: edge.id, distance };
-      }
-    }
-    return nearest?.id ?? null;
+    return hitEdge(this, x, y);
   }
 
   /** One connector's current endpoints. */
@@ -623,30 +560,6 @@ export class FlowScene implements SceneReader {
     if (!this.overrideRects.delete(id)) return;
     this.setRectSignal(id, this.applied.get(id) ?? null);
   }
-}
-
-/** A directional, collision-free key for a connector's pair. */
-function pairKey(fromId: string, toId: string): string {
-  return `${fromId.length}:${fromId}${toId}`;
-}
-
-/** The pairs an edge map currently contains, for cache retention checks. */
-function topologyPairs(edges: Iterable<EdgeSummary>): Set<string> {
-  const pairs = new Set<string>();
-  for (const edge of edges) pairs.add(pairKey(edge.fromId, edge.toId));
-  return pairs;
-}
-
-function samePairs(a: Set<string>, b: Set<string>): boolean {
-  if (a.size !== b.size) return false;
-  for (const key of a) {
-    if (!b.has(key)) return false;
-  }
-  return true;
-}
-
-function rectOfNode(node: NodeSummary): BoxGeometry {
-  return { x: node.x, y: node.y, width: node.width, height: node.height };
 }
 
 function samePreviews(a: readonly ConnectionPreview[], b: readonly ConnectionPreview[]): boolean {
