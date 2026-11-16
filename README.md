@@ -12,6 +12,25 @@ The app is sandboxed by `src/nsh.json`: it may read its own bundled assets but
 no remote host. An integration that fetches or loads remote images adds that
 host to `capabilities.network` deliberately.
 
+## Architecture invariants
+
+- `src/flow/canvas` is native: cards, ports, selection and the composer are
+  ordinary NSH views, connectors are stroked in native canvas layers (one
+  for committed edges, one for previews), never a retained scene, and hit
+  testing stays in the scene model. The scene reconciles the viewport
+  snapshot within its card budget while pinning selected cards and their
+  connectors; never instantiate the whole document in the view tree.
+- `src/flow/document` is the document side. Rust (`src/native/`) owns SQLite,
+  full-text search, undo and asset metadata; TSX never opens SQLite or writes
+  SQL. Keep FFI calls coarse-grained and route reads through the single
+  worker.
+- Loaders are single-flight through `flow/shared/async-drain.ts`; each
+  loader keeps its own scheduling, revision fences and retry rule.
+- Cross-area imports use the area facade (`flow/*/index.ts`, except the
+  same-feature deep import and the `pages/flow` / `pages/projects`
+  composition roots). Pages may use components and the store; components and
+  `flow` never import the store.
+
 ## Requirements
 
 - [Bun](https://bun.sh/) 1.4 or newer (`packageManager` pins the exact version)

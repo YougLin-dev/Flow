@@ -7,8 +7,8 @@
   and search areas, the probes, the page area and workspace split, and full
   structure enforcement). Phase 6/7 were re-baselined on 2026-11-16 after the
   database v1 and project-layer work; §16.3 records the measurements and
-  decisions. Phase 6 is done (2026-11-16, §16.4); Phase 7 runs in six review
-  batches, with 7-0 through 7-10 done.
+  decisions. Phase 6 is done (2026-11-16, §16.4); Phase 7 is done (2026-11-16,
+  §16.5) after six review batches.
 - **Scope:** `src/` (TSX app) and `src/native/` (Rust document core).
 - **Related:** [standards](../standards.md), [architecture](../architecture.md),
   [conventions](../conventions.md), [testing](../testing.md),
@@ -610,12 +610,12 @@ src/
 │       ├── session/
 │       │   ├── node-session.ts         facade over the sessions below
 │       │   ├── composer-session.ts
-│       │   ├── inline-session.ts
+│       │   ├── input-session.ts
 │       │   ├── inline-editor.ts
-│       │   ├── asset-session.ts
 │       │   └── composer-detail.ts       reload policy only
 │       ├── commands/
 │       │   ├── node-commands.ts
+│       │   ├── edge-commands.ts
 │       │   └── upload-source.ts
 │       ├── assets/
 │       │   ├── asset-urls.ts
@@ -954,8 +954,9 @@ outside `components/probes`/`test/`."
 7. **Viewport budget.** `FlowScene` reconciles only `scene(rect, margin)` and
    keeps the card budget, throttled reads and selected-card pinning. Moving
    files must not introduce a whole-document read.
-8. **No second canvas/render loop.** Connectors stay in one native `Canvas`
-   layer; cards stay native views; geometry stays in `flow/canvas/geometry`.
+8. **No second canvas/render loop.** Connectors stay in native canvas layers
+   (one for committed edges, one for previews); cards stay native views;
+   geometry stays in `flow/canvas/geometry`.
 
 ---
 
@@ -963,7 +964,8 @@ outside `components/probes`/`test/`."
 
 - Tests move with their subject: `flow/canvas/model/scene/scene.test.ts`,
   `flow/canvas/interaction/canvas-controller.test.ts`,
-  `flow/document/session/node-session.native.test.ts`.
+  `flow/document/session/node-session-{run,commands,inputs,composer}.native.test.ts`
+  (the one suite split with its subject in Phase 7).
 - `*.host.test.tsx` stays reserved for real-platform tests. `App.test.tsx`,
   `App.composer.test.tsx`, `App.pan.test.tsx` and `App.host.test.tsx` stay at
   the app root because they mount `./App.tsx`; their helpers move to
@@ -1591,17 +1593,23 @@ frozen schema are unchanged; mark Phase 6 done.
 
 ### Phase 7 — Internal splits (incremental, after enforcement)
 
+**Status: done (2026-11-16).** Steps 7-1 through 7-13 landed in six review
+batches; 7-0 landed with the 66c9847 re-baseline, and §16.5 records the
+close-out.
+
 Re-baselined 2026-11-16; the targets are unchanged by database v1, but their
 sizes and some §6.4 items moved. Behavior-preserving except where a step
 records a deliberate adjustment, in six review batches (2026-11-16):
-7-0/7-1, 7-2/7-3/7-4, 7-5/7-6/7-7, 7-8/7-9, 7-10 alone, and 7-11/7-12/7-13.
+7-1, 7-2/7-3/7-4, 7-5/7-6/7-7, 7-8/7-9, 7-10 alone, and 7-11/7-12/7-13.
+Step 7-0 completed with the 66c9847 re-baseline.
 Each batch is one implementation, one two-reviewer round and one commit;
 batching keeps the review on the batch's change set instead of fragmenting
 it per step. 7-10 stays alone as the highest-risk extraction.
 
 7-0. **Docs (can run with Phase 6).** Add `flow/projects`/`pages/projects`
 to §4.5/§4.6 and Appendix A and refresh the structure counts. Leave
-`pages/projects/projects-home.ts` (377 lines) unsplit for now.
+`pages/projects/projects-home.ts` (377 lines) unsplit for now. Done with
+the 66c9847 re-baseline.
 7-1. **§6.4 cleanup.** Extract `flow/canvas/model/screen-rect.ts`
 (`screenRectOf`) and route resize-handles/frame-surface; move FlowCard's
 status tables to `components/canvas/world/status-visual.ts`; alias
@@ -1683,12 +1691,23 @@ signals as stable aliases and its protected `nodeDetail` hook, which the
 and delete are unchanged. All eight NodeSession suites (42 tests) pass;
 the only test-file change is a stale harness comment.
 7-11. **NodeSession: commands.** Extract `commands/edge-commands.ts` behind
-the facade.
+the facade. Done 2026-11-16: `connectNodes`, `deleteEdge` and
+`reconnectEdge` read an `EdgeCommandHost`; `NodeSession` delegates and the
+four connection tests pass unchanged.
 7-12. **NodeSession: inputs.** Extract `session/input-session.ts`; split the
-remaining native test by behavior.
+remaining native test by behavior. Done 2026-11-16: `input-session.ts`
+holds `removeInput`, `reorderInputs` and `uploadInputs`, with the facade
+passing its open-composer accessor; the old native test split into run,
+commands, inputs and composer suites with all 13 cases preserved, and the
+two upload unit tests pass unchanged.
 7-13. **Close-out.** README invariants for `flow/canvas` and
 `flow/document`; optional `flow-workspace` project-lifecycle extraction
 only if its code-line count grows past the cap; split the largest tests.
+Done 2026-11-16: the README has the four invariants; `flow-workspace` is
+481 code lines, below the cap, so it stays whole; after splitting
+`scene.test.ts` and the old native session test, no test exceeds the
+600-line threshold the plan warns about (largest: projects-home 554,
+canvas-controller 532, node-session-detail 530 raw).
 
 ### Migration mechanics that keep the gate green
 
@@ -2181,6 +2200,43 @@ Invariants verified at close-out:
   `bun run test:bench` 2 passed (66.78s), `bun run test:100k` 1 passed, and
   `bun run test:host` 14 passed plus its 100k smoke 1 passed.
 
+### 16.5 Phase 7 close-out (2026-11-16)
+
+Phase 7 is complete: 7-0 landed with the 66c9847 re-baseline, and six review
+batches carried 7-1 (`d040e4c`), 7-2/7-3/7-4 (`5ea1000`), 7-5/7-6/7-7
+(`9e72a5c`), 7-8/7-9 (`cab5827`), 7-10 (`74926c7`) and 7-11/7-12/7-13 (the
+final batch commit). Each batch had
+two independent read-only reviews; every finding was fixed and passed a
+focused closure review (BLOCKER/MAJOR findings were also adversarially
+checked where a reviewer raised one).
+
+Final layout: `flow/canvas/model/scene/{scene-hits,scene-selection,
+scene-records,scene-overrides}.ts` with `FlowScene` still the only state
+owner; `flow/canvas/interaction/{gesture-math,hit-priority}.ts` with the
+controller's pointer methods still the signal writers; `flow/document/
+session/{composer-session,input-session}.ts` and `flow/document/commands/
+edge-commands.ts` behind `NodeSession`; the viewport and minimap loaders on
+`AsyncDrain`; README invariants for `flow/canvas` and `flow/document`.
+Production sizes after the split: `scene.ts` 582 raw, `canvas-controller.ts`
+585 raw, `node-session.ts` 290, `composer-session.ts` 218,
+`input-session.ts` 119, `edge-commands.ts` 130; all are within the
+500-code-line budget when measured as documented.
+
+Optional items recorded: 7-4 has no new host assertion because the minimap
+drag publishes no probe or text a host test could read (its controller
+tests cover the finger rules); `flow-workspace` is 481 code lines, below the
+cap, so its project-lifecycle extraction is skipped; `pages/projects/
+projects-home.ts` (377 lines) stays unsplit; after splitting `scene.test.ts`
+and the old `node-session.native.test.ts`, no test reaches the 600-raw-line
+threshold the plan warns about (largest: projects-home 554,
+canvas-controller 532, node-session-detail 530).
+
+Evidence on the final tree: `bun run check` green; `bun run test` 875
+(873 passed, 2 skipped); `bun run test:host` 14 passed plus its smoke 1;
+`bun run test:100k` 1 passed; `bun run test:bench` 2 passed (62.82s).
+Phase 7 changed TSX/docs only: the frozen `v1.sql` and its digest, the FFI
+surface and the worker jobs are unchanged.
+
 ---
 
 ## Appendix A — TSX placement map (non-test)
@@ -2279,7 +2335,8 @@ async-drain,keyed-flags,wheel,shortcuts,native-types,result-inputs}.ts`,
 `flow/canvas/model/scene/{scene-types,scene-hits,scene-selection,
 scene-records,scene-overrides}.ts`, `flow/canvas/model/cards/{card-image,
 inline-body}.ts`, `flow/canvas/interaction/canvas-input.ts`,
-`flow/document/session/{composer-session,inline-session,asset-session}.ts`,
+`flow/document/session/{composer-session,input-session}.ts`,
+`flow/document/commands/edge-commands.ts`,
 `flow/execution/{runner,providers}.ts`,
 `components/canvas/world/{CardTitle,CardBody}.tsx`,
 `components/canvas/world/{status-visual,connector-layer}.ts`,

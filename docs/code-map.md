@@ -149,6 +149,9 @@ owner. Batch 4 moved `CanvasController`'s gesture math to
 `interaction/gesture-math.ts` and its press/hover classification to
 `interaction/hit-priority.ts`. Batch 5 moved the composer's detail and
 asset URL cache into `session/composer-session.ts`; `NodeSession` keeps the
-facade and its protected detail-read hook. Do not add a new file at the
+facade and its protected detail-read hook. Batch 6 moved the edge commands
+to `commands/edge-commands.ts` and the composer's input commands to
+`session/input-session.ts`, leaving `NodeSession` a 290-line facade, and
+added the README architecture invariants. Do not add a new file at the
 `components/`, `flow/` or `pages/` root:
 `scripts/structure.mjs` fails it.

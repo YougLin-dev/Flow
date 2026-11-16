@@ -6,10 +6,15 @@
  */
 import { signal } from "nsh";
 import type { PickedImage, PickImagesOptions, Signal } from "nsh";
-import type { ChangeSet, EdgeInput, NodeDetail, NodeInput } from "../../shared";
+import type { ChangeSet, NodeDetail, NodeInput } from "../../shared";
 import { ComposerSession, type AssetUrlSource } from "./composer-session";
 import type { NodeRunner } from "../../execution";
 import { InlineEditor } from "./inline-editor";
+import {
+  connectNodes as connectNodesCommand,
+  deleteEdge as deleteEdgeCommand,
+  reconnectEdge as reconnectEdgeCommand,
+} from "../commands/edge-commands";
 import {
   copyNode as copyNodeCommand,
   copyNodeWithDrafts as copyNodeWithDraftsCommand,
@@ -18,15 +23,18 @@ import {
   type NodeCommandHost,
 } from "../commands/node-commands";
 import {
-  canConnectPorts,
   defaultSettings,
   type NodeKindId,
   type NodeSettings,
   nodeKind,
-  portsOfNode,
   serializeSettings,
 } from "../../nodes";
-import { capacityOf, hasPortEdge, incomingEdgeCount, type ConnectionPair } from "../../canvas";
+import type { ConnectionPair } from "../../canvas";
+import {
+  removeInput as removeInputCommand,
+  reorderInputs as reorderInputsCommand,
+  uploadInputs,
+} from "./input-session";
 import { uploadSource as uploadSourceFile } from "../commands/upload-source";
 
 export type { AssetUrlSource } from "./composer-session";
@@ -148,96 +156,15 @@ export class NodeSession {
   }
 
   async removeInput(inputId: string): Promise<void> {
-    const document = this.host.document();
-    if (!document || this.host.isDisposed()) return;
-    try {
-      const changes = await document.removeInput(inputId);
-      if (this.host.isDisposed()) return;
-      this.host.applyChanges(changes);
-      this.host.schedulePreviews();
-    } catch (error) {
-      console.error("Flow could not remove the input", error);
-    }
+    return removeInputCommand(this.host, inputId);
   }
 
   async reorderInputs(ids: string[]): Promise<void> {
-    const document = this.host.document();
-    const id = this.composerId();
-    if (!document || !id || this.host.isDisposed()) return;
-    try {
-      const changes = await document.reorderInputs(id, ids);
-      if (this.host.isDisposed()) return;
-      this.host.applyChanges(changes);
-    } catch (error) {
-      console.error("Flow could not reorder the inputs", error);
-    }
+    return reorderInputsCommand(this.host, () => this.composerId(), ids);
   }
 
   async upload(): Promise<void> {
-    const document = this.host.document();
-    const id = this.composerId();
-    if (!document || !id || this.host.isDisposed()) return;
-    try {
-      const picked = await this.host.pickImages({
-        multiple: true,
-        limit: 4,
-        maxDimension: 2048,
-        quality: 0.9,
-      });
-      // Read and import concurrently, then append in picker order: the
-      // document assigns each input the next position on its port, so the
-      // worker order is the display order. A failed import or append is
-      // isolated so the images that did import still commit.
-      const imports = await Promise.allSettled(
-        picked.map(async (image) => {
-          const bytes = new Uint8Array(await image.file.arrayBuffer());
-          const metaJson = JSON.stringify({
-            width: image.size.width,
-            height: image.size.height,
-          });
-          const asset = await document.importAsset({
-            id: `asset-${crypto.randomUUID()}`,
-            kind: "image",
-            name: image.file.name || "image",
-            mime: image.file.type || "image/jpeg",
-            bytes,
-            metaJson,
-          });
-          return { asset, metaJson };
-        }),
-      );
-      if (this.host.isDisposed()) return;
-      let appends = Promise.resolve();
-      for (const result of imports) {
-        if (result.status === "rejected") {
-          console.error("Flow could not upload an image", result.reason);
-          continue;
-        }
-        appends = appends.then(async () => {
-          if (this.host.isDisposed()) return;
-          try {
-            const changes = await document.addInput({
-              id: `input-${crypto.randomUUID()}`,
-              nodeId: id,
-              portId: "references",
-              kind: "image",
-              origin: "local",
-              assetId: result.value.asset.id,
-              text: "",
-              metaJson: result.value.metaJson,
-            });
-            if (!this.host.isDisposed()) this.host.applyChanges(changes);
-          } catch (error) {
-            console.error("Flow could not upload an image", error);
-          }
-        });
-      }
-      await appends;
-      if (this.host.isDisposed()) return;
-      this.host.schedulePreviews();
-    } catch (error) {
-      console.error("Flow could not upload an image", error);
-    }
+    return uploadInputs(this.host, () => this.composerId());
   }
 
   /**
@@ -343,102 +270,15 @@ export class NodeSession {
 
   /** Connects one or more pairs in one write; duplicates and bad pairs skip. */
   async connectNodes(pairs: readonly ConnectionPair[]): Promise<void> {
-    const document = this.host.document();
-    const scene = this.host.scene();
-    if (!document || !scene || this.host.isDisposed()) return;
-    const valid: ConnectionPair[] = [];
-    for (const pair of pairs) {
-      if (pair.fromId === pair.toId) continue;
-      const fromNode = scene.node(pair.fromId);
-      const toNode = scene.node(pair.toId);
-      if (fromNode === null || toNode === null) continue;
-      if (
-        !canConnectPorts(portsOfNode(fromNode), pair.fromPort, portsOfNode(toNode), pair.toPort)
-      ) {
-        continue;
-      }
-      if (hasPortEdge(scene, pair.fromId, pair.fromPort, pair.toId, pair.toPort)) continue;
-      valid.push(pair);
-    }
-    // Capacity is checked for the whole batch: one full input rejects the
-    // gesture rather than writing a partial fan-out.
-    const proposed = new Map<string, number>();
-    for (const pair of valid) {
-      const key = `${pair.toId}\u0000${pair.toPort}`;
-      const capacity = capacityOf(scene, pair.toId, pair.toPort);
-      const existing = incomingEdgeCount(scene, pair.toId, pair.toPort);
-      const added = proposed.get(key) ?? 0;
-      if (capacity === null || existing + added + 1 > capacity) return;
-      proposed.set(key, added + 1);
-    }
-    const edges: EdgeInput[] = valid.map((pair) => ({
-      id: `edge-${crypto.randomUUID()}`,
-      fromId: pair.fromId,
-      toId: pair.toId,
-      fromPort: pair.fromPort,
-      toPort: pair.toPort,
-      portKind: pair.portKind,
-      fromOffset: pair.fromOffset,
-      toOffset: pair.toOffset,
-      kind: "flow",
-    }));
-    if (edges.length === 0) return;
-    const only = edges.length === 1 ? edges[0] : null;
-    try {
-      const changes = only ? await document.connectEdge(only) : await document.connectEdges(edges);
-      if (this.host.isDisposed()) return;
-      this.host.applyChanges(changes);
-      this.host.schedulePreviews();
-    } catch (error) {
-      console.error("Flow could not connect the nodes", error);
-    }
+    return connectNodesCommand(this.host, pairs);
   }
 
   async deleteEdge(id: string): Promise<void> {
-    const document = this.host.document();
-    if (!document || this.host.isDisposed()) return;
-    try {
-      const changes = await document.deleteEdges([id]);
-      if (!this.host.isDisposed()) this.host.applyChanges(changes);
-    } catch (error) {
-      console.error("Flow could not delete the connection", error);
-    }
+    return deleteEdgeCommand(this.host, id);
   }
 
   async reconnectEdge(edgeId: string, pair: ConnectionPair): Promise<void> {
-    const document = this.host.document();
-    const scene = this.host.scene();
-    if (!document || !scene || pair.fromId === pair.toId || this.host.isDisposed()) return;
-    const fromNode = scene.node(pair.fromId);
-    const toNode = scene.node(pair.toId);
-    if (fromNode === null || toNode === null) return;
-    if (!canConnectPorts(portsOfNode(fromNode), pair.fromPort, portsOfNode(toNode), pair.toPort)) {
-      return;
-    }
-    // The pair a reconnect would write must not already belong to another
-    // edge: the writer rejects it, and the gesture should never have offered it.
-    if (hasPortEdge(scene, pair.fromId, pair.fromPort, pair.toId, pair.toPort)) return;
-    // The edge being moved does not occupy a slot in its new target.
-    const capacity = capacityOf(scene, pair.toId, pair.toPort);
-    const existing = incomingEdgeCount(scene, pair.toId, pair.toPort, edgeId);
-    if (capacity === null || existing + 1 > capacity) return;
-    try {
-      const changes = await document.updateEdge({
-        id: edgeId,
-        fromId: pair.fromId,
-        toId: pair.toId,
-        fromPort: pair.fromPort,
-        toPort: pair.toPort,
-        portKind: pair.portKind,
-        fromOffset: pair.fromOffset,
-        toOffset: pair.toOffset,
-        kind: "flow",
-      });
-      if (!this.host.isDisposed()) this.host.applyChanges(changes);
-      this.host.schedulePreviews();
-    } catch (error) {
-      console.error("Flow could not reconnect the nodes", error);
-    }
+    return reconnectEdgeCommand(this.host, edgeId, pair);
   }
 
   /** Reads one node's detail; tests observe the read through a subclass. */
