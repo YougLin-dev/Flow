@@ -147,6 +147,8 @@ Phase 7 batch 3 split the scene's queries into `scene-hits`, `scene-selection`,
 `scene-records` and `scene-overrides`; `FlowScene` remains the single state
 owner. Batch 4 moved `CanvasController`'s gesture math to
 `interaction/gesture-math.ts` and its press/hover classification to
-`interaction/hit-priority.ts`. Do not add a new file at the
+`interaction/hit-priority.ts`. Batch 5 moved the composer's detail and
+asset URL cache into `session/composer-session.ts`; `NodeSession` keeps the
+facade and its protected detail-read hook. Do not add a new file at the
 `components/`, `flow/` or `pages/` root:
 `scripts/structure.mjs` fails it.

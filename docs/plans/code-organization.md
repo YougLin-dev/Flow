@@ -8,7 +8,7 @@
   structure enforcement). Phase 6/7 were re-baselined on 2026-11-16 after the
   database v1 and project-layer work; §16.3 records the measurements and
   decisions. Phase 6 is done (2026-11-16, §16.4); Phase 7 runs in six review
-  batches, with 7-0 through 7-9 done.
+  batches, with 7-0 through 7-10 done.
 - **Scope:** `src/` (TSX app) and `src/native/` (Rust document core).
 - **Related:** [standards](../standards.md), [architecture](../architecture.md),
   [conventions](../conventions.md), [testing](../testing.md),
@@ -1676,7 +1676,12 @@ hit tests and the new unit tests pass, and the host suite passes unchanged
 `session/composer-session.ts` (asset cache included), preserving
 `protected nodeDetail`, generation fencing and
 `copyNodeWithDrafts`/`deleteNodeWithDrafts`, or update the harness in the
-same PR.
+same PR. Done 2026-11-16: `ComposerSession` owns the open detail, the
+asset URL cache, settings saves and the mock run; `NodeSession` keeps its
+signals as stable aliases and its protected `nodeDetail` hook, which the
+`CountingNodeSession` harness still counts through. The draft-aware copy
+and delete are unchanged. All eight NodeSession suites (42 tests) pass;
+the only test-file change is a stale harness comment.
 7-11. **NodeSession: commands.** Extract `commands/edge-commands.ts` behind
 the facade.
 7-12. **NodeSession: inputs.** Extract `session/input-session.ts`; split the

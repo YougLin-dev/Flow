@@ -1,6 +1,6 @@
 /**
  * What an open composer reloads from a change set and which assets its detail
- * shows. Pure policy beside `NodeSession`, which loads the detail and applies
+ * shows. Pure policy for `ComposerSession`, which loads the detail and applies
  * it; keeping it here leaves the session to the document-facing commands.
  */
 import type { NodeDetail, NodeSummary } from "../../shared";

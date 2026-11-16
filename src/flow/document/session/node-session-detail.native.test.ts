@@ -36,7 +36,7 @@ function until(check: () => boolean, timeout = 5000): Promise<void> {
   });
 }
 
-/** Counts the detail reads `loadComposer` asks its host document for. */
+/** Counts the detail reads the composer session asks the NodeSession hook for. */
 class CountingNodeSession extends NodeSession {
   detailReads = 0;
   nodeDetailsCompleted = 0;

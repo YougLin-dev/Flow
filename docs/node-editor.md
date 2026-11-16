@@ -205,8 +205,10 @@ or `interrupted` (`input-not-ready` is reserved for a later dependency gate).
 
 `flow/execution/runner.ts` owns the run lifecycle: one run per node, status
 `running`, input sync, provider call, asset import, batch save, cancellation
-and failure recording. `flow/document/session/node-session.ts` owns the document-facing
-composer state (settings, inputs, upload), and `flow/document/session/inline-editor.ts` owns
+and failure recording. `flow/document/session/composer-session.ts` owns the
+open composer's detail, settings save and mock run, exposed through the
+`node-session.ts` facade, which also covers inputs and upload.
+`flow/document/session/inline-editor.ts` owns
 the in-place body editor: its draft, the generation that keeps a late write
 from closing a reopened editor, and the write itself. An external body change
 under an open draft (a run, undo or another writer) closes it instead of

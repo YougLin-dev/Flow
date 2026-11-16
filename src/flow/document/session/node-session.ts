@@ -1,13 +1,13 @@
 /**
  * The document side of the composer, inline text editor and card menu:
  * opening a node, saving settings, running the mock provider, managing
- * inputs, uploading images and copying or deleting cards. It owns the small
- * piece of UI state the page renders.
+ * inputs, uploading images and copying or deleting cards. It exposes the
+ * sessions' signals and delegates the composer's own state.
  */
 import { signal } from "nsh";
 import type { PickedImage, PickImagesOptions, Signal } from "nsh";
 import type { ChangeSet, EdgeInput, NodeDetail, NodeInput } from "../../shared";
-import { canSkipDetailReload, detailAssetIds } from "./composer-detail";
+import { ComposerSession, type AssetUrlSource } from "./composer-session";
 import type { NodeRunner } from "../../execution";
 import { InlineEditor } from "./inline-editor";
 import {
@@ -20,8 +20,6 @@ import {
 import {
   canConnectPorts,
   defaultSettings,
-  isKnownKind,
-  isRunnableKind,
   type NodeKindId,
   type NodeSettings,
   nodeKind,
@@ -31,11 +29,7 @@ import {
 import { capacityOf, hasPortEdge, incomingEdgeCount, type ConnectionPair } from "../../canvas";
 import { uploadSource as uploadSourceFile } from "../commands/upload-source";
 
-/** The asset URL cache the composer reads; `AssetUrls` implements it. */
-export interface AssetUrlSource {
-  url(id: string, mime: string): Promise<string | null>;
-  get(id: string): string | null;
-}
+export type { AssetUrlSource } from "./composer-session";
 
 export interface NodeSessionHost extends NodeCommandHost {
   assets(): AssetUrlSource | null;
@@ -45,31 +39,32 @@ export interface NodeSessionHost extends NodeCommandHost {
   schedulePreviews(): void;
 }
 
-/** The kind a settings draft belongs to when no open detail names it. */
-function settingsKind(settings: NodeSettings): NodeKindId {
-  if ("media" in settings) return "upload";
-  if ("count" in settings) return "image";
-  return "text";
-}
-
 export class NodeSession {
-  readonly composerId = signal<string | null>(null);
-  readonly detail = signal<NodeDetail | null>(null);
-  readonly running = signal(false);
+  readonly composerId: Signal<string | null>;
+  readonly detail: Signal<NodeDetail | null>;
+  readonly running: Signal<boolean>;
   /** The upload node whose picked files are importing, if any. */
   readonly uploadingNode = signal<string | null>(null);
-  readonly assetVersion = signal(0);
+  readonly assetVersion: Signal<number>;
   /** The card whose body is edited in place, and the draft it shows. */
   readonly inlineId: Signal<string | null>;
   readonly inlineText: Signal<string>;
 
+  private readonly composer: ComposerSession;
   private readonly inline: InlineEditor;
-  private readonly announced = new Set<string>();
-  private generation = 0;
   /** A pick, import or write is in flight; not the same as the Saving label. */
   private uploadInFlight = false;
 
   constructor(private readonly host: NodeSessionHost) {
+    this.composer = new ComposerSession({
+      document: () => this.host.document(),
+      assets: () => this.host.assets(),
+      runner: () => this.host.runner(),
+      applyChanges: (changes) => this.host.applyChanges(changes),
+      isDisposed: () => this.host.isDisposed(),
+      // Keep the protected hook: tests observe the read through a subclass.
+      nodeDetail: (id) => this.nodeDetail(id),
+    });
     this.inline = new InlineEditor({
       document: () => this.host.document(),
       isDisposed: () => this.host.isDisposed(),
@@ -77,6 +72,10 @@ export class NodeSession {
       openComposer: (nodeId) => this.openComposer(nodeId),
       closeComposer: () => this.closeComposer(),
     });
+    this.composerId = this.composer.id;
+    this.detail = this.composer.detail;
+    this.running = this.composer.running;
+    this.assetVersion = this.composer.assetVersion;
     this.inlineId = this.inline.nodeId;
     this.inlineText = this.inline.text;
   }
@@ -90,29 +89,7 @@ export class NodeSession {
    * endpoints cannot be matched to decide whether it touched this card.
    */
   onChanges(changes: ChangeSet): void {
-    const id = this.composerId();
-    if (id !== null) {
-      // A removed node has no detail to reload; close before the page's
-      // selection effect tries to save drafts back into a deleted row.
-      if (changes.removed.includes(id)) {
-        this.closeComposer();
-      } else {
-        const current = this.detail();
-        let reload = false;
-        if (current === null || current.node.id !== id) {
-          reload = true;
-        } else {
-          for (const node of changes.changed) {
-            if (node.id === id && !canSkipDetailReload(current.node, node)) reload = true;
-          }
-        }
-        if (changes.edgesChanged.some((edge) => edge.fromId === id || edge.toId === id)) {
-          reload = true;
-        }
-        if (changes.edgesRemoved.length > 0) reload = true;
-        if (reload) void this.loadComposer(id);
-      }
-    }
+    this.composer.noteChanges(changes);
     const inline = this.inlineId();
     if (inline !== null) {
       if (changes.removed.includes(inline)) {
@@ -128,24 +105,15 @@ export class NodeSession {
   }
 
   onSettled(nodeId: string): void {
-    if (this.composerId() !== nodeId) return;
-    this.running.set(this.host.runner()?.isRunning(nodeId) ?? false);
-    void this.loadComposer(nodeId);
+    this.composer.onSettled(nodeId);
   }
 
   openComposer(id: string): void {
-    if (this.composerId() === id && this.detail()) return;
-    this.composerId.set(id);
-    this.detail.set(null);
-    this.running.set(this.host.runner()?.isRunning(id) ?? false);
-    void this.loadComposer(id);
+    this.composer.open(id);
   }
 
   closeComposer(): void {
-    this.generation += 1;
-    this.composerId.set(null);
-    this.detail.set(null);
-    this.running.set(false);
+    this.composer.close();
   }
 
   closeInline(): void {
@@ -164,55 +132,19 @@ export class NodeSession {
 
   /** Asset URLs for the composer's current images. */
   assetUrls(): Record<string, string> {
-    this.assetVersion();
-    const detail = this.detail();
-    const assets = this.host.assets();
-    if (detail === null || assets === null) return {};
-    const entries: Array<readonly [string, string]> = [];
-    for (const id of detailAssetIds(detail)) {
-      const url = assets.get(id);
-      if (url !== null) entries.push([id, url]);
-    }
-    return Object.fromEntries(entries);
+    return this.composer.assetUrls();
   }
 
   async saveSettings(id: string, settings: NodeSettings): Promise<void> {
-    const document = this.host.document();
-    if (!document || this.host.isDisposed()) return;
-    const json = serializeSettings(settings);
-    const current = this.detail();
-    if (current?.node.id === id && current.node.settingsJson === json) return;
-    const kind = current?.node.id === id ? current.node.kind : settingsKind(settings);
-    // A kind this build does not know keeps its edges: the fallback port
-    // schema is a reading aid, not an authoritative list of the node's ports.
-    const ports = isKnownKind(kind) ? portsOfNode({ kind, settingsJson: json }) : null;
-    const validPorts =
-      ports === null
-        ? null
-        : [...new Set([...ports.inputs, ...ports.outputs].map((port) => port.id))];
-    try {
-      const changes = await document.setNodeSettings(id, json, validPorts);
-      if (!this.host.isDisposed()) this.host.applyChanges(changes);
-    } catch (error) {
-      console.error("Flow could not save the node settings", error);
-    }
+    return this.composer.saveSettings(id, settings);
   }
 
   async run(settings: NodeSettings): Promise<void> {
-    const detail = this.detail();
-    const id = this.composerId();
-    const runner = this.host.runner();
-    if (!detail || !id || !runner || this.running()) return;
-    if (!isRunnableKind(detail.node.kind)) return;
-    this.running.set(true);
-    await this.saveSettings(id, settings);
-    if (this.host.isDisposed()) return;
-    await runner.run(detail, settings);
+    return this.composer.run(settings);
   }
 
   cancel(): void {
-    const id = this.composerId();
-    if (id) this.host.runner()?.cancel(id);
+    this.composer.cancel();
   }
 
   async removeInput(inputId: string): Promise<void> {
@@ -514,64 +446,5 @@ export class NodeSession {
     const document = this.host.document();
     if (!document || this.host.isDisposed()) return null;
     return document.nodeDetail(id);
-  }
-
-  private async loadComposer(id: string): Promise<void> {
-    const document = this.host.document();
-    if (!document || this.host.isDisposed()) return;
-    const generation = ++this.generation;
-    try {
-      const detail = await this.nodeDetail(id);
-      if (this.host.isDisposed() || generation !== this.generation || this.composerId() !== id) {
-        return;
-      }
-      if (!detail) {
-        this.closeComposer();
-        return;
-      }
-      this.detail.set(detail);
-      this.running.set(this.host.runner()?.isRunning(id) ?? false);
-      // Cache URLs even after a newer load superseded this one: an asset
-      // that resolves late must still notify the composer's readers.
-      await this.ensureAssets(detail);
-    } catch (error) {
-      // A read in flight at quit rejects because the document closed; the
-      // composer is gone with it, so only a live session reports the failure.
-      if (!this.host.isDisposed()) {
-        console.error("Flow could not read the node detail", error);
-      }
-    }
-  }
-
-  /** Loads the detail's asset URLs, returning whether any URL was new. */
-  private async ensureAssets(detail: NodeDetail): Promise<boolean> {
-    const assets = this.host.assets();
-    if (!assets) return false;
-    const wanted = new Map<string, string>();
-    const collect = (id: string | null | undefined, mime: string | null | undefined): void => {
-      if (id && mime) wanted.set(id, mime);
-    };
-    for (const item of detail.batch?.items ?? []) collect(item.assetId, item.asset?.mime);
-    for (const input of detail.inputs) {
-      collect(input.assetId, input.asset?.mime);
-      collect(input.item?.assetId, input.item?.asset?.mime);
-    }
-    let inserted = false;
-    await Promise.all(
-      [...wanted].map(async ([id, mime]) => {
-        const previous = assets.get(id);
-        const url = await assets.url(id, mime);
-        if (url && previous === null && this.noteAssetUrl(id)) inserted = true;
-      }),
-    );
-    return inserted;
-  }
-
-  /** Announces a URL this session has not announced yet. */
-  private noteAssetUrl(id: string): boolean {
-    if (this.announced.has(id)) return false;
-    this.announced.add(id);
-    this.assetVersion.update((value) => value + 1);
-    return true;
   }
 }
