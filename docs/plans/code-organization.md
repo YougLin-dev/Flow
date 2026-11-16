@@ -444,7 +444,10 @@ src/
 │   │   ├── ProjectDialogShell.tsx
 │   │   ├── ProjectNameDialog.tsx
 │   │   ├── DeleteProjectDialog.tsx
-│   │   └── ImportProjectDialog.tsx
+│   │   ├── ProjectPathDialog.tsx      one-path form (import, backup, restore)
+│   │   ├── ImportProjectDialog.tsx
+│   │   ├── BackupProjectDialog.tsx
+│   │   └── RestoreProjectDialog.tsx
 │   └── flow/
 │       ├── index.ts
 │       ├── FlowPage.tsx
@@ -1064,7 +1067,7 @@ src/native/src/
 │   ├── maintenance.rs      FTS/RTree parity repair (verify calls it)
 │   └── reset.rs            dev-only destructive reset
 ├── project.rs              ProjectStore/ProjectLease FFI half + module declarations
-├── project/                catalog, package, lock, paths, create, commit and ops helpers (test_support in cfg(test))
+├── project/                catalog, package, lock, paths, create, commit, backup and ops helpers (test_support in cfg(test))
 ├── schema.rs               schema module declarations
 ├── history.rs              History/HistoryOp + row snapshots
 ├── asset.rs, gc.rs, viewport.rs, scene.rs, detail.rs, search.rs, edge_index.rs

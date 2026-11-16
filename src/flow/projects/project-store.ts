@@ -26,6 +26,8 @@ export interface ProjectStorePort {
   deleteProject(projectId: string): Promise<void>;
   duplicateProject(projectId: string, title: string): Promise<ProjectEntry>;
   importProject(source: string): Promise<ProjectEntry>;
+  backupProject(projectId: string, destination: string): Promise<void>;
+  restoreProject(projectId: string, source: string): Promise<ProjectEntry>;
 }
 
 /** Opens the managed root. The Rust store creates it when it is missing. */

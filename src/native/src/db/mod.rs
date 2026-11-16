@@ -28,7 +28,7 @@ mod metadata;
 mod open;
 mod session;
 mod undo;
-mod verify;
+pub(crate) mod verify;
 mod worker;
 
 use undo::{ensure_history, invalidate_history};

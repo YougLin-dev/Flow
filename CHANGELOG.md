@@ -17,7 +17,9 @@ All notable changes to Flow are recorded here. The format follows
   Import project… adds a package folder or a .zip archive from a path,
   accepting stored or deflated entries under a strict package allowlist,
   with duplicate names, multiple end records, ZIP64 archives and oversized
-  archives or entries refused. The
+  archives or entries refused. Back up… copies a closed project to a new
+  folder outside the projects folder; Restore… replaces a project with a
+  backup folder or .zip of the same project after verifying it. The
   canvas's
   rename control renames the open project in place; the title bar and the
   list show the new name and the package never moves. Exactly one

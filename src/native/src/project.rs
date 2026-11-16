@@ -19,6 +19,7 @@ use std::sync::{Arc, Mutex, MutexGuard};
 use nsh_core::prelude::*;
 
 mod archive;
+mod backup;
 mod catalog;
 mod commit;
 mod create;
@@ -101,6 +102,7 @@ impl ProjectStore {
         let state = this.with(|store| Arc::clone(&store.state));
         crate::off_thread(move || {
             let _catalog = lock_catalog(&state)?;
+            paths::recover_restores(&state.root);
             paths::sweep_residue(&state.root);
             archive::sweep_staging();
             let entries = catalog::refresh(&state.root)?;
@@ -204,6 +206,52 @@ impl ProjectStore {
         })
         .await
     }
+
+    /// Copies a closed project package to a new folder outside the root. The
+    /// copy is a complete, verified package (`project.db` and `assets/`).
+    pub async fn backup_project(
+        this: Instance<Self>,
+        project_id: String,
+        destination: String,
+    ) -> Result<(), String> {
+        let state = this.with(|store| Arc::clone(&store.state));
+        // The package lock inside the backup serializes opens; the active-slot
+        // read only catches the project this window already shows. Both the
+        // read and the copy run off the engine thread, and the backup takes no
+        // catalog lock (that lock can be held by a long import). The package
+        // lock resolves a race with an open started in between.
+        crate::off_thread(move || {
+            let active = active_project(&state);
+            backup::backup_project(&state.root, active.as_deref(), &project_id, &destination)
+        })
+        .await
+    }
+
+    /// Replaces a closed project package with a backup of the same identity.
+    /// An archive backup is unpacked and the replacement package built before
+    /// the catalog lock is taken, so a large source does not block the other
+    /// project actions.
+    pub async fn restore_project(
+        this: Instance<Self>,
+        project_id: String,
+        source: String,
+    ) -> Result<ProjectEntry, String> {
+        let state = this.with(|store| Arc::clone(&store.state));
+        let root = state.root.clone();
+        let build_id = project_id.clone();
+        let pending = crate::off_thread(move || {
+            let prepared = ops::prepare_import(&source)?;
+            backup::prepare_restore(&root, &build_id, prepared)
+        })
+        .await?;
+        crate::off_thread(move || {
+            let _catalog = lock_catalog(&state)?;
+            let active = active_project(&state);
+            let entry = backup::commit_restore(&state.root, active.as_deref(), pending)?;
+            Ok(entry_view(&state, entry))
+        })
+        .await
+    }
 }
 
 #[class]
@@ -255,6 +303,7 @@ impl Drop for ProjectLease {
 
 fn open_state(root: String) -> Result<StoreState, String> {
     let root = paths::prepare_root(&root)?;
+    paths::recover_restores(&root);
     paths::sweep_residue(&root);
     archive::sweep_staging();
     Ok(StoreState {
@@ -430,6 +479,24 @@ mod tests {
         assert_eq!(stored.stamp, Some(expected));
         lease.release();
         let _ = fs::remove_dir_all(&state.root);
+    }
+
+    #[test]
+    fn opening_the_store_recovers_a_parked_restore() {
+        let root =
+            std::env::temp_dir().join(format!("flow-store-parked-{}", paths::unique_suffix()));
+        fs::create_dir_all(&root).expect("root");
+        let state = Arc::new(open_state(root.to_string_lossy().into_owned()).expect("open state"));
+        let created = create::create_project(&state.root, "Parked", None).expect("create");
+        let parked = paths::restore_parked_dir(&state.root, &created.path);
+        fs::rename(paths::package_dir(&state.root, &created.path), &parked)
+            .expect("park the package");
+
+        let reopened = open_state(state.root.to_string_lossy().into_owned()).expect("reopen");
+
+        assert!(paths::package_dir(&reopened.root, &created.path).is_dir());
+        assert!(!parked.exists(), "the parked copy was recovered");
+        let _ = fs::remove_dir_all(&reopened.root);
     }
 
     #[test]

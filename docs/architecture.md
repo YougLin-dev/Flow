@@ -212,12 +212,18 @@ The canvas stays in TSX and owns only the scene model and its views.
   size caps, duplicate names refused, and exactly one end record whose
   declared count and directory size are checked before the parser allocates,
   extracted to an owner-only temp directory before the same validation);
-  pre-v1 packages are refused rather than migrated. The app starts on the projects
+  pre-v1 packages are refused rather than migrated. Back up copies a closed
+  package to a new folder outside the root (a `VACUUM INTO` snapshot plus
+  assets, quick-checked and asset-verified); restore accepts a folder or
+  `.zip` backup of the same identity, builds and verifies the replacement,
+  and swaps directories under the package lock, parking the old directory
+  for crash recovery. The app starts on the projects
   screen (`pages/projects`) when it has a managed root: the list shows
   recency, an open-in-another-window badge and unreadable fallback rows, and
-  creates, renames, duplicates, deletes and imports projects through the same
-  store (rename and duplicate are hidden for an unreadable row; delete stays
-  available so a damaged package can be removed). Opening a project hands
+  creates, renames, duplicates, deletes, imports, backs up and restores
+  projects through the same store (rename, duplicate and backup are hidden
+  for an unreadable row; restore and delete stay available so a damaged
+  package can be recovered or removed). Opening a project hands
   its lease to the flow workspace, which closes the document before releasing
   the package; the canvas's leading `Projects` control returns to the list,
   and the window title bar names the open project. A readable catalog row
@@ -227,7 +233,8 @@ The canvas stays in TSX and owns only the scene model and its views.
   packages. There
   is no filesystem watcher or timer: the projects page revalidates quietly
   when the app returns to the foreground or wakes, and a deep catalog refresh
-  remains the recovery path after a refusal. Backup/restore remains.
+  remains the recovery path after a refusal. The project-layer follow-ups
+  are complete.
 - The decision and the phased migration are recorded in
   [ADR 0002](adr/0002-rust-document-core.md),
   [ADR 0003](adr/0003-orm-seaorm.md) and

@@ -101,7 +101,7 @@ pub(super) fn verify_connection(
     .map_err(|error| format!("the document repair failed: {error}"))
 }
 
-fn check_quick_check(conn: &DatabaseConnection) -> Result<(), String> {
+pub(crate) fn check_quick_check(conn: &DatabaseConnection) -> Result<(), String> {
     let integrity = conn
         .query_one_raw(sea_orm::Statement::from_string(
             conn.get_database_backend(),

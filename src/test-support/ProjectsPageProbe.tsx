@@ -40,6 +40,8 @@ export function ProjectsPageProbe() {
     duplicate: async () => UNREADABLE,
     remove: async () => {},
     importProject: async () => UNREADABLE,
+    backup: async () => {},
+    restore: async () => UNREADABLE,
     showProjects: () => {},
     reportOpenError: () => {},
     reportActionError: () => actionError.set("The action was refused."),

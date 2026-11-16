@@ -34,7 +34,14 @@ export interface OpenProjectDescriptor extends ActiveProject {
 }
 
 /** A project action whose dialog can outlive a dismissal. */
-export type ProjectAction = "create" | "rename" | "duplicate" | "delete" | "import";
+export type ProjectAction =
+  | "create"
+  | "rename"
+  | "duplicate"
+  | "delete"
+  | "import"
+  | "backup"
+  | "restore";
 
 /** The copy in front of a stored action error, inline and above the list. */
 export const PROJECT_ACTION_FAILURE: Record<ProjectAction, string> = {
@@ -43,6 +50,8 @@ export const PROJECT_ACTION_FAILURE: Record<ProjectAction, string> = {
   duplicate: "Couldn’t duplicate the project.",
   delete: "Couldn’t delete the project.",
   import: "Couldn’t import the project.",
+  backup: "Couldn’t back up the project.",
+  restore: "Couldn’t restore the project.",
 };
 
 export interface ProjectsHomeOptions {
@@ -86,6 +95,10 @@ export interface ProjectsHome {
   remove(project: ProjectEntry): Promise<void>;
   /** Imports an outside package folder or `.zip` archive of one. */
   importProject(source: string): Promise<ProjectEntry>;
+  /** Copies a closed project package to a new folder outside the root. */
+  backup(project: ProjectEntry, destination: string): Promise<void>;
+  /** Replaces a closed project with a backup of the same identity. */
+  restore(project: ProjectEntry, source: string): Promise<ProjectEntry>;
   /** Returns from the canvas to the list; the workspace closed the project. */
   showProjects(): void;
   /** The workspace could not open the project; show the list with why. */
@@ -324,7 +337,7 @@ export function createProjectsHome(root: string, options: ProjectsHomeOptions = 
    * path can never hold; accept the copied form rather than failing with a
    * missing-database error.
    */
-  const cleanSource = (raw: string): string => {
+  const cleanPath = (raw: string): string => {
     const trimmed = raw.trim();
     if (trimmed.length >= 2 && trimmed.startsWith('"') && trimmed.endsWith('"')) {
       return trimmed.slice(1, -1).trim();
@@ -333,7 +346,7 @@ export function createProjectsHome(root: string, options: ProjectsHomeOptions = 
   };
 
   const importProject = async (rawSource: string): Promise<ProjectEntry> => {
-    const source = cleanSource(rawSource);
+    const source = cleanPath(rawSource);
     if (source === "") throw new Error("the project import path is empty");
     return act(
       async () => (await ensureStore()).importProject(source),
@@ -341,6 +354,35 @@ export function createProjectsHome(root: string, options: ProjectsHomeOptions = 
         commit((list) => withEntry(list, entry));
         announce(`Imported “${entry.title}”.`);
       },
+    );
+  };
+
+  const backup = async (project: ProjectEntry, rawDestination: string): Promise<void> => {
+    const destination = cleanPath(rawDestination);
+    if (destination === "") throw new Error("the backup destination is empty");
+    await act(
+      async () => (await ensureStore()).backupProject(project.projectId, destination),
+      () => {
+        // The backup is a copy; the row does not change.
+        commit((list) => list);
+        announce(`Backed up “${projectControlName(project)}”.`);
+      },
+      // The store reads the package identity; a refusal can mean it broke.
+      true,
+    );
+  };
+
+  const restore = async (project: ProjectEntry, rawSource: string): Promise<ProjectEntry> => {
+    const source = cleanPath(rawSource);
+    if (source === "") throw new Error("the project restore path is empty");
+    return act(
+      async () => (await ensureStore()).restoreProject(project.projectId, source),
+      (entry) => {
+        commit((list) => withEntry(list, entry));
+        announce(`Restored “${entry.title}”.`);
+      },
+      // The store verifies the backup and the replaced package's identity.
+      true,
     );
   };
 
@@ -398,6 +440,8 @@ export function createProjectsHome(root: string, options: ProjectsHomeOptions = 
     duplicate,
     remove,
     importProject,
+    backup,
+    restore,
     showProjects,
     reportOpenError,
     reportActionError,

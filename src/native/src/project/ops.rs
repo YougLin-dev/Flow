@@ -113,6 +113,10 @@ pub(crate) fn delete_project(
     {
         let _ = crate::schema::package::checkpoint_truncate(&conn);
     }
+    // Retire any restore rollback copy first: once the package is gone, a
+    // parked copy would otherwise be mistaken for an interrupted restore and
+    // resurrect the deleted project at the next store open.
+    paths::retire_restores(root, project_id)?;
     let trash = paths::trash_dir(root, project_id);
     fsutil::rename(&paths::package_dir(root, project_id), &trash)
         .map_err(|error| format!("the project package could not be deleted: {error}"))?;
@@ -312,7 +316,7 @@ fn import_directory(root: &Path, source: &Path) -> Result<catalog::Entry, String
     Ok(entry)
 }
 
-fn refuse_active(active: Option<&str>, project_id: &str) -> Result<(), String> {
+pub(crate) fn refuse_active(active: Option<&str>, project_id: &str) -> Result<(), String> {
     if active == Some(project_id) {
         Err(OPEN_HERE.to_owned())
     } else {
@@ -336,17 +340,17 @@ fn lock_and_identity(
     Ok((lock, identity))
 }
 
-fn connect(database: &Path) -> Result<DatabaseConnection, String> {
+pub(crate) fn connect(database: &Path) -> Result<DatabaseConnection, String> {
     let url = db::sqlite_url(&database.to_string_lossy())?;
     Database::connect(url).map_err(|error| error.to_string())
 }
 
-fn connect_read_only(database: &Path) -> Result<DatabaseConnection, String> {
+pub(crate) fn connect_read_only(database: &Path) -> Result<DatabaseConnection, String> {
     let url = db::sqlite_url_ro(&database.to_string_lossy())?;
     Database::connect(url).map_err(|error| error.to_string())
 }
 
-fn copy_assets(from: &Path, to: &Path) -> Result<(), String> {
+pub(crate) fn copy_assets(from: &Path, to: &Path) -> Result<(), String> {
     fs::create_dir_all(to).map_err(copy_error)?;
     let entries = match fs::read_dir(from) {
         Ok(entries) => entries,

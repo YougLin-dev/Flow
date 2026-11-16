@@ -34,6 +34,8 @@ export function fakeProjectStore(overrides: Partial<ProjectStorePort> = {}): Pro
     deleteProject: async () => {},
     duplicateProject: async () => listed,
     importProject: async () => listed,
+    backupProject: async () => {},
+    restoreProject: async () => listed,
     ...overrides,
   };
 }

@@ -1,13 +1,13 @@
 # Projects screen
 
 Status: implemented — the project list, create, rename, duplicate, delete,
-import, open, back to the list and quit. The catalog refreshes on action, on a
-refusal, on return, and on a foreground return or wake, with no filesystem
-watcher; a cached readable row is re-read only when its package stamp
-changed, while fallback and identity-mismatched rows are re-read on every
-list.
-Backup/restore is a later slice; an open project is renamed from the canvas,
-not from this list.
+import, backup, restore, open, back to the list and quit. The catalog
+refreshes on action, on a refusal, on return, and on a foreground return or
+wake, with no filesystem watcher; a cached readable row is re-read only when
+its package stamp changed, while fallback and identity-mismatched rows are
+re-read on every list.
+An open project is renamed from the canvas, not from this list; backup and
+restore require a closed package.
 
 The data model and the store live in
 [database-design.md](database-design.md) §8.7. This page records the screen's
@@ -18,8 +18,9 @@ and tests refer to.
 
 - **Primary task:** open an existing project.
 - **Secondary tasks:** create a new project (an empty canvas), rename one,
-  duplicate one, delete one, and import a package folder or `.zip` archive
-  from outside the managed root.
+  duplicate one, delete one, import a package folder or `.zip` archive from
+  outside the managed root, back one up to a folder, and restore one from a
+  backup folder or `.zip`.
 - **Object:** one self-contained project package (`project.db` + `assets/`).
 - **Always available:** the project list, `New project`, `Import project…`,
   and for the open project a way back to the list.
@@ -28,9 +29,12 @@ and tests refer to.
 - **States:** loading the list; no projects; the store could not load (with
   Retry); the project can't open (unreadable, open elsewhere, unknown error);
   creating, renaming and duplicating (busy, invalid/refused title); deleting
-  (busy, refused while open elsewhere; allowed for an unreadable package);
-  importing (busy, folder missing or not a package); closing the canvas
-  failed.
+  (busy, refused while open elsewhere or while its restore residue cannot be
+  retired; allowed for an unreadable package);
+  importing (busy, folder missing or not a package); backing up (busy,
+  destination exists or lies inside the projects folder); restoring (busy,
+  backup missing, damaged, of another project, or the project is open);
+  closing the canvas failed.
 - **Keyboard, touch and screen reader:** rows are buttons in list order, each
   followed by its actions button; Tab reaches both, Enter/Space opens a row,
   the actions button opens its menu (whose items take the keyboard focus), the
@@ -53,9 +57,11 @@ and tests refer to.
   so a snapshot from before the action cannot drop or resurrect a row.
 - `pages/projects/ProjectDialogShell.tsx` — the shared dialog surface: focus
   trap, Escape/backdrop dismissal, heading, description, error line and an
-  actions row. `ProjectNameDialog` (create, rename, duplicate),
-  `DeleteProjectDialog` and `ImportProjectDialog` supply their fields and
-  buttons.
+  actions row. `ProjectPathDialog` supplies the one-path form used by
+  `ImportProjectDialog`, `BackupProjectDialog` (a new destination folder) and
+  `RestoreProjectDialog` (a backup folder or `.zip`; an alert with a
+  destructive action); `ProjectNameDialog` (create, rename, duplicate) and
+  `DeleteProjectDialog` supply the other forms.
 - `flow/projects/project-list.ts` — the frozen order, status copy, title for
   an unreadable fallback row, and relative time. These are pure and tested
   beside the area.
@@ -69,19 +75,23 @@ and tests refer to.
   title, subtitle and open/unreadable status (an explicit label wins over the
   row's text for a screen reader), followed by an icon-only actions button
   named `Actions for <title>` that opens a semantic `Menu`. The menu offers
-  Rename…, Duplicate…, Delete…; the key is `projectId`. No row state lives in
-  the cell: the menu's open flag is the page's, keyed by project id, and a
-  scroll closes it so a recycled cell cannot reopen it. A fallback row hides
-  Rename… and Duplicate… (the store's identity guard would refuse both) but
-  keeps Delete…; its subtitle and control name carry the first bytes of the
+  Rename…, Duplicate…, Back up…, Restore… and Delete…; the key is `projectId`.
+  No row state lives in the cell: the menu's open flag is the page's, keyed by
+  project id, and a scroll closes it so a recycled cell cannot reopen it. A
+  fallback row hides Rename…, Duplicate… and Back up… (the store's identity
+  guard would refuse them) but keeps Restore… and Delete…; Restore replaces a
+  damaged package only when the backup carries the same identity, so a package
+  whose folder name disagrees with its identity is recovered by importing the
+  backup instead. Its subtitle and control name carry the first bytes of the
   package identity, so two damaged packages stay distinguishable before a
   destructive action.
 - Rename and duplicate open the name dialog prefilled (rename with the title,
   duplicate with `<title> copy`); delete opens a confirmation that names the
-  project and says it cannot be undone. Import opens a folder-or-archive
-  path field: NSH has no folder picker, and the file picker returns bytes
-  rather than a path, while the store imports a package folder or `.zip`
-  archive from a path.
+  project and says it cannot be undone. Import, backup and restore each open
+  one path field: NSH has no folder picker, and the file picker returns bytes
+  rather than a path, so the dialog takes the path directly. Backup asks for
+  a new destination folder; restore asks for a backup folder or `.zip` and
+  warns that it replaces the current canvas and assets.
 - The dialogs are the semantic `Dialog`: they take focus, trap it, and
   dismiss on Escape, the backdrop or Cancel at any time. A write in flight is
   committed by the store, so the page ignores a late success (its row update
@@ -111,15 +121,15 @@ The app starts on the project list when it has a managed root:
 
 ## Motion inventory
 
-| Change                                         | Motion                                                                                                                                        |
-| ---------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------- |
-| Hover / press on rows, pills, dialog buttons   | Background wash (`hover:bg-muted`, `active:bg-accent`) immediately; the app's control family has no transition tokens yet                     |
-| A row's actions menu appears / leaves          | The `Menu` popup: the platform's own popup placement and native dismissal; the app adds no transition tokens yet                              |
-| Name / delete / import dialog appears / leaves | `Dialog` `animation="fade"`; the platform's reduced-motion setting decides whether it animates                                                |
-| Projects → canvas, canvas → projects           | None: a whole workspace swap; the canvas mounts native views and fits the camera, and a cross-fade would animate the work area                |
-| A row arrives or leaves after an action        | None: the list is the action's result applied as a snapshot and re-sorted in the frozen order; a renamed row can move, a row leaves on delete |
-| Busy action, close failure, action error       | In place, no motion; the control's disabled style and the error text carry the state                                                          |
-| Open-elsewhere / unreadable status             | Text and a neutral badge, no motion or color-only signal                                                                                      |
+| Change                                       | Motion                                                                                                                                        |
+| -------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------- |
+| Hover / press on rows, pills, dialog buttons | Background wash (`hover:bg-muted`, `active:bg-accent`) immediately; the app's control family has no transition tokens yet                     |
+| A row's actions menu appears / leaves        | The `Menu` popup: the platform's own popup placement and native dismissal; the app adds no transition tokens yet                              |
+| Path / name / delete dialog appears / leaves | `Dialog` `animation="fade"`; the platform's reduced-motion setting decides whether it animates                                                |
+| Projects → canvas, canvas → projects         | None: a whole workspace swap; the canvas mounts native views and fits the camera, and a cross-fade would animate the work area                |
+| A row arrives or leaves after an action      | None: the list is the action's result applied as a snapshot and re-sorted in the frozen order; a renamed row can move, a row leaves on delete |
+| Busy action, close failure, action error     | In place, no motion; the control's disabled style and the error text carry the state                                                          |
+| Open-elsewhere / unreadable status           | Text and a neutral badge, no motion or color-only signal                                                                                      |
 
 App-wide motion tokens (durations, easings, press scales) and the styled `ui`
 layer are still missing from the app; this screen matches its existing
@@ -132,7 +142,9 @@ this screen should move onto them then.
   opens it, closes it back to the list, reopens it (which proves the lease was
   released), renames, duplicates and deletes it through the row's actions
   menu, imports a package folder by path and keeps a failed import in its
-  dialog, closes a row menu by scrolling, dismisses the dialog with
+  dialog, backs up a project and restores it over a later rename (the list
+  shows the backup's title again and the restored package reopens), closes a
+  row menu by scrolling, dismisses the dialog with
   Escape, shows a project held by another window as labelled and non-opening,
   and renames the open project from the canvas (the list shows the new title
   after closing, and reopening prefills the rename dialog with it).
@@ -149,9 +161,13 @@ this screen should move onto them then.
   package is reopened, so a package damaged after it was cached lists as
   unavailable; delete’s refusal re-read stays shallow). A deep read that a
   later action or list read superseded runs again instead of being dropped.
+  `projects-home-backup.test.ts` covers the backup/restore path trimming, the
+  empty-path refusal before the store, the row update on restore, and the deep
+  re-read after a failed backup or restore.
   `ProjectsPage.test.tsx` mounts the page over a fixed damaged package (a
-  test-support entry) and checks that its menu offers only delete and that
-  the confirmation names the package by its short identity; a second
+  test-support entry) and checks that its menu hides rename, duplicate and
+  backup but keeps restore and delete, and that the confirmation names the
+  package by its short identity; a second
   test-support entry proves that a foreground return and a wake each run a
   quiet list read. `projects-home-foreground.test.ts` proves the quiet
   failure keeps the visible list, a return recovers a failed load, and a
@@ -171,7 +187,15 @@ this screen should move onto them then.
   encryption, symlinks and other compression methods, multiple and ZIP64
   end records, every size/entry cap, a lying declared size, trailing bytes
   (including beyond a 64 KiB tail), staging cleanup, the archive-path error
-  message, and the import's identity/asset/collision behavior.
+  message, and the import's identity/asset/collision behavior. Backup and
+  restore are covered with a database+asset copy and verification, destination
+  and open-project refusals, the same-identity swap and catalog stamp/open
+  order, a restore from a `.zip`, refusals for another project's, damaged or
+  open target backups, the parked pre-restore recovery and sweep hold (a held
+  package is skipped), a delete that cannot retire a parked copy and keeps the
+  package, a root that cannot be read refusing retirement, unreferenced
+  hash-named assets dropped from backups and restores, and an archive's
+  vanished extraction still naming the archive.
 - Visual, on the real Windows host at 960×640 and 420×760 in light and dark:
   the list, the empty state, the row actions menu, the rename, duplicate,
   delete and import dialogs, and the canvas chrome (title bar with the project
@@ -179,7 +203,11 @@ this screen should move onto them then.
   rename dialog) were inspected from host screenshots. At 420 the header
   wraps its two actions under the title, the menu stays inside the window,
   the rename dialog keeps its margins (its description wraps) and its buttons
-  fit, and the title bar shows the open project's name.
+  fit, and the title bar shows the open project's name. The backup and
+  restore dialogs use the same inspected path-dialog shell (one field, Cancel
+  and one action), with restore adopting the inspected delete dialog's
+  destructive button style; their behavior is covered headlessly, and no new
+  visual state was added beyond that copy.
 - Not verified in this environment: a larger system text size (the host has no
   test control for the font scale), reduced motion with the dialog fade, and
   the fallback row's look on a real host (the visual run had no damaged

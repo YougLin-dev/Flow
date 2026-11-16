@@ -330,7 +330,8 @@ card context menus. `App.projects.test.tsx` drives the managed startup: it
 creates and opens a project through the dialog, returns to the list (reopening
 proves the lease was released), renames, duplicates and deletes through a
 row's actions menu, closes a row menu by scrolling, imports a package folder
-by path and shows a failed import in its dialog, dismisses the
+by path and shows a failed import in its dialog, backs up a project and
+restores it over a later rename, dismisses the
 dialog with Escape, shows a project held by another window without opening
 it, and renames the open project from the canvas (the new title survives the
 close and a reopen). `pages/projects/projects-home.test.ts` covers the list state with a fake
@@ -338,6 +339,9 @@ store: load failure and retry, create, rename, duplicate, delete (including a
 stale list read that cannot resurrect the row), import, open refusals and the
 open-error copy, the quiet re-read after a failed action, and a deep status
 read that runs again when an action supersedes it.
+`pages/projects/projects-home-backup.test.ts` covers the backup/restore path
+trimming, the empty-path refusal before the store, the restore row update, and
+the deep re-read after a failed backup or restore.
 `pages/projects/projects-home-foreground.test.ts` covers the foreground
 revalidation: a quiet failure keeps the visible list, a successful return
 recovers a failed load, and a return during an in-flight load is ignored.
@@ -350,7 +354,8 @@ asserts the title bar's text, so the shell's rename wiring is covered too.
 (no write starts, no result applies, a late failure reaches the list).
 `ProjectsPage.test.tsx` mounts the page over a fixed damaged package through a
 test-support entry (the test host cannot seed one) and checks that its menu
-offers only delete and that the confirmation names the package; a second
+hides rename, duplicate and backup but keeps restore and delete, and that the
+confirmation names the package; a second
 test-support entry proves that a foreground return and a system wake each run
 a quiet list read.
 `App.host.test.tsx` repeats the subset

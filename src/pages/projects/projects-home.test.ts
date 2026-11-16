@@ -38,6 +38,8 @@ function fakeStore(overrides: Partial<ProjectStorePort> = {}): ProjectStorePort 
     deleteProject: async () => {},
     duplicateProject: async () => entry(ID_B, "Copy"),
     importProject: async () => entry(ID_B, "Imported"),
+    backupProject: async () => {},
+    restoreProject: async (projectId) => entry(projectId, "Restored"),
     ...overrides,
   };
 }

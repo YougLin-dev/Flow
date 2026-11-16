@@ -3,16 +3,19 @@ import { UNREADABLE_ID } from "./test-support/ProjectsPageProbe";
 
 const SHORT_ID = UNREADABLE_ID.slice(0, 8);
 
-test("an unreadable row offers only delete and names its package", async () => {
+test("an unreadable row keeps restore and delete and names its package", async () => {
   const app = await open("./test-support/ProjectsPageProbe.tsx");
   await app.waitUntil(() => app.shows("text:Unavailable project"));
 
   await app.press(`label:Actions for Unavailable project ${SHORT_ID}`);
   await app.waitUntil(() => app.shows("text:Delete…"));
-  // Rename and duplicate read the package identity, which a fallback row
-  // does not have; only delete may stay.
+  // Rename, duplicate and backup read the package identity, which a fallback
+  // row does not have; restore replaces the package and is the recovery path,
+  // and delete stays so a damaged package can be removed.
   expect(app.shows("text:Rename…")).toBe(false);
   expect(app.shows("text:Duplicate…")).toBe(false);
+  expect(app.shows("text:Back up…")).toBe(false);
+  expect(app.shows("text:Restore…")).toBe(true);
 
   await app.press("text:Delete…");
   await app.waitUntil(() => app.shows("id:project-delete-dialog"));

@@ -29,6 +29,16 @@ pub(crate) struct Identity {
 /// Reads the document identity of an existing package. A missing database,
 /// a foreign file and a package that fails the v1 guard are distinct errors.
 pub(crate) fn read_identity(database: &Path) -> Result<Identity, String> {
+    inspect_identity(database, false)
+}
+
+/// Reads the identity after SQLite's `quick_check`, the backup and restore
+/// prerequisite. The list stays on the cheaper `read_identity`.
+pub(crate) fn verify_identity(database: &Path) -> Result<Identity, String> {
+    inspect_identity(database, true)
+}
+
+fn inspect_identity(database: &Path, quick_check: bool) -> Result<Identity, String> {
     if !paths::is_regular_file(database) {
         return Err(missing_database(database));
     }
@@ -40,6 +50,9 @@ pub(crate) fn read_identity(database: &Path) -> Result<Identity, String> {
         v1::FileState::Current(info) => info,
         v1::FileState::New => return Err(missing_database(database)),
     };
+    if quick_check {
+        crate::db::verify::check_quick_check(&conn).map_err(guard)?;
+    }
     let row = document::current(&conn).map_err(|error| guard(error.to_string()))?;
     Ok(Identity {
         project_id: info.project_id,

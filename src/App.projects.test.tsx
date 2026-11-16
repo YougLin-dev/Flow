@@ -14,6 +14,13 @@ async function resetRoot(root: string): Promise<void> {
   await Promise.all(projects.map((project) => store.deleteProject(project.projectId)));
 }
 
+/** Also finds packages written outside that root's catalog (a backup). */
+async function resetRootDeep(root: string): Promise<void> {
+  const store = await openProjectStore(root);
+  const projects = await store.refreshCatalog();
+  await Promise.all(projects.map((project) => store.deleteProject(project.projectId)));
+}
+
 const openApp = (root: string): Promise<App> =>
   open("./App.tsx", {
     host: { params: { projectsRoot: root, flowZoomProbe: 1 } },
@@ -189,6 +196,55 @@ test("a failed import explains itself and keeps the dialog", async () => {
     app.texts().some((text) => text.includes("Couldn’t import the project.")),
   );
   expect(app.shows("id:project-import-dialog")).toBe(true);
+});
+
+test("backs up a project and restores it over a later rename", async () => {
+  const root = testRoot("backup");
+  // A second managed root gives the test a real folder for the backup that
+  // its reset can clear; backups must live outside the project root.
+  const backupRoot = testRoot("backup-store");
+  // A package-shaped name lets the backup root's deep reset find and delete
+  // the folder on the next run; the backup itself carries the source id.
+  const backupPath = `${backupRoot}/ffffffffffffffffffffffffffffffff`;
+  await resetRoot(root);
+  await resetRootDeep(backupRoot);
+  const app = await openApp(root);
+  await app.waitUntil(() => app.shows("text:No projects yet"));
+  await createFromList(app, "Before");
+
+  await app.press("label:Actions for Before");
+  await app.waitUntil(() => app.shows("text:Back up…"));
+  await app.press("text:Back up…");
+  await app.waitUntil(() => app.shows("id:project-backup-path"));
+  await app.type("id:project-backup-path", backupPath);
+  await app.press("id:project-backup-submit");
+  await app.waitUntil(() => !app.shows("id:project-backup-dialog"));
+
+  await app.press("label:Actions for Before");
+  await app.waitUntil(() => app.shows("text:Rename…"));
+  await app.press("text:Rename…");
+  await app.waitUntil(() => app.shows("id:project-rename-title"));
+  await app.clear("id:project-rename-title");
+  await app.type("id:project-rename-title", "After");
+  await app.press("id:project-rename-submit");
+  await app.waitUntil(() => app.shows("text:After"));
+
+  await app.press("label:Actions for After");
+  await app.waitUntil(() => app.shows("text:Restore…"));
+  await app.press("text:Restore…");
+  await app.waitUntil(() => app.shows("id:project-restore-path"));
+  await app.type("id:project-restore-path", backupPath);
+  await app.press("id:project-restore-submit");
+  await app.waitUntil(() => !app.shows("id:project-restore-dialog"));
+  await app.waitUntil(() => app.shows("text:Before"));
+  expect(app.shows("text:After")).toBe(false);
+
+  // The restored package still opens and releases its lease: the managed
+  // open ran the recovery check the restore requested.
+  await app.press("text:Before");
+  await app.waitUntil(() => app.shows("id:back-to-projects"));
+  await app.press("id:back-to-projects");
+  await app.waitUntil(() => app.shows("id:projects-page"));
 });
 
 test("a row menu closes when the list scrolls", async () => {

@@ -17,8 +17,10 @@ import {
 } from "../../flow/projects";
 import type { ProjectEntry } from "../../flow/shared";
 import { Icon } from "../../components/primitives";
+import { BackupProjectDialog } from "./BackupProjectDialog";
 import { DeleteProjectDialog } from "./DeleteProjectDialog";
 import { ImportProjectDialog } from "./ImportProjectDialog";
+import { RestoreProjectDialog } from "./RestoreProjectDialog";
 import { runProjectAction, type DialogRun, type DialogRuns } from "./project-action-run";
 import { ProjectNameDialog } from "./ProjectNameDialog";
 import { PROJECT_ACTION_FAILURE, type ProjectsHome } from "./projects-home";
@@ -31,7 +33,10 @@ export interface ProjectsPageProps {
 type ProjectDialog =
   | { readonly kind: "create" }
   | { readonly kind: "import" }
-  | { readonly kind: "rename" | "duplicate" | "delete"; readonly project: ProjectEntry };
+  | {
+      readonly kind: "rename" | "duplicate" | "delete" | "backup" | "restore";
+      readonly project: ProjectEntry;
+    };
 
 const OUTLINE =
   "rounded-(--radius) border border-border bg-card px-3 py-1.5 text-sm text-card-foreground hover:bg-muted active:bg-accent focus-visible:ring-2 focus-visible:ring-ring";
@@ -155,6 +160,24 @@ export function ProjectsPage(props: ProjectsPageProps) {
       runs,
       "import",
       () => props.home.importProject(source),
+      () => {},
+    );
+  };
+
+  const submitBackup = async (project: ProjectEntry, destination: string): Promise<void> => {
+    await runProjectAction(
+      runs,
+      "backup",
+      () => props.home.backup(project, destination),
+      () => {},
+    );
+  };
+
+  const submitRestore = async (project: ProjectEntry, source: string): Promise<void> => {
+    await runProjectAction(
+      runs,
+      "restore",
+      () => props.home.restore(project, source),
       () => {},
     );
   };
@@ -328,6 +351,23 @@ export function ProjectsPage(props: ProjectsPageProps) {
                       <Text class="text-sm text-popover-foreground">Duplicate…</Text>
                     </MenuItem>
                   )}
+                  {project().unreadable ? null : (
+                    <MenuItem
+                      class={MENU_ITEM}
+                      onSelect={() => openDialog({ kind: "backup", project: project() })}
+                    >
+                      <Text class="text-sm text-popover-foreground">Back up…</Text>
+                    </MenuItem>
+                  )}
+                  {/* Restoring replaces the package with a verified backup of
+                      the same identity, so it is also the recovery path for a
+                      damaged row that still has its directory. */}
+                  <MenuItem
+                    class={MENU_ITEM}
+                    onSelect={() => openDialog({ kind: "restore", project: project() })}
+                  >
+                    <Text class="text-sm text-popover-foreground">Restore…</Text>
+                  </MenuItem>
                   <MenuItem
                     class={MENU_ITEM}
                     onSelect={() => openDialog({ kind: "delete", project: project() })}
@@ -403,6 +443,28 @@ export function ProjectsPage(props: ProjectsPageProps) {
             failurePrefix={PROJECT_ACTION_FAILURE.import}
             onCancel={dismissDialog}
             onImport={submitImport}
+          />
+        )}
+      </If>
+
+      <If when={currentTarget("backup")}>
+        {(target) => (
+          <BackupProjectDialog
+            project={target()}
+            failurePrefix={PROJECT_ACTION_FAILURE.backup}
+            onCancel={dismissDialog}
+            onBackup={(destination) => submitBackup(target(), destination)}
+          />
+        )}
+      </If>
+
+      <If when={currentTarget("restore")}>
+        {(target) => (
+          <RestoreProjectDialog
+            project={target()}
+            failurePrefix={PROJECT_ACTION_FAILURE.restore}
+            onCancel={dismissDialog}
+            onRestore={(source) => submitRestore(target(), source)}
           />
         )}
       </If>

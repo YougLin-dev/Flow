@@ -15,6 +15,7 @@ use crate::project::paths;
 
 /// A temp package that removes itself unless [`TempPackage::commit`] renames
 /// it into place.
+#[derive(Debug)]
 pub(crate) struct TempPackage {
     path: std::path::PathBuf,
 }
