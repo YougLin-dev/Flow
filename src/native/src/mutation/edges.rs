@@ -18,7 +18,7 @@ use super::tx::runs::items_for_batch_tx;
 use super::tx::{finish_tx, no_op};
 use crate::clock::now_ms;
 use crate::entity::nodes as node_rows;
-use crate::history::{EdgeRow, HistoryOp, HistoryRefs, InputRow};
+use crate::history::{EdgeRow, HistoryOp, InputRow};
 use crate::types::{ChangeSet, EdgeInput};
 
 pub fn insert_edges(conn: &DatabaseConnection, inputs: Vec<EdgeInput>) -> Result<Mutation, String> {
@@ -41,8 +41,8 @@ pub fn insert_edges(conn: &DatabaseConnection, inputs: Vec<EdgeInput>) -> Result
         inverse.reverse();
 
         let rev = finish_tx(txn)?;
-        Ok(Mutation {
-            changes: ChangeSet {
+        Ok(Mutation::commit(
+            ChangeSet {
                 rev: rev as f64,
                 changed: Vec::new(),
                 removed: Vec::new(),
@@ -51,8 +51,7 @@ pub fn insert_edges(conn: &DatabaseConnection, inputs: Vec<EdgeInput>) -> Result
             },
             forward,
             inverse,
-            refs: HistoryRefs::default(),
-        })
+        ))
     })
     .map_err(|error| error.to_string())
 }
@@ -89,8 +88,8 @@ pub fn delete_edges(conn: &DatabaseConnection, ids: Vec<String>) -> Result<Mutat
         inverse.reverse();
 
         let rev = finish_tx(txn)?;
-        Ok(Mutation {
-            changes: ChangeSet {
+        Ok(Mutation::commit(
+            ChangeSet {
                 rev: rev as f64,
                 changed,
                 removed: Vec::new(),
@@ -99,8 +98,7 @@ pub fn delete_edges(conn: &DatabaseConnection, ids: Vec<String>) -> Result<Mutat
             },
             forward,
             inverse,
-            refs: HistoryRefs::default(),
-        })
+        ))
     })
     .map_err(|error| error.to_string())
 }
@@ -142,8 +140,8 @@ pub fn connect_edges(
         let mut inverse = desired_inverse;
         inverse.reverse();
         let rev = finish_tx(txn)?;
-        Ok(Mutation {
-            changes: ChangeSet {
+        Ok(Mutation::commit(
+            ChangeSet {
                 rev: rev as f64,
                 changed: changed_by_id
                     .values()
@@ -155,8 +153,7 @@ pub fn connect_edges(
             },
             forward,
             inverse,
-            refs: HistoryRefs::default(),
-        })
+        ))
     })
     .map_err(|error| error.to_string())
 }
@@ -259,8 +256,8 @@ pub fn update_edge(conn: &DatabaseConnection, input: EdgeInput) -> Result<Mutati
         desired_inverse.reverse();
 
         let rev = finish_tx(txn)?;
-        Ok(Mutation {
-            changes: ChangeSet {
+        Ok(Mutation::commit(
+            ChangeSet {
                 rev: rev as f64,
                 changed,
                 removed: Vec::new(),
@@ -268,9 +265,8 @@ pub fn update_edge(conn: &DatabaseConnection, input: EdgeInput) -> Result<Mutati
                 edges_removed: Vec::new(),
             },
             forward,
-            inverse: desired_inverse,
-            refs: HistoryRefs::default(),
-        })
+            desired_inverse,
+        ))
     })
     .map_err(|error| error.to_string())
 }

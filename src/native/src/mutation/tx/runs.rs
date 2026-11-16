@@ -76,29 +76,14 @@ pub(in crate::mutation) fn cancel_orphan_settle(
     refs.batch(Some(&running.id));
     refs.node(running.node_id.clone());
     let rev = finish_tx(txn)?;
-    Ok((
-        ChangeSet {
-            rev: rev as f64,
-            changed: Vec::new(),
-            removed: Vec::new(),
-            edges_changed: Vec::new(),
-            edges_removed: Vec::new(),
-        },
-        refs,
-    ))
+    Ok((ChangeSet::empty(rev as f64), refs))
 }
 
 pub(in crate::mutation) fn empty_settle(
     txn: &DatabaseTransaction,
 ) -> Result<(ChangeSet, HistoryRefs), DbErr> {
     Ok((
-        ChangeSet {
-            rev: document::current_rev(txn)? as f64,
-            changed: Vec::new(),
-            removed: Vec::new(),
-            edges_changed: Vec::new(),
-            edges_removed: Vec::new(),
-        },
+        ChangeSet::empty(document::current_rev(txn)? as f64),
         HistoryRefs::default(),
     ))
 }

@@ -44,7 +44,7 @@ pub fn node_detail(conn: &DatabaseConnection, id: &str) -> Result<Option<NodeDet
     let inputs = read_inputs(conn, id)?;
     let incoming = read_incoming(conn, id)?;
     Ok(Some(NodeDetail {
-        node: node_summary(&node),
+        node: NodeSummary::from(&node),
         batch,
         latest_batch,
         inputs,
@@ -496,7 +496,7 @@ fn assets_by_id(
             .all(conn)
             .map_err(|error| error.to_string())?;
         for row in rows {
-            found.insert(row.id.clone(), asset_summary(&row));
+            found.insert(row.id.clone(), AssetSummary::from(&row));
         }
     }
     Ok(found)
@@ -520,37 +520,5 @@ fn item_summary(
             .as_ref()
             .and_then(|id| assets.get(id))
             .cloned(),
-    }
-}
-
-fn asset_summary(asset: &assets::Model) -> AssetSummary {
-    AssetSummary {
-        id: asset.id.clone(),
-        hash: asset.hash.clone(),
-        kind: asset.kind.clone(),
-        name: asset.name.clone(),
-        mime: asset.mime.clone(),
-        size: asset.size as f64,
-        meta_json: asset.meta_json.clone(),
-        created_at: asset.created_at as f64,
-    }
-}
-
-fn node_summary(node: &nodes::Model) -> NodeSummary {
-    NodeSummary {
-        id: node.id.clone(),
-        kind: node.kind.clone(),
-        title: node.title.clone(),
-        body: node.body.clone(),
-        x: node.x,
-        y: node.y,
-        width: node.width,
-        height: node.height,
-        z: node.z,
-        rev: node.rev as f64,
-        data_json: node.data_json.clone(),
-        settings_json: node.settings_json.clone(),
-        status: node.status.clone(),
-        output_batch_id: node.output_batch_id.clone(),
     }
 }

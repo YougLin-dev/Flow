@@ -119,11 +119,5 @@ pub fn seed_document(
 }
 
 fn empty_change_tx(txn: &DatabaseTransaction) -> Result<ChangeSet, DbErr> {
-    Ok(ChangeSet {
-        rev: document::current_rev(txn)? as f64,
-        changed: Vec::new(),
-        removed: Vec::new(),
-        edges_changed: Vec::new(),
-        edges_removed: Vec::new(),
-    })
+    Ok(ChangeSet::empty(document::current_rev(txn)? as f64))
 }

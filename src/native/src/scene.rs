@@ -64,7 +64,7 @@ pub fn get_node(conn: &DatabaseConnection, id: &str) -> Result<Option<NodeSummar
         .filter(nodes::Column::Id.eq(id))
         .one(conn)
         .map_err(|error| error.to_string())?;
-    Ok(row.map(|row| node_summary(&row)))
+    Ok(row.map(|row| NodeSummary::from(&row)))
 }
 
 /// The whole document's content bounds. The v1 triggers maintain them on the
@@ -210,43 +210,15 @@ struct EdgeGeometry {
     width: f64,
 }
 
-fn node_summary(node: &nodes::Model) -> NodeSummary {
-    NodeSummary {
-        id: node.id.clone(),
-        kind: node.kind.clone(),
-        title: node.title.clone(),
-        body: node.body.clone(),
-        x: node.x,
-        y: node.y,
-        width: node.width,
-        height: node.height,
-        z: node.z,
-        rev: node.rev as f64,
-        data_json: node.data_json.clone(),
-        settings_json: node.settings_json.clone(),
-        status: node.status.clone(),
-        output_batch_id: node.output_batch_id.clone(),
-    }
-}
-
 fn edge_summary(edge: &edges::Model, geometry: &BTreeMap<String, EdgeGeometry>) -> EdgeSummary {
     EdgeSummary {
-        id: edge.id.clone(),
-        from_id: edge.from_id.clone(),
-        to_id: edge.to_id.clone(),
-        from_port: edge.from_port.clone(),
-        to_port: edge.to_port.clone(),
-        port_kind: edge.port_kind.clone(),
-        from_offset: edge.from_offset,
-        to_offset: edge.to_offset,
-        kind: edge.kind.clone(),
-        data_json: edge.data_json.clone(),
         from_point: geometry
             .get(&edge.from_id)
             .map(|card| EdgePoint::output(card.x, card.y, card.width, edge.from_offset)),
         to_point: geometry
             .get(&edge.to_id)
             .map(|card| EdgePoint::input(card.x, card.y, edge.to_offset)),
+        ..EdgeSummary::from(edge)
     }
 }
 

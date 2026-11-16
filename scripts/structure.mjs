@@ -219,6 +219,7 @@ export function checkRustLayout(root) {
     "fsutil.rs",
     "project.rs",
     "project",
+    "rows.rs",
     "constants.rs",
     "clock.rs",
     "types.rs",

@@ -34,12 +34,28 @@ pub struct Mutation {
 }
 
 impl Mutation {
-    fn new(changes: ChangeSet, forward: Vec<HistoryOp>, inverse: Vec<HistoryOp>) -> Self {
+    /// Assembles a write whose undo needs no references beyond its ops.
+    pub(in crate::mutation) fn commit(
+        changes: ChangeSet,
+        forward: Vec<HistoryOp>,
+        inverse: Vec<HistoryOp>,
+    ) -> Self {
+        Self::with_refs(changes, forward, inverse, HistoryRefs::default())
+    }
+
+    /// Assembles a write whose undo also restores out-of-band references,
+    /// such as an upload's assets.
+    pub(in crate::mutation) fn with_refs(
+        changes: ChangeSet,
+        forward: Vec<HistoryOp>,
+        inverse: Vec<HistoryOp>,
+        refs: HistoryRefs,
+    ) -> Self {
         Self {
             changes,
             forward,
             inverse,
-            refs: HistoryRefs::default(),
+            refs,
         }
     }
 }

@@ -65,15 +65,15 @@ pub fn set_manual_text(
         refs.batch(Some(&batch.id));
         refs.asset(item.asset_id.as_deref());
         let rev = finish_tx(txn)?;
-        Ok(Mutation {
-            changes: ChangeSet {
+        Ok(Mutation::with_refs(
+            ChangeSet {
                 rev: rev as f64,
                 changed,
                 removed: Vec::new(),
                 edges_changed: Vec::new(),
                 edges_removed: Vec::new(),
             },
-            forward: vec![HistoryOp::NodeOutput {
+            vec![HistoryOp::NodeOutput {
                 id: id.clone(),
                 from_batch_id: before_row.output_batch_id.clone(),
                 from_body: before_row.body.clone(),
@@ -82,7 +82,7 @@ pub fn set_manual_text(
                 to_body: after.body.clone(),
                 to_status: after.status.clone(),
             }],
-            inverse: vec![HistoryOp::NodeOutput {
+            vec![HistoryOp::NodeOutput {
                 id,
                 from_batch_id: after.output_batch_id.clone(),
                 from_body: after.body.clone(),
@@ -92,7 +92,7 @@ pub fn set_manual_text(
                 to_status: before_row.status,
             }],
             refs,
-        })
+        ))
     })
     .map_err(|error| error.to_string())
 }
@@ -253,8 +253,8 @@ pub fn set_manual_upload(
             refs.asset(item.asset_id.as_deref());
         }
         let rev = finish_tx(txn)?;
-        Ok(Mutation {
-            changes: ChangeSet {
+        Ok(Mutation::with_refs(
+            ChangeSet {
                 rev: rev as f64,
                 changed,
                 removed: Vec::new(),
@@ -264,7 +264,7 @@ pub fn set_manual_upload(
             forward,
             inverse,
             refs,
-        })
+        ))
     })
     .map_err(|error| error.to_string())
 }
@@ -313,18 +313,18 @@ pub fn insert_upload_node(
             refs.asset(item.asset_id.as_deref());
         }
         let rev = finish_tx(txn)?;
-        Ok(Mutation {
-            changes: ChangeSet {
+        Ok(Mutation::with_refs(
+            ChangeSet {
                 rev: rev as f64,
                 changed: vec![after.summary()],
                 removed: Vec::new(),
                 edges_changed: Vec::new(),
                 edges_removed: Vec::new(),
             },
-            forward: vec![HistoryOp::Insert(after)],
-            inverse: vec![HistoryOp::Delete { id: node.id }],
+            vec![HistoryOp::Insert(after)],
+            vec![HistoryOp::Delete { id: node.id }],
             refs,
-        })
+        ))
     })
     .map_err(|error| error.to_string())
 }

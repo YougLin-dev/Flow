@@ -21,14 +21,8 @@ pub(in crate::mutation) fn finish_tx(txn: &DatabaseTransaction) -> Result<i64, D
 }
 
 pub(in crate::mutation) fn no_op(txn: &DatabaseTransaction) -> Result<Mutation, DbErr> {
-    Ok(Mutation::new(
-        ChangeSet {
-            rev: document::current_rev(txn)? as f64,
-            changed: Vec::new(),
-            removed: Vec::new(),
-            edges_changed: Vec::new(),
-            edges_removed: Vec::new(),
-        },
+    Ok(Mutation::commit(
+        ChangeSet::empty(document::current_rev(txn)? as f64),
         Vec::new(),
         Vec::new(),
     ))

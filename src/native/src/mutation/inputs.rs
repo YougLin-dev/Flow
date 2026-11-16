@@ -51,18 +51,18 @@ pub fn add_input(conn: &DatabaseConnection, input: InputItemInput) -> Result<Mut
         }
 
         let rev = finish_tx(txn)?;
-        Ok(Mutation {
-            changes: ChangeSet {
+        Ok(Mutation::with_refs(
+            ChangeSet {
                 rev: rev as f64,
                 changed,
                 removed: Vec::new(),
                 edges_changed: Vec::new(),
                 edges_removed: Vec::new(),
             },
-            forward: vec![HistoryOp::InsertInput(row.clone())],
-            inverse: vec![HistoryOp::DeleteInput { id: row.id }],
+            vec![HistoryOp::InsertInput(row.clone())],
+            vec![HistoryOp::DeleteInput { id: row.id }],
             refs,
-        })
+        ))
     })
     .map_err(|error| error.to_string())
 }
@@ -85,18 +85,18 @@ pub fn remove_input(conn: &DatabaseConnection, id: String) -> Result<Mutation, S
         }
 
         let rev = finish_tx(txn)?;
-        Ok(Mutation {
-            changes: ChangeSet {
+        Ok(Mutation::with_refs(
+            ChangeSet {
                 rev: rev as f64,
                 changed,
                 removed: Vec::new(),
                 edges_changed: Vec::new(),
                 edges_removed: Vec::new(),
             },
-            forward: vec![HistoryOp::DeleteInput { id: id.clone() }],
-            inverse: vec![HistoryOp::InsertInput(input_row(&row))],
+            vec![HistoryOp::DeleteInput { id: id.clone() }],
+            vec![HistoryOp::InsertInput(input_row(&row))],
             refs,
-        })
+        ))
     })
     .map_err(|error| error.to_string())
 }
@@ -181,8 +181,8 @@ pub fn reorder_inputs(
         let changed = vec![node_row(&touch_node_tx(txn, &node_id)?).summary()];
 
         let rev = finish_tx(txn)?;
-        Ok(Mutation {
-            changes: ChangeSet {
+        Ok(Mutation::commit(
+            ChangeSet {
                 rev: rev as f64,
                 changed,
                 removed: Vec::new(),
@@ -191,8 +191,7 @@ pub fn reorder_inputs(
             },
             forward,
             inverse,
-            refs: HistoryRefs::default(),
-        })
+        ))
     })
     .map_err(|error| error.to_string())
 }

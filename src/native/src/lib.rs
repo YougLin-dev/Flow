@@ -17,6 +17,7 @@ mod gc;
 mod history;
 mod mutation;
 mod project;
+mod rows;
 mod scene;
 pub mod schema;
 mod search;

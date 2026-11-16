@@ -107,13 +107,8 @@ impl Database {
 }
 
 fn empty_change(conn: &DatabaseConnection) -> Result<ChangeSet, String> {
-    Ok(ChangeSet {
-        rev: document::current_rev(conn).map_err(|error| error.to_string())? as f64,
-        changed: Vec::new(),
-        removed: Vec::new(),
-        edges_changed: Vec::new(),
-        edges_removed: Vec::new(),
-    })
+    let rev = document::current_rev(conn).map_err(|error| error.to_string())? as f64;
+    Ok(ChangeSet::empty(rev))
 }
 
 pub(super) fn lock_history(

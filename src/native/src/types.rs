@@ -360,6 +360,21 @@ pub struct ChangeSet {
     pub edges_removed: Vec<String>,
 }
 
+impl ChangeSet {
+    /// A write that changed no visible row, stamped with the document
+    /// revision. Taking the revision is required: a default `0` would break
+    /// the TSX revision fence.
+    pub fn empty(rev: f64) -> Self {
+        Self {
+            rev,
+            changed: Vec::new(),
+            removed: Vec::new(),
+            edges_changed: Vec::new(),
+            edges_removed: Vec::new(),
+        }
+    }
+}
+
 /// Optional structured filters for a search.
 #[derive(Debug, Clone, Default, PartialEq, JsObject)]
 pub struct SearchFilters {

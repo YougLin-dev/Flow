@@ -75,7 +75,7 @@ pub fn import_asset(
             .ok_or_else(|| "the imported asset disappeared".to_owned())?,
         Err(error) => return conflict_asset(conn, assets_dir, &hash, &input.bytes, error),
     };
-    Ok(asset_summary(&stored))
+    Ok(AssetSummary::from(&stored))
 }
 
 /// A returned row's stored hash and size are checked before the file is used
@@ -105,7 +105,7 @@ fn existing_asset(
     // A valid file is left untouched; a missing or corrupt one is replaced
     // with the bytes whose hash and size were just verified.
     write_bytes(assets_dir, &existing.hash, bytes)?;
-    Ok(asset_summary(existing))
+    Ok(AssetSummary::from(existing))
 }
 
 /// The failed-insert fallback: another writer may have won the hash between
@@ -242,19 +242,6 @@ pub(crate) fn file_matches(path: &Path, hash: &str, size: usize) -> Result<bool,
         hasher.update(&buffer[..read]);
     }
     Ok(format!("{:x}", hasher.finalize()) == hash)
-}
-
-fn asset_summary(asset: &assets::Model) -> AssetSummary {
-    AssetSummary {
-        id: asset.id.clone(),
-        hash: asset.hash.clone(),
-        kind: asset.kind.clone(),
-        name: asset.name.clone(),
-        mime: asset.mime.clone(),
-        size: asset.size as f64,
-        meta_json: asset.meta_json.clone(),
-        created_at: asset.created_at as f64,
-    }
 }
 
 #[cfg(test)]
