@@ -78,6 +78,8 @@ export interface ProjectsHome {
   create(title: string): Promise<ProjectEntry>;
   /** Renames a closed project; resolves with its updated row. */
   rename(project: ProjectEntry, title: string): Promise<ProjectEntry>;
+  /** Updates the open project's title after a live rename. */
+  renameActive(title: string): void;
   /** Duplicates a closed project under a new identity and title. */
   duplicate(project: ProjectEntry, title: string): Promise<ProjectEntry>;
   /** Deletes a closed project's package. */
@@ -288,6 +290,13 @@ export function createProjectsHome(root: string, options: ProjectsHomeOptions = 
     );
   };
 
+  const renameActive = (title: string): void => {
+    const project = active();
+    if (project === null) return;
+    active.set({ projectId: project.projectId, title });
+    announce(`Renamed to “${title}”.`);
+  };
+
   const duplicate = async (project: ProjectEntry, rawTitle: string): Promise<ProjectEntry> => {
     const title = requireTitle(rawTitle);
     return act(
@@ -385,6 +394,7 @@ export function createProjectsHome(root: string, options: ProjectsHomeOptions = 
     open,
     create,
     rename,
+    renameActive,
     duplicate,
     remove,
     importProject,

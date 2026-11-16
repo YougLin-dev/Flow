@@ -52,6 +52,12 @@ fn current_rev(db: &Database) -> i64 {
         .expect("read the document revision")
 }
 
+/// The whole document row, for tests that check metadata beside the revision.
+fn current_document(db: &Database) -> crate::entity::document::Model {
+    db.run(|conn| document::current(conn).map_err(|error| error.to_string()))
+        .expect("read the document row")
+}
+
 /// Removes a test path, retrying while the worker still closes its
 /// SQLite handles. Windows refuses to unlink a file the worker holds.
 fn remove_path_retrying(path: &std::path::Path) {

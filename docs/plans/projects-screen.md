@@ -6,8 +6,8 @@ refusal, on return, and on a foreground return or wake, with no filesystem
 watcher; a cached readable row is re-read only when its package stamp
 changed, while fallback and identity-mismatched rows are re-read on every
 list.
-Importing a zipped package, backup/restore and renaming an open project are
-later slices.
+Importing a zipped package and backup/restore are later slices; an open
+project is renamed from the canvas, not from this list.
 
 The data model and the store live in
 [database-design.md](database-design.md) §8.7. This page records the screen's
@@ -60,9 +60,11 @@ and tests refer to.
   an unreadable fallback row, and relative time. These are pure and tested
   beside the area.
 - `components/app/TitleBar.tsx` — names the open project instead of the
-  tagline. `components/search/SearchButton.tsx` no longer positions itself;
+  tagline through a title accessor, so an open or renamed project updates it.
+  `components/search/SearchButton.tsx` no longer positions itself;
   `pages/flow` owns the canvas's top-left control row, where the leading
-  `Projects` pill and the search pill share one line.
+  `Projects` pill, the open project's rename pencil (which mounts the same
+  name dialog) and the search pill share one line.
 - Rows are `List` cells: an open `Button` whose accessible name carries the
   title, subtitle and open/unreadable status (an explicit label wins over the
   row's text for a screen reader), followed by an icon-only actions button
@@ -130,8 +132,13 @@ this screen should move onto them then.
   released), renames, duplicates and deletes it through the row's actions
   menu, imports an unzipped package folder by path and keeps a failed import
   in its dialog, closes a row menu by scrolling, dismisses the dialog with
-  Escape, and shows a project held by another window as labelled and
-  non-opening. `projects-home.test.ts` covers load failure/retry, create
+  Escape, shows a project held by another window as labelled and non-opening,
+  and renames the open project from the canvas (the list shows the new title
+  after closing, and reopening prefills the rename dialog with it).
+  `components/app/TitleBar.test.tsx` proves the bar follows its title
+  accessor, and `App.host.test.tsx` repeats the managed rename on the real
+  host and asserts the title bar's text.
+  `projects-home.test.ts` covers load failure/retry, create
   (which adds its row without opening it, including past a stale in-flight
   list read), the dismissed action's error report, rename, duplicate, delete
   (a read that started before the delete cannot resurrect its row), import
@@ -162,9 +169,11 @@ this screen should move onto them then.
 - Visual, on the real Windows host at 960×640 and 420×760 in light and dark:
   the list, the empty state, the row actions menu, the rename, duplicate,
   delete and import dialogs, and the canvas chrome (title bar with the project
-  name, the `Projects`/`Search` control row) were inspected from host
-  screenshots. At 420 the header wraps its two actions under the title, the
-  menu stays inside the window, and the dialog keeps its margins.
+  name, the `Projects`/rename pencil/`Search` control row, and the canvas
+  rename dialog) were inspected from host screenshots. At 420 the header
+  wraps its two actions under the title, the menu stays inside the window,
+  the rename dialog keeps its margins (its description wraps) and its buttons
+  fit, and the title bar shows the open project's name.
 - Not verified in this environment: a larger system text size (the host has no
   test control for the font scale), reduced motion with the dialog fade, and
   the fallback row's look on a real host (the visual run had no damaged

@@ -1,4 +1,4 @@
-import { ChevronLeft } from "lucide";
+import { ChevronLeft, Pencil } from "lucide";
 import { cleanup, effect, host, keymap, platform, signal, Text, token, View } from "nsh";
 import { Button } from "nsh/base";
 import { Application, isAvailable } from "nsh/desktop";
@@ -20,6 +20,7 @@ import {
 } from "./workspace/flow-effects";
 import { createFlowWorkspace, type WorkspaceProject } from "./workspace/flow-workspace";
 import { pageChromeHandlers } from "./workspace/page-chrome";
+import { PROJECT_ACTION_FAILURE, ProjectNameDialog } from "../projects";
 
 export interface FlowPageProps {
   /** The managed project to open; absent on the legacy single-document path. */
@@ -28,6 +29,8 @@ export interface FlowPageProps {
   readonly onClose?: (() => void) | undefined;
   /** A managed open failed; the shell shows the list with the reason. */
   readonly onOpenError?: ((error: unknown) => void) | undefined;
+  /** The open project was renamed; the shell updates its window title. */
+  readonly onRenamed?: ((title: string) => void) | undefined;
 }
 
 /**
@@ -58,6 +61,11 @@ export function FlowPage(props: FlowPageProps = {}) {
 
   const closing = signal(false);
   const closeFailed = signal(false);
+  const renameOpen = signal(false);
+  const projectTitle = signal(props.project?.title ?? "");
+  // Identifies the live dialog run: a write that settles after its dialog was
+  // dismissed must not close a later run the user has since opened.
+  let renameRun = 0;
 
   // The managed back path: close the document (and release its package) only
   // when the worker acknowledged the close, then let the shell swap pages.
@@ -71,6 +79,26 @@ export function FlowPage(props: FlowPageProps = {}) {
     }
     closing.set(false);
     closeFailed.set(true);
+  };
+
+  const openRename = (): void => {
+    renameRun += 1;
+    renameOpen.set(true);
+  };
+
+  const cancelRename = (): void => {
+    renameRun += 1;
+    renameOpen.set(false);
+  };
+
+  const submitRename = async (title: string): Promise<void> => {
+    const run = renameRun;
+    await workspace.renameProject(title);
+    // The write landed, so publish the committed title even if the dialog
+    // was dismissed; only close the dialog that submitted it.
+    projectTitle.set(title);
+    props.onRenamed?.(title);
+    if (run === renameRun) renameOpen.set(false);
   };
 
   dismissContextMenuOnChange(canvasMenu, camera, scene);
@@ -143,6 +171,17 @@ export function FlowPage(props: FlowPageProps = {}) {
             >
               <Icon icon={ChevronLeft} size={15} tint={() => token("muted-foreground")} />
               <Text class="text-sm text-card-foreground">Projects</Text>
+            </Button>
+          ) : null}
+          {props.project ? (
+            <Button
+              testID="rename-project"
+              accessibilityLabel="Rename project"
+              disabled={closing() || closeFailed()}
+              onPress={openRename}
+              class="size-8 items-center justify-center rounded-full border border-border bg-card text-muted-foreground hover:bg-muted active:bg-accent focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-40"
+            >
+              <Icon icon={Pencil} size={14} tint={() => token("muted-foreground")} />
             </Button>
           ) : null}
           {workspace.composerOpen() ? null : (
@@ -257,6 +296,21 @@ export function FlowPage(props: FlowPageProps = {}) {
       </If>
 
       <CanvasMenuLayer menu={canvasMenu} stage={stage} />
+
+      <If when={renameOpen()}>
+        {() => (
+          <ProjectNameDialog
+            idPrefix="project-rename"
+            heading="Rename project"
+            description="The name changes in the project list and the window title."
+            submitLabel="Rename"
+            initialTitle={projectTitle()}
+            failurePrefix={PROJECT_ACTION_FAILURE.rename}
+            onCancel={cancelRename}
+            onSubmit={submitRename}
+          />
+        )}
+      </If>
 
       {minimapDrag.dragging() ? (
         <MinimapDragOverlay

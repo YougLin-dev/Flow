@@ -315,6 +315,56 @@ fn save_view_persists_without_bumping_the_revision() {
 }
 
 #[test]
+fn set_title_changes_only_the_title_and_timestamp() {
+    let (path, database) = temp_database("set-title");
+    {
+        let db = Database::open(&database).expect("open");
+        // Age the row so the rename's timestamp write is observable; a
+        // non-strict comparison would pass even if updated_at were untouched.
+        db.run(|conn| {
+            conn.execute_unprepared("UPDATE document SET updated_at = 0 WHERE id = 1")
+                .map_err(|error| error.to_string())?;
+            Ok(())
+        })
+        .expect("age the timestamp");
+        let before = current_document(&db);
+        assert_eq!(before.updated_at, 0);
+        db.set_title("Renamed".to_owned()).expect("rename");
+        let after = current_document(&db);
+        assert_eq!(after.title, "Renamed");
+        assert!(
+            after.updated_at > before.updated_at,
+            "the rename writes its timestamp"
+        );
+        assert_eq!(after.rev, before.rev, "the title is not an undo step");
+        assert_eq!(after.created_at, before.created_at);
+        db.close().expect("close");
+    }
+    {
+        let db = Database::open(&database).expect("reopen");
+        assert_eq!(db.project_info().expect("info").title, "Renamed");
+        db.close().expect("close");
+    }
+    remove_database_files(&path);
+}
+
+#[test]
+fn set_title_refuses_an_invalid_or_closed_document() {
+    let db = Database::open(":memory:").expect("open");
+    for title in ["", "   ", "bad\0title"] {
+        let error = db
+            .set_title(title.to_owned())
+            .expect_err("an invalid title must be refused");
+        assert!(error.contains("title"), "{error}");
+    }
+    db.close().expect("close");
+    assert_eq!(
+        db.set_title("After close".to_owned()).err(),
+        Some("the database is closed".to_owned())
+    );
+}
+
+#[test]
 fn project_info_reports_the_previous_shutdown_state() {
     let (path, database) = temp_database("opened-clean");
     {

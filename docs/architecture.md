@@ -203,9 +203,11 @@ The canvas stays in TSX and owns only the scene model and its views.
   so an imported empty package is not filled in later. Delete needs only a
   real package directory under its lock, not a readable identity, so
   fallback rows remain removable; rename and duplicate still require the
-  identity. Rename is closed-package only in this slice, changes only
-  title/`updated_at`, and never moves the directory;
-  imports accept an unpacked package directory, not an archive; pre-v1
+  identity. Rename from the list works on a closed package; the workspace can
+  also rename the open project through one document-worker command. Both
+  change only title/`updated_at` (no rev or history) and never move the
+  directory, and the list re-reads the changed package by stamp.
+  Imports accept an unpacked package directory, not an archive; pre-v1
   packages are refused rather than migrated. The app starts on the projects
   screen (`pages/projects`) when it has a managed root: the list shows
   recency, an open-in-another-window badge and unreadable fallback rows, and
@@ -221,8 +223,8 @@ The canvas stays in TSX and owns only the scene model and its views.
   packages. There
   is no filesystem watcher or timer: the projects page revalidates quietly
   when the app returns to the foreground or wakes, and a deep catalog refresh
-  remains the recovery path after a refusal. Zipped-package import,
-  backup/restore and open-project rename remain.
+  remains the recovery path after a refusal. Zipped-package import and
+  backup/restore remain.
 - The decision and the phased migration are recorded in
   [ADR 0002](adr/0002-rust-document-core.md),
   [ADR 0003](adr/0003-orm-seaorm.md) and

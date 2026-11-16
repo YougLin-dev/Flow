@@ -14,7 +14,9 @@ All notable changes to Flow are recorded here. The format follows
   package that cannot be read. New project creates one through a named
   dialog; each row's actions menu renames it (the canvas keeps its content),
   duplicates it under a new identity, or deletes it after a confirmation, and
-  Import project… adds an unzipped package folder from a path. Exactly one
+  Import project… adds an unzipped package folder from a path. The canvas's
+  rename control renames the open project in place; the title bar and the
+  list show the new name and the package never moves. Exactly one
   project is open per window, and the canvas's leading
   Projects control closes the document before releasing the package; closing
   a project or quitting saves the open composer's draft and the inline

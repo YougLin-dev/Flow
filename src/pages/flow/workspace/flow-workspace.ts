@@ -46,6 +46,8 @@ import { revealSearchHit } from "./search-navigation";
 export interface WorkspaceProject {
   readonly store: ProjectStorePort;
   readonly projectId: string;
+  /** The title at open time; the page owns the live title after a rename. */
+  readonly title: string;
 }
 
 export interface FlowWorkspaceDeps {
@@ -87,6 +89,8 @@ export interface FlowWorkspace {
   readonly fit: () => void;
   readonly searchCards: (query: string, kind: string | null) => Promise<SearchHit[]>;
   readonly selectSearchHit: (hit: SearchHit) => void;
+  /** Renames the open managed project; a closed document is refused. */
+  readonly renameProject: (title: string) => Promise<void>;
   /** Applies a new stage size; the first one fits and opens the document. */
   readonly handleSize: (size: StageSize) => void;
   /** Releases every object in the page's cleanup order, once. */
@@ -315,6 +319,21 @@ export function createFlowWorkspace(deps: FlowWorkspaceDeps): FlowWorkspace {
   const selectSearchHit = (hit: SearchHit): void => {
     searchOpen.set(false);
     void revealNode(hit.id);
+  };
+
+  /**
+   * The live rename: one worker command changes the document title and its
+   * timestamp without an undo step. The project list re-reads the package
+   * from its changed stamp on the next list; no catalog write is needed here.
+   */
+  const renameProject = async (title: string): Promise<void> => {
+    // A quick submit may race the managed open; wait for it rather than
+    // reporting "not open" for a project that is opening.
+    await openingTask;
+    if (project === null || document === null) {
+      throw new Error("the project is not open");
+    }
+    await document.setProjectTitle(title);
   };
 
   const scheduleVerify = (doc: Document, report: ProjectInfo): void => {
@@ -587,6 +606,7 @@ export function createFlowWorkspace(deps: FlowWorkspaceDeps): FlowWorkspace {
     fit,
     searchCards,
     selectSearchHit,
+    renameProject,
     handleSize,
     dispose,
     shutdown,

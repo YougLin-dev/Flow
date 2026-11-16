@@ -219,7 +219,7 @@ src/                   the NSH app: its root, entry, config and assets
     src/db/mod.rs      database handle and command wrappers
     src/db/worker.rs   worker thread, connections, WAL and SQLite URLs
     src/db/open.rs     open entry points and managed package open
-    src/db/session.rs  close, recovery state and saved view
+    src/db/session.rs  close, recovery state, saved view and live title
     src/db/verify.rs   integrity check and repair
     src/db/undo.rs     undo/redo and history helpers
     src/db/metadata.rs counts, bounds cache and emptiness

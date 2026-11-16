@@ -1,4 +1,4 @@
-//! Close, recovery state and the saved view.
+//! Close, recovery state, the saved view and the live title.
 
 use std::sync::Arc;
 use std::sync::atomic::Ordering;
@@ -38,6 +38,25 @@ impl Database {
                 demo_seeded: document.demo_seeded != 0,
                 opened_clean,
             })
+        })
+    }
+
+    /// Changes the open project's title without bumping the revision or
+    /// recording undo history, matching the closed-package rename. The
+    /// project list learns it from the package stamp on its next read.
+    pub fn set_title(&self, title: String) -> Result<(), String> {
+        schema::v1::validate_title(&title)?;
+        let now = crate::clock::now_ms();
+        self.run(move |conn| {
+            document_row::Entity::update(document_row::ActiveModel {
+                id: Unchanged(document::ROW_ID),
+                title: Set(title),
+                updated_at: Set(now),
+                ..Default::default()
+            })
+            .exec(conn)
+            .map_err(|error| error.to_string())?;
+            Ok(())
         })
     }
 

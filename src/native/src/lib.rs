@@ -277,6 +277,13 @@ impl Document {
         off_thread(move || db.save_view(x, y, zoom)).await
     }
 
+    /// Changes the open project's title without bumping the revision or
+    /// recording undo history.
+    pub async fn set_project_title(this: Instance<Self>, title: String) -> Result<(), String> {
+        let db = this.with(|document| document.db.clone());
+        off_thread(move || db.set_title(title)).await
+    }
+
     /// The package recovery check: SQLite's quick integrity and foreign-key
     /// checks, then an FTS/RTree parity repair, a dirty-connector flush and
     /// exact bounds. A maintenance write, not a read-only check.

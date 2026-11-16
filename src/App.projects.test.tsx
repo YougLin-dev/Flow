@@ -85,6 +85,42 @@ test("renames a project from its row menu", async () => {
   expect(app.shows("text:First")).toBe(false);
 });
 
+test("renames the open project from the canvas", async () => {
+  const root = testRoot("open-rename");
+  await resetRoot(root);
+  const app = await openApp(root);
+  await app.waitUntil(() => app.shows("text:No projects yet"));
+  await createFromList(app, "Before");
+
+  await app.press("text:Before");
+  await app.waitUntil(() => app.shows("id:rename-project"));
+  await app.press("id:rename-project");
+  await app.waitUntil(() => app.shows("id:project-rename-title"));
+  expect(app.value("id:project-rename-title")).toBe("Before");
+  await app.clear("id:project-rename-title");
+  await app.type("id:project-rename-title", "After");
+  await app.press("id:project-rename-submit");
+  await app.waitUntil(() => !app.shows("id:project-rename-dialog"));
+
+  await app.press("id:back-to-projects");
+  await app.waitUntil(() => app.shows("id:projects-page"));
+  await app.waitUntil(() => app.shows("text:After"));
+  expect(app.shows("text:Before")).toBe(false);
+
+  // The title lives in the database, not only in the list snapshot: the list
+  // re-read the changed package by stamp, and reopening prefills the rename
+  // dialog with it.
+  await app.press("text:After");
+  await app.waitUntil(() => app.shows("id:back-to-projects"));
+  await app.press("id:rename-project");
+  await app.waitUntil(() => app.shows("id:project-rename-title"));
+  expect(app.value("id:project-rename-title")).toBe("After");
+  await app.press("id:project-rename-cancel");
+  await app.waitUntil(() => !app.shows("id:project-rename-dialog"));
+  await app.press("id:back-to-projects");
+  await app.waitUntil(() => app.shows("id:projects-page"));
+});
+
 test("duplicates a project into a new row and leaves the source", async () => {
   const root = testRoot("duplicate");
   await resetRoot(root);

@@ -17,8 +17,12 @@ export interface TitleBarProps {
   pinned: boolean;
   /** The user asked to pin or unpin the window. */
   onTogglePinned: () => void;
-  /** The open project's name; absent on the projects screen and legacy path. */
-  title?: string | undefined;
+  /**
+   * The open project's name; absent on the projects screen and legacy path.
+   * An accessor, so the bar follows an open or renamed project while the
+   * shell keeps running.
+   */
+  title?: (() => string | undefined) | undefined;
 }
 
 /**
@@ -60,7 +64,7 @@ export function TitleBar(props: TitleBarProps) {
           class="ml-2 min-w-0 text-xs text-muted-foreground"
           style={{ numberOfLines: 1, textOverflow: "ellipsis" }}
         >
-          {props.title ?? "Native canvas · NSH"}
+          {props.title?.() ?? "Native canvas · NSH"}
         </Text>
       </View>
       {pinnable && (

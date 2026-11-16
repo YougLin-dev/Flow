@@ -58,6 +58,30 @@ const selectedOf = (app: App): number => canvasState(app).selected;
 
 const composingOf = (app: App): boolean => canvasState(app).composing;
 
+test("renames the open project and updates the title bar", async () => {
+  const root = `.nsh/projects-host-rename-${Date.now()}`;
+  const app = await open("./App.tsx", { host: { params: { projectsRoot: root } } });
+  await app.waitUntil(() => app.shows("id:projects-page"));
+  await app.press("id:new-project");
+  await app.waitUntil(() => app.shows("id:project-title"));
+  await app.type("id:project-title", "Before rename");
+  await app.press("id:project-submit");
+  await app.waitUntil(() => app.shows("id:rename-project"));
+  // The app-drawn title bar exists only on a desktop host; the headless run
+  // of this file cannot see it.
+  if (!app.shows("id:title-bar")) return;
+  // The title bar names the open project, then follows the live rename.
+  await app.waitUntil(() => app.shows("text:Before rename"));
+  await app.press("id:rename-project");
+  await app.waitUntil(() => app.shows("id:project-rename-title"));
+  await app.clear("id:project-rename-title");
+  await app.type("id:project-rename-title", "After rename");
+  await app.press("id:project-rename-submit");
+  await app.waitUntil(() => !app.shows("id:project-rename-dialog"));
+  await app.waitUntil(() => app.shows("text:After rename"));
+  expect(app.texts()).not.toContain("Before rename");
+});
+
 test("shows the flow canvas", async () => {
   const app = await openApp();
   await app.waitUntil(() => percentOf(app) > 0);

@@ -36,6 +36,7 @@ export function ProjectsPageProbe() {
     open: () => {},
     create: async () => UNREADABLE,
     rename: async () => UNREADABLE,
+    renameActive: () => {},
     duplicate: async () => UNREADABLE,
     remove: async () => {},
     importProject: async () => UNREADABLE,

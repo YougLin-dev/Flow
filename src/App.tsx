@@ -1,4 +1,4 @@
-import { cleanup, host, mount, View } from "nsh";
+import { cleanup, computed, host, mount, View } from "nsh";
 import { isAvailable } from "nsh/desktop";
 import { TitleBar } from "./components/app";
 import { projectsRootForLaunch } from "./flow/projects";
@@ -24,16 +24,13 @@ function App() {
     envProjectsRoot: process.env.FLOW_PROJECTS_ROOT,
   });
   const home = root === null ? null : createProjectsHome(root);
+  const projectTitle = computed(() => home?.current()?.title);
   cleanup(() => home?.dispose());
 
   return (
     <View class="flex-1 bg-background">
       {isAvailable && (
-        <TitleBar
-          pinned={isPinned()}
-          onTogglePinned={togglePinned}
-          title={home?.current()?.title}
-        />
+        <TitleBar pinned={isPinned()} onTogglePinned={togglePinned} title={projectTitle} />
       )}
       {home === null ? (
         <FlowPage />
@@ -47,6 +44,7 @@ function App() {
                 void home.refresh();
               }}
               onOpenError={(error) => home.reportOpenError(error)}
+              onRenamed={(title) => home.renameActive(title)}
             />
           )}
         </If>

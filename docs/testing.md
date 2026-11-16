@@ -331,8 +331,9 @@ creates and opens a project through the dialog, returns to the list (reopening
 proves the lease was released), renames, duplicates and deletes through a
 row's actions menu, closes a row menu by scrolling, imports an unzipped
 package folder by path and shows a failed import in its dialog, dismisses the
-dialog with Escape and shows a project held by another window without opening
-it. `pages/projects/projects-home.test.ts` covers the list state with a fake
+dialog with Escape, shows a project held by another window without opening
+it, and renames the open project from the canvas (the new title survives the
+close and a reopen). `pages/projects/projects-home.test.ts` covers the list state with a fake
 store: load failure and retry, create, rename, duplicate, delete (including a
 stale list read that cannot resurrect the row), import, open refusals and the
 open-error copy, the quiet re-read after a failed action, and a deep status
@@ -340,6 +341,11 @@ read that runs again when an action supersedes it.
 `pages/projects/projects-home-foreground.test.ts` covers the foreground
 revalidation: a quiet failure keeps the visible list, a successful return
 recovers a failed load, and a return during an in-flight load is ignored.
+`pages/projects/projects-home-rename-active.test.ts` covers the live rename's
+active-project title state.
+`components/app/TitleBar.test.tsx` proves the bar follows its title accessor,
+and `App.host.test.tsx` repeats the managed open rename on the real host and
+asserts the title bar's text, so the shell's rename wiring is covered too.
 `pages/projects/project-action-run.test.ts` pins the dismissed-dialog rule
 (no write starts, no result applies, a late failure reaches the list).
 `ProjectsPage.test.tsx` mounts the page over a fixed damaged package through a
