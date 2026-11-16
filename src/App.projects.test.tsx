@@ -19,6 +19,18 @@ const openApp = (root: string): Promise<App> =>
     host: { params: { projectsRoot: root, flowZoomProbe: 1 } },
   });
 
+/** Creates a project through the dialog, then returns to the list. */
+async function createFromList(app: App, title: string): Promise<void> {
+  await app.press("id:new-project");
+  await app.waitUntil(() => app.shows("id:project-title"));
+  await app.type("id:project-title", title);
+  await app.waitUntil(() => app.value("id:project-title") === title);
+  await app.press("id:project-submit");
+  await app.waitUntil(() => app.shows("id:back-to-projects"));
+  await app.press("id:back-to-projects");
+  await app.waitUntil(() => app.shows(`text:${title}`));
+}
+
 test("creates, opens and closes a managed project", async () => {
   const root = testRoot("create");
   await resetRoot(root);
@@ -31,7 +43,7 @@ test("creates, opens and closes a managed project", async () => {
   await app.waitUntil(() => app.shows("id:project-title"));
   await app.type("id:project-title", "First project");
   await app.waitUntil(() => app.value("id:project-title") === "First project");
-  await app.press("id:project-create");
+  await app.press("id:project-submit");
 
   // The canvas opened the created package.
   await app.waitUntil(() => app.shows("id:back-to-projects"));
@@ -49,6 +61,126 @@ test("creates, opens and closes a managed project", async () => {
   await app.waitUntil(() => app.shows("id:back-to-projects"));
   await app.press("id:back-to-projects");
   await app.waitUntil(() => app.shows("id:projects-page"));
+});
+
+test("renames a project from its row menu", async () => {
+  const root = testRoot("rename");
+  await resetRoot(root);
+  const app = await openApp(root);
+  await app.waitUntil(() => app.shows("text:No projects yet"));
+  await createFromList(app, "First");
+
+  await app.press("label:Actions for First");
+  await app.waitUntil(() => app.shows("text:Rename…"));
+  await app.press("text:Rename…");
+  await app.waitUntil(() => app.shows("id:project-rename-title"));
+  expect(app.value("id:project-rename-title")).toBe("First");
+  await app.clear("id:project-rename-title");
+  await app.type("id:project-rename-title", "Renamed");
+  await app.press("id:project-rename-submit");
+  // The dialog must close before the row can be the only "Renamed" on screen:
+  // the input itself holds that text while the dialog is open.
+  await app.waitUntil(() => !app.shows("id:project-rename-dialog"));
+  await app.waitUntil(() => app.shows("text:Renamed"));
+  expect(app.shows("text:First")).toBe(false);
+});
+
+test("duplicates a project into a new row and leaves the source", async () => {
+  const root = testRoot("duplicate");
+  await resetRoot(root);
+  const app = await openApp(root);
+  await app.waitUntil(() => app.shows("text:No projects yet"));
+  await createFromList(app, "Source");
+
+  await app.press("label:Actions for Source");
+  await app.waitUntil(() => app.shows("text:Duplicate…"));
+  await app.press("text:Duplicate…");
+  await app.waitUntil(() => app.shows("id:project-duplicate-title"));
+  expect(app.value("id:project-duplicate-title")).toBe("Source copy");
+  await app.press("id:project-duplicate-submit");
+  await app.waitUntil(() => !app.shows("id:project-duplicate-dialog"));
+  await app.waitUntil(() => app.shows("text:Source copy"));
+  expect(app.shows("text:Source")).toBe(true);
+});
+
+test("deletes a project after confirmation", async () => {
+  const root = testRoot("delete");
+  await resetRoot(root);
+  const app = await openApp(root);
+  await app.waitUntil(() => app.shows("text:No projects yet"));
+  await createFromList(app, "Doomed");
+
+  await app.press("label:Actions for Doomed");
+  await app.waitUntil(() => app.shows("text:Delete…"));
+  await app.press("text:Delete…");
+  await app.waitUntil(() => app.shows("id:project-delete-dialog"));
+  await app.press("id:project-delete-submit");
+  await app.waitUntil(() => !app.shows("id:project-delete-dialog"));
+  await app.waitUntil(() => !app.shows("text:Doomed"));
+  await app.waitUntil(() => app.shows("text:No projects yet"));
+});
+
+test("imports an unzipped package folder", async () => {
+  const root = testRoot("import");
+  await resetRoot(root);
+  const sourceRoot = testRoot("import-source");
+  await resetRoot(sourceRoot);
+  const source = await openProjectStore(sourceRoot);
+  const created = await source.createProject("Imported", null);
+  const folder = `${sourceRoot}/${created.projectId}`;
+
+  const app = await openApp(root);
+  await app.waitUntil(() => app.shows("text:No projects yet"));
+  await app.press("id:import-project");
+  await app.waitUntil(() => app.shows("id:project-import-path"));
+  await app.type("id:project-import-path", folder);
+  await app.press("id:project-import-submit");
+  await app.waitUntil(() => !app.shows("id:project-import-dialog"));
+  await app.waitUntil(() => app.shows("text:Imported"));
+});
+
+test("a failed import explains itself and keeps the dialog", async () => {
+  const root = testRoot("import-failure");
+  await resetRoot(root);
+  const app = await openApp(root);
+  await app.waitUntil(() => app.shows("text:No projects yet"));
+
+  await app.press("id:import-project");
+  await app.waitUntil(() => app.shows("id:project-import-path"));
+  await app.type("id:project-import-path", `${root}/missing-package`);
+  await app.press("id:project-import-submit");
+  await app.waitUntil(() =>
+    app.texts().some((text) => text.includes("Couldn’t import the project.")),
+  );
+  expect(app.shows("id:project-import-dialog")).toBe(true);
+});
+
+test("a row menu closes when the list scrolls", async () => {
+  const root = testRoot("menu-scroll");
+  await resetRoot(root);
+  const seed = await openProjectStore(root);
+  const created = await Promise.all(
+    Array.from({ length: 12 }, (_, index) =>
+      seed.createProject(`Project ${String(index).padStart(2, "0")}`, null),
+    ),
+  );
+  // Opening one marks it most recent, so it heads the list.
+  const first = created.find((project) => project.title === "Project 00");
+  if (!first) throw new Error("the seed did not create Project 00");
+  const lease = await seed.openProject(first.projectId);
+  lease.release();
+
+  const app = await openApp(root);
+  await app.waitUntil(() => app.shows("text:Project 00"));
+  await app.press("label:Actions for Project 00");
+  await app.waitUntil(() => app.shows("text:Rename…"));
+  await app.scroll("id:project-list", 200);
+  await app.waitUntil(() => !app.shows("text:Rename…"));
+  await app.scroll("id:project-list", -200);
+  await app.waitUntil(() => app.shows("text:Project 00"));
+  // The page's open flag was cleared by the scroll, so the row's menu does
+  // not reappear when it comes back into view.
+  expect(app.shows("text:Rename…")).toBe(false);
 });
 
 test("dismissing New project creates nothing", async () => {

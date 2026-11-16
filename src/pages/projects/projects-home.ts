@@ -16,6 +16,7 @@ import {
   isProjectOpenElsewhere,
   isProjectOpenHere,
   openProjectStore,
+  projectControlName,
   sortProjects,
   type ProjectStorePort,
 } from "../../flow/projects";
@@ -30,6 +31,18 @@ export interface ActiveProject {
 export interface OpenProjectDescriptor extends ActiveProject {
   readonly store: ProjectStorePort;
 }
+
+/** A project action whose dialog can outlive a dismissal. */
+export type ProjectAction = "create" | "rename" | "duplicate" | "delete" | "import";
+
+/** The copy in front of a stored action error, inline and above the list. */
+export const PROJECT_ACTION_FAILURE: Record<ProjectAction, string> = {
+  create: "Couldn’t create the project.",
+  rename: "Couldn’t rename the project.",
+  duplicate: "Couldn’t duplicate the project.",
+  delete: "Couldn’t delete the project.",
+  import: "Couldn’t import the project.",
+};
 
 export interface ProjectsHomeOptions {
   /** Opens the FFI store; tests inject a fake. */
@@ -57,12 +70,20 @@ export interface ProjectsHome {
    * the store's message.
    */
   create(title: string): Promise<ProjectEntry>;
+  /** Renames a closed project; resolves with its updated row. */
+  rename(project: ProjectEntry, title: string): Promise<ProjectEntry>;
+  /** Duplicates a closed project under a new identity and title. */
+  duplicate(project: ProjectEntry, title: string): Promise<ProjectEntry>;
+  /** Deletes a closed project's package. */
+  remove(project: ProjectEntry): Promise<void>;
+  /** Imports an unzipped package folder from outside the managed root. */
+  importProject(source: string): Promise<ProjectEntry>;
   /** Returns from the canvas to the list; the workspace closed the project. */
   showProjects(): void;
   /** The workspace could not open the project; show the list with why. */
   reportOpenError(error: unknown): void;
-  /** A dismissed dialog's create failed; show the list with why. */
-  reportCreateError(error: unknown): void;
+  /** A dismissed dialog's action failed; show the list with why. */
+  reportActionError(action: ProjectAction, error: unknown): void;
   /** Clears the action error (a dismiss or the start of another action). */
   clearActionError(): void;
   /** Stops late store results after the shell unmounts. */
@@ -80,6 +101,10 @@ export function createProjectsHome(root: string, options: ProjectsHomeOptions = 
 
   let storeTask: Promise<ProjectStorePort> | null = null;
   let loadGeneration = 0;
+  // The generation of the deep status read in flight, if any: a list action
+  // that supersedes it starts it again, because its whole point is the row
+  // that changed out of band.
+  let deepReadGeneration: number | null = null;
   let disposed = false;
 
   const ensureStore = (): Promise<ProjectStorePort> => {
@@ -101,6 +126,13 @@ export function createProjectsHome(root: string, options: ProjectsHomeOptions = 
 
   const load = async (quiet: boolean, deep = false): Promise<void> => {
     const generation = ++loadGeneration;
+    if (deep) {
+      deepReadGeneration = generation;
+    } else if (deepReadGeneration !== null) {
+      // A shallow snapshot trusts cached rows, so it would hide the package
+      // the deep read is checking. Keep a deep read as the one that lands.
+      void load(true, true);
+    }
     if (!quiet) {
       loading.set(true);
       loadError.set(null);
@@ -123,6 +155,8 @@ export function createProjectsHome(root: string, options: ProjectsHomeOptions = 
       } else {
         loadError.set(errorMessage(error));
       }
+    } finally {
+      if (deepReadGeneration === generation) deepReadGeneration = null;
     }
   };
 
@@ -161,23 +195,125 @@ export function createProjectsHome(root: string, options: ProjectsHomeOptions = 
     active.set({ projectId: project.projectId, title: project.title });
   };
 
-  const create = async (rawTitle: string): Promise<ProjectEntry> => {
-    const title = rawTitle.trim();
-    if (title === "") throw new Error("the project title is empty");
-    const store = await ensureStore();
-    const entry = await store.createProject(title, null);
-    if (disposed) return entry;
-    // Invalidate a list read that started before this create; its snapshot
-    // would drop the new row. The create's entry is the authoritative row.
+  /** Applies an action's result to the visible list. */
+  const commit = (change: (list: ProjectEntry[]) => ProjectEntry[]): void => {
+    // Invalidate a list read that started before this action; its snapshot
+    // would drop a new row, keep a renamed one, or resurrect a deleted one.
     loadGeneration += 1;
+    // A deep status read has no snapshot this action supersedes: its job is
+    // the package that changed out of band, so start it again rather than
+    // dropping it with the other reads.
+    if (deepReadGeneration !== null) {
+      deepReadGeneration = null;
+      refreshQuietly(true);
+    }
     loading.set(false);
     loadError.set(null);
-    // Replacing by id keeps a repeated create from duplicating a row.
-    projects.update((list) =>
-      sortProjects([...list.filter((project) => project.projectId !== entry.projectId), entry]),
-    );
+    projects.update((list) => sortProjects(change(list)));
     actionError.set(null);
-    return entry;
+  };
+
+  /** Replaces the row with the same identity, which also keeps a repeated
+   * action from duplicating it. */
+  const withEntry = (list: ProjectEntry[], entry: ProjectEntry): ProjectEntry[] => [
+    ...list.filter((project) => project.projectId !== entry.projectId),
+    entry,
+  ];
+
+  /**
+   * Runs a store action and applies its result. A failure re-reads the
+   * statuses (another window may have taken the package) and rethrows for
+   * the dialog; whether the result still matters after a dismissal is the
+   * caller's concern. A deep read is for actions that read the package
+   * identity, whose refusal may mean the package no longer opens.
+   */
+  const act = async <T>(
+    work: () => Promise<T>,
+    applied: (value: T) => void,
+    deep = false,
+  ): Promise<T> => {
+    try {
+      const value = await work();
+      if (!disposed) applied(value);
+      return value;
+    } catch (error) {
+      if (!disposed) refreshQuietly(deep);
+      throw error;
+    }
+  };
+
+  const requireTitle = (rawTitle: string): string => {
+    const title = rawTitle.trim();
+    if (title === "") throw new Error("the project title is empty");
+    return title;
+  };
+
+  const create = async (rawTitle: string): Promise<ProjectEntry> => {
+    const title = requireTitle(rawTitle);
+    return act(
+      async () => (await ensureStore()).createProject(title, null),
+      (entry) => commit((list) => withEntry(list, entry)),
+    );
+  };
+
+  const rename = async (project: ProjectEntry, rawTitle: string): Promise<ProjectEntry> => {
+    const title = requireTitle(rawTitle);
+    return act(
+      async () => (await ensureStore()).renameProject(project.projectId, title),
+      (entry) => {
+        commit((list) => withEntry(list, entry));
+        announce(`Renamed to “${entry.title}”.`);
+      },
+      // The store reads the package identity; a refusal can mean it broke.
+      true,
+    );
+  };
+
+  const duplicate = async (project: ProjectEntry, rawTitle: string): Promise<ProjectEntry> => {
+    const title = requireTitle(rawTitle);
+    return act(
+      async () => (await ensureStore()).duplicateProject(project.projectId, title),
+      (entry) => {
+        commit((list) => withEntry(list, entry));
+        announce(`Duplicated as “${entry.title}”.`);
+      },
+      true,
+    );
+  };
+
+  const remove = async (project: ProjectEntry): Promise<void> => {
+    await act(
+      async () => (await ensureStore()).deleteProject(project.projectId),
+      () => {
+        commit((list) => list.filter((candidate) => candidate.projectId !== project.projectId));
+        announce(`Deleted “${projectControlName(project)}”.`);
+      },
+    );
+  };
+
+  /**
+   * Explorer's "Copy as path" wraps a path in double quotes, which a Windows
+   * path can never hold; accept the copied form rather than failing with a
+   * missing-database error.
+   */
+  const cleanSource = (raw: string): string => {
+    const trimmed = raw.trim();
+    if (trimmed.length >= 2 && trimmed.startsWith('"') && trimmed.endsWith('"')) {
+      return trimmed.slice(1, -1).trim();
+    }
+    return trimmed;
+  };
+
+  const importProject = async (rawSource: string): Promise<ProjectEntry> => {
+    const source = cleanSource(rawSource);
+    if (source === "") throw new Error("the project folder is empty");
+    return act(
+      async () => (await ensureStore()).importProject(source),
+      (entry) => {
+        commit((list) => withEntry(list, entry));
+        announce(`Imported “${entry.title}”.`);
+      },
+    );
   };
 
   const showProjects = (): void => {
@@ -202,8 +338,8 @@ export function createProjectsHome(root: string, options: ProjectsHomeOptions = 
     refreshQuietly(true);
   };
 
-  const reportCreateError = (error: unknown): void => {
-    fail(`Couldn’t create the project. ${errorMessage(error)}`);
+  const reportActionError = (action: ProjectAction, error: unknown): void => {
+    fail(`${PROJECT_ACTION_FAILURE[action]} ${errorMessage(error)}`);
   };
 
   const current = (): OpenProjectDescriptor | null => {
@@ -228,9 +364,13 @@ export function createProjectsHome(root: string, options: ProjectsHomeOptions = 
     refresh,
     open,
     create,
+    rename,
+    duplicate,
+    remove,
+    importProject,
     showProjects,
     reportOpenError,
-    reportCreateError,
+    reportActionError,
     clearActionError: () => actionError.set(null),
     dispose,
   };

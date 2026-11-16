@@ -43,9 +43,21 @@ export function projectDisplayTitle(project: ProjectEntry): string {
   return project.unreadable ? "Unavailable project" : project.title;
 }
 
+/**
+ * The name a control or an announcement uses for the project. Unreadable
+ * rows share one title, so theirs carries the first bytes of the package
+ * identity: two damaged packages stay tellable apart before a destructive
+ * action.
+ */
+export function projectControlName(project: ProjectEntry): string {
+  return project.unreadable
+    ? `${projectDisplayTitle(project)} ${project.projectId.slice(0, 8)}`
+    : projectDisplayTitle(project);
+}
+
 /** The row's second line: recent activity, or why the package cannot open. */
 export function projectSubtitle(project: ProjectEntry, now: number): string {
-  if (project.unreadable) return "This project can’t be opened";
+  if (project.unreadable) return `Can’t open · ${project.projectId.slice(0, 8)}`;
   const lastOpenedAt = project.lastOpenedAt ?? null;
   if (lastOpenedAt !== null) return `Opened ${relativeTime(lastOpenedAt, now)}`;
   return `Updated ${relativeTime(project.updatedAt, now)}`;

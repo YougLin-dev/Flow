@@ -2,6 +2,7 @@ import { expect, test } from "nsh/test";
 import type { ProjectEntry } from "../shared";
 import {
   filterProjects,
+  projectControlName,
   projectDisplayTitle,
   projectStatusLabel,
   projectSubtitle,
@@ -65,10 +66,14 @@ test("labels the open states and keeps a closed row quiet", () => {
   expect(projectStatusLabel(entry("c", "C", 1, null))).toBe("");
 });
 
-test("names an unreadable package and explains why it cannot open", () => {
+test("names an unreadable package and tells two damaged ones apart", () => {
   const broken = entry("a".repeat(32), "a".repeat(32), 0, null, false, false, true);
   expect(projectDisplayTitle(broken)).toBe("Unavailable project");
-  expect(projectSubtitle(broken, 1_000)).toBe("This project can’t be opened");
+  expect(projectSubtitle(broken, 1_000)).toBe("Can’t open · aaaaaaaa");
+  // Controls and announcements carry the id suffix, so two fallback rows do
+  // not share one name before a destructive action.
+  expect(projectControlName(broken)).toBe("Unavailable project aaaaaaaa");
+  expect(projectControlName(entry("b", "Lake", 5, null))).toBe("Lake");
   expect(projectDisplayTitle(entry("b", "Lake", 5, null))).toBe("Lake");
 });
 

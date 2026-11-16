@@ -170,8 +170,256 @@ test("a dismissed create's failure is reported above the list", async () => {
     openStore: async () => fakeStore(),
   });
   await home.refresh();
-  home.reportCreateError(new Error("the project title is invalid"));
+  home.reportActionError("create", new Error("the project title is invalid"));
   expect(home.actionError()).toBe("Couldn’t create the project. the project title is invalid");
+  home.dispose();
+});
+
+test("renames a project by trimmed title and updates its row", async () => {
+  const calls: { id: string; title: string }[] = [];
+  const home = createProjectsHome("/projects", {
+    openStore: async () =>
+      fakeStore({
+        listProjects: async () => [
+          entry(ID_A, "Old", { updatedAt: 1 }),
+          entry(ID_B, "Other", { updatedAt: 2 }),
+        ],
+        renameProject: async (projectId, title) => {
+          calls.push({ id: projectId, title });
+          return entry(projectId, title, { updatedAt: 9 });
+        },
+      }),
+  });
+  await home.refresh();
+  const updated = await home.rename(entry(ID_A, "Old"), "  New  ");
+  expect(calls).toEqual([{ id: ID_A, title: "New" }]);
+  expect(updated.title).toBe("New");
+  // The updated row sorts by its new timestamp; the other row stays.
+  expect(home.projects().map((project) => project.title)).toEqual(["New", "Other"]);
+  expect(home.actionError()).toBe(null);
+  home.dispose();
+});
+
+test("duplicates a project into a new row and leaves the source", async () => {
+  const calls: { id: string; title: string }[] = [];
+  const home = createProjectsHome("/projects", {
+    openStore: async () =>
+      fakeStore({
+        listProjects: async () => [entry(ID_A, "Source")],
+        duplicateProject: async (projectId, title) => {
+          calls.push({ id: projectId, title });
+          return entry(ID_B, title);
+        },
+      }),
+  });
+  await home.refresh();
+  const copy = await home.duplicate(entry(ID_A, "Source"), "Source copy");
+  expect(calls).toEqual([{ id: ID_A, title: "Source copy" }]);
+  expect(copy.projectId).toBe(ID_B);
+  expect(home.projects().map((project) => project.title)).toEqual(["Source", "Source copy"]);
+  home.dispose();
+});
+
+test("deletes a project and cannot resurrect it from a stale list read", async () => {
+  const pending: { release?: (entries: ProjectEntry[]) => void } = {};
+  let calls = 0;
+  const home = createProjectsHome("/projects", {
+    openStore: async () =>
+      fakeStore({
+        listProjects: () => {
+          calls += 1;
+          if (calls === 2) {
+            return new Promise<ProjectEntry[]>((resolve) => {
+              pending.release = resolve;
+            });
+          }
+          return Promise.resolve([entry(ID_A, "Doomed")]);
+        },
+        deleteProject: async () => {},
+      }),
+  });
+  // The home's initial read is the one that fills the list.
+  await settle();
+  expect(home.projects().map((project) => project.title)).toEqual(["Doomed"]);
+  // A read that started before the delete still holds the old row.
+  const read = home.refresh();
+  await home.remove(entry(ID_A, "Doomed"));
+  expect(home.projects()).toEqual([]);
+  pending.release?.([entry(ID_A, "Doomed")]);
+  await read;
+  await settle();
+  expect(home.projects()).toEqual([]);
+  home.dispose();
+});
+
+test("imports a project folder by trimmed path", async () => {
+  const sources: string[] = [];
+  const home = createProjectsHome("/projects", {
+    openStore: async () =>
+      fakeStore({
+        importProject: async (source) => {
+          sources.push(source);
+          return entry(ID_B, "Imported");
+        },
+      }),
+  });
+  await home.refresh();
+  const imported = await home.importProject("  /tmp/package  ");
+  expect(sources).toEqual(["/tmp/package"]);
+  expect(imported.projectId).toBe(ID_B);
+  expect(home.projects().map((project) => project.title)).toEqual(["Imported"]);
+  home.dispose();
+});
+
+test("an import path copied as a quoted Windows path is accepted", async () => {
+  const sources: string[] = [];
+  const home = createProjectsHome("/projects", {
+    openStore: async () =>
+      fakeStore({
+        importProject: async (source) => {
+          sources.push(source);
+          return entry(ID_B, "Quoted");
+        },
+      }),
+  });
+  await home.refresh();
+  await home.importProject('  "C:\\Users\\me\\package"  ');
+  expect(sources).toEqual(["C:\\Users\\me\\package"]);
+  home.dispose();
+});
+
+test("an empty import path never reaches the store", async () => {
+  let called = false;
+  const home = createProjectsHome("/projects", {
+    openStore: async () =>
+      fakeStore({
+        importProject: async () => {
+          called = true;
+          return entry(ID_B, "Never");
+        },
+      }),
+  });
+  await home.refresh();
+  expect(await rejection(home.importProject("   "))).toBe("the project folder is empty");
+  expect(await rejection(home.importProject('""'))).toBe("the project folder is empty");
+  expect(called).toBe(false);
+  home.dispose();
+});
+
+test("a failed rename re-reads a package that broke while cached", async () => {
+  let broken = false;
+  const home = createProjectsHome("/projects", {
+    openStore: async () =>
+      fakeStore({
+        listProjects: async () => [entry(ID_A, "Cached")],
+        refreshCatalog: async () => [
+          broken ? entry(ID_A, ID_A, { updatedAt: 0, unreadable: true }) : entry(ID_A, "Cached"),
+        ],
+        renameProject: async () => {
+          throw new Error("the package identity does not match its directory");
+        },
+      }),
+  });
+  await home.refresh();
+  broken = true;
+  await rejection(home.rename(entry(ID_A, "Cached"), "New"));
+  await settle();
+  expect(home.projects()[0]?.unreadable).toBe(true);
+  home.dispose();
+});
+
+test("an action cannot drop a pending deep status re-read", async () => {
+  let deepCalls = 0;
+  const pending: { release?: (entries: ProjectEntry[]) => void } = {};
+  const healthy = entry(ID_A, "Cached");
+  const broken = entry(ID_A, ID_A, { updatedAt: 0, unreadable: true });
+  const home = createProjectsHome("/projects", {
+    openStore: async () =>
+      fakeStore({
+        listProjects: async () => [healthy],
+        refreshCatalog: () => {
+          deepCalls += 1;
+          if (deepCalls === 1) {
+            return new Promise<ProjectEntry[]>((resolve) => {
+              pending.release = resolve;
+            });
+          }
+          return Promise.resolve([broken]);
+        },
+        renameProject: async (projectId, title) => entry(projectId, title),
+      }),
+  });
+  await home.refresh();
+  // A package broke after it was cached: the open fails and starts the slow
+  // deep re-read that will report it.
+  home.reportOpenError(new Error("the package has no Flow database"));
+  // An action commits before that read lands; it must not cancel the check.
+  await home.rename(entry(ID_A, "Cached"), "Renamed");
+  await settle();
+  expect(deepCalls).toBe(2);
+  expect(home.projects()[0]?.unreadable).toBe(true);
+
+  // The superseded read finishing late cannot restore the healthy row.
+  pending.release?.([healthy]);
+  await settle();
+  expect(home.projects()[0]?.unreadable).toBe(true);
+  home.dispose();
+});
+
+test("a shallow read cannot drop a pending deep status re-read", async () => {
+  let deepCalls = 0;
+  const pending: { release?: (entries: ProjectEntry[]) => void } = {};
+  const healthy = entry(ID_A, "Cached");
+  const broken = entry(ID_A, ID_A, { updatedAt: 0, unreadable: true });
+  const home = createProjectsHome("/projects", {
+    openStore: async () =>
+      fakeStore({
+        listProjects: async () => [healthy],
+        refreshCatalog: () => {
+          deepCalls += 1;
+          if (deepCalls === 1) {
+            return new Promise<ProjectEntry[]>((resolve) => {
+              pending.release = resolve;
+            });
+          }
+          return Promise.resolve([broken]);
+        },
+      }),
+  });
+  await home.refresh();
+  // A package broke after it was cached: the open fails and starts the deep
+  // re-read that will report it.
+  home.reportOpenError(new Error("the package has no Flow database"));
+  // Any later read (a return, a refusal) must not drop that check.
+  await home.refresh();
+  await settle();
+  expect(deepCalls).toBe(2);
+  expect(home.projects()[0]?.unreadable).toBe(true);
+  pending.release?.([healthy]);
+  await settle();
+  expect(home.projects()[0]?.unreadable).toBe(true);
+  home.dispose();
+});
+
+test("a failed action re-reads the row's status", async () => {
+  let held = false;
+  const home = createProjectsHome("/projects", {
+    openStore: async () =>
+      fakeStore({
+        listProjects: async () => [entry(ID_A, "Locked", { openElsewhere: held })],
+        deleteProject: async () => {
+          throw new Error(PROJECT_OPEN_ELSEWHERE);
+        },
+      }),
+  });
+  await home.refresh();
+  expect(home.projects()[0]?.openElsewhere).toBe(false);
+
+  // The other window took the package after this list was read.
+  held = true;
+  expect(await rejection(home.remove(entry(ID_A, "Locked")))).toBe(PROJECT_OPEN_ELSEWHERE);
+  await settle();
+  expect(home.projects()[0]?.openElsewhere).toBe(true);
   home.dispose();
 });
 

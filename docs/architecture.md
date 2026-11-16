@@ -208,11 +208,13 @@ The canvas stays in TSX and owns only the scene model and its views.
   packages are refused rather than migrated. The app starts on the projects
   screen (`pages/projects`) when it has a managed root: the list shows
   recency, an open-in-another-window badge and unreadable fallback rows, and
-  creates and opens projects through the same store. Opening a project hands
+  creates, renames, duplicates, deletes and imports projects through the same
+  store (rename and duplicate are hidden for an unreadable row; delete stays
+  available so a damaged package can be removed). Opening a project hands
   its lease to the flow workspace, which closes the document before releasing
   the package; the canvas's leading `Projects` control returns to the list,
-  and the window title bar names the open project. Rename, duplicate, delete
-  and import from the list, and a catalog watch policy, remain.
+  and the window title bar names the open project. A catalog watch policy and
+  zipped-package import remain.
 - The decision and the phased migration are recorded in
   [ADR 0002](adr/0002-rust-document-core.md),
   [ADR 0003](adr/0003-orm-seaorm.md) and

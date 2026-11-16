@@ -326,10 +326,20 @@ toggling, pan, zoom, search reveal, opening the native composer, running a
 node, editing the body, removing an input, switching nodes and the canvas and
 card context menus. `App.projects.test.tsx` drives the managed startup: it
 creates and opens a project through the dialog, returns to the list (reopening
-proves the lease was released), dismisses the dialog with Escape and shows a
-project held by another window without opening it.
-`pages/projects/projects-home.test.ts` covers the list state with a fake
-store: load failure and retry, create, open refusals and the open-error copy.
+proves the lease was released), renames, duplicates and deletes through a
+row's actions menu, closes a row menu by scrolling, imports an unzipped
+package folder by path and shows a failed import in its dialog, dismisses the
+dialog with Escape and shows a project held by another window without opening
+it. `pages/projects/projects-home.test.ts` covers the list state with a fake
+store: load failure and retry, create, rename, duplicate, delete (including a
+stale list read that cannot resurrect the row), import, open refusals and the
+open-error copy, the quiet re-read after a failed action, and a deep status
+read that runs again when an action supersedes it.
+`pages/projects/project-action-run.test.ts` pins the dismissed-dialog rule
+(no write starts, no result applies, a late failure reaches the list).
+`ProjectsPage.test.tsx` mounts the page over a fixed damaged package through a
+test-support entry (the test host cannot seed one) and checks that its menu
+offers only delete and that the confirmation names the package.
 `App.host.test.tsx` repeats the subset
 whose subject is the platform itself (window, real input, rendering, desktop
 APIs); it is also the only file `bun run test:host` runs. The zoom label is the

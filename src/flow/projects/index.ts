@@ -1,6 +1,7 @@
 /** The projects area facade: the managed root, store adapter and session. */
 export {
   filterProjects,
+  projectControlName,
   projectDisplayTitle,
   projectStatus,
   projectStatusLabel,
