@@ -19,7 +19,7 @@ use crate::db;
 use crate::document;
 use crate::mutation;
 use crate::project::commit::TempPackage;
-use crate::project::{catalog, paths};
+use crate::project::{catalog, paths, stamp};
 use crate::schema::v1;
 use crate::types::SeedDocumentInput;
 
@@ -48,15 +48,19 @@ pub(crate) fn create_project(
     crate::schema::package::checkpoint_truncate(&conn)?;
     crate::schema::package::mark_clean(&conn)?;
     let row = document::current(&conn).map_err(|error| error.to_string())?;
-    let entry = catalog::Entry {
+    let mut entry = catalog::Entry {
         path: row.project_id.clone(),
         project_id: row.project_id,
         title: row.title,
         updated_at: row.updated_at,
         last_opened_at: None,
         fallback: false,
+        stamp: None,
     };
     drop(conn);
+    // Stamp after the last connection closes: SQLite removes the WAL on a
+    // clean close, and the commit rename preserves the files' stamps.
+    entry.stamp = stamp::package_stamp(temp.path());
 
     temp.commit(root, &entry)?;
     Ok(entry)

@@ -354,6 +354,14 @@ fn a_managed_session_opens_the_leased_package_and_closes_cleanly() {
 
     let (state, mut lease) = crate::project::test_support::create_and_lease(temp.path(), "Managed");
     let project_id = lease.project_id();
+    // The lease recorded the package and its open time in the catalog before
+    // the document touched it.
+    let before = crate::project::test_support::catalog_list(temp.path());
+    let before_row = before
+        .iter()
+        .find(|entry| entry.path == project_id)
+        .expect("catalog row before the open");
+    assert!(before_row.last_opened_at.is_some());
     let db = Database::open_package(&lease.database_path(), project_id.clone())
         .expect("open the leased package");
     let info = db.project_info().expect("project info");
@@ -363,6 +371,27 @@ fn a_managed_session_opens_the_leased_package_and_closes_cleanly() {
     assert_eq!(info.node_count, 0.0);
     db.close().expect("close the managed document");
     lease.release();
+
+    // The managed session rewrote the package. The next list must re-read
+    // it, store the closed package's stamp, and keep the open order.
+    let after = crate::project::test_support::catalog_list(temp.path());
+    let after_row = after
+        .iter()
+        .find(|entry| entry.path == project_id)
+        .expect("catalog row after the close");
+    assert_ne!(
+        after_row.stamp, before_row.stamp,
+        "the managed session changed the package"
+    );
+    assert_eq!(
+        after_row.stamp,
+        crate::project::test_support::catalog_stamp(temp.path(), &project_id),
+        "the list stored the closed package's stamp"
+    );
+    assert_eq!(
+        after_row.last_opened_at, before_row.last_opened_at,
+        "the open order survives the re-read"
+    );
 
     let mut second = crate::project::test_support::lease_from(&state, &project_id);
     let reopened = Database::open_package(&second.database_path(), project_id.clone())

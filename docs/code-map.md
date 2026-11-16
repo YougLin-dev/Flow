@@ -134,8 +134,10 @@ facade, forbidden-folder, segment, native-seam and unclassified rules fail
 fails above 20. The old → new map is in
 [the plan's Appendix A](plans/code-organization.md#appendix-a--tsx-placement-map-non-test).
 The project layer added `flow/projects` (managed root, store adapter, lease
-session and pure list helpers) over the Rust `ProjectStore`; it imports
-`flow/document` through its facade. The next slice added `pages/projects`
+session and pure list helpers) over the Rust `ProjectStore`; catalog rows
+carry database/WAL stamps, so a list re-reads a changed package without a
+watcher, and the projects page revalidates on a foreground return or wake. It
+imports `flow/document` through its facade. The next slice added `pages/projects`
 (the projects screen and its app-lifetime home state) and mounted the session
 in `pages/flow`: the shell chooses the project list or the canvas, and the
 workspace leases and opens the chosen package. The Rust core split (Phase 6)

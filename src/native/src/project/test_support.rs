@@ -7,7 +7,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use crate::fsutil;
-use crate::project::{ProjectLease, create, open_lease, open_state, paths};
+use crate::project::{ProjectLease, catalog, create, open_lease, open_state, paths, stamp};
 
 pub(crate) struct TempRoot {
     root: PathBuf,
@@ -46,4 +46,15 @@ pub(crate) fn create_and_lease(root: &Path, title: &str) -> (Arc<super::StoreSta
 /// Leases an existing package from a store state already held by a test.
 pub(crate) fn lease_from(state: &Arc<super::StoreState>, project_id: &str) -> ProjectLease {
     open_lease(Arc::clone(state), project_id.to_owned()).expect("lease the project")
+}
+
+/// Runs the catalog reconciliation a project list runs, for tests outside
+/// this module (the catalog itself stays private to the project layer).
+pub(crate) fn catalog_list(root: &Path) -> Vec<catalog::Entry> {
+    catalog::list(root).expect("catalog list")
+}
+
+/// The current package stamp, to compare with a stored catalog row.
+pub(crate) fn catalog_stamp(root: &Path, project_id: &str) -> Option<stamp::PackageStamp> {
+    stamp::package_stamp(&paths::package_dir(root, project_id))
 }

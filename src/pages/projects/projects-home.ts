@@ -5,8 +5,9 @@
  * workspace, so this layer only decides which project the shell shows.
  *
  * The store opens once per launch (a retry after a failure reopens it). The
- * list is a snapshot of the derived catalog: it refreshes after an action
- * and when the user returns from a project, never on a timer.
+ * list is a snapshot of the derived catalog: it refreshes after an action,
+ * when the user returns from a project, and when the page revalidates it on
+ * a foreground return, never on a timer or a filesystem watcher.
  */
 import { announce, signal } from "nsh";
 import type { ProjectEntry } from "../../flow/shared";
@@ -62,6 +63,11 @@ export interface ProjectsHome {
   current(): OpenProjectDescriptor | null;
   /** Reloads the list; a failed store open is retried on the next call. */
   refresh(): Promise<void>;
+  /**
+   * Re-reads the list quietly for a foreground return: the visible list and
+   * its loading state stay put while the catalog is reconciled.
+   */
+  revalidate(): Promise<void>;
   /** Shows a project, or explains why it cannot open. */
   open(project: ProjectEntry): void;
   /**
@@ -144,6 +150,9 @@ export function createProjectsHome(root: string, options: ProjectsHomeOptions = 
       const entries = deep ? await store.refreshCatalog() : await store.listProjects();
       if (disposed || generation !== loadGeneration) return;
       projects.set(sortProjects(entries));
+      // A successful read, quiet or not, makes a previous load error stale:
+      // a foreground return can recover a list that failed to load.
+      loadError.set(null);
       loading.set(false);
     } catch (error) {
       if (disposed || generation !== loadGeneration) return;
@@ -161,6 +170,16 @@ export function createProjectsHome(root: string, options: ProjectsHomeOptions = 
   };
 
   const refresh = (): Promise<void> => load(false);
+
+  /**
+   * A foreground return re-reads the shallow list without a loading flash.
+   * An explicit load owns the loading and error state, so a return while one
+   * is in flight is ignored rather than superseding it.
+   */
+  const revalidate = (): Promise<void> => {
+    if (loading()) return Promise.resolve();
+    return load(true);
+  };
 
   /**
    * Re-reads statuses after a refusal without flashing the loading state. A
@@ -362,6 +381,7 @@ export function createProjectsHome(root: string, options: ProjectsHomeOptions = 
     actionError,
     current,
     refresh,
+    revalidate,
     open,
     create,
     rename,

@@ -337,11 +337,16 @@ store: load failure and retry, create, rename, duplicate, delete (including a
 stale list read that cannot resurrect the row), import, open refusals and the
 open-error copy, the quiet re-read after a failed action, and a deep status
 read that runs again when an action supersedes it.
+`pages/projects/projects-home-foreground.test.ts` covers the foreground
+revalidation: a quiet failure keeps the visible list, a successful return
+recovers a failed load, and a return during an in-flight load is ignored.
 `pages/projects/project-action-run.test.ts` pins the dismissed-dialog rule
 (no write starts, no result applies, a late failure reaches the list).
 `ProjectsPage.test.tsx` mounts the page over a fixed damaged package through a
 test-support entry (the test host cannot seed one) and checks that its menu
-offers only delete and that the confirmation names the package.
+offers only delete and that the confirmation names the package; a second
+test-support entry proves that a foreground return and a system wake each run
+a quiet list read.
 `App.host.test.tsx` repeats the subset
 whose subject is the platform itself (window, real input, rendering, desktop
 APIs); it is also the only file `bun run test:host` runs. The zoom label is the

@@ -25,7 +25,7 @@ use crate::fsutil;
 use crate::project::commit::TempPackage;
 use crate::project::lock::PackageLock;
 use crate::project::paths;
-use crate::project::{catalog, package};
+use crate::project::{catalog, package, stamp};
 use crate::schema::v1;
 
 /// Mutating a package that this window has open is refused; the workspace
@@ -77,6 +77,7 @@ pub(crate) fn rename_project(
         updated_at: now,
         last_opened_at,
         fallback: false,
+        stamp: stamp::package_stamp(&paths::package_dir(root, project_id)),
     };
     let _ = catalog::upsert(root, entry.clone());
     Ok(entry)
@@ -147,7 +148,7 @@ pub(crate) fn duplicate_project(
 
     let database = temp.path().join(paths::DATABASE_FILE);
     let now = clock::now_ms();
-    let entry = {
+    let mut entry = {
         let conn = connect(&database)?;
         db::configure(&conn, &database.to_string_lossy())?;
         let new_id = v1::mint_project_id(&conn)?;
@@ -162,8 +163,12 @@ pub(crate) fn duplicate_project(
             updated_at: row.updated_at,
             last_opened_at: None,
             fallback: false,
+            stamp: None,
         }
     };
+    // Stamp after the connection closes and the WAL is removed; the commit
+    // rename preserves the files' stamps.
+    entry.stamp = stamp::package_stamp(temp.path());
     temp.commit(root, &entry)?;
     Ok(entry)
 }
@@ -238,6 +243,7 @@ pub(crate) fn import_project(root: &Path, source: &str) -> Result<catalog::Entry
         updated_at: row.updated_at,
         last_opened_at: None,
         fallback: false,
+        stamp: stamp::package_stamp(temp.path()),
     };
     temp.commit(root, &entry)?;
     Ok(entry)
@@ -386,6 +392,45 @@ mod tests {
         .expect("row")
         .try_get_by_index::<i64>(0)
         .expect("count")
+    }
+
+    #[test]
+    fn every_writer_stores_the_committed_packages_stamp() {
+        let temp = TempRoot::new("writer-stamps");
+        let created = create(&temp, "One");
+        assert_eq!(
+            created.stamp,
+            stamp::package_stamp(&paths::package_dir(temp.path(), &created.path)),
+            "create"
+        );
+
+        let renamed = rename_project(temp.path(), None, &created.path, "Two").expect("rename");
+        assert_eq!(
+            renamed.stamp,
+            stamp::package_stamp(&paths::package_dir(temp.path(), &renamed.path)),
+            "rename"
+        );
+
+        let copied =
+            duplicate_project(temp.path(), None, &created.path, "Copy").expect("duplicate");
+        assert_eq!(
+            copied.stamp,
+            stamp::package_stamp(&paths::package_dir(temp.path(), &copied.path)),
+            "duplicate"
+        );
+
+        let source = TempRoot::new("writer-import-source");
+        let source_entry = create_project(source.path(), "Imported", None).expect("source");
+        let imported = import_project(
+            temp.path(),
+            &paths::package_dir(source.path(), &source_entry.path).to_string_lossy(),
+        )
+        .expect("import");
+        assert_eq!(
+            imported.stamp,
+            stamp::package_stamp(&paths::package_dir(temp.path(), &imported.path)),
+            "import"
+        );
     }
 
     #[test]

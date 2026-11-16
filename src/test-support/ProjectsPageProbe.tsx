@@ -32,6 +32,7 @@ export function ProjectsPageProbe() {
     actionError: () => actionError(),
     current: () => null,
     refresh: async () => {},
+    revalidate: async () => {},
     open: () => {},
     create: async () => UNREADABLE,
     rename: async () => UNREADABLE,

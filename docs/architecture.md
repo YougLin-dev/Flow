@@ -182,9 +182,10 @@ The canvas stays in TSX and owns only the scene model and its views.
   doubt rebuilds it from the directories, unreadable packages and packages
   whose document identity disagrees with their directory stay visible as
   fallback rows keyed by the directory, and a valid catalog is reconciled
-  without reopening readable known packages (a fallback row or one whose
-  identity disagrees with its directory is re-read on every list, and an
-  explicit catalog refresh reopens them all). The lock lives in `<root>/.locks/<id>.lock`, not inside
+  without reopening readable known packages whose stamp still matches (a
+  fallback row, one whose identity disagrees with its directory, or one
+  whose stamp changed is re-read on that list, and an explicit catalog
+  refresh reopens them all). The lock lives in `<root>/.locks/<id>.lock`, not inside
   the package, because Windows refuses to rename a directory while any
   handle inside it is open; its owner is the OS lock, so process death
   frees it and no stale-lock protocol exists. `ProjectStore` hands out one
@@ -213,8 +214,15 @@ The canvas stays in TSX and owns only the scene model and its views.
   available so a damaged package can be removed). Opening a project hands
   its lease to the flow workspace, which closes the document before releasing
   the package; the canvas's leading `Projects` control returns to the list,
-  and the window title bar names the open project. A catalog watch policy and
-  zipped-package import remain.
+  and the window title bar names the open project. A readable catalog row
+  carries a stamp of its database and WAL (length and modification time); a
+  list re-reads a readable row only when its stamp changed, so an out-of-band
+  title or a same-identity restore surfaces without reopening quiet
+  packages. There
+  is no filesystem watcher or timer: the projects page revalidates quietly
+  when the app returns to the foreground or wakes, and a deep catalog refresh
+  remains the recovery path after a refusal. Zipped-package import,
+  backup/restore and open-project rename remain.
 - The decision and the phased migration are recorded in
   [ADR 0002](adr/0002-rust-document-core.md),
   [ADR 0003](adr/0003-orm-seaorm.md) and

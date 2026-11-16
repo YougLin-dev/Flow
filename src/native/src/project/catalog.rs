@@ -9,9 +9,12 @@
 //! A package that fails identity reading is still listed with a fallback
 //! entry (title = directory name, `updated_at = 0`) so it is not silently
 //! lost; opening or mutating it still fails its identity guard. A readable
-//! cached entry is trusted while reconciling; a fallback row, or one whose
-//! identity no longer matches its directory, is re-read on every list so
-//! recovery and out-of-band changes surface without a manual refresh.
+//! cached entry is trusted while reconciling only when its package stamp
+//! still matches the files on disk; a fallback row, one whose identity no
+//! longer matches its directory, or one whose stamp changed is re-read on
+//! that list, so recovery and out-of-band changes surface without a manual
+//! refresh. The row is then written with the new stamp, so a quiet package
+//! is not reopened again.
 
 use std::cmp::Ordering;
 use std::collections::{HashMap, HashSet};
@@ -23,10 +26,12 @@ use serde_json::{Value, json};
 
 use crate::project::package;
 use crate::project::paths;
+use crate::project::stamp::{self, PackageStamp};
 use crate::schema::v1;
 
-/// The catalog format this build understands.
-const VERSION: i64 = 1;
+/// The catalog format this build understands. Version 1 had no package
+/// stamp; it is rebuilt once rather than trusted.
+const VERSION: i64 = 2;
 /// A catalog larger than this is not ours; rebuilding is cheaper than
 /// trusting it.
 const MAX_BYTES: u64 = 8 * 1024 * 1024;
@@ -47,12 +52,17 @@ pub(crate) struct Entry {
     /// rather than inferred from a title equal to the directory, because a
     /// readable package may legitimately have such a title.
     pub fallback: bool,
+    /// The package files at the time this row was read. The list trusts a
+    /// readable row only when this still matches; `None` never matches.
+    pub stamp: Option<PackageStamp>,
 }
 
 /// Lists the projects, reconciling a valid catalog with the directories on
 /// disk. An invalid or missing catalog is rebuilt from scratch. New entries
-/// are read from their packages; a readable cached entry is trusted, while a
-/// fallback row or one whose identity differs from its directory is re-read.
+/// are read from their packages; a readable cached entry is trusted only
+/// while its package stamp still matches, while a fallback row, one whose
+/// identity differs from its directory, or one whose stamp changed is
+/// re-read.
 pub(crate) fn list(root: &Path) -> Result<Vec<Entry>, String> {
     let candidates = scan(root)?;
     let Some(previous) = load_valid(root) else {
@@ -65,16 +75,38 @@ pub(crate) fn list(root: &Path) -> Result<Vec<Entry>, String> {
         .collect();
     let mut entries = Vec::with_capacity(candidates.len());
     for (path, dir) in &candidates {
+        // One stat per candidate, taken before identity is read. If the
+        // package changes during the read, the stored stamp stays older than
+        // the files and the next list reads it again.
+        let current = stamp::package_stamp(dir);
         match known.remove(path) {
             // A cached entry whose identity differs from its directory is
             // stale (the package changed out of band); list rows must carry
             // the directory as their operation key, so re-read it. A cached
             // fallback is likewise re-read so a package that was briefly
-            // unreadable recovers its title without a manual refresh.
-            Some(entry) if entry.project_id == *path && !is_fallback(&entry) => {
+            // unreadable recovers its title without a manual refresh. A
+            // readable entry is trusted only while its stamp still matches.
+            Some(entry)
+                if entry.project_id == *path
+                    && !is_fallback(&entry)
+                    && entry.stamp.is_some()
+                    && entry.stamp == current =>
+            {
                 entries.push(entry);
             }
-            Some(_) | None => entries.push(read_candidate(path, dir)),
+            Some(previous) => {
+                // Reading a changed package keeps the row's last-opened
+                // ordering metadata; only a stored identity that disagrees
+                // with its directory drops it. A fallback keeps it too, so a
+                // stable unreadable row does not rewrite the catalog on
+                // every list.
+                let mut entry = read_candidate(path, dir, current);
+                if entry.project_id == previous.project_id {
+                    entry.last_opened_at = previous.last_opened_at;
+                }
+                entries.push(entry);
+            }
+            None => entries.push(read_candidate(path, dir, current)),
         }
     }
     sort_entries(&mut entries);
@@ -83,6 +115,7 @@ pub(crate) fn list(root: &Path) -> Result<Vec<Entry>, String> {
     // Entries for vanished packages were dropped above; new packages were
     // added. Persist only when the set really changed.
     if entries != previous {
+        merge_open_times(root, &mut entries);
         let _ = write(root, &entries);
     }
     Ok(entries)
@@ -107,7 +140,7 @@ fn rebuild(
 ) -> Result<Vec<Entry>, String> {
     let mut entries = Vec::with_capacity(candidates.len());
     for (path, dir) in candidates {
-        let mut entry = read_candidate(path, dir);
+        let mut entry = read_candidate(path, dir, stamp::package_stamp(dir));
         if let Some((project_id, last_opened_at)) = preserved.get(path)
             && *project_id == entry.project_id
         {
@@ -116,8 +149,37 @@ fn rebuild(
         entries.push(entry);
     }
     sort_entries(&mut entries);
+    merge_open_times(root, &mut entries);
     let _ = write(root, &entries);
     Ok(entries)
+}
+
+/// Carries a concurrently recorded open time into a whole-file rewrite and
+/// restores recency order (a merged time can move a row). `last_opened_at`
+/// is not derivable from a package, so a rewrite built from an older
+/// snapshot must not drop another window's `mark_opened`. Only a matching
+/// path and identity carries the value; the later time wins.
+fn merge_open_times(root: &Path, entries: &mut [Entry]) {
+    let Some(latest) = load_valid(root) else {
+        return;
+    };
+    let mut open_times: HashMap<String, (String, Option<i64>)> = latest
+        .into_iter()
+        .map(|entry| (entry.path, (entry.project_id, entry.last_opened_at)))
+        .collect();
+    for entry in entries.iter_mut() {
+        let Some((project_id, at)) = open_times.remove(&entry.path) else {
+            continue;
+        };
+        if project_id != entry.project_id {
+            continue;
+        }
+        entry.last_opened_at = match (entry.last_opened_at, at) {
+            (Some(ours), Some(theirs)) => Some(ours.max(theirs)),
+            (ours, theirs) => ours.or(theirs),
+        };
+    }
+    sort_entries(entries);
 }
 
 /// Whether this row is a directory fallback rather than a read package.
@@ -129,7 +191,7 @@ pub(crate) fn is_fallback(entry: &Entry) -> bool {
 /// document identity does not match its directory — still gets a visible
 /// fallback entry keyed by the directory. Every listed entry's `project_id`
 /// is therefore the operation key the store resolves.
-fn read_candidate(path: &str, dir: &Path) -> Entry {
+fn read_candidate(path: &str, dir: &Path, stamp: Option<PackageStamp>) -> Entry {
     match package::read_identity(&dir.join(paths::DATABASE_FILE)) {
         Ok(identity) if identity.project_id == path => Entry {
             path: path.to_owned(),
@@ -138,6 +200,7 @@ fn read_candidate(path: &str, dir: &Path) -> Entry {
             updated_at: identity.updated_at,
             last_opened_at: None,
             fallback: false,
+            stamp,
         },
         _ => Entry {
             path: path.to_owned(),
@@ -146,6 +209,9 @@ fn read_candidate(path: &str, dir: &Path) -> Entry {
             updated_at: 0,
             last_opened_at: None,
             fallback: true,
+            // A fallback is re-read on every list and has no readable
+            // identity for the stamp to protect.
+            stamp: None,
         },
     }
 }
@@ -222,6 +288,26 @@ pub(crate) fn load_valid(root: &Path) -> Option<Vec<Entry>> {
     parse_entries(&value)
 }
 
+fn parse_stamp(value: &Value) -> Option<PackageStamp> {
+    let object = value.as_object()?;
+    let database = parse_file_stamp(object.get("database")?)?;
+    let wal = match object.get("wal")? {
+        Value::Null => None,
+        value => Some(parse_file_stamp(value)?),
+    };
+    Some(PackageStamp { database, wal })
+}
+
+fn parse_file_stamp(value: &Value) -> Option<stamp::FileStamp> {
+    let object = value.as_object()?;
+    let len = object.get("len")?.as_u64()?;
+    let mtime_ns = object.get("mtime_ns")?.as_i64()?;
+    if mtime_ns < 0 {
+        return None;
+    }
+    Some(stamp::FileStamp { len, mtime_ns })
+}
+
 fn parse_entries(value: &Value) -> Option<Vec<Entry>> {
     let object = value.as_object()?;
     if object.get("version")?.as_i64()? != VERSION {
@@ -239,12 +325,13 @@ fn parse_entries(value: &Value) -> Option<Vec<Entry>> {
             Value::Null => None,
             value => Some(value.as_i64()?),
         };
-        // Catalogs written before the flag existed are read with its old
-        // inference once; the next reconciliation stores the real flag.
-        let fallback = match item.get("fallback") {
-            Some(Value::Bool(fallback)) => *fallback,
-            None => title == path && updated_at == 0,
-            Some(_) => return None,
+        let fallback = match item.get("fallback")? {
+            Value::Bool(fallback) => *fallback,
+            _ => return None,
+        };
+        let stamp = match item.get("stamp")? {
+            Value::Null => None,
+            value => Some(parse_stamp(value)?),
         };
         if !paths::is_package_name(path) || !paths::is_package_name(project_id) {
             return None;
@@ -265,6 +352,7 @@ fn parse_entries(value: &Value) -> Option<Vec<Entry>> {
             updated_at,
             last_opened_at,
             fallback,
+            stamp,
         });
     }
     Some(entries)
@@ -284,6 +372,16 @@ pub(crate) fn write(root: &Path, entries: &[Entry]) -> Result<(), String> {
                 "updated_at": entry.updated_at,
                 "last_opened_at": entry.last_opened_at,
                 "fallback": entry.fallback,
+                "stamp": entry.stamp.as_ref().map(|stamp| json!({
+                    "database": {
+                        "len": stamp.database.len,
+                        "mtime_ns": stamp.database.mtime_ns,
+                    },
+                    "wal": stamp.wal.map(|wal| json!({
+                        "len": wal.len,
+                        "mtime_ns": wal.mtime_ns,
+                    })),
+                })),
             }))
             .collect::<Vec<_>>(),
     }))
@@ -377,26 +475,65 @@ mod tests {
         serde_json::from_slice(&bytes).expect("catalog json")
     }
 
+    /// A readable cached row carrying the package's current stamp, as every
+    /// writer of the catalog stores it.
+    fn stored_entry(
+        temp: &TempRoot,
+        id: &str,
+        title: &str,
+        updated_at: i64,
+        last_opened_at: Option<i64>,
+    ) -> Entry {
+        Entry {
+            path: id.to_owned(),
+            project_id: id.to_owned(),
+            title: title.to_owned(),
+            updated_at,
+            last_opened_at,
+            fallback: false,
+            stamp: stamp::package_stamp(&paths::package_dir(temp.path(), id)),
+        }
+    }
+
     const ID_A: &str = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
     const ID_B: &str = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
 
     #[test]
     fn list_rebuilds_invalid_catalogs_from_the_directories() {
+        let valid = |path: &str| {
+            serde_json::json!({
+                "path": path,
+                "project_id": ID_A,
+                "title": "A",
+                "updated_at": 1,
+                "last_opened_at": null,
+                "fallback": false,
+                "stamp": {"database": {"len": 0, "mtime_ns": 0}, "wal": null},
+            })
+        };
         for (label, contents) in [
             ("missing", None),
-            ("truncated", Some("{\"version\":1,\"entries\":[".to_owned())),
-            ("version", Some("{\"version\":2,\"entries\":[]}".to_owned())),
+            ("truncated", Some("{\"version\":2,\"entries\":[".to_owned())),
+            ("version", Some("{\"version\":3,\"entries\":[]}".to_owned())),
             (
                 "duplicate",
-                Some(format!(
-                    "{{\"version\":1,\"entries\":[{{\"path\":\"{ID_A}\",\"project_id\":\"{ID_A}\",\"title\":\"A\",\"updated_at\":1,\"last_opened_at\":null}},{{\"path\":\"{ID_A}\",\"project_id\":\"{ID_A}\",\"title\":\"A\",\"updated_at\":1,\"last_opened_at\":null}}]}}"
-                )),
+                Some(
+                    serde_json::json!({
+                        "version": VERSION,
+                        "entries": [valid(ID_A), valid(ID_A)],
+                    })
+                    .to_string(),
+                ),
             ),
             (
                 "escape",
-                Some(format!(
-                    "{{\"version\":1,\"entries\":[{{\"path\":\"../{ID_A}\",\"project_id\":\"{ID_A}\",\"title\":\"A\",\"updated_at\":1,\"last_opened_at\":null}}]}}"
-                )),
+                Some(
+                    serde_json::json!({
+                        "version": VERSION,
+                        "entries": [valid(&format!("../{ID_A}"))],
+                    })
+                    .to_string(),
+                ),
             ),
         ] {
             let temp = TempRoot::new(label);
@@ -418,14 +555,7 @@ mod tests {
         let kept = package(&temp, "Kept");
         write(
             temp.path(),
-            &[Entry {
-                path: kept.clone(),
-                project_id: kept.clone(),
-                title: "Kept".to_owned(),
-                updated_at: 1,
-                last_opened_at: Some(7),
-                fallback: false,
-            }],
+            &[stored_entry(&temp, &kept, "Kept", 1, Some(7))],
         )
         .expect("write catalog");
         let added = package(&temp, "Added");
@@ -482,6 +612,66 @@ mod tests {
         assert_eq!(entries[0].updated_at, 0);
         assert!(entries[0].last_opened_at.is_none());
         assert!(is_fallback(&entries[0]));
+        assert!(
+            entries[0].stamp.is_none(),
+            "a fallback has no readable package to stamp"
+        );
+    }
+
+    #[test]
+    fn list_reuses_a_cached_row_whose_stamp_matches() {
+        let temp = TempRoot::new("matching-stamp");
+        let id = package(&temp, "Real");
+        // A forged title with the package's real stamp is trusted: the list
+        // does not reopen a package whose files did not change.
+        write(
+            temp.path(),
+            &[stored_entry(&temp, &id, "Cached", 42, Some(7))],
+        )
+        .expect("write catalog");
+
+        let entries = list(temp.path()).expect("list");
+        assert_eq!(entries[0].title, "Cached");
+        assert_eq!(entries[0].updated_at, 42);
+        assert_eq!(entries[0].last_opened_at, Some(7));
+    }
+
+    #[test]
+    fn list_rereads_a_cached_row_whose_package_changed() {
+        let temp = TempRoot::new("changed-stamp");
+        let id = package(&temp, "Before");
+        let entries = list(temp.path()).expect("first list");
+        assert_eq!(entries[0].title, "Before");
+        mark_opened(temp.path(), &id, 77).expect("mark opened");
+
+        // Change the title out of band, as another build or a restore would.
+        let database = paths::database_path(temp.path(), &id);
+        let conn =
+            Database::connect(crate::db::sqlite_url(&database.to_string_lossy()).expect("url"))
+                .expect("connect");
+        conn.execute_raw(Statement::from_string(
+            DbBackend::Sqlite,
+            "UPDATE document SET title = 'After', updated_at = 9 WHERE id = 1".to_owned(),
+        ))
+        .expect("rename out of band");
+        drop(conn);
+        // Force a distinct stamp even on a coarse filesystem: the point is
+        // the invalidation gate, not this platform's timestamp resolution.
+        fs::OpenOptions::new()
+            .write(true)
+            .open(&database)
+            .expect("open database")
+            .set_modified(std::time::SystemTime::now() + std::time::Duration::from_secs(1))
+            .expect("bump the modification time");
+
+        let entries = list(temp.path()).expect("second list");
+        assert_eq!(entries[0].title, "After", "the changed package is re-read");
+        assert_eq!(entries[0].updated_at, 9);
+        assert_eq!(
+            entries[0].last_opened_at,
+            Some(77),
+            "a re-read keeps the row's open order"
+        );
     }
 
     #[test]
@@ -552,60 +742,147 @@ mod tests {
     }
 
     #[test]
-    fn a_catalog_from_before_the_fallback_flag_is_still_read() {
-        let temp = TempRoot::new("old-catalog");
-        let id = package(&temp, "Before");
-        // A genuine pre-flag fallback row (a junk package directory written
-        // with title == path and a zero timestamp) must keep that reading.
+    fn a_version_1_catalog_is_rebuilt_once() {
+        let temp = TempRoot::new("v1-catalog");
+        let id = package(&temp, "Real");
         foreign(&temp, ID_B);
+        // Version 1 had no stamp, so it cannot be trusted; it is discarded
+        // and rebuilt from the directories rather than read with defaults.
         fs::write(
             paths::catalog_path(temp.path()),
             format!(
-                "{{\"version\":1,\"entries\":[{{\"path\":\"{id}\",\"project_id\":\"{id}\",\"title\":\"Before\",\"updated_at\":1,\"last_opened_at\":null}},{{\"path\":\"{ID_B}\",\"project_id\":\"{ID_B}\",\"title\":\"{ID_B}\",\"updated_at\":0,\"last_opened_at\":null}}]}}"
+                "{{\"version\":1,\"entries\":[{{\"path\":\"{id}\",\"project_id\":\"{id}\",\"title\":\"Stale\",\"updated_at\":1,\"last_opened_at\":null}},{{\"path\":\"{ID_B}\",\"project_id\":\"{ID_B}\",\"title\":\"{ID_B}\",\"updated_at\":0,\"last_opened_at\":null}}]}}"
             ),
         )
-        .expect("old catalog");
+        .expect("v1 catalog");
 
         let entries = list(temp.path()).expect("list");
         let readable = entries
             .iter()
             .find(|entry| entry.path == id)
             .expect("readable row");
-        assert_eq!(readable.title, "Before");
-        assert!(!is_fallback(readable), "a readable row stays readable");
+        assert_eq!(readable.title, "Real", "the package is read again");
+        assert!(!is_fallback(readable));
+        assert!(readable.stamp.is_some(), "the rebuilt row carries a stamp");
         let fallback = entries
             .iter()
             .find(|entry| entry.path == ID_B)
             .expect("fallback row");
-        assert!(is_fallback(fallback), "the old inference is kept");
-        // The reconciliation itself is unchanged, so the old file stays; the
-        // next write persists the parsed flag for every row.
-        mark_opened(temp.path(), ID_B, 3).expect("mark the fallback row");
+        assert!(is_fallback(fallback));
         let stored = catalog(&temp);
-        let stored_fallback = stored["entries"]
-            .as_array()
-            .expect("entries")
-            .iter()
-            .find(|entry| entry["path"] == ID_B)
-            .expect("stored fallback")["fallback"]
-            .as_bool();
-        assert_eq!(
-            stored_fallback,
-            Some(true),
-            "the next write stores the flag"
-        );
+        assert_eq!(stored["version"], VERSION, "the rebuilt file is version 2");
+    }
 
-        // The stored flag then drives recovery: a package that appears under
-        // the fallback's directory is read and replaces the row.
-        fs::remove_dir_all(temp.path().join(ID_B)).expect("remove the junk package");
-        package_with_id(&temp, "Recovered", ID_B);
-        let entries = list(temp.path()).expect("list after recovery");
-        let recovered = entries
-            .iter()
-            .find(|entry| entry.path == ID_B)
-            .expect("recovered row");
-        assert_eq!(recovered.title, "Recovered");
-        assert!(!is_fallback(recovered));
+    #[test]
+    fn a_rewrite_carries_only_a_matching_concurrent_open_time() {
+        let temp = TempRoot::new("merge-open");
+        let first = package(&temp, "First");
+        let second = package(&temp, "Second");
+        // The rewrite's snapshot predates another window marking the first
+        // project opened; only that row's open time may be carried.
+        write(
+            temp.path(),
+            &[
+                stored_entry(&temp, &first, "First", 1, Some(9)),
+                stored_entry(&temp, &second, "Second", 2, Some(8)),
+            ],
+        )
+        .expect("disk catalog");
+        let mut entries = vec![
+            Entry {
+                project_id: ID_B.to_owned(),
+                ..stored_entry(&temp, &second, "Second", 2, None)
+            },
+            stored_entry(&temp, &first, "First", 1, None),
+        ];
+
+        merge_open_times(temp.path(), &mut entries);
+        assert_eq!(
+            entries[0].last_opened_at,
+            Some(9),
+            "the merged open time outranks recency"
+        );
+        assert_eq!(
+            entries[0].title, "First",
+            "the merge restores recency order"
+        );
+        assert_eq!(
+            entries[1].last_opened_at, None,
+            "an identity mismatch does not carry another package's open time"
+        );
+    }
+
+    #[test]
+    fn a_stable_fallback_is_not_rewritten_on_every_list() {
+        let temp = TempRoot::new("fallback-stable");
+        foreign(&temp, ID_A);
+        write(
+            temp.path(),
+            &[Entry {
+                path: ID_A.to_owned(),
+                project_id: ID_A.to_owned(),
+                title: ID_A.to_owned(),
+                updated_at: 0,
+                last_opened_at: Some(77),
+                fallback: true,
+                stamp: None,
+            }],
+        )
+        .expect("write catalog");
+        // Age the catalog: a rewrite through the temp file and rename would
+        // give it a fresh modification time.
+        let aged = std::time::UNIX_EPOCH + std::time::Duration::from_secs(1_600_000_000);
+        fs::OpenOptions::new()
+            .write(true)
+            .open(paths::catalog_path(temp.path()))
+            .expect("open catalog")
+            .set_modified(aged)
+            .expect("age the catalog");
+
+        let entries = list(temp.path()).expect("first list");
+        assert!(is_fallback(&entries[0]));
+        assert_eq!(entries[0].last_opened_at, Some(77));
+        assert_eq!(
+            fs::metadata(paths::catalog_path(temp.path()))
+                .expect("metadata")
+                .modified()
+                .expect("mtime"),
+            aged,
+            "a stable fallback row is not rewritten"
+        );
+        let entries = list(temp.path()).expect("second list");
+        assert_eq!(entries[0].last_opened_at, Some(77));
+    }
+
+    #[test]
+    fn list_rereads_a_cached_row_when_only_its_wal_changed() {
+        let temp = TempRoot::new("wal-stamp");
+        let id = package(&temp, "Before");
+        let database = paths::database_path(temp.path(), &id);
+        let conn =
+            Database::connect(crate::db::sqlite_url(&database.to_string_lossy()).expect("url"))
+                .expect("connect");
+        crate::db::configure(&conn, &database.to_string_lossy()).expect("wal mode");
+        let entries = list(temp.path()).expect("first list");
+        let before = entries[0].stamp.clone().expect("stamp");
+
+        // With the connection open, the update lives in the WAL: the database
+        // file's length and modification time stay as they were.
+        conn.execute_raw(Statement::from_string(
+            DbBackend::Sqlite,
+            "UPDATE document SET title = 'After', updated_at = 9 WHERE id = 1".to_owned(),
+        ))
+        .expect("rename in the wal");
+
+        let entries = list(temp.path()).expect("second list");
+        assert_eq!(entries[0].title, "After", "the WAL change is re-read");
+        let after = entries[0].stamp.clone().expect("stamp");
+        assert_eq!(
+            after.database, before.database,
+            "the database file itself did not change"
+        );
+        assert_ne!(after.wal, before.wal, "the WAL sidecar changed");
+        drop(conn);
     }
 
     #[test]
@@ -623,6 +900,7 @@ mod tests {
                     updated_at: 1,
                     last_opened_at: Some(50),
                     fallback: false,
+                    stamp: None,
                 },
                 Entry {
                     path: second.clone(),
@@ -631,6 +909,7 @@ mod tests {
                     updated_at: 2,
                     last_opened_at: Some(60),
                     fallback: false,
+                    stamp: None,
                 },
             ],
         )
@@ -670,6 +949,7 @@ mod tests {
                 updated_at: 1,
                 last_opened_at: Some(99),
                 fallback: false,
+                stamp: None,
             }],
         )
         .expect("write catalog");
@@ -702,6 +982,7 @@ mod tests {
             updated_at: 5,
             last_opened_at: None,
             fallback: false,
+            stamp: None,
         }
     }
 
@@ -739,6 +1020,7 @@ mod tests {
                 updated_at: 1,
                 last_opened_at: None,
                 fallback: false,
+                stamp: None,
             }],
         )
         .expect("write catalog");

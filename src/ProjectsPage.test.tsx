@@ -20,3 +20,20 @@ test("an unreadable row offers only delete and names its package", async () => {
   // "Unavailable project" title.
   expect(app.texts().some((text) => text.includes(`Unavailable project ${SHORT_ID}`))).toBe(true);
 });
+
+test("revalidates the list when the app returns to the foreground", async () => {
+  const app = await open("./test-support/ProjectsForegroundProbe.tsx");
+  await app.waitUntil(() => app.texts().includes("reads:1"));
+
+  await app.setLifecycle("background");
+  await app.setLifecycle("active");
+  await app.waitUntil(() => app.texts().includes("reads:2"));
+});
+
+test("revalidates the list after a system wake while active", async () => {
+  const app = await open("./test-support/ProjectsForegroundProbe.tsx");
+  await app.waitUntil(() => app.texts().includes("reads:1"));
+
+  await app.wake();
+  await app.waitUntil(() => app.texts().includes("reads:2"));
+});

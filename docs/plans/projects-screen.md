@@ -2,8 +2,12 @@
 
 Status: implemented — the project list, create, rename, duplicate, delete,
 import, open, back to the list and quit. The catalog refreshes on action, on a
-refusal and on return, with no watcher. Importing a zipped package and
-backup/restore are later slices.
+refusal, on return, and on a foreground return or wake, with no filesystem
+watcher; a cached readable row is re-read only when its package stamp
+changed, while fallback and identity-mismatched rows are re-read on every
+list.
+Importing a zipped package, backup/restore and renaming an open project are
+later slices.
 
 The data model and the store live in
 [database-design.md](database-design.md) §8.7. This page records the screen's
@@ -139,7 +143,11 @@ this screen should move onto them then.
   later action or list read superseded runs again instead of being dropped.
   `ProjectsPage.test.tsx` mounts the page over a fixed damaged package (a
   test-support entry) and checks that its menu offers only delete and that
-  the confirmation names the package by its short identity.
+  the confirmation names the package by its short identity; a second
+  test-support entry proves that a foreground return and a wake each run a
+  quiet list read. `projects-home-foreground.test.ts` proves the quiet
+  failure keeps the visible list, a return recovers a failed load, and a
+  return during an in-flight load is ignored.
   `project-action-run.test.ts`
   pins the dismissal rule: a dismissed run starts no write, applies no
   result, and reports its failure to the list. `project-list.test.ts` covers
@@ -147,8 +155,10 @@ this screen should move onto them then.
   `workspace/save-drafts.test.ts` pins the close-time draft save order and
   its wait for the inline write. Rust: the catalog keeps an explicit fallback
   flag (with tests for a readable package titled like its directory and for
-  both branches of the pre-flag inference), and `entry_view` maps it to
-  `unreadable` on both sides.
+  strict version 2 parsing), readable rows carry a database+WAL stamp whose
+  mismatch re-reads the package while preserving its open order, a version 1
+  catalog rebuilds once, and `entry_view` maps the flag to `unreadable` on
+  both sides.
 - Visual, on the real Windows host at 960×640 and 420×760 in light and dark:
   the list, the empty state, the row actions menu, the rename, duplicate,
   delete and import dialogs, and the canvas chrome (title bar with the project

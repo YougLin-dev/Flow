@@ -7,7 +7,7 @@
  * action error.
  */
 import { FolderInput, MoreHorizontal, Plus } from "lucide";
-import { List, signal, Text, token, View } from "nsh";
+import { effect, lifecycle, List, signal, Text, token, View, wakeCount } from "nsh";
 import { Button, Menu, MenuItem } from "nsh/base";
 import {
   projectControlName,
@@ -51,6 +51,21 @@ export function ProjectsPage(props: ProjectsPageProps) {
   // Relative times are a snapshot per mount: the page remounts when the user
   // returns from a project, so the list's ages refresh then, not on a timer.
   const now = Date.now();
+
+  // The list is a snapshot of the catalog. Re-read it quietly when the app
+  // returns to the foreground, or wakes while visible; there is no watcher
+  // and no timer. The home's own first load covers the initial mount.
+  let wasActive = lifecycle() === "active";
+  let lastWake = wakeCount();
+  effect(() => {
+    const active = lifecycle() === "active";
+    const wake = wakeCount();
+    const returned = active && !wasActive;
+    const woke = active && wake !== lastWake;
+    wasActive = active;
+    lastWake = wake;
+    if (returned || woke) void props.home.revalidate();
+  });
 
   const openProject = (project: ProjectEntry): void => {
     props.home.clearActionError();

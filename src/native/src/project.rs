@@ -25,6 +25,7 @@ mod lock;
 mod ops;
 mod package;
 mod paths;
+mod stamp;
 #[cfg(test)]
 pub(crate) mod test_support;
 
@@ -277,6 +278,10 @@ fn open_lease(state: Arc<StoreState>, project_id: String) -> Result<ProjectLease
         }
         lock = lock::PackageLock::acquire(&state.root, &project_id)?;
         database = paths::database_path(&state.root, &project_id);
+        // Stat before reading identity: if an out-of-band writer changes the
+        // package in between, the stored stamp stays older than the files
+        // and the next list re-reads instead of trusting a mixed row.
+        let stamp = stamp::package_stamp(&paths::package_dir(&state.root, &project_id));
         let identity = package::read_identity(&database)?;
         if identity.project_id != project_id {
             return Err(package::identity_mismatch(&state.root, &project_id));
@@ -298,6 +303,7 @@ fn open_lease(state: Arc<StoreState>, project_id: String) -> Result<ProjectLease
                 updated_at: identity.updated_at,
                 last_opened_at: None,
                 fallback: false,
+                stamp,
             },
         );
         let _ = catalog::mark_opened(&state.root, &project_id, clock::now_ms());
@@ -396,6 +402,27 @@ mod tests {
         lease.release();
         let mut next = open_lease(Arc::clone(&state), second.project_id.clone()).expect("next");
         next.release();
+        let _ = fs::remove_dir_all(&state.root);
+    }
+
+    #[test]
+    fn opening_a_lease_stores_the_packages_stamp() {
+        let root =
+            std::env::temp_dir().join(format!("flow-store-stamp-{}", paths::unique_suffix()));
+        fs::create_dir_all(&root).expect("root");
+        let state = Arc::new(open_state(root.to_string_lossy().into_owned()).expect("open state"));
+        let created = create::create_project(&state.root, "Stamped", None).expect("create");
+        let expected = stamp::package_stamp(&paths::package_dir(&state.root, &created.path))
+            .expect("package stamp");
+
+        let mut lease = open_lease(Arc::clone(&state), created.project_id.clone()).expect("lease");
+        let stored = catalog::load_valid(&state.root)
+            .expect("catalog")
+            .into_iter()
+            .find(|entry| entry.path == created.path)
+            .expect("stored row");
+        assert_eq!(stored.stamp, Some(expected));
+        lease.release();
         let _ = fs::remove_dir_all(&state.root);
     }
 
