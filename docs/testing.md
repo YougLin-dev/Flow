@@ -29,7 +29,9 @@ exercised on the production connection surface. The production `src/native/src/s
 queries keep FTS5/RTree as the outer table with `CROSS JOIN`,
 `edge_index.rs` checks the connector box against the UI's curve geometry, and
 `db/tests` covers a scene read between two off-screen cards plus its maintenance
-through moves, deletes and undo.
+through moves, deletes and undo. `db/tests/session.rs` also drives the managed
+session: the project store's lease names the package, `open_package` opens that
+path and identity, `close` marks it clean, and a fresh lease reopens it.
 
 The benchmark is manual evidence, not part of the gate. `bun run test:bench`
 runs every ignored test; run the 100k fixture alone with:

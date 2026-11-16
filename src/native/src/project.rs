@@ -26,7 +26,7 @@ mod ops;
 mod package;
 mod paths;
 #[cfg(test)]
-mod test_support;
+pub(crate) mod test_support;
 
 use crate::clock;
 use crate::types::{ProjectEntry, SeedDocumentInput};
