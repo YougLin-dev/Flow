@@ -11,25 +11,27 @@ import type { PortSide } from "../geometry/connection";
 import type { CanvasCamera } from "../model/camera";
 import type { ConnectionPair, MagnetPort } from "./connection-gesture";
 import { EdgeGestures } from "./edge-gestures";
-import {
-  frameContains as frameContainsScreen,
-  framePortAt as framePortAtScreen,
-  frameScreenRect,
-} from "./frame-surface";
-import type { GroupPort } from "../model/scene/group-ports";
+import { frameScreenRect } from "./frame-surface";
 import { HoverFlags } from "./hover-flags";
 import type { PortKind } from "../../nodes";
-import { cursorForHandle, handleAtPoint, screenRect } from "./resize-handles";
+import { cursorForHandle, screenRect } from "./resize-handles";
 import { RightGesture } from "./right-gesture";
 import type { FlowScene } from "../model/scene/scene";
-import { portAt } from "../model/scene/scene-ports";
 import {
-  intersects,
   normalizeRect,
   type ResizeHandle,
   resizedRect,
   type ScreenRect,
 } from "../geometry/selection";
+import {
+  dragPastThreshold,
+  draggedRects,
+  marqueeIds,
+  marqueeIsClick,
+  marqueeWorldRect,
+  resizePastThreshold,
+} from "./gesture-math";
+import { canvasHit } from "./hit-priority";
 
 /** The typed port whose icon follows the pointer. */
 export interface PortHover {
@@ -79,8 +81,6 @@ interface Gesture {
   additive: boolean;
   moved: boolean;
 }
-
-const DRAG_THRESHOLD = 2;
 
 export class CanvasController {
   /** The box the user is dragging with the marquee, in screen points. */
@@ -166,28 +166,9 @@ export class CanvasController {
     return bounds ? frameScreenRect(this.host.camera(), bounds) : null;
   }
 
-  /** Whether a screen point is inside the frame a marquee left around its selection. */
-  private frameContains(
-    x: number,
-    y: number,
-    framed = this.multiFrame(),
-    bounds = framed ? this.host.scene().selectionBounds() : null,
-  ): boolean {
-    // The frame is a multi-card selection's affordance: with one card left
-    // (a shift press, a delete) it is a normal selection again.
-    if (!framed || bounds === null) return false;
-    return frameContainsScreen(this.host.camera(), bounds, x, y);
-  }
-
   /** True while a marquee's frame spans two or more selected cards. */
   multiFrame(): boolean {
     return this.marqueeSelected() && this.host.scene().selection().length > 1;
-  }
-
-  /** The group port under a screen point, on a multi-card frame. */
-  private framePortAt(x: number, y: number, bounds: BoxGeometry | null): GroupPort | null {
-    if (bounds === null) return null;
-    return framePortAtScreen(this.host.scene(), this.host.camera(), bounds, x, y);
   }
 
   /** A press is one state transition: readers see the gesture's final state. */
@@ -206,17 +187,13 @@ export class CanvasController {
       this.gesture = { ...idle(), startX: x, startY: y, lastX: x, lastY: y };
       const framed = this.multiFrame();
       const frameBounds = framed ? scene.selectionBounds() : null;
-      const world = camera.toWorld(x, y);
-      const port = portAt(scene, world.x, world.y);
+      const hit = canvasHit({ scene, camera, x, y, framed, frameBounds });
 
-      // A group port is a connector handle for the whole selection. Test it
-      // before a press outside the frame would dismiss that frame, but let a
-      // card's own port win when the pointer is closer to it: the group's wide
-      // reach overlaps the ports just inside and outside the frame. A disabled
-      // group port consumes the press without starting anything.
-      const framePort = this.framePortAt(x, y, frameBounds);
-      if (framePort !== null && (port === null || nearer(framePort.center, x, y, port.point))) {
-        if (framePort.enabled && this.edges.beginGroup(framePort)) {
+      // A group port is a connector handle for the whole selection. It is
+      // tested before a press outside the frame would dismiss that frame; a
+      // disabled group port consumes the press without starting anything.
+      if (hit.kind === "framePort") {
+        if (hit.port.enabled && this.edges.beginGroup(hit.port)) {
           this.edgeMode = true;
           this.gesturing.set(true);
           this.gesture = { ...this.gesture, mode: "edge" };
@@ -226,17 +203,24 @@ export class CanvasController {
       }
 
       // The frame belongs to the area the marquee swept: it stays while the
-      // pointer acts inside it and disappears on a press outside.
-      const insideFrame = this.frameContains(x, y, framed, frameBounds);
-      if (!insideFrame) this.marqueeSelected.set(false);
+      // pointer acts inside it (a member card's port included) and disappears
+      // on a press outside.
+      if (!hit.insideFrame) this.marqueeSelected.set(false);
 
       // Ports come before resize handles: a selected card's east and west
       // handles sit exactly on its ports, and a connection is the more common
-      // gesture at that point. A framed selection keeps its cards' ports, so
-      // a press on one starts that card's connection there too. Every other
-      // press inside the frame belongs to the frame's drag surface: a press
-      // on a connector must not select the edge and drop the multi-selection.
-      if ((!insideFrame || port !== null) && this.edges.down(x, y, port)) {
+      // gesture at that point. Every other press outside the frame may select
+      // a connector first; inside the frame the whole area is one drag
+      // surface, so a connector under it does not drop the multi-selection.
+      if (hit.kind === "port") {
+        this.edges.down(x, y, hit.port);
+        this.edgeMode = true;
+        this.gesturing.set(true);
+        this.gesture = { ...this.gesture, mode: "edge" };
+        this.cursor.set("crosshair");
+        return;
+      }
+      if (hit.kind !== "frame" && this.edges.down(x, y, null)) {
         this.edgeMode = true;
         this.gesturing.set(true);
         this.gesture = { ...this.gesture, mode: "edge" };
@@ -244,41 +228,42 @@ export class CanvasController {
         return;
       }
 
-      const id = scene.nodeAt(world.x, world.y);
-      if (clickCount >= 2 && id !== null && scene.kindOf(id) === "text") {
-        this.host.openInline(id);
+      if (clickCount >= 2 && hit.card !== null && scene.kindOf(hit.card) === "text") {
+        this.host.openInline(hit.card);
         return;
       }
 
       // The frame a marquee left is one drag surface: a press anywhere inside
       // it moves the whole selection, even on a card's border, instead of
       // resizing one card, replacing the selection or starting a new box.
-      if (insideFrame) {
+      if (hit.kind === "frame") {
         this.startDrag();
         return;
       }
 
-      const target = handleAtPoint(scene, camera, scene.nodes(), x, y);
-      const base = target === null ? null : scene.cardRect(target.id);
-      if (target && base) {
-        // A handle resizes its card without a prior selection; the press
-        // selects the card so the resize reads as acting on it.
-        if (!(scene.selection().length === 1 && scene.selection()[0] === target.id)) {
-          scene.select([target.id]);
+      if (hit.kind === "handle") {
+        const base = scene.cardRect(hit.id);
+        if (base) {
+          // A handle resizes its card without a prior selection; the press
+          // selects the card so the resize reads as acting on it.
+          if (!(scene.selection().length === 1 && scene.selection()[0] === hit.id)) {
+            scene.select([hit.id]);
+          }
+          this.gesturing.set(true);
+          this.gesture = {
+            ...this.gesture,
+            mode: "resize",
+            base: new Map([[hit.id, base]]),
+            resizeId: hit.id,
+            resizeSide: hit.side,
+          };
+          this.cursor.set(cursorForHandle(hit.side));
+          return;
         }
-        this.gesturing.set(true);
-        this.gesture = {
-          ...this.gesture,
-          mode: "resize",
-          base: new Map([[target.id, base]]),
-          resizeId: target.id,
-          resizeSide: target.side,
-        };
-        this.cursor.set(cursorForHandle(target.side));
-        return;
       }
 
-      if (id !== null) {
+      if (hit.card !== null) {
+        const id = hit.card;
         if (shift) scene.toggleSelected(id);
         else if (!scene.selection().includes(id)) scene.select([id]);
         if (scene.selection().includes(id)) {
@@ -335,12 +320,20 @@ export class CanvasController {
         this.marquee.set(box);
         // The covered cards light up as the box sweeps: the preview is the
         // release's selection, written only when the covered set changes.
-        if (box.width < 1 && box.height < 1) this.clearPreview();
-        else this.setPreview(this.idsWithin(gesture, box));
+        if (marqueeIsClick(box)) this.clearPreview();
+        else {
+          this.setPreview(
+            marqueeIds(
+              this.host.scene(),
+              marqueeWorldRect(this.host.camera(), box),
+              gesture.additive,
+            ),
+          );
+        }
         return;
       }
       if (gesture.mode === "drag") {
-        if (!gesture.moved && screenDistance(gesture, x, y) > DRAG_THRESHOLD) {
+        if (!gesture.moved && dragPastThreshold(gesture.startX, gesture.startY, x, y)) {
           gesture.moved = true;
           this.markGestureMoved();
         }
@@ -348,22 +341,14 @@ export class CanvasController {
         const camera = this.host.camera();
         const world = camera.toWorld(x, y);
         const start = camera.toWorld(gesture.startX, gesture.startY);
-        const worldDx = world.x - start.x;
-        const worldDy = world.y - start.y;
-        const next = new Map<string, BoxGeometry>();
-        for (const [id, rect] of gesture.base) {
-          next.set(id, { ...rect, x: rect.x + worldDx, y: rect.y + worldDy });
-        }
-        this.host.scene().setOverrides(next);
+        this.host
+          .scene()
+          .setOverrides(draggedRects(gesture.base, world.x - start.x, world.y - start.y));
         this.cursor.set("grabbing");
         return;
       }
       if (gesture.mode === "resize") {
-        if (
-          !gesture.moved &&
-          (Math.abs(x - gesture.startX) > DRAG_THRESHOLD ||
-            Math.abs(y - gesture.startY) > DRAG_THRESHOLD)
-        ) {
+        if (!gesture.moved && resizePastThreshold(gesture.startX, gesture.startY, x, y)) {
           gesture.moved = true;
           this.markGestureMoved();
         }
@@ -473,43 +458,34 @@ export class CanvasController {
     batch(() => {
       const scene = this.host.scene();
       const camera = this.host.camera();
-      const world = camera.toWorld(x, y);
-      // One card pass serves the port occlusion, the frame hover and the
-      // resting hover; the frame is also decided once for this pointer event.
-      const under = scene.nodeAt(world.x, world.y);
       const framed = this.multiFrame();
       const frameBounds = framed ? scene.selectionBounds() : null;
-      // A group port belongs to the frame, ahead of the resize handles it
-      // overlaps, but a card's own port wins when the pointer is closer to
-      // it. A full input group says so with its cursor instead of inviting a
-      // drag that would be rejected.
-      const framePort = this.framePortAt(x, y, frameBounds);
-      const port = portAt(scene, world.x, world.y);
-      if (framePort !== null && (port === null || nearer(framePort.center, x, y, port.point))) {
+      const hit = canvasHit({ scene, camera, x, y, framed, frameBounds });
+      // A full input group says so with its cursor instead of inviting a drag
+      // that would be rejected.
+      if (hit.kind === "framePort") {
         this.setHovered(null);
         this.hoveredPort.set(null);
         this.hoveredGroup.set({
-          side: framePort.side,
-          portKind: framePort.portKind,
-          point: world,
-          center: framePort.center,
+          side: hit.port.side,
+          portKind: hit.port.portKind,
+          point: hit.world,
+          center: hit.port.center,
         });
-        this.cursor.set(framePort.enabled ? "crosshair" : "not-allowed");
+        this.cursor.set(hit.port.enabled ? "crosshair" : "not-allowed");
         return;
       }
       this.hoveredGroup.set(null);
       // A typed port takes precedence over the east/west resize handles it
-      // overlaps: pressing a visible port starts a connection. A framed
-      // selection keeps each card's ports, so they hover there too.
-      const insideFrame = this.frameContains(x, y, framed, frameBounds);
-      if (port !== null) {
-        this.setHovered(port.nodeId);
+      // overlaps: pressing a visible port starts a connection.
+      if (hit.kind === "port") {
+        this.setHovered(hit.port.nodeId);
         this.hoveredPort.set({
-          nodeId: port.nodeId,
-          side: port.side,
-          portId: port.portId,
-          point: world,
-          center: port.point,
+          nodeId: hit.port.nodeId,
+          side: hit.port.side,
+          portId: hit.port.portId,
+          point: hit.world,
+          center: hit.port.point,
         });
         this.cursor.set("crosshair");
         return;
@@ -518,18 +494,17 @@ export class CanvasController {
       // The frame a marquee left is one drag surface: card bodies and borders
       // inside it all move the whole selection, so the move cursor is shown
       // everywhere but the explicit ports above.
-      if (insideFrame) {
-        this.setHovered(under);
+      if (hit.kind === "frame") {
+        this.setHovered(hit.card);
         this.cursor.set("grab");
         return;
       }
-      const target = handleAtPoint(scene, camera, scene.nodes(), x, y, under);
-      if (target) {
-        this.setHovered(target.id);
-        this.cursor.set(cursorForHandle(target.side));
+      if (hit.kind === "handle") {
+        this.setHovered(hit.id);
+        this.cursor.set(cursorForHandle(hit.side));
         return;
       }
-      this.setHovered(under);
+      this.setHovered(hit.card);
       this.cursor.set("default");
     });
   }
@@ -565,33 +540,10 @@ export class CanvasController {
   }
 
   private selectWithin(gesture: Gesture, box: ScreenRect): readonly string[] {
-    if (box.width < 1 && box.height < 1) return [];
-    const ids = this.idsWithin(gesture, box);
-    this.host.scene().select(ids);
-    return ids;
-  }
-
-  /** The ids a marquee released at `box` selects: the final set, not just additions. */
-  private idsWithin(gesture: Gesture, box: ScreenRect): readonly string[] {
+    if (marqueeIsClick(box)) return [];
     const scene = this.host.scene();
-    const camera = this.host.camera();
-    const topLeft = camera.toWorld(box.x, box.y);
-    const bottomRight = camera.toWorld(box.x + box.width, box.y + box.height);
-    const world = {
-      x: topLeft.x,
-      y: topLeft.y,
-      width: bottomRight.x - topLeft.x,
-      height: bottomRight.y - topLeft.y,
-    };
-    const selected = gesture.additive ? scene.selection() : [];
-    const ids = [...selected];
-    const included = new Set(selected);
-    for (const node of scene.nodes()) {
-      const rect = scene.cardRect(node.id);
-      if (!rect || !intersects(rect, world) || included.has(node.id)) continue;
-      ids.push(node.id);
-      included.add(node.id);
-    }
+    const ids = marqueeIds(scene, marqueeWorldRect(this.host.camera(), box), gesture.additive);
+    scene.select(ids);
     return ids;
   }
 
@@ -625,15 +577,6 @@ function idle(): Gesture {
     additive: false,
     moved: false,
   };
-}
-
-function screenDistance(gesture: Gesture, x: number, y: number): number {
-  return Math.hypot(x - gesture.startX, y - gesture.startY);
-}
-
-/** Whether `center` is at least as close to the pointer as `other`. */
-function nearer(center: Point, x: number, y: number, other: Point): boolean {
-  return Math.hypot(center.x - x, center.y - y) <= Math.hypot(other.x - x, other.y - y);
 }
 
 /** The stable identity of one typed port. */

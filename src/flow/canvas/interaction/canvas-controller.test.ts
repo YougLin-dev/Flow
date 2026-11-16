@@ -353,6 +353,24 @@ test("drags a marquee selection from a card border inside its frame", () => {
   controller.up(350, 160);
 });
 
+test("a member card's port keeps the marquee frame while connecting", () => {
+  const { controller } = setup([node("a", 100, 100), node("b", 400, 100)]);
+
+  controller.down(50, 50, false, 1);
+  controller.move(650, 220);
+  controller.up(650, 220);
+  expect(controller.marqueeSelected()).toBe(true);
+
+  // (314, 142) is card a's output port, inside the frame. Starting a
+  // connection from a member card must not dismiss the frame.
+  controller.hover(314, 142);
+  expect(controller.cursor()).toBe("crosshair");
+  controller.down(314, 142, false, 1);
+  expect(controller.gesturing()).toBe(true);
+  expect(controller.marqueeSelected()).toBe(true);
+  controller.cancel();
+});
+
 test("a press outside the frame clears the marquee selection", () => {
   const { scene, controller } = setup([node("a", 100, 100), node("b", 400, 100)]);
 

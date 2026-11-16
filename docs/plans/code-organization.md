@@ -8,7 +8,7 @@
   structure enforcement). Phase 6/7 were re-baselined on 2026-11-16 after the
   database v1 and project-layer work; §16.3 records the measurements and
   decisions. Phase 6 is done (2026-11-16, §16.4); Phase 7 runs in six review
-  batches, with 7-0 through 7-7 done.
+  batches, with 7-0 through 7-9 done.
 - **Scope:** `src/` (TSX app) and `src/native/` (Rust document core).
 - **Related:** [standards](../standards.md), [architecture](../architecture.md),
   [conventions](../conventions.md), [testing](../testing.md),
@@ -578,6 +578,8 @@ src/
 │   │   └── interaction/
 │   │       ├── canvas-controller.ts
 │   │       ├── canvas-input.ts        pressed/pinch/suppress state machine
+│   │       ├── gesture-math.ts        drag/resize thresholds and marquee math
+│   │       ├── hit-priority.ts        one press/hover hit classification
 │   │       ├── edge-gestures.ts
 │   │       ├── connection-gesture.ts
 │   │       ├── right-gesture.ts
@@ -1658,9 +1660,18 @@ with helper tests, and the eight selection/depth/flag cases moved out of
 `scene.test.ts`; the class keeps the selection signals, keyed flags and
 ranks cache.
 7-8. **CanvasController: drag/resize and marquee** pure helpers with unit
-tests.
-7-9. **CanvasController: hit priority** shared by down and hover; down/up/
-hover stay the only writers and batch owners. Host tests.
+tests. Done 2026-11-16: `gesture-math.ts` owns the drag/resize thresholds,
+the translated drag rects, the marquee click test, its world conversion and
+the covered ids, with unit tests; the controller keeps the gesture state.
+7-9. **CanvasController: hit priority** shared by down and hover; the
+controller's pointer methods stay the only signal writers and batch owners.
+Host tests. Done 2026-11-16: `hit-priority.ts` classifies a screen point
+once for press and hover (frame port, card port, frame, handle, card,
+empty) and carries the card under the pointer for the double-click
+override; the pointer methods remain the only writers and batch owners,
+the helpers open no batch and own no signals. The 29 controller tests, 4
+hit tests and the new unit tests pass, and the host suite passes unchanged
+(14 platform tests plus the smoke, run on the final tree).
 7-10. **NodeSession: composer session** (L, highest risk). Extract
 `session/composer-session.ts` (asset cache included), preserving
 `protected nodeDetail`, generation fencing and

@@ -145,6 +145,8 @@ layout is in
 and the README production tree; Appendix B also lists the test-module layout.
 Phase 7 batch 3 split the scene's queries into `scene-hits`, `scene-selection`,
 `scene-records` and `scene-overrides`; `FlowScene` remains the single state
-owner. Do not add a new file at the
+owner. Batch 4 moved `CanvasController`'s gesture math to
+`interaction/gesture-math.ts` and its press/hover classification to
+`interaction/hit-priority.ts`. Do not add a new file at the
 `components/`, `flow/` or `pages/` root:
 `scripts/structure.mjs` fails it.
