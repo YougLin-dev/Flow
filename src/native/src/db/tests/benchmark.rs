@@ -1026,7 +1026,7 @@ fn hundred_thousand_nodes_benchmark() {
     let overview_started = std::time::Instant::now();
     let overview = db.overview().expect("measure document overview");
     let overview_ms = elapsed_ms(overview_started);
-    assert_eq!(overview.cards.len() as u64, scene::OVERVIEW_LIMIT);
+    assert_eq!(overview.cards.len() as u64, crate::scene::OVERVIEW_LIMIT);
     println!(
         "overview (minimap, bounds cached): cards={} read={overview_ms:.2}ms",
         overview.cards.len()

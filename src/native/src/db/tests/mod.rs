@@ -3,8 +3,17 @@
 //! `db::tests` is a descendant of `db`, so the fixtures and tests keep access
 //! to the private workers and builders they exercise. Child modules use
 //! `use super::*;` to share the fixtures declared here.
+//!
+//! A test module whose name matches a production module (`scene`, `search`,
+//! and later `worker`, `session`, `verify`, `gc`) shadows that binding for
+//! every `use super::*;` child, so production modules must be spelled
+//! `crate::...`.
 
 mod benchmark;
+mod indexes;
+mod previews;
+mod scene;
+mod search;
 mod worker;
 
 use std::collections::{BTreeMap, BTreeSet};
@@ -305,189 +314,6 @@ fn inserts_searches_moves_and_deletes() {
 }
 
 #[test]
-fn empty_document_bounds_are_zero() {
-    let db = Database::open(":memory:").expect("open");
-    let bounds = db.bounds().expect("bounds");
-    assert_eq!(
-        (bounds.x, bounds.y, bounds.width, bounds.height),
-        (0.0, 0.0, 0.0, 0.0)
-    );
-    let overview = db.overview().expect("overview");
-    assert_eq!(
-        (
-            overview.bounds.x,
-            overview.bounds.y,
-            overview.bounds.width,
-            overview.bounds.height
-        ),
-        (0.0, 0.0, 0.0, 0.0)
-    );
-    assert!(overview.cards.is_empty());
-}
-
-#[test]
-fn bounds_cache_follows_a_move() {
-    let db = Database::open(":memory:").expect("open");
-    db.insert_nodes(vec![node("a", "A", "", &[], 0.0, 0.0)])
-        .expect("insert");
-    let first = db.bounds().expect("bounds");
-    assert_eq!((first.x, first.y), (0.0, 0.0));
-    // A second read at the same revision reuses the cached entry.
-    assert_eq!(db.bounds().expect("cached bounds"), first);
-
-    db.move_nodes(vec!["a".to_owned()], 50.0, 25.0)
-        .expect("move");
-    // The v1 trigger envelope covers the old and the new rect until
-    // compaction; Fit therefore never clips a card that just moved.
-    let moved = db.bounds().expect("bounds after move");
-    assert_eq!(
-        (moved.x, moved.y, moved.width, moved.height),
-        (0.0, 0.0, 250.0, 109.0)
-    );
-    db.compact_bounds().expect("compact bounds");
-    let exact = db.bounds().expect("bounds after compaction");
-    assert_eq!(
-        (exact.x, exact.y, exact.width, exact.height),
-        (50.0, 25.0, 200.0, 84.0)
-    );
-}
-
-#[test]
-fn overview_reads_every_card_and_the_document_bounds() {
-    let db = Database::open(":memory:").expect("open");
-    db.insert_nodes(vec![
-        node("a", "A", "", &[], 100.0, 50.0),
-        node("b", "B", "", &[], 700.0, 400.0),
-    ])
-    .expect("insert");
-
-    let overview = db.overview().expect("overview");
-    assert_eq!(
-        (
-            overview.bounds.x,
-            overview.bounds.y,
-            overview.bounds.width,
-            overview.bounds.height
-        ),
-        (100.0, 50.0, 800.0, 434.0)
-    );
-    assert!(overview.rev > 0.0);
-    let mut ids: Vec<&str> = overview.cards.iter().map(|card| card.id.as_str()).collect();
-    ids.sort_unstable();
-    assert_eq!(ids, vec!["a", "b"]);
-    let card = overview
-        .cards
-        .iter()
-        .find(|card| card.id == "b")
-        .expect("card b");
-    assert_eq!(
-        (card.x, card.y, card.width, card.height),
-        (700.0, 400.0, 200.0, 84.0)
-    );
-}
-
-#[test]
-fn overview_sample_stays_capped_on_a_large_document() {
-    let db = Database::open(":memory:").expect("open");
-    let nodes: Vec<NodeInput> = (0..scene::OVERVIEW_LIMIT + 5)
-        .map(|index| {
-            let mut input = node(
-                &format!("n{index}"),
-                "Card",
-                "",
-                &[],
-                index as f64 * 10.0,
-                0.0,
-            );
-            // A raised card must not crowd the sample: order comes from
-            // the insertion hash, not from stacking or row order.
-            input.z = index as f64;
-            input
-        })
-        .collect();
-    db.insert_nodes(nodes).expect("insert");
-
-    let overview = db.overview().expect("overview");
-    assert_eq!(overview.cards.len() as u64, scene::OVERVIEW_LIMIT);
-    let unique: std::collections::BTreeSet<&str> =
-        overview.cards.iter().map(|card| card.id.as_str()).collect();
-    assert_eq!(unique.len(), overview.cards.len());
-}
-
-#[test]
-fn overview_sample_is_neither_the_first_nor_the_top_cards() {
-    let db = Database::open(":memory:").expect("open");
-    let nodes: Vec<NodeInput> = (0..40)
-        .map(|index| {
-            let mut input = node(
-                &format!("n{index:02}"),
-                "Card",
-                "",
-                &[],
-                index as f64 * 10.0,
-                0.0,
-            );
-            input.z = index as f64;
-            input
-        })
-        .collect();
-    db.insert_nodes(nodes).expect("insert");
-
-    // The private read with a small cap: the full `overview()` cap is 400
-    // and this fixture is smaller.
-    let cards = db
-        .run(|conn| viewport::overview_cards(conn, 40, 10))
-        .expect("sample");
-    assert_eq!(cards.len(), 10);
-    let mut sampled: Vec<String> = cards.iter().map(|card| card.id.clone()).collect();
-    sampled.sort_unstable();
-    let first: Vec<String> = (0..10).map(|index| format!("n{index:02}")).collect();
-    let top: Vec<String> = (30..40).map(|index| format!("n{index:02}")).collect();
-    assert_ne!(sampled, first);
-    assert_ne!(sampled, top);
-}
-
-#[test]
-fn short_terms_all_match_in_a_mixed_query() {
-    let db = Database::open(":memory:").expect("open");
-    db.insert_nodes(vec![
-        node(
-            "a",
-            "Generator",
-            "AI image generation",
-            &["image"],
-            0.0,
-            0.0,
-        ),
-        node("b", "图像生成器", "把文本变成图片", &["设计"], 300.0, 0.0),
-    ])
-    .expect("insert");
-
-    let english = db
-        .search("AI image".to_owned(), SearchFilters::default(), 20)
-        .expect("mixed short query");
-    assert_eq!(english.len(), 1);
-    assert_eq!(english[0].id, "a");
-
-    let chinese = db
-        .search("图像 生成".to_owned(), SearchFilters::default(), 20)
-        .expect("mixed CJK query");
-    assert_eq!(chinese.len(), 1);
-    assert_eq!(chinese[0].id, "b");
-
-    assert!(
-        db.search("AI missing".to_owned(), SearchFilters::default(), 20)
-            .expect("all terms required")
-            .is_empty()
-    );
-    assert!(
-        db.search("image".to_owned(), SearchFilters::default(), 0)
-            .expect("zero limit")
-            .is_empty()
-    );
-}
-
-#[test]
 fn undo_restores_a_deleted_node_its_edges_and_indexes() {
     let db = Database::open(":memory:").expect("open");
     db.insert_nodes(vec![
@@ -655,76 +481,6 @@ fn connects_several_sources_in_one_history_step() {
 }
 
 #[test]
-fn updates_searchable_text_and_undoes_the_index_change() {
-    let db = Database::open(":memory:").expect("open");
-    db.insert_nodes(vec![node(
-        "a",
-        "Old title",
-        "Body text",
-        &["old"],
-        0.0,
-        0.0,
-    )])
-    .expect("insert");
-
-    let changed = db
-        .set_node_text(
-            "a".to_owned(),
-            "New title".to_owned(),
-            vec!["new".to_owned()],
-        )
-        .expect("set text");
-    assert_eq!(changed.changes.changed[0].title, "New title");
-    assert_eq!(
-        changed.changes.changed[0].body, "Body text",
-        "a title/tags edit leaves the output-derived body alone"
-    );
-    assert_eq!(
-        db.search("New title".to_owned(), SearchFilters::default(), 20)
-            .expect("new search")
-            .len(),
-        1
-    );
-    assert!(
-        db.search("Old title".to_owned(), SearchFilters::default(), 20)
-            .expect("old search")
-            .is_empty()
-    );
-    assert_eq!(
-        db.search("Body text".to_owned(), SearchFilters::default(), 20)
-            .expect("body search")
-            .len(),
-        1,
-        "the untouched body stays searchable"
-    );
-
-    db.undo().expect("undo text");
-    assert_eq!(
-        db.search("Old title".to_owned(), SearchFilters::default(), 20)
-            .expect("restored search")
-            .len(),
-        1
-    );
-    assert!(
-        db.search("New title".to_owned(), SearchFilters::default(), 20)
-            .expect("new title removed")
-            .is_empty()
-    );
-    assert_eq!(
-        db.search("Body text".to_owned(), SearchFilters::default(), 20)
-            .expect("body search after undo")
-            .len(),
-        1
-    );
-    db.redo().expect("redo text");
-    assert!(
-        db.search("Old title".to_owned(), SearchFilters::default(), 20)
-            .expect("removed again")
-            .is_empty()
-    );
-}
-
-#[test]
 fn sqlite_url_makes_a_relative_path_absolute() {
     let url = sqlite_url("my data/notes:2024.db").expect("url");
     assert!(url.starts_with("sqlite:file:"));
@@ -769,230 +525,6 @@ fn sqlite_url_opens_a_canonicalized_package() {
     assert!(matches!(state, schema::v1::FileState::Current(_)));
     drop(conn);
     remove_database_files(&path);
-}
-
-#[test]
-fn viewport_prefers_nodes_inside_the_rect_over_the_margin() {
-    let db = Database::open(":memory:").expect("open");
-    db.insert_nodes(vec![
-        node("a-margin", "Margin", "", &[], -250.0, 10.0),
-        node("z-inside", "Inside", "", &[], 10.0, 10.0),
-    ])
-    .expect("insert");
-
-    let nodes = db
-        .viewport(
-            Viewport {
-                x: 0.0,
-                y: 0.0,
-                width: 100.0,
-                height: 100.0,
-            },
-            300.0,
-        )
-        .expect("viewport");
-
-    // `a-margin` sorts first by id, but only intersects the prefetch
-    // margin; the card budget must see the visible node first.
-    assert_eq!(nodes.len(), 2);
-    assert_eq!(nodes[0].id, "z-inside");
-}
-
-#[test]
-fn the_in_view_order_uses_exact_geometry_not_the_padded_cell() {
-    let db = Database::open(":memory:").expect("open");
-    db.insert_nodes(vec![
-        // Its padded RTree cell reaches into the rect, and its low z
-        // would outrank the visible card under the old cell-based CASE.
-        {
-            let mut margin = node("margin", "Margin", "", &[], 101.0, 10.0);
-            margin.z = -1.0;
-            margin
-        },
-        node("visible", "Visible", "", &[], 10.0, 10.0),
-    ])
-    .expect("insert");
-
-    let scene = db
-        .scene(
-            Viewport {
-                x: 0.0,
-                y: 0.0,
-                width: 100.0,
-                height: 100.0,
-            },
-            300.0,
-            1,
-        )
-        .expect("one-card scene");
-    assert_eq!(scene.nodes.len(), 1);
-    assert_eq!(scene.nodes[0].id, "visible");
-}
-
-#[test]
-fn viewport_rechecks_exact_geometry_after_the_rtree() {
-    let db = Database::open(":memory:").expect("open");
-    db.insert_nodes(vec![
-        // The padded RTree cell reaches one unit into the rect; the card
-        // itself starts one unit past it.
-        node("past-right", "Right", "", &[], 101.0, 10.0),
-        // A true edge that touches the rect boundary is inside.
-        node("touching", "Touch", "", &[], -200.0, 10.0),
-        node("inside", "Inside", "", &[], 10.0, 10.0),
-    ])
-    .expect("insert");
-
-    let nodes = db
-        .viewport(
-            Viewport {
-                x: 0.0,
-                y: 0.0,
-                width: 100.0,
-                height: 100.0,
-            },
-            0.0,
-        )
-        .expect("viewport");
-    let ids: BTreeSet<&str> = nodes.iter().map(|node| node.id.as_str()).collect();
-    assert_eq!(ids, BTreeSet::from(["inside", "touching"]));
-}
-
-#[test]
-fn a_viewport_read_reports_truncation_from_its_extra_row() {
-    let db = Database::open(":memory:").expect("open");
-    db.insert_nodes(vec![
-        node("a", "A", "", &[], 10.0, 10.0),
-        node("b", "B", "", &[], 60.0, 10.0),
-        node("c", "C", "", &[], 110.0, 10.0),
-    ])
-    .expect("insert");
-    let rect = Viewport {
-        x: 0.0,
-        y: 0.0,
-        width: 400.0,
-        height: 100.0,
-    };
-
-    let capped_rect = rect.clone();
-    let capped = db
-        .run(move |conn| viewport::viewport_read(conn, capped_rect, 0.0, 2))
-        .expect("capped read");
-    assert_eq!(capped.nodes.len(), 2);
-    assert!(capped.truncated, "the third card fell outside the budget");
-
-    let complete = db
-        .run(move |conn| viewport::viewport_read(conn, rect, 0.0, 3))
-        .expect("complete read");
-    assert_eq!(complete.nodes.len(), 3);
-    assert!(
-        !complete.truncated,
-        "a read that fills its budget exactly is complete"
-    );
-}
-
-#[test]
-fn two_phase_scene_matches_the_single_statement_reference() {
-    let db = Database::open(":memory:").expect("open");
-    let dense: Vec<NodeInput> = (0..12)
-        .map(|i| {
-            let mut input = node(
-                &format!("dense-{i:02}"),
-                &format!("Dense {i}"),
-                "",
-                &[],
-                (i % 4) as f64 * 210.0,
-                (i / 4) as f64 * 130.0,
-            );
-            input.z = (i % 3) as f64;
-            input
-        })
-        .collect();
-    db.insert_nodes(dense).expect("insert dense nodes");
-
-    let rect = Viewport {
-        x: 0.0,
-        y: 0.0,
-        width: 800.0,
-        height: 600.0,
-    };
-    let snapshot = db.scene(rect.clone(), 0.0, 5).expect("two-phase scene");
-    // Run the legacy single statement on the same worker/connection so
-    // the RTree and every ordering input are identical.
-    let reference = db
-        .run(move |conn| {
-            let statement = viewport::viewport_statement_reference(rect, 0.0, 5);
-            viewport::rows_from_statement(conn, &statement)
-        })
-        .expect("legacy reference read");
-
-    assert_eq!(snapshot.nodes.len(), 5);
-    assert_eq!(reference.len(), 5);
-    let scene_rows: Vec<(&str, f64, f64)> = snapshot
-        .nodes
-        .iter()
-        .map(|node| (node.id.as_str(), node.z, node.rev))
-        .collect();
-    let reference_rows: Vec<(&str, f64, f64)> = reference
-        .iter()
-        .map(|node| (node.id.as_str(), node.z, node.rev))
-        .collect();
-    let scene_ids: Vec<&str> = scene_rows.iter().map(|row| row.0).collect();
-    let reference_ids: Vec<&str> = reference_rows.iter().map(|row| row.0).collect();
-    assert_eq!(
-        scene_rows, reference_rows,
-        "two-phase order {scene_ids:?} differs from the single statement {reference_ids:?}"
-    );
-}
-
-#[test]
-fn a_scene_reads_the_far_port_of_an_edge_to_an_off_screen_card() {
-    let db = Database::open(":memory:").expect("open");
-    db.insert_nodes(vec![
-        node("a", "Near", "", &[], 0.0, 0.0),
-        node("far", "Far", "", &[], 5_000.0, 0.0),
-    ])
-    .expect("insert");
-    db.connect_edge(EdgeInput {
-        id: "a-far".to_owned(),
-        from_id: "a".to_owned(),
-        to_id: "far".to_owned(),
-        from_port: "out".to_owned(),
-        to_port: "in".to_owned(),
-        port_kind: "text".to_owned(),
-        from_offset: 42.0,
-        to_offset: 42.0,
-        kind: "flow".to_owned(),
-        data_json: None,
-    })
-    .expect("connect");
-
-    let scene = db
-        .scene(
-            Viewport {
-                x: 0.0,
-                y: 0.0,
-                width: 400.0,
-                height: 300.0,
-            },
-            0.0,
-            viewport::NODE_LIMIT,
-        )
-        .expect("scene");
-
-    // The far card is outside the read; its port still travels with the
-    // edge so the near card's connector can be drawn to it.
-    assert_eq!(scene.nodes.len(), 1);
-    assert_eq!(scene.nodes[0].id, "a");
-    assert_eq!(scene.edges.len(), 1);
-    let edge = &scene.edges[0];
-    assert_eq!(edge.from_point, Some(EdgePoint { x: 200.0, y: 42.0 }));
-    assert_eq!(
-        edge.to_point,
-        Some(EdgePoint {
-            x: 5_000.0,
-            y: 42.0
-        })
-    );
 }
 
 fn connect(db: &Database, id: &str, from: &str, to: &str) {
@@ -1183,664 +715,6 @@ fn scene_between(
         max_cards,
     )
     .expect("scene")
-}
-
-#[test]
-fn a_scene_reads_a_connector_between_two_off_screen_cards() {
-    let db = Database::open(":memory:").expect("open");
-    db.insert_nodes(vec![
-        node("left", "Left", "", &[], -5_000.0, 0.0),
-        node("right", "Right", "", &[], 5_000.0, 0.0),
-    ])
-    .expect("insert");
-    connect(&db, "left-right", "left", "right");
-
-    // Both cards are far outside the read; the connector's curve crosses
-    // it, so the edge RTree reports it with both endpoint ports.
-    let scene = scene_between(&db, 0.0, 0.0, 800.0, 600.0, viewport::NODE_LIMIT);
-    assert!(scene.nodes.is_empty());
-    assert_eq!(scene.edges.len(), 1);
-    let edge = &scene.edges[0];
-    assert_eq!(edge.id, "left-right");
-    assert_eq!(
-        edge.from_point,
-        Some(EdgePoint {
-            x: -4_800.0,
-            y: 42.0
-        })
-    );
-    assert_eq!(
-        edge.to_point,
-        Some(EdgePoint {
-            x: 5_000.0,
-            y: 42.0
-        })
-    );
-}
-
-#[test]
-fn a_capped_scene_read_does_not_return_uncrossable_offscreen_connectors() {
-    let db = Database::open(":memory:").expect("open");
-    let interiors = ["interior-0", "interior-1", "interior-2"];
-    let mut inputs = Vec::new();
-    for (index, id) in interiors.iter().enumerate() {
-        inputs.push(node(id, id, "", &[], 50.0 + index as f64 * 240.0, 50.0));
-    }
-    // The long connector's cards sit below every in-view card's z, so the
-    // in-view-first ordering can never promote one into a one-card sample.
-    let mut left = node("left", "Left", "", &[], -5_000.0, 0.0);
-    left.z = -1.0;
-    let mut right = node("right", "Right", "", &[], 5_000.0, 0.0);
-    right.z = -1.0;
-    inputs.push(left);
-    inputs.push(right);
-    db.insert_nodes(inputs).expect("insert");
-    // Only left -> right; none of the interior cards touches the long
-    // connector.
-    connect(&db, "left-right", "left", "right");
-
-    let rect = Viewport {
-        x: 0.0,
-        y: 0.0,
-        width: 800.0,
-        height: 600.0,
-    };
-
-    // The uncapped read still runs the RTree half and finds the crossing.
-    let full = db
-        .scene(rect.clone(), 0.0, viewport::NODE_LIMIT)
-        .expect("uncapped scene");
-    assert_eq!(full.nodes.len(), 3);
-    assert!(full.edges.iter().all(|edge| edge.id == "left-right"));
-    assert!(full.edges.iter().any(|edge| edge.id == "left-right"));
-
-    // One kept card is a capped sample; the RTree half must not add a
-    // connector that touches none of the kept cards.
-    let one = db.scene(rect.clone(), 0.0, 1).expect("one-card scene");
-    assert_eq!(one.nodes.len(), 1);
-    assert!(
-        interiors.contains(&one.nodes[0].id.as_str()),
-        "the kept card was {}",
-        one.nodes[0].id
-    );
-    assert!(!one.edges.iter().any(|edge| edge.id == "left-right"));
-
-    // A complete read that happens to equal the budget is not a sample:
-    // the one-row probe found nothing beyond it, so the crossing
-    // connector is part of the scene.
-    let three = db.scene(rect.clone(), 0.0, 3).expect("three-card scene");
-    assert_eq!(three.nodes.len(), 3);
-    assert!(three.edges.iter().any(|edge| edge.id == "left-right"));
-
-    // A zero budget is the deliberate empty read: no cards and no
-    // crossing half, even when the read itself fits.
-    let empty = db.scene(rect, 0.0, 0).expect("empty scene");
-    assert!(empty.nodes.is_empty());
-    assert!(empty.edges.is_empty());
-}
-
-#[test]
-fn moving_a_card_moves_its_connector_in_the_edge_index() {
-    let db = Database::open(":memory:").expect("open");
-    db.insert_nodes(vec![
-        node("left", "Left", "", &[], -5_000.0, 0.0),
-        node("right", "Right", "", &[], 5_000.0, 0.0),
-    ])
-    .expect("insert");
-    connect(&db, "left-right", "left", "right");
-
-    db.move_nodes(vec!["left".to_owned()], 9_000.0, 0.0)
-        .expect("move");
-
-    // The old crossing no longer exists; the moved connector is indexed
-    // between the cards' new positions.
-    assert!(
-        scene_between(&db, 0.0, 0.0, 800.0, 600.0, viewport::NODE_LIMIT)
-            .edges
-            .is_empty()
-    );
-    let scene = scene_between(&db, 4_250.0, 0.0, 400.0, 600.0, viewport::NODE_LIMIT);
-    assert!(scene.nodes.is_empty());
-    assert_eq!(scene.edges.len(), 1);
-    assert_eq!(
-        scene.edges[0].from_point,
-        Some(EdgePoint {
-            x: 4_200.0,
-            y: 42.0
-        })
-    );
-}
-
-#[test]
-fn deleting_and_undoing_edges_keeps_the_edge_index_in_step() {
-    let db = Database::open(":memory:").expect("open");
-    db.insert_nodes(vec![
-        node("left", "Left", "", &[], -5_000.0, 0.0),
-        node("right", "Right", "", &[], 5_000.0, 0.0),
-    ])
-    .expect("insert");
-    connect(&db, "left-right", "left", "right");
-
-    db.delete_edges(vec!["left-right".to_owned()])
-        .expect("delete edge");
-    assert!(
-        scene_between(&db, 0.0, 0.0, 800.0, 600.0, viewport::NODE_LIMIT)
-            .edges
-            .is_empty()
-    );
-
-    let undone = db.undo().expect("undo delete");
-    // The change set itself carries both ports, so the scene redraws the
-    // restored connector before the next viewport read arrives.
-    assert_eq!(
-        undone.edges_changed[0].from_point,
-        Some(EdgePoint {
-            x: -4_800.0,
-            y: 42.0
-        })
-    );
-    assert_eq!(
-        undone.edges_changed[0].to_point,
-        Some(EdgePoint {
-            x: 5_000.0,
-            y: 42.0
-        })
-    );
-    assert_eq!(
-        scene_between(&db, 0.0, 0.0, 800.0, 600.0, viewport::NODE_LIMIT)
-            .edges
-            .len(),
-        1
-    );
-}
-
-#[test]
-fn moving_both_ends_of_a_connector_in_one_command_writes_its_box_once() {
-    let db = Database::open(":memory:").expect("open");
-    db.insert_nodes(vec![
-        node("left", "Left", "", &[], -5_000.0, 0.0),
-        node("right", "Right", "", &[], 5_000.0, 0.0),
-    ])
-    .expect("insert");
-    connect(&db, "left-right", "left", "right");
-
-    db.set_node_bounds(vec![
-        NodeBounds {
-            id: "left".to_owned(),
-            x: -4_000.0,
-            y: 2_000.0,
-            width: 200.0,
-            height: 84.0,
-        },
-        NodeBounds {
-            id: "right".to_owned(),
-            x: 6_000.0,
-            y: 2_000.0,
-            width: 200.0,
-            height: 84.0,
-        },
-    ])
-    .expect("move both ends");
-
-    let scene = db
-        .scene(
-            Viewport {
-                x: -4_000.0,
-                y: 1_500.0,
-                width: 10_200.0,
-                height: 2_000.0,
-            },
-            2_000.0,
-            viewport::NODE_LIMIT,
-        )
-        .expect("new-region scene");
-    let left = scene
-        .nodes
-        .iter()
-        .find(|node| node.id == "left")
-        .expect("the moved left card");
-    assert_eq!(
-        (left.x, left.y, left.width, left.height),
-        (-4_000.0, 2_000.0, 200.0, 84.0)
-    );
-    let right = scene
-        .nodes
-        .iter()
-        .find(|node| node.id == "right")
-        .expect("the moved right card");
-    assert_eq!(
-        (right.x, right.y, right.width, right.height),
-        (6_000.0, 2_000.0, 200.0, 84.0)
-    );
-
-    let edges: Vec<_> = scene
-        .edges
-        .iter()
-        .filter(|edge| edge.id == "left-right")
-        .collect();
-    assert_eq!(edges.len(), 1, "the connector is indexed once");
-    assert_eq!(
-        edges[0].from_point,
-        Some(EdgePoint::output(-4_000.0, 2_000.0, 200.0, 42.0))
-    );
-    assert_eq!(
-        edges[0].to_point,
-        Some(EdgePoint::input(6_000.0, 2_000.0, 42.0))
-    );
-
-    // The old crossing is gone. Margin 0 keeps the moved cards and the
-    // connector's new box out of the read.
-    let old = scene_between(&db, 0.0, 0.0, 800.0, 600.0, viewport::NODE_LIMIT);
-    assert!(old.nodes.is_empty());
-    assert!(old.edges.iter().all(|edge| edge.id != "left-right"));
-
-    // A box between the new left port and the old right port would cross
-    // this band; neither the genuine old nor new box does, and no card
-    // touches it, so only the index can return the connector.
-    let stale_probe = Viewport {
-        x: -3_500.0,
-        y: 1_000.0,
-        width: 500.0,
-        height: 300.0,
-    };
-    let after = db
-        .scene(stale_probe, 0.0, viewport::NODE_LIMIT)
-        .expect("stale-endpoint probe");
-    assert!(after.nodes.is_empty());
-    assert!(after.edges.iter().all(|edge| edge.id != "left-right"));
-}
-
-#[test]
-fn undo_of_a_two_end_move_restores_both_rtree_boxes() {
-    let db = Database::open(":memory:").expect("open");
-    db.insert_nodes(vec![
-        node("left", "Left", "", &[], -5_000.0, 0.0),
-        node("right", "Right", "", &[], 5_000.0, 0.0),
-    ])
-    .expect("insert");
-    connect(&db, "left-right", "left", "right");
-
-    db.set_node_bounds(vec![
-        NodeBounds {
-            id: "left".to_owned(),
-            x: -4_000.0,
-            y: 2_000.0,
-            width: 200.0,
-            height: 84.0,
-        },
-        NodeBounds {
-            id: "right".to_owned(),
-            x: 6_000.0,
-            y: 2_000.0,
-            width: 200.0,
-            height: 84.0,
-        },
-    ])
-    .expect("move both ends");
-    db.undo().expect("undo the two-end move");
-
-    let old = scene_between(&db, 0.0, 0.0, 800.0, 600.0, viewport::NODE_LIMIT);
-    assert!(old.nodes.is_empty(), "both original cards are outside");
-    assert_eq!(old.edges.len(), 1, "the original box is indexed again");
-    assert_eq!(old.edges[0].id, "left-right");
-    assert_eq!(
-        old.edges[0].from_point,
-        Some(EdgePoint::output(-5_000.0, 0.0, 200.0, 42.0))
-    );
-    assert_eq!(
-        old.edges[0].to_point,
-        Some(EdgePoint::input(5_000.0, 0.0, 42.0))
-    );
-
-    // The new box is gone. Use the new region without its usual margin:
-    // margin 2,000 would include the restored connector at y=42.
-    let new_region = scene_between(
-        &db,
-        -4_000.0,
-        1_500.0,
-        10_200.0,
-        2_000.0,
-        viewport::NODE_LIMIT,
-    );
-    assert!(new_region.edges.iter().all(|edge| edge.id != "left-right"));
-
-    let stale_probe = Viewport {
-        x: -3_500.0,
-        y: 1_000.0,
-        width: 500.0,
-        height: 300.0,
-    };
-    let stale = db
-        .scene(stale_probe.clone(), 0.0, viewport::NODE_LIMIT)
-        .expect("stale-endpoint probe after undo");
-    assert!(stale.nodes.is_empty());
-    assert!(stale.edges.iter().all(|edge| edge.id != "left-right"));
-
-    db.redo().expect("redo the two-end move");
-    let scene = db
-        .scene(
-            Viewport {
-                x: -4_000.0,
-                y: 1_500.0,
-                width: 10_200.0,
-                height: 2_000.0,
-            },
-            2_000.0,
-            viewport::NODE_LIMIT,
-        )
-        .expect("new-region scene after redo");
-    let left = scene
-        .nodes
-        .iter()
-        .find(|node| node.id == "left")
-        .expect("the redone left card");
-    assert_eq!(
-        (left.x, left.y, left.width, left.height),
-        (-4_000.0, 2_000.0, 200.0, 84.0)
-    );
-    let right = scene
-        .nodes
-        .iter()
-        .find(|node| node.id == "right")
-        .expect("the redone right card");
-    assert_eq!(
-        (right.x, right.y, right.width, right.height),
-        (6_000.0, 2_000.0, 200.0, 84.0)
-    );
-    let edges: Vec<_> = scene
-        .edges
-        .iter()
-        .filter(|edge| edge.id == "left-right")
-        .collect();
-    assert_eq!(edges.len(), 1, "the connector is indexed once after redo");
-    assert_eq!(
-        edges[0].from_point,
-        Some(EdgePoint::output(-4_000.0, 2_000.0, 200.0, 42.0))
-    );
-    assert_eq!(
-        edges[0].to_point,
-        Some(EdgePoint::input(6_000.0, 2_000.0, 42.0))
-    );
-
-    let old_after_redo = scene_between(&db, 0.0, 0.0, 800.0, 600.0, viewport::NODE_LIMIT);
-    assert!(old_after_redo.nodes.is_empty());
-    assert!(
-        old_after_redo
-            .edges
-            .iter()
-            .all(|edge| edge.id != "left-right")
-    );
-    let after = db
-        .scene(stale_probe, 0.0, viewport::NODE_LIMIT)
-        .expect("stale-endpoint probe after redo");
-    assert!(after.nodes.is_empty());
-    assert!(after.edges.iter().all(|edge| edge.id != "left-right"));
-}
-
-#[test]
-fn set_node_bounds_change_set_shape_matches_baseline() {
-    let db = Database::open(":memory:").expect("open");
-    db.insert_nodes(vec![NodeInput {
-        id: "styled".to_owned(),
-        kind: "image".to_owned(),
-        title: "Styled".to_owned(),
-        body: "Body".to_owned(),
-        tags: vec!["alpha".to_owned(), "β".to_owned()],
-        x: 10.0,
-        y: 20.0,
-        width: 200.0,
-        height: 84.0,
-        z: 3.5,
-        data_json: Some("{\"prompt\":\"a cat\"}".to_owned()),
-        settings_json: Some("{\"model\":\"m1\"}".to_owned()),
-    }])
-    .expect("insert");
-    db.save_run(
-        ResultBatchInput {
-            id: "batch-1".to_owned(),
-            node_id: "styled".to_owned(),
-            trigger: "run".to_owned(),
-            provider: "test".to_owned(),
-            model: "m1".to_owned(),
-            params_json: "{}".to_owned(),
-            status: "done".to_owned(),
-            error: None,
-        },
-        vec![ResultItemInput {
-            id: "item-1".to_owned(),
-            position: 0.0,
-            port_id: "out".to_owned(),
-            kind: "text".to_owned(),
-            text: "Result text".to_owned(),
-            asset_id: None,
-            meta_json: None,
-        }],
-    )
-    .expect("save run");
-
-    let before = db
-        .get_node("styled".to_owned())
-        .expect("read before")
-        .expect("the node exists");
-    let document_rev = db
-        .scene(
-            Viewport {
-                x: 0.0,
-                y: 0.0,
-                width: 1_000.0,
-                height: 1_000.0,
-            },
-            0.0,
-            viewport::NODE_LIMIT,
-        )
-        .expect("before scene")
-        .rev;
-    let read_stored = || {
-        db.run(|conn| {
-            nodes::Entity::find()
-                .filter(nodes::Column::Id.eq("styled"))
-                .one(conn)
-                .map_err(|error| error.to_string())
-        })
-        .expect("read stored row")
-        .expect("the stored row exists")
-    };
-    let before_row = read_stored();
-
-    let target = NodeBounds {
-        id: "styled".to_owned(),
-        x: 100.0,
-        y: 200.0,
-        width: 300.0,
-        height: 120.0,
-    };
-    let result = db
-        .set_node_bounds(vec![target.clone()])
-        .expect("move bounds");
-
-    assert_eq!(result.changes.rev, document_rev + 1.0);
-    assert_eq!(result.changes.changed.len(), 1);
-    let mut expected = before.clone();
-    expected.x = target.x;
-    expected.y = target.y;
-    expected.width = target.width;
-    expected.height = target.height;
-    expected.rev = before.rev + 1.0;
-    assert_eq!(
-        result.changes.changed[0], expected,
-        "every non-geometry summary field is carried through"
-    );
-
-    let [
-        HistoryOp::NodeGeometry {
-            id,
-            x,
-            y,
-            width,
-            height,
-        },
-    ] = result.forward.as_slice()
-    else {
-        panic!("one forward NodeGeometry op, got {:?}", result.forward);
-    };
-    assert_eq!(id.as_str(), "styled");
-    assert_eq!(
-        (*x, *y, *width, *height),
-        (target.x, target.y, target.width, target.height)
-    );
-    let [
-        HistoryOp::NodeGeometry {
-            id,
-            x,
-            y,
-            width,
-            height,
-        },
-    ] = result.inverse.as_slice()
-    else {
-        panic!("one inverse NodeGeometry op, got {:?}", result.inverse);
-    };
-    assert_eq!(id.as_str(), "styled");
-    assert_eq!(
-        (*x, *y, *width, *height),
-        (before.x, before.y, before.width, before.height)
-    );
-
-    let after_row = read_stored();
-    assert_eq!(after_row.tags, before_row.tags);
-    assert_eq!(after_row.tags, "alpha\nβ");
-    assert_eq!(after_row.kind, before_row.kind);
-    assert_eq!(after_row.seq, before_row.seq);
-    assert_eq!(after_row.created_at, before_row.created_at);
-    assert_eq!(after_row.data_json, before_row.data_json);
-    assert_eq!(after_row.settings_json, before_row.settings_json);
-    assert_eq!(after_row.status, "done");
-    assert_eq!(after_row.output_batch_id.as_deref(), Some("batch-1"));
-    assert_eq!(
-        (after_row.x, after_row.y, after_row.width, after_row.height),
-        (target.x, target.y, target.width, target.height)
-    );
-    assert_eq!(after_row.rev, before_row.rev + 1);
-    assert!(after_row.updated_at >= before_row.updated_at);
-
-    let undone = db.undo().expect("undo bounds");
-    assert_eq!(undone.changed.len(), 1);
-    assert_eq!(undone.rev, result.changes.rev + 1.0);
-    assert_eq!(undone.changed[0].rev, before.rev + 2.0);
-    assert_eq!(
-        (
-            undone.changed[0].x,
-            undone.changed[0].y,
-            undone.changed[0].width,
-            undone.changed[0].height
-        ),
-        (before.x, before.y, before.width, before.height)
-    );
-    assert_eq!(undone.changed[0].status, before.status);
-    assert_eq!(undone.changed[0].output_batch_id, before.output_batch_id);
-    let undone_row = read_stored();
-    assert_eq!(undone_row.rev, before_row.rev + 2);
-    assert!(undone_row.updated_at >= after_row.updated_at);
-
-    let redone = db.redo().expect("redo bounds");
-    assert_eq!(redone.changed.len(), 1);
-    assert_eq!(redone.rev, undone.rev + 1.0);
-    assert_eq!(redone.changed[0].rev, before.rev + 3.0);
-    assert_eq!(
-        (
-            redone.changed[0].x,
-            redone.changed[0].y,
-            redone.changed[0].width,
-            redone.changed[0].height
-        ),
-        (target.x, target.y, target.width, target.height)
-    );
-    assert_eq!(redone.changed[0].status, before.status);
-    assert_eq!(redone.changed[0].output_batch_id, before.output_batch_id);
-    let redone_row = read_stored();
-    assert_eq!(redone_row.rev, before_row.rev + 3);
-    assert!(redone_row.updated_at >= undone_row.updated_at);
-}
-
-#[test]
-fn undoing_a_node_delete_restores_the_connector_index() {
-    let db = Database::open(":memory:").expect("open");
-    db.insert_nodes(vec![
-        node("left", "Left", "", &[], -5_000.0, 0.0),
-        node("right", "Right", "", &[], 5_000.0, 0.0),
-    ])
-    .expect("insert");
-    connect(&db, "left-right", "left", "right");
-
-    db.delete_nodes(vec!["left".to_owned()]).expect("delete");
-    assert!(
-        scene_between(&db, 0.0, 0.0, 800.0, 600.0, viewport::NODE_LIMIT)
-            .edges
-            .is_empty()
-    );
-
-    // Undo restores the node before its edges (the history inverse is
-    // reversed again on apply), so the edge insert indexes the curve.
-    db.undo().expect("undo delete");
-    let scene = scene_between(&db, 0.0, 0.0, 800.0, 600.0, viewport::NODE_LIMIT);
-    assert_eq!(scene.edges.len(), 1);
-    assert_eq!(
-        scene.edges[0].from_point,
-        Some(EdgePoint {
-            x: -4_800.0,
-            y: 42.0
-        })
-    );
-}
-
-#[test]
-fn short_cjk_queries_use_the_like_fallback() {
-    let db = Database::open(":memory:").expect("open");
-    db.insert_nodes(vec![node(
-        "a",
-        "图像生成器",
-        "把文本变成图片",
-        &["设计", "生成"],
-        0.0,
-        0.0,
-    )])
-    .expect("insert");
-
-    // Two characters cannot be indexed by the trigram tokenizer; each
-    // searchable field falls back to the bounded LIKE scan.
-    for query in ["图像", "图片", "设计"] {
-        let hits = db
-            .search(query.to_owned(), SearchFilters::default(), 20)
-            .expect("short search");
-        assert_eq!(hits.len(), 1, "query {query}");
-    }
-
-    let hits = db
-        .search("生成器".to_owned(), SearchFilters::default(), 20)
-        .expect("trigram search");
-    assert_eq!(hits.len(), 1);
-
-    let text = db
-        .search(
-            "图像".to_owned(),
-            SearchFilters {
-                kind: Some("text".to_owned()),
-            },
-            20,
-        )
-        .expect("filtered search");
-    assert_eq!(text.len(), 1);
-    assert!(
-        db.search(
-            "图像".to_owned(),
-            SearchFilters {
-                kind: Some("image".to_owned()),
-            },
-            20,
-        )
-        .expect("filter miss")
-        .is_empty()
-    );
 }
 
 #[test]
@@ -2960,139 +1834,6 @@ fn undoing_an_upload_restores_its_edge_anchors() {
         .find(|edge| edge.id == "edge-upload")
         .expect("the connector is indexed after redo");
     assert!((edge.from_offset - 80.0).abs() < 0.001);
-}
-
-#[test]
-fn bodies_written_by_manual_edits_and_runs_are_searchable() {
-    let db = Database::open(":memory:").expect("open");
-    db.insert_nodes(vec![node("text", "Panel", "Before", &[], 0.0, 0.0)])
-        .expect("insert");
-
-    db.set_manual_text(
-        "text".to_owned(),
-        "Orchid petals".to_owned(),
-        ResultBatchInput {
-            id: "batch-manual".to_owned(),
-            node_id: "text".to_owned(),
-            trigger: "manual".to_owned(),
-            provider: "manual".to_owned(),
-            model: String::new(),
-            params_json: "{}".to_owned(),
-            status: "done".to_owned(),
-            error: None,
-        },
-        ResultItemInput {
-            id: "item-manual".to_owned(),
-            position: 0.0,
-            port_id: "out".to_owned(),
-            kind: "text".to_owned(),
-            text: "Orchid petals".to_owned(),
-            asset_id: None,
-            meta_json: None,
-        },
-    )
-    .expect("manual edit");
-    assert_eq!(
-        db.search("Orchid".to_owned(), SearchFilters::default(), 20)
-            .expect("manual search")
-            .len(),
-        1
-    );
-    assert!(
-        db.search("Before".to_owned(), SearchFilters::default(), 20)
-            .expect("old body search")
-            .is_empty()
-    );
-
-    db.save_run(
-        ResultBatchInput {
-            id: "batch-run".to_owned(),
-            node_id: "text".to_owned(),
-            trigger: "run".to_owned(),
-            provider: "mock-text".to_owned(),
-            model: "mock-text".to_owned(),
-            params_json: "{}".to_owned(),
-            status: "done".to_owned(),
-            error: None,
-        },
-        vec![ResultItemInput {
-            id: "item-run".to_owned(),
-            position: 0.0,
-            port_id: "out".to_owned(),
-            kind: "text".to_owned(),
-            text: "Marigold fields".to_owned(),
-            asset_id: None,
-            meta_json: None,
-        }],
-    )
-    .expect("run");
-    assert_eq!(
-        db.search("Marigold".to_owned(), SearchFilters::default(), 20)
-            .expect("run search")
-            .len(),
-        1
-    );
-    assert!(
-        db.search("Orchid".to_owned(), SearchFilters::default(), 20)
-            .expect("replaced body search")
-            .is_empty()
-    );
-}
-
-#[test]
-fn a_mixed_search_indexes_long_terms_and_filters_short_ones() {
-    let db = Database::open(":memory:").expect("open");
-    db.insert_nodes(vec![
-        node("both", "AI image generator", "", &[], 0.0, 0.0),
-        node("long", "image generator", "", &[], 0.0, 0.0),
-        node("short", "AI image", "", &[], 0.0, 0.0),
-    ])
-    .expect("insert");
-
-    // "generator" uses the trigram index; "AI" is too short for it and is
-    // checked against the title, body and tags after the match.
-    let hits = db
-        .search("AI generator".to_owned(), SearchFilters::default(), 20)
-        .expect("mixed search");
-    let ids: Vec<&str> = hits.iter().map(|hit| hit.id.as_str()).collect();
-    assert_eq!(ids, ["both"]);
-}
-
-#[test]
-fn a_mixed_search_applies_every_short_term() {
-    let db = Database::open(":memory:").expect("open");
-    db.insert_nodes(vec![
-        node("all", "generator a b c d e f g h z", "", &[], 0.0, 0.0),
-        node("missing-z", "generator a b c d e f g h", "", &[], 0.0, 0.0),
-    ])
-    .expect("insert");
-
-    // Nine short terms plus one long one: the mixed path must apply all
-    // of them, not the all-short fallback's first eight.
-    let hits = db
-        .search(
-            "generator a b c d e f g h z".to_owned(),
-            SearchFilters::default(),
-            20,
-        )
-        .expect("mixed search");
-    let ids: Vec<&str> = hits.iter().map(|hit| hit.id.as_str()).collect();
-    assert_eq!(ids, ["all"]);
-}
-
-#[test]
-fn an_all_short_search_applies_at_most_eight_terms() {
-    let db = Database::open(":memory:").expect("open");
-    db.insert_nodes(vec![node("eight", "a b c d e f g h", "", &[], 0.0, 0.0)])
-        .expect("insert");
-
-    // The ninth short term is past the fallback's cap and is ignored; a
-    // query applying it would find nothing.
-    let hits = db
-        .search("a b c d e f g h z".to_owned(), SearchFilters::default(), 20)
-        .expect("short search");
-    assert_eq!(hits.len(), 1);
-    assert_eq!(hits[0].id, "eight");
 }
 
 #[test]
@@ -8264,93 +7005,189 @@ fn deleting_the_last_node_cascades_its_edges() {
     );
 }
 
-fn explain_plan(conn: &DatabaseConnection, built: sea_orm::Statement) -> String {
-    let statement = sea_orm::Statement {
-        sql: format!("EXPLAIN QUERY PLAN {}", built.sql),
-        values: built.values,
-        db_backend: built.db_backend,
-    };
-    let rows = conn.query_all_raw(statement).expect("explain query plan");
-    rows.iter()
-        .map(|row| row.try_get::<String>("", "detail").expect("plan detail"))
-        .collect::<Vec<_>>()
-        .join("\n")
-}
-
 #[test]
-fn running_work_queries_use_partial_indexes() {
-    let conn = open_connection(":memory:", OpenMode::Create)
-        .expect("open memory database")
-        .conn;
-    let nodes_statement = nodes::Entity::find()
-        .filter(nodes::Column::Status.eq("running"))
-        .select_only()
-        .column(nodes::Column::Id)
-        .build(conn.get_database_backend());
-    let nodes_plan = explain_plan(&conn, nodes_statement);
-    assert!(
-        nodes_plan.contains("nodes_running"),
-        "the nodes recovery query uses its partial index: {nodes_plan}"
-    );
-
-    let batches_statement = result_batches::Entity::update_many()
-        .col_expr(result_batches::Column::Status, Expr::value("interrupted"))
-        .filter(result_batches::Column::Status.eq("running"))
-        .build(conn.get_database_backend());
-    let batches_plan = explain_plan(&conn, batches_statement);
-    assert!(
-        batches_plan.contains("result_batches_running"),
-        "the batch recovery query uses its partial index: {batches_plan}"
-    );
-}
-
-#[test]
-fn geometry_flush_queries_drive_from_the_dirty_markers() {
-    let conn = open_connection(":memory:", OpenMode::Create)
-        .expect("open memory database")
-        .conn;
-    for sql in [
-        crate::edge_index::dirty_edge_delete_statement(),
-        crate::edge_index::dirty_edge_insert_statement(),
-    ] {
-        let plan = explain_plan(
-            &conn,
-            sea_orm::Statement::from_string(conn.get_database_backend(), sql.clone()),
-        );
-        assert!(
-            plan.contains("edges_port_pair") && plan.contains("edges_to"),
-            "the incident-edge predicate is a MULTI-INDEX OR: {sql}\n{plan}"
-        );
-        assert!(
-            !plan.contains("SCAN e USING COVERING INDEX edges_port_pair"),
-            "the flush must not scan every edge: {sql}\n{plan}"
-        );
-    }
-}
-
-#[test]
-fn overview_sample_uses_the_sample_index() {
-    let conn = open_connection(":memory:", OpenMode::Create)
-        .expect("open memory database")
-        .conn;
-    let statement = viewport::overview_statement(100_000, 400);
-    let (sql, values) = statement.build(sea_orm::sea_query::SqliteQueryBuilder);
-    let plan = explain_plan(
-        &conn,
-        sea_orm::Statement {
-            sql,
-            values: Some(values),
-            db_backend: conn.get_database_backend(),
+fn set_node_bounds_change_set_shape_matches_baseline() {
+    let db = Database::open(":memory:").expect("open");
+    db.insert_nodes(vec![NodeInput {
+        id: "styled".to_owned(),
+        kind: "image".to_owned(),
+        title: "Styled".to_owned(),
+        body: "Body".to_owned(),
+        tags: vec!["alpha".to_owned(), "β".to_owned()],
+        x: 10.0,
+        y: 20.0,
+        width: 200.0,
+        height: 84.0,
+        z: 3.5,
+        data_json: Some("{\"prompt\":\"a cat\"}".to_owned()),
+        settings_json: Some("{\"model\":\"m1\"}".to_owned()),
+    }])
+    .expect("insert");
+    db.save_run(
+        ResultBatchInput {
+            id: "batch-1".to_owned(),
+            node_id: "styled".to_owned(),
+            trigger: "run".to_owned(),
+            provider: "test".to_owned(),
+            model: "m1".to_owned(),
+            params_json: "{}".to_owned(),
+            status: "done".to_owned(),
+            error: None,
         },
+        vec![ResultItemInput {
+            id: "item-1".to_owned(),
+            position: 0.0,
+            port_id: "out".to_owned(),
+            kind: "text".to_owned(),
+            text: "Result text".to_owned(),
+            asset_id: None,
+            meta_json: None,
+        }],
+    )
+    .expect("save run");
+
+    let before = db
+        .get_node("styled".to_owned())
+        .expect("read before")
+        .expect("the node exists");
+    let document_rev = db
+        .scene(
+            Viewport {
+                x: 0.0,
+                y: 0.0,
+                width: 1_000.0,
+                height: 1_000.0,
+            },
+            0.0,
+            viewport::NODE_LIMIT,
+        )
+        .expect("before scene")
+        .rev;
+    let read_stored = || {
+        db.run(|conn| {
+            nodes::Entity::find()
+                .filter(nodes::Column::Id.eq("styled"))
+                .one(conn)
+                .map_err(|error| error.to_string())
+        })
+        .expect("read stored row")
+        .expect("the stored row exists")
+    };
+    let before_row = read_stored();
+
+    let target = NodeBounds {
+        id: "styled".to_owned(),
+        x: 100.0,
+        y: 200.0,
+        width: 300.0,
+        height: 120.0,
+    };
+    let result = db
+        .set_node_bounds(vec![target.clone()])
+        .expect("move bounds");
+
+    assert_eq!(result.changes.rev, document_rev + 1.0);
+    assert_eq!(result.changes.changed.len(), 1);
+    let mut expected = before.clone();
+    expected.x = target.x;
+    expected.y = target.y;
+    expected.width = target.width;
+    expected.height = target.height;
+    expected.rev = before.rev + 1.0;
+    assert_eq!(
+        result.changes.changed[0], expected,
+        "every non-geometry summary field is carried through"
     );
-    assert!(
-        plan.contains("nodes_sample"),
-        "the minimap sample uses its expression index: {plan}"
+
+    let [
+        HistoryOp::NodeGeometry {
+            id,
+            x,
+            y,
+            width,
+            height,
+        },
+    ] = result.forward.as_slice()
+    else {
+        panic!("one forward NodeGeometry op, got {:?}", result.forward);
+    };
+    assert_eq!(id.as_str(), "styled");
+    assert_eq!(
+        (*x, *y, *width, *height),
+        (target.x, target.y, target.width, target.height)
     );
-    assert!(
-        !plan.contains("SCAN nodes") && !plan.contains("USE TEMP B-TREE FOR ORDER BY"),
-        "the minimap sample must not scan and sort the whole document: {plan}"
+    let [
+        HistoryOp::NodeGeometry {
+            id,
+            x,
+            y,
+            width,
+            height,
+        },
+    ] = result.inverse.as_slice()
+    else {
+        panic!("one inverse NodeGeometry op, got {:?}", result.inverse);
+    };
+    assert_eq!(id.as_str(), "styled");
+    assert_eq!(
+        (*x, *y, *width, *height),
+        (before.x, before.y, before.width, before.height)
     );
+
+    let after_row = read_stored();
+    assert_eq!(after_row.tags, before_row.tags);
+    assert_eq!(after_row.tags, "alpha\nβ");
+    assert_eq!(after_row.kind, before_row.kind);
+    assert_eq!(after_row.seq, before_row.seq);
+    assert_eq!(after_row.created_at, before_row.created_at);
+    assert_eq!(after_row.data_json, before_row.data_json);
+    assert_eq!(after_row.settings_json, before_row.settings_json);
+    assert_eq!(after_row.status, "done");
+    assert_eq!(after_row.output_batch_id.as_deref(), Some("batch-1"));
+    assert_eq!(
+        (after_row.x, after_row.y, after_row.width, after_row.height),
+        (target.x, target.y, target.width, target.height)
+    );
+    assert_eq!(after_row.rev, before_row.rev + 1);
+    assert!(after_row.updated_at >= before_row.updated_at);
+
+    let undone = db.undo().expect("undo bounds");
+    assert_eq!(undone.changed.len(), 1);
+    assert_eq!(undone.rev, result.changes.rev + 1.0);
+    assert_eq!(undone.changed[0].rev, before.rev + 2.0);
+    assert_eq!(
+        (
+            undone.changed[0].x,
+            undone.changed[0].y,
+            undone.changed[0].width,
+            undone.changed[0].height
+        ),
+        (before.x, before.y, before.width, before.height)
+    );
+    assert_eq!(undone.changed[0].status, before.status);
+    assert_eq!(undone.changed[0].output_batch_id, before.output_batch_id);
+    let undone_row = read_stored();
+    assert_eq!(undone_row.rev, before_row.rev + 2);
+    assert!(undone_row.updated_at >= after_row.updated_at);
+
+    let redone = db.redo().expect("redo bounds");
+    assert_eq!(redone.changed.len(), 1);
+    assert_eq!(redone.rev, undone.rev + 1.0);
+    assert_eq!(redone.changed[0].rev, before.rev + 3.0);
+    assert_eq!(
+        (
+            redone.changed[0].x,
+            redone.changed[0].y,
+            redone.changed[0].width,
+            redone.changed[0].height
+        ),
+        (target.x, target.y, target.width, target.height)
+    );
+    assert_eq!(redone.changed[0].status, before.status);
+    assert_eq!(redone.changed[0].output_batch_id, before.output_batch_id);
+    let redone_row = read_stored();
+    assert_eq!(redone_row.rev, before_row.rev + 3);
+    assert!(redone_row.updated_at >= undone_row.updated_at);
 }
 
 fn preview_item(id: String, position: i32, asset_id: Option<&str>) -> ResultItemInput {
@@ -8399,314 +7236,6 @@ fn preview_run(
     actual
 }
 
-#[test]
-fn preview_items_stay_bounded_without_losing_total_count() {
-    let db = Database::open(":memory:").expect("open");
-    db.insert_nodes(vec![
-        // A node with no output has no current batch to preview.
-        node("empty", "Empty", "", &[], 0.0, 0.0),
-        node("single", "Single", "", &[], 300.0, 0.0),
-        node("six", "Six", "", &[], 600.0, 0.0),
-    ])
-    .expect("insert preview nodes");
-
-    preview_run(
-        &db,
-        "single",
-        "preview-single",
-        vec![preview_item("single-0".to_owned(), 0, None)],
-    );
-    preview_run(
-        &db,
-        "six",
-        "preview-six",
-        (0..6)
-            .map(|position| preview_item(format!("six-{position}"), position, None))
-            .collect(),
-    );
-    // v1 refuses to settle a `done` batch with no items, so a node with
-    // an output always has something to preview.
-    let empty_done = db.save_run(
-        ResultBatchInput {
-            id: "preview-empty".to_owned(),
-            node_id: "empty".to_owned(),
-            trigger: "run".to_owned(),
-            provider: "mock-image".to_owned(),
-            model: "mock-image".to_owned(),
-            params_json: "{}".to_owned(),
-            status: "done".to_owned(),
-            error: None,
-        },
-        Vec::new(),
-    );
-    assert!(empty_done.is_err(), "a done batch needs an item");
-
-    let ids = vec!["empty".to_owned(), "single".to_owned(), "six".to_owned()];
-    let previews = db.previews(ids.clone()).expect("previews");
-    let reference = db
-        .run(move |conn| detail::previews_reference(conn, ids))
-        .expect("reference previews");
-    assert_eq!(previews, reference);
-    assert!(
-        previews.iter().all(|preview| preview.node_id != "empty"),
-        "a node without an output has no preview"
-    );
-
-    let by_node = |id: &str| {
-        previews
-            .iter()
-            .find(|preview| preview.node_id == id)
-            .unwrap_or_else(|| panic!("missing {id} preview"))
-    };
-    let single = by_node("single");
-    assert_eq!(single.item_count, 1.0);
-    assert_eq!(single.items.len(), 1);
-    let six = by_node("six");
-    assert_eq!(
-        six.item_count, 6.0,
-        "the count is the full batch, not the preview cap"
-    );
-    assert_eq!(six.items.len(), 4, "a preview carries at most four items");
-    let returned: Vec<&str> = six.items.iter().map(|item| item.id.as_str()).collect();
-    assert_eq!(returned, vec!["six-0", "six-1", "six-2", "six-3"]);
-}
-
-#[test]
-fn preview_items_order_by_position_with_an_id_tiebreak() {
-    let db = Database::open(":memory:").expect("open");
-    db.insert_nodes(vec![node("ordered", "Ordered", "", &[], 0.0, 0.0)])
-        .expect("insert preview node");
-    preview_run(
-        &db,
-        "ordered",
-        "preview-ordered",
-        vec![
-            preview_item("b".to_owned(), 2, None),
-            preview_item("a".to_owned(), 1, None),
-            preview_item("z".to_owned(), 0, None),
-            preview_item("c".to_owned(), 3, None),
-        ],
-    );
-
-    let ids = vec!["ordered".to_owned()];
-    let previews = db.previews(ids.clone()).expect("previews");
-    let reference = db
-        .run(move |conn| detail::previews_reference(conn, ids))
-        .expect("reference previews");
-    assert_eq!(previews, reference);
-    let ordered = &previews[0];
-    assert_eq!(ordered.item_count, 4.0);
-    let returned: Vec<&str> = ordered.items.iter().map(|item| item.id.as_str()).collect();
-    assert_eq!(returned, vec!["z", "a", "b", "c"], "position order");
-
-    // v1 makes positions unique per `(batch, port)`, so stored ties
-    // cannot occur; the query still names id as the deterministic
-    // tiebreak.
-    let (sql, _) = detail::preview_items_statement(&["batch".to_owned()])
-        .build(sea_orm::sea_query::SqliteQueryBuilder);
-    let upper = sql.to_ascii_uppercase();
-    assert!(upper.contains("ORDER BY \"BATCH_ID\" ASC"), "{sql}");
-    assert!(upper.contains("\"POSITION\" ASC"), "{sql}");
-    assert!(upper.contains("\"ID\" ASC"), "{sql}");
-}
-
-#[test]
-fn previews_batch_chunks_and_share_assets() {
-    let db = Database::open(":memory:").expect("open");
-    db.import_asset(AssetInput {
-        id: "shared-asset".to_owned(),
-        kind: "image".to_owned(),
-        name: "shared.png".to_owned(),
-        mime: "image/png".to_owned(),
-        bytes: benchmark_png(0),
-        meta_json: None,
-    })
-    .expect("import shared asset");
-
-    // 401 ids cross the 400-id chunk boundary once; every batch shares one
-    // asset, so a per-node asset query would repeat the same read 401 times.
-    let mut nodes = Vec::with_capacity(401);
-    for index in 0..401usize {
-        let mut preview = node(
-            &format!("preview-node-{index}"),
-            "Preview",
-            "",
-            &[],
-            index as f64 * 240.0,
-            0.0,
-        );
-        preview.kind = "image".to_owned();
-        nodes.push(preview);
-    }
-    db.insert_nodes(nodes).expect("insert preview nodes");
-    for index in 0..401usize {
-        preview_run(
-            &db,
-            &format!("preview-node-{index}"),
-            &format!("preview-batch-{index}"),
-            (0..4)
-                .map(|position| {
-                    preview_item(
-                        format!("preview-item-{index}-{position}"),
-                        position,
-                        Some("shared-asset"),
-                    )
-                })
-                .collect(),
-        );
-    }
-
-    let ids: Vec<String> = (0..401)
-        .map(|index| format!("preview-node-{index}"))
-        .collect();
-    let previews = db.previews(ids.clone()).expect("previews");
-    let reference = db
-        .run({
-            let ids = ids.clone();
-            move |conn| detail::previews_reference(conn, ids)
-        })
-        .expect("reference previews");
-    assert_eq!(previews, reference);
-    assert_eq!(previews.len(), 401, "no requested preview crosses a chunk");
-    for preview in &previews {
-        assert_eq!(preview.item_count, 4.0, "{} count", preview.node_id);
-        assert_eq!(preview.items.len(), 4, "{} items", preview.node_id);
-        for item in &preview.items {
-            assert_eq!(item.asset_id.as_deref(), Some("shared-asset"));
-            assert!(item.asset.is_some(), "{} shared asset", item.id);
-        }
-    }
-}
-
-#[test]
-fn previews_keep_the_old_node_and_item_summaries() {
-    let db = Database::open(":memory:").expect("open");
-    db.import_asset(AssetInput {
-        id: "shared-asset".to_owned(),
-        kind: "image".to_owned(),
-        name: "shared.png".to_owned(),
-        mime: "image/png".to_owned(),
-        bytes: benchmark_png(0),
-        meta_json: None,
-    })
-    .expect("import shared asset");
-    db.import_asset(AssetInput {
-        id: "other-asset".to_owned(),
-        kind: "image".to_owned(),
-        name: "other.png".to_owned(),
-        mime: "image/png".to_owned(),
-        bytes: benchmark_png(1),
-        meta_json: None,
-    })
-    .expect("import second asset");
-    let mut first = node("image-a", "Image A", "", &[], 0.0, 0.0);
-    first.kind = "image".to_owned();
-    let mut second = node("image-b", "Image B", "", &[], 400.0, 0.0);
-    second.kind = "image".to_owned();
-    db.insert_nodes(vec![first, second])
-        .expect("insert preview nodes");
-    preview_run(
-        &db,
-        "image-a",
-        "batch-a",
-        vec![
-            preview_item("a-0".to_owned(), 0, Some("shared-asset")),
-            preview_item("a-1".to_owned(), 1, Some("other-asset")),
-            preview_item("a-2".to_owned(), 2, None),
-            preview_item("a-3".to_owned(), 3, Some("shared-asset")),
-        ],
-    );
-    preview_run(
-        &db,
-        "image-b",
-        "batch-b",
-        vec![
-            preview_item("b-0".to_owned(), 0, Some("shared-asset")),
-            preview_item("b-1".to_owned(), 1, Some("other-asset")),
-        ],
-    );
-
-    let ids = vec!["image-a".to_owned(), "image-b".to_owned()];
-    let previews = db.previews(ids.clone()).expect("previews");
-    let reference = db
-        .run(move |conn| detail::previews_reference(conn, ids))
-        .expect("reference previews");
-    assert_eq!(previews, reference);
-
-    let a = previews
-        .iter()
-        .find(|preview| preview.node_id == "image-a")
-        .expect("image-a preview");
-    assert_eq!(a.item_count, 4.0);
-    assert_eq!(a.items.len(), 4);
-    assert_eq!(a.items[0].asset_id.as_deref(), Some("shared-asset"));
-    assert!(a.items[0].asset.is_some());
-    assert_eq!(a.items[1].asset_id.as_deref(), Some("other-asset"));
-    assert!(a.items[1].asset.is_some());
-    assert!(a.items[2].asset.is_none(), "an item without an asset id");
-    assert_eq!(a.items[3].asset_id.as_deref(), Some("shared-asset"));
-    assert!(
-        a.items[3].asset.is_some(),
-        "a repeated asset still resolves"
-    );
-
-    // v1 refuses an item whose asset row does not exist, so a preview can
-    // never meet the missing-asset case this test used to model.
-    let missing = db.save_run(
-        ResultBatchInput {
-            id: "batch-missing".to_owned(),
-            node_id: "image-a".to_owned(),
-            trigger: "run".to_owned(),
-            provider: "mock-image".to_owned(),
-            model: "mock-image".to_owned(),
-            params_json: "{}".to_owned(),
-            status: "done".to_owned(),
-            error: None,
-        },
-        vec![preview_item("missing".to_owned(), 0, Some("missing-asset"))],
-    );
-    assert!(missing.is_err(), "a missing asset row must be refused");
-
-    let b = previews
-        .iter()
-        .find(|preview| preview.node_id == "image-b")
-        .expect("image-b preview");
-    assert_eq!(b.item_count, 2.0);
-    assert_eq!(b.items.len(), 2);
-    assert_eq!(b.items[1].asset_id.as_deref(), Some("other-asset"));
-    assert!(b.items[1].asset.is_some());
-}
-
-#[test]
-fn preview_query_caps_rows_in_the_outer_window_query() {
-    use sea_orm::sea_query::SqliteQueryBuilder;
-
-    let statement = detail::preview_items_statement(&["batch-id".to_owned()]);
-    let (sql, values) = statement.build(SqliteQueryBuilder);
-    let upper = sql.to_ascii_uppercase();
-    assert!(upper.contains("ROW_NUMBER()"), "{sql}");
-    assert!(upper.contains("OVER"), "{sql}");
-    assert!(upper.contains("PARTITION BY"), "{sql}");
-    assert_eq!(
-        upper.matches("ROW_NUMBER()").count(),
-        1,
-        "one window ranks the whole chunk: {sql}"
-    );
-    assert!(
-        sql.contains("\"preview_row_number\" <= ?"),
-        "the cap is an outer bound value, not an interpolated id: {sql}"
-    );
-    assert_eq!(
-        sql.matches('?').count(),
-        2,
-        "the batch id and cap stay bound values: {sql}"
-    );
-    assert!(
-        !sql.contains("batch-id"),
-        "batch ids never enter the statement text: {sql}"
-    );
-    assert_eq!(values.0.len(), 2, "one id list and the cap are bound");
-}
 // The deterministic PNG is a fixture, not benchmark-only: the asset tests
 // use it to persist an image without a committed binary.
 

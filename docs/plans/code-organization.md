@@ -1141,6 +1141,10 @@ Risky; parameterize, do not collapse:
   because `clippy -D warnings` fails on unused imports.
 - Keep fixtures (`node`, `connect`, `scene_between`, `preview_*`, the
   package/DB writers) in `db/tests/mod.rs`; child modules use `use super::*`.
+  A test module named like a production module (`scene`, `search`, `worker`,
+  `session`, `verify`, `gc`) shadows that binding for every `use super::*`
+  child, so production modules are spelled `crate::...`; the note is in the
+  `db/tests/mod.rs` header.
   Benchmark-only imports (`AtomicU64`, `fs`, `Path`, `PathBuf`, `now_ms`,
   `OVERVIEW_LIMIT`, `NODE_LIMIT`) must be imported explicitly in
   `benchmark.rs`; keep `mod benchmark;` in `tests/mod.rs` or the ignored
@@ -1521,9 +1525,9 @@ compatibility shims after a phase.
 
 ### Phase 6 — Rust core split (parallel with phases 2–5)
 
-Re-baselined 2026-11-16 against the v1 core (§16.3). Each step is one PR;
-none changes FFI names, worker jobs, transaction boundaries or the frozen v1
-schema. Start with the docs cut (6-0), then move tests before production.
+Re-baselined 2026-11-16 against the v1 core (§16.3). Each step or sub-step
+is one PR; none changes FFI names, worker jobs, transaction boundaries or the
+frozen v1 schema. Start with the docs cut (6-0), then move tests before production.
 
 6-0. **Docs only.** This re-baseline: §1.6, §9–§9.3, Appendix B and the
 Phase 6/7 steps. No code moves.
@@ -1534,9 +1538,10 @@ smoke script pre-delete its database and assert the seeder (so a stale
 fixture cannot pass). Keep `db::tests` a descendant of `db`.
 6-2. **db tests: reads.** Move the scene, search, previews and EXPLAIN
 (`indexes`) groups verbatim.
-6-3. **db tests: commands.** Move nodes, edges, inputs, settings, manual,
-runs, assets and history verbatim. Keep the reference oracles in
-`viewport.rs`/`detail.rs`.
+6-3. **db tests: commands.** Move the node/edge/input tests (6-3a), the
+settings/manual/history tests (6-3b) and the runs/assets tests (6-3c) as
+separate PRs; keep the reference oracles in `viewport.rs`/`detail.rs`. The
+combined group is about 5.5k test lines, too large for one review.
 6-4. **db tests: lifecycle.** Move startup, session, verify, gc and reset;
 add the managed-session integration test (lease + `open_package` + close)
 here.

@@ -647,7 +647,7 @@ recover_runs populated-running: n=2 avg=19.83ms p95=22.50ms max=22.50ms 100 row-
 
 This is down from the 94.09 / 103.21 ms populated-running recovery lines in
 the full-fixture table above, which predates the version 4 partial indexes.
-`db::tests::running_work_queries_use_partial_indexes` asserts that
+`db::tests::indexes::running_work_queries_use_partial_indexes` asserts that
 `EXPLAIN QUERY PLAN` for the exact recovery filters contains `nodes_running`
 and `result_batches_running`; planning is not inferred from the timings.
 

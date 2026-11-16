@@ -104,13 +104,14 @@ Decision tree:
   Keep SQLite and search code in Rust, and keep TSX/canvas code out of the
   crate.
 - SeaORM entities are one file per table under `src/native/src/entity/`, named
-  after the table. Today commands live in `mutation.rs`; reads in `search.rs`,
-  `viewport.rs`, `scene.rs` or `detail.rs`; asset bytes in `asset.rs`; package
+  after the table. Today commands live in `mutation.rs`; reads in the
+  production modules `search.rs`, `viewport.rs`, `scene.rs` or `detail.rs`;
+  asset bytes in `asset.rs`; package
   collection in `gc.rs`; creating and managing packages in `project.rs` and
   `project/`; durable file helpers in `fsutil.rs`; `db.rs` owns the worker
   handle, history and startup, and `schema.rs` owns table creation and the
   package-wide statements in `schema/package.rs`. Raw SQLITE SQL belongs only
-  in `schema.rs`/`search.rs` for virtual tables and in `schema/package.rs` for
+  in `schema.rs` and the production `search.rs` for virtual tables and in `schema/package.rs` for
   checkpointing, snapshotting and rekeying a package. The Phase 6 target is
   `db/{mod,worker,startup,undo,tests}`,
   `mutation/{mod,nodes,edges,inputs,runs,apply,support,tx}`,

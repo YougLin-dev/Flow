@@ -78,8 +78,8 @@ The canvas stays in TSX and owns only the scene model and its views.
   frozen schema.
 - Ordinary tables are SeaORM entities; SeaQuery builds dynamic filters and
   joins. Only the FTS5/RTree virtual-table adapters (`schema/v1.sql`,
-  `schema/maintenance.rs`, `search.rs`, `edge_index.rs`) contain static
-  SQLite SQL.
+  `schema/maintenance.rs`, the production `search.rs`, `edge_index.rs`)
+  contain static SQLite SQL.
 - Database work runs on NSH's blocking pool, then through a handle to one
   dedicated database worker thread. That thread owns the connection, which
   keeps the single-writer design and avoids sending SeaORM's sync Rusqlite
