@@ -52,6 +52,45 @@ pub(in crate::mutation) fn delete_input_tx(
     Ok(())
 }
 
+/// Which input rows an edge removal deletes.
+pub(in crate::mutation) enum EdgeInputsToDelete<'a> {
+    /// Every row the edge contributed. Replay must use this mode: run-time
+    /// sync can change item ids, so the rows a command captured may be stale.
+    AllForEdge,
+    /// Exactly the rows the caller captured.
+    Captured(&'a [InputRow]),
+}
+
+/// Deletes the selected rows and returns the nodes whose input list changed,
+/// in first-seen order.
+pub(in crate::mutation) fn delete_inputs_for_edge_tx(
+    txn: &DatabaseTransaction,
+    edge_id: &str,
+    mode: EdgeInputsToDelete<'_>,
+) -> Result<Vec<String>, DbErr> {
+    let rows: Vec<(String, String)> = match mode {
+        EdgeInputsToDelete::AllForEdge => node_inputs::Entity::find()
+            .filter(node_inputs::Column::EdgeId.eq(edge_id))
+            .all(txn)?
+            .into_iter()
+            .map(|row| (row.id, row.node_id))
+            .collect(),
+        EdgeInputsToDelete::Captured(rows) => rows
+            .iter()
+            .map(|row| (row.id.clone(), row.node_id.clone()))
+            .collect(),
+    };
+    let mut seen = BTreeSet::new();
+    let mut changed = Vec::new();
+    for (id, node_id) in &rows {
+        delete_input_tx(txn, id)?;
+        if seen.insert(node_id.clone()) {
+            changed.push(node_id.clone());
+        }
+    }
+    Ok(changed)
+}
+
 pub(in crate::mutation) fn inputs_for_node_tx(
     txn: &DatabaseTransaction,
     node_id: &str,

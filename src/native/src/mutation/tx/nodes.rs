@@ -4,6 +4,7 @@ use std::collections::HashMap;
 
 use sea_orm::sea_query::Expr;
 use sea_orm::{
+    ActiveValue,
     ActiveValue::{NotSet, Set, Unchanged},
     ColumnTrait, DatabaseTransaction, DbErr, EntityTrait, QueryFilter,
 };
@@ -20,68 +21,11 @@ use crate::mutation::tx::edges::scale_edge_offsets_tx;
 /// both in input order.
 type BoundsBatch = (Vec<NodeRow>, Vec<(NodeRow, NodeBounds)>);
 
-pub(in crate::mutation) fn insert_node_tx(
-    txn: &DatabaseTransaction,
-    node: &NodeInput,
-) -> Result<NodeRow, DbErr> {
-    let now = now_ms();
-    let tags = canonical_tags(&node.tags);
-    let data_json = node.data_json.clone().unwrap_or_else(|| "{}".to_owned());
-    let settings_json = node
-        .settings_json
-        .clone()
-        .unwrap_or_else(|| "{}".to_owned());
-
-    let inserted = nodes::Entity::insert(nodes::ActiveModel {
-        seq: NotSet,
-        id: Set(node.id.clone()),
-        kind: Set(node.kind.clone()),
-        title: Set(node.title.clone()),
-        body: Set(node.body.clone()),
-        tags: Set(tags.clone()),
-        x: Set(node.x),
-        y: Set(node.y),
-        width: Set(node.width),
-        height: Set(node.height),
-        z: Set(node.z),
-        data_json: Set(data_json.clone()),
-        settings_json: Set(settings_json.clone()),
-        status: Set("idle".to_owned()),
-        output_batch_id: Set(None),
-        rev: Set(1),
-        created_at: Set(now),
-        updated_at: Set(now),
-    })
-    .exec(txn)?;
-
-    Ok(NodeRow {
-        seq: inserted.last_insert_id,
-        id: node.id.clone(),
-        kind: node.kind.clone(),
-        title: node.title.clone(),
-        body: node.body.clone(),
-        tags: tags_from(&tags),
-        x: node.x,
-        y: node.y,
-        width: node.width,
-        height: node.height,
-        z: node.z,
-        data_json,
-        settings_json,
-        status: "idle".to_owned(),
-        output_batch_id: None,
-        rev: 1,
-        created_at: now,
-        updated_at: now,
-    })
-}
-
-pub(in crate::mutation) fn insert_row_tx(
-    txn: &DatabaseTransaction,
-    row: &NodeRow,
-) -> Result<(), DbErr> {
-    nodes::Entity::insert(nodes::ActiveModel {
-        seq: Set(row.seq),
+/// The shared insert columns. `seq` is the one difference between a new node
+/// (`NotSet`) and a replay that restores the historical row id and values.
+fn node_insert_model(row: &NodeRow, seq: ActiveValue<i64>) -> nodes::ActiveModel {
+    nodes::ActiveModel {
+        seq,
         id: Set(row.id.clone()),
         kind: Set(row.kind.clone()),
         title: Set(row.title.clone()),
@@ -99,8 +43,51 @@ pub(in crate::mutation) fn insert_row_tx(
         rev: Set(row.rev),
         created_at: Set(row.created_at),
         updated_at: Set(row.updated_at),
+    }
+}
+
+pub(in crate::mutation) fn insert_node_tx(
+    txn: &DatabaseTransaction,
+    node: &NodeInput,
+) -> Result<NodeRow, DbErr> {
+    let now = now_ms();
+    let tags = canonical_tags(&node.tags);
+    let row = NodeRow {
+        // Placeholder; the database assigns the sequence for a fresh insert.
+        seq: 0,
+        id: node.id.clone(),
+        kind: node.kind.clone(),
+        title: node.title.clone(),
+        body: node.body.clone(),
+        tags: tags_from(&tags),
+        x: node.x,
+        y: node.y,
+        width: node.width,
+        height: node.height,
+        z: node.z,
+        data_json: node.data_json.clone().unwrap_or_else(|| "{}".to_owned()),
+        settings_json: node
+            .settings_json
+            .clone()
+            .unwrap_or_else(|| "{}".to_owned()),
+        status: "idle".to_owned(),
+        output_batch_id: None,
+        rev: 1,
+        created_at: now,
+        updated_at: now,
+    };
+    let inserted = nodes::Entity::insert(node_insert_model(&row, NotSet)).exec(txn)?;
+    Ok(NodeRow {
+        seq: inserted.last_insert_id,
+        ..row
     })
-    .exec(txn)?;
+}
+
+pub(in crate::mutation) fn insert_row_tx(
+    txn: &DatabaseTransaction,
+    row: &NodeRow,
+) -> Result<(), DbErr> {
+    nodes::Entity::insert(node_insert_model(row, Set(row.seq))).exec(txn)?;
     Ok(())
 }
 

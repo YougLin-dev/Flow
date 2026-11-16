@@ -5,7 +5,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use sea_orm::{ColumnTrait, DatabaseConnection, DbErr, EntityTrait, QueryFilter, QueryOrder};
 
 use super::Mutation;
-use super::support::{input_row, node_row};
+use super::support::{edge_input_row, input_row, node_row};
 use super::tx::inputs::{
     delete_input_tx, find_input_tx, inputs_for_node_tx, insert_input_row_tx, max_input_position_tx,
     write_input_port_positions_tx,
@@ -236,20 +236,7 @@ pub fn sync_inputs(conn: &DatabaseConnection, node_id: String) -> Result<History
                 if item.port_id != edge.from_port {
                     continue;
                 }
-                let row = InputRow {
-                    id: format!("input-{}-{}", edge.id, item.id),
-                    node_id: node_id.clone(),
-                    position: 0,
-                    port_id: edge.to_port.clone(),
-                    kind: item.kind.clone(),
-                    origin: "edge".to_owned(),
-                    edge_id: Some(edge.id.clone()),
-                    item_id: Some(item.id.clone()),
-                    asset_id: item.asset_id.clone(),
-                    text: item.text.clone(),
-                    meta_json: item.meta_json.clone(),
-                    created_at: now_ms(),
-                };
+                let row = edge_input_row(&edge.id, &node_id, &edge.to_port, 0, &item);
                 rebuilt.entry(row.port_id.clone()).or_default().push(row);
             }
         }

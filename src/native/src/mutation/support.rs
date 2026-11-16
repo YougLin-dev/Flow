@@ -1,7 +1,33 @@
 //! Row conversions and tag helpers.
 
-use crate::entity::{edges, node_inputs, nodes};
+use crate::clock::now_ms;
+use crate::entity::{edges, node_inputs, nodes, result_items};
 use crate::history::{EdgeRow, InputRow, NodeRow};
+
+/// The snapshot row an edge contributes for one batch item. The caller owns
+/// the position; the id scheme is shared by connect and input sync.
+pub(in crate::mutation) fn edge_input_row(
+    edge_id: &str,
+    node_id: &str,
+    port_id: &str,
+    position: i32,
+    item: &result_items::Model,
+) -> InputRow {
+    InputRow {
+        id: format!("input-{edge_id}-{}", item.id),
+        node_id: node_id.to_owned(),
+        position,
+        port_id: port_id.to_owned(),
+        kind: item.kind.clone(),
+        origin: "edge".to_owned(),
+        edge_id: Some(edge_id.to_owned()),
+        item_id: Some(item.id.clone()),
+        asset_id: item.asset_id.clone(),
+        text: item.text.clone(),
+        meta_json: item.meta_json.clone(),
+        created_at: now_ms(),
+    }
+}
 
 /// The canonical `nodes.tags` form: one trimmed, non-empty tag per line. The
 /// v1 CHECK forbids leading, trailing and doubled newlines, so a tag that

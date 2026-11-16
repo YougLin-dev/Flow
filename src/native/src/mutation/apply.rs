@@ -4,7 +4,7 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use sea_orm::{
     ActiveValue::{Set, Unchanged},
-    ColumnTrait, DatabaseConnection, DatabaseTransaction, DbErr, EntityTrait, QueryFilter,
+    DatabaseConnection, DatabaseTransaction, DbErr, EntityTrait,
 };
 
 use super::support::node_row;
@@ -13,7 +13,8 @@ use super::tx::edges::{
     find_edge_opt_tx, find_edge_tx, insert_edge_row_tx, replace_edge_row_tx,
 };
 use super::tx::inputs::{
-    delete_input_tx, inputs_for_nodes_tx, restore_input_group_tx, write_input_port_positions_tx,
+    EdgeInputsToDelete, delete_input_tx, delete_inputs_for_edge_tx, inputs_for_nodes_tx,
+    restore_input_group_tx, write_input_port_positions_tx,
 };
 use super::tx::nodes::{
     apply_settings_tx, delete_node_tx, find_node_by_seq_opt_tx, find_node_opt_tx, find_node_tx,
@@ -328,13 +329,11 @@ pub fn apply_ops(conn: &DatabaseConnection, ops: &[HistoryOp]) -> Result<ApplyOu
                     // captured may be stale. Remove every row the edge
                     // contributed; the entry's InsertInput ops restore the
                     // state this replace returns to.
-                    let rows = node_inputs::Entity::find()
-                        .filter(node_inputs::Column::EdgeId.eq(row.id.clone()))
-                        .all(txn)?;
-                    for input in &rows {
-                        delete_input_tx(txn, &input.id)?;
-                        if touched.insert(input.node_id.clone()) {
-                            changed.push(node_row(&touch_node_tx(txn, &input.node_id)?).summary());
+                    let affected =
+                        delete_inputs_for_edge_tx(txn, &row.id, EdgeInputsToDelete::AllForEdge)?;
+                    for node_id in affected {
+                        if touched.insert(node_id.clone()) {
+                            changed.push(node_row(&touch_node_tx(txn, &node_id)?).summary());
                         }
                     }
                     let from = find_node_tx(txn, &row.from_id)?;
@@ -348,13 +347,11 @@ pub fn apply_ops(conn: &DatabaseConnection, ops: &[HistoryOp]) -> Result<ApplyOu
                     // under the source's current item ids, so undo/redo cannot
                     // rely on the ids the history captured: remove every row
                     // the edge contributed.
-                    let rows = node_inputs::Entity::find()
-                        .filter(node_inputs::Column::EdgeId.eq(id.clone()))
-                        .all(txn)?;
-                    for row in &rows {
-                        delete_input_tx(txn, &row.id)?;
-                        if touched.insert(row.node_id.clone()) {
-                            changed.push(node_row(&touch_node_tx(txn, &row.node_id)?).summary());
+                    let affected =
+                        delete_inputs_for_edge_tx(txn, id, EdgeInputsToDelete::AllForEdge)?;
+                    for node_id in affected {
+                        if touched.insert(node_id.clone()) {
+                            changed.push(node_row(&touch_node_tx(txn, &node_id)?).summary());
                         }
                     }
                     delete_edge_tx(txn, id)?;

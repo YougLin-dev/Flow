@@ -8,14 +8,14 @@ use sea_orm::{
     ColumnTrait, Condition, DatabaseTransaction, DbErr, EntityTrait, QueryFilter,
 };
 
-use crate::clock::now_ms;
 use crate::entity::{edges, nodes};
 use crate::history::{EdgeRow, HistoryOp, InputRow};
 use crate::types::{EdgeInput, EdgePoint, EdgeSummary};
 
-use crate::mutation::support::edge_row;
+use crate::mutation::support::{edge_input_row, edge_row};
 use crate::mutation::tx::inputs::{
-    delete_input_tx, inputs_for_edge_tx, insert_input_row_tx, max_input_position_tx,
+    EdgeInputsToDelete, delete_inputs_for_edge_tx, inputs_for_edge_tx, insert_input_row_tx,
+    max_input_position_tx,
 };
 use crate::mutation::tx::nodes::{find_node_tx, touch_node_tx};
 use crate::mutation::tx::runs::items_for_batch_tx;
@@ -26,6 +26,34 @@ pub(in crate::mutation) struct ConnectedEdge {
     pub(in crate::mutation) target: nodes::Model,
     pub(in crate::mutation) forward: Vec<HistoryOp>,
     pub(in crate::mutation) inverse: Vec<HistoryOp>,
+}
+
+/// Snapshots the source's current batch on `from_port` into the target's
+/// `to_port` input list, starting after that port's last input. Returns the
+/// inserted rows in position order; an empty source batch snapshots nothing.
+pub(in crate::mutation) fn snapshot_inputs_tx(
+    txn: &DatabaseTransaction,
+    edge_id: &str,
+    source: &nodes::Model,
+    to_id: &str,
+    from_port: &str,
+    to_port: &str,
+) -> Result<Vec<InputRow>, DbErr> {
+    let mut inputs = Vec::new();
+    let mut position = max_input_position_tx(txn, to_id, to_port)?;
+    let Some(batch_id) = &source.output_batch_id else {
+        return Ok(inputs);
+    };
+    for item in items_for_batch_tx(txn, batch_id)? {
+        if item.port_id != from_port {
+            continue;
+        }
+        let row = edge_input_row(edge_id, to_id, to_port, position, &item);
+        insert_input_row_tx(txn, &row)?;
+        inputs.push(row);
+        position += 1;
+    }
+    Ok(inputs)
 }
 
 /// The change set's edge summary, with both ports for a scene that holds
@@ -74,32 +102,17 @@ pub(in crate::mutation) fn connect_edge_tx(
     let edge = insert_edge_tx(txn, input)?;
     let mut forward = vec![HistoryOp::InsertEdge(edge.clone())];
     let mut desired_inverse = Vec::new();
-    let mut position = max_input_position_tx(txn, &input.to_id, &input.to_port)?;
-
-    if let Some(batch_id) = &source.output_batch_id {
-        for item in items_for_batch_tx(txn, batch_id)? {
-            if item.port_id != input.from_port {
-                continue;
-            }
-            let row = InputRow {
-                id: format!("input-{}-{}", edge.id, item.id),
-                node_id: input.to_id.clone(),
-                position,
-                port_id: input.to_port.clone(),
-                kind: item.kind.clone(),
-                origin: "edge".to_owned(),
-                edge_id: Some(edge.id.clone()),
-                item_id: Some(item.id.clone()),
-                asset_id: item.asset_id.clone(),
-                text: item.text.clone(),
-                meta_json: item.meta_json.clone(),
-                created_at: now_ms(),
-            };
-            insert_input_row_tx(txn, &row)?;
-            forward.push(HistoryOp::InsertInput(row.clone()));
-            desired_inverse.push(HistoryOp::DeleteInput { id: row.id });
-            position += 1;
-        }
+    let inputs = snapshot_inputs_tx(
+        txn,
+        &edge.id,
+        &source,
+        &input.to_id,
+        &input.from_port,
+        &input.to_port,
+    )?;
+    for row in &inputs {
+        forward.push(HistoryOp::InsertInput(row.clone()));
+        desired_inverse.push(HistoryOp::DeleteInput { id: row.id.clone() });
     }
 
     let target = touch_node_tx(txn, &input.to_id)?;
@@ -282,9 +295,7 @@ pub(in crate::mutation) fn reconcile_ports_tx(
             continue;
         }
         let inputs = inputs_for_edge_tx(txn, &edge.id)?;
-        for input in &inputs {
-            delete_input_tx(txn, &input.id)?;
-        }
+        delete_inputs_for_edge_tx(txn, &edge.id, EdgeInputsToDelete::Captured(&inputs))?;
         delete_edge_tx(txn, &edge.id)?;
         if edge.to_id != node_id {
             survivors.insert(edge.to_id.clone());

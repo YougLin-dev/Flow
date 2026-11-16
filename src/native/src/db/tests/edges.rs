@@ -124,6 +124,88 @@ fn connects_several_sources_in_one_history_step() {
 }
 
 #[test]
+fn deleting_a_connected_edge_removes_and_restores_its_snapshot() {
+    let db = Database::open(":memory:").expect("open");
+    db.insert_nodes(vec![
+        node("a", "A", "", &[], 0.0, 0.0),
+        node("t", "T", "", &[], 400.0, 0.0),
+    ])
+    .expect("insert");
+    db.save_run(
+        ResultBatchInput {
+            id: "batch-a".to_owned(),
+            node_id: "a".to_owned(),
+            trigger: "manual".to_owned(),
+            provider: "manual".to_owned(),
+            model: String::new(),
+            params_json: "{}".to_owned(),
+            status: "done".to_owned(),
+            error: None,
+        },
+        vec![ResultItemInput {
+            id: "item-a".to_owned(),
+            position: 0.0,
+            port_id: "out".to_owned(),
+            kind: "text".to_owned(),
+            text: "hello".to_owned(),
+            asset_id: None,
+            meta_json: None,
+        }],
+    )
+    .expect("save run");
+    connect(&db, "e1", "a", "t");
+    assert_eq!(
+        db.node_detail("t".to_owned())
+            .expect("detail")
+            .expect("t detail")
+            .inputs
+            .len(),
+        1,
+        "connect snapshots the source batch"
+    );
+    // Undo below must target the delete, not the connect that made the rows.
+    db.clear_history().expect("clear connect history");
+    // With the FK on, deleting the edge cascades the snapshot rows and hides
+    // a regression where delete_edges stops deleting them explicitly.
+    direct_write(&db, "PRAGMA foreign_keys = OFF");
+
+    let removed = db.delete_edges(vec!["e1".to_owned()]).expect("delete e1");
+    assert_eq!(removed.changes.edges_removed, vec!["e1".to_owned()]);
+    assert_eq!(
+        db.node_detail("t".to_owned())
+            .expect("detail")
+            .expect("t detail")
+            .inputs
+            .len(),
+        0,
+        "delete removes the edge's snapshot rows"
+    );
+
+    db.undo().expect("undo the delete");
+    let restored = db
+        .node_detail("t".to_owned())
+        .expect("detail")
+        .expect("t detail");
+    assert_eq!(restored.inputs.len(), 1);
+    assert_eq!(restored.inputs[0].id, "input-e1-item-a");
+    assert_eq!(restored.inputs[0].text, "hello");
+    assert_eq!(restored.inputs[0].position, 0.0);
+    assert_eq!(restored.inputs[0].edge_id.as_deref(), Some("e1"));
+    assert_eq!(restored.inputs[0].item_id.as_deref(), Some("item-a"));
+
+    db.redo().expect("redo the delete");
+    assert_eq!(
+        db.node_detail("t".to_owned())
+            .expect("detail")
+            .expect("t detail")
+            .inputs
+            .len(),
+        0
+    );
+    direct_write(&db, "PRAGMA foreign_keys = ON");
+}
+
+#[test]
 fn snapshots_edges_into_ordered_inputs_and_undoes_their_removal() {
     let db = Database::open(":memory:").expect("open");
     db.insert_nodes(vec![

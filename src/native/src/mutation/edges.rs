@@ -8,17 +8,13 @@ use super::Mutation;
 use super::support::{edge_row, node_row};
 use super::tx::edges::{
     already_connected_tx, connect_edge_tx, delete_edge_tx, edge_summary, find_edge_tx,
-    insert_edge_tx, replace_edge_row_tx,
+    insert_edge_tx, replace_edge_row_tx, snapshot_inputs_tx,
 };
-use super::tx::inputs::{
-    delete_input_tx, inputs_for_edge_tx, insert_input_row_tx, max_input_position_tx,
-};
+use super::tx::inputs::{EdgeInputsToDelete, delete_inputs_for_edge_tx, inputs_for_edge_tx};
 use super::tx::nodes::{find_node_tx, touch_node_tx};
-use super::tx::runs::items_for_batch_tx;
 use super::tx::{finish_tx, no_op};
-use crate::clock::now_ms;
 use crate::entity::nodes as node_rows;
-use crate::history::{EdgeRow, HistoryOp, InputRow};
+use crate::history::{EdgeRow, HistoryOp};
 use crate::types::{ChangeSet, EdgeInput};
 
 pub fn insert_edges(conn: &DatabaseConnection, inputs: Vec<EdgeInput>) -> Result<Mutation, String> {
@@ -69,8 +65,8 @@ pub fn delete_edges(conn: &DatabaseConnection, ids: Vec<String>) -> Result<Mutat
         for id in &ids {
             let row = find_edge_tx(txn, id)?;
             let inputs = inputs_for_edge_tx(txn, &row.id)?;
+            delete_inputs_for_edge_tx(txn, &row.id, EdgeInputsToDelete::Captured(&inputs))?;
             for input in &inputs {
-                delete_input_tx(txn, &input.id)?;
                 forward.push(HistoryOp::DeleteInput {
                     id: input.id.clone(),
                 });
@@ -182,9 +178,7 @@ pub fn update_edge(conn: &DatabaseConnection, input: EdgeInput) -> Result<Mutati
         }
 
         let old_inputs = inputs_for_edge_tx(txn, &input.id)?;
-        for row in &old_inputs {
-            delete_input_tx(txn, &row.id)?;
-        }
+        delete_inputs_for_edge_tx(txn, &input.id, EdgeInputsToDelete::Captured(&old_inputs))?;
 
         let after = replace_edge_row_tx(
             txn,
@@ -211,32 +205,16 @@ pub fn update_edge(conn: &DatabaseConnection, input: EdgeInput) -> Result<Mutati
         for row in &old_inputs {
             forward.push(HistoryOp::DeleteInput { id: row.id.clone() });
         }
-        let mut new_inputs = Vec::new();
-        let mut position = max_input_position_tx(txn, &input.to_id, &input.to_port)?;
-        if let Some(batch_id) = &source.output_batch_id {
-            for item in items_for_batch_tx(txn, batch_id)? {
-                if item.port_id != input.from_port {
-                    continue;
-                }
-                let row = InputRow {
-                    id: format!("input-{}-{}", after.id, item.id),
-                    node_id: input.to_id.clone(),
-                    position,
-                    port_id: input.to_port.clone(),
-                    kind: item.kind.clone(),
-                    origin: "edge".to_owned(),
-                    edge_id: Some(after.id.clone()),
-                    item_id: Some(item.id.clone()),
-                    asset_id: item.asset_id.clone(),
-                    text: item.text.clone(),
-                    meta_json: item.meta_json.clone(),
-                    created_at: now_ms(),
-                };
-                insert_input_row_tx(txn, &row)?;
-                forward.push(HistoryOp::InsertInput(row.clone()));
-                new_inputs.push(row);
-                position += 1;
-            }
+        let new_inputs = snapshot_inputs_tx(
+            txn,
+            &after.id,
+            &source,
+            &input.to_id,
+            &input.from_port,
+            &input.to_port,
+        )?;
+        for row in &new_inputs {
+            forward.push(HistoryOp::InsertInput(row.clone()));
         }
 
         let mut stale_targets = vec![before.to_id.clone(), input.to_id.clone()];
