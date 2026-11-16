@@ -1147,8 +1147,8 @@ Risky; parameterize, do not collapse:
   production split. Spell them `crate::scene`/`crate::search`/`crate::gc`/`crate::history`
   and `crate::db::...`; the note is in `db/tests/mod.rs`. The `nodes`/`edges`
   test modules also shadow the SeaORM entities (imported as
-  `node_rows`/`edge_rows`); `assets` is the next entity collision, addressed
-  as `crate::entity::assets` if needed.
+  `node_rows`/`edge_rows`). The `assets` test module shadows the asset entity;
+  the test that uses it imports `crate::entity::assets` locally.
   Benchmark-only imports (`AtomicU64`, `fs`, `Path`, `PathBuf`, `now_ms`,
   `OVERVIEW_LIMIT`, `NODE_LIMIT`) must be imported explicitly in
   `benchmark.rs`; keep `mod benchmark;` in `tests/mod.rs` or the ignored
