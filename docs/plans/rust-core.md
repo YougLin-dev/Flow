@@ -1,8 +1,11 @@
 # Rust document core plan
 
-- **Status:** P0, P1 and P2 complete; P3 pending. The document core and its
-  contract are current; the canvas this plan calls a Leafer scene is now a
-  native view tree ([ADR 0004](../adr/0004-native-view-canvas.md)).
+- **Status:** P0–P2 complete. The implemented core covers asset
+  import/hash/dedup/metadata, runs, the project layer, the frozen v1 schema and
+  the Phase 6 Rust split. Asset-library browsing and thumbnail generation are
+  deferred, and P4 hardening remains. The canvas this plan calls a Leafer
+  scene is now a native view tree
+  ([ADR 0004](../adr/0004-native-view-canvas.md)).
 - **Date:** 2026-11-07
 - **Related:** [ADR 0002](../adr/0002-rust-document-core.md),
   [ADR 0003](../adr/0003-orm-seaorm.md)
@@ -37,7 +40,7 @@ App.tsx / TSX / QuickJS
             ├─ Document            commands, revisions, undo/redo
             ├─ db                  worker handle, startup, WAL
             ├─ SeaORM + SeaQuery   entities, dynamic filters, transactions
-            ├─ SQLite              WAL, schema_migrations
+            ├─ SQLite              WAL, frozen v1 schema
             ├─ FTS5                full-text search
             ├─ RTree               viewport queries
             └─ assets              content-addressed files and metadata
@@ -65,21 +68,23 @@ src/
     src/
       lib.rs                       #[native_module("@flow/native")]
       types.rs                     shared JsObject/PropEnum types
-      db.rs                        worker handle, pragmas, startup
+      db/                          handle, worker, open, session, verify, undo, metadata
       entity/                      SeaORM entities, one file per table
-      schema.rs                    table creation and virtual-table DDL
-      mutation.rs                  transactional commands and undo payloads
+      schema/                      frozen v1 DDL, open guard, package, maintenance, reset
+      mutation/                    command families, replay and tx/support helpers
+      rows.rs                      Model → summary conversions shared by reads/writes
+      asset.rs                     content-addressed files and asset metadata
       viewport.rs                  RTree viewport reads
       search.rs                    FTS5 search and short-query fallback
       history.rs                   reversible command operations
-      assets.rs                    planned: content-addressed files and metadata
 ```
 
 Use the specifier `@flow/native` rather than `flow/native` to avoid colliding
 with the existing `src/flow/` foundation directory. The mixed app keeps
 `App.tsx` as its entry; do not add a Rust `"root"` component for this design.
 
-The crate depends on `nsh-core` 0.4.0, `sea-orm-sync` 2.0.4 with SeaQuery 1.0
+The crate depends on `nsh-core` from the pinned fork commit (0.5.0 in
+`Cargo.lock`), `sea-orm-sync` 2.0.4 with SeaQuery 1.0
 (MIT/Apache-2.0), `rusqlite` 0.38 with bundled SQLite (MIT; SQLite itself is
 public domain) and `serde_json` 1.0 (MIT/Apache-2.0). `sea-orm-sync`'s
 `rusqlite` feature selects the sync driver; the direct `rusqlite` dependency
@@ -89,9 +94,12 @@ license/maintenance review.
 
 ## Data model
 
-One SQLite database per app, with `document_id` columns for future multiple
-canvases. Asset metadata is global. The database lives under NSH's app data
-directory; P0 confirms how the Rust side receives that path from the host.
+The sketch below is the original P0 proposal. The implemented schema is the
+frozen v1 script in `schema/v1.sql` (one project package is one database plus
+its assets directory): `assets_fts`, `schema_migrations`, `documents` and the
+`document_id` columns below were replaced by the v1 document table and
+trigger-maintained indexes; see
+[database-design](database-design.md).
 
 ```sql
 PRAGMA journal_mode = WAL;
@@ -188,19 +196,23 @@ Implementation notes:
 
 - `nodes.seq` is the internal integer key. `nodes_rtree.id` and the FTS5
   `rowid` both point at it; `nodes.id` remains the stable public identifier.
-- `nodes_fts` and `assets_fts` are regular FTS5 tables keyed by the source
-  row's rowid. Every write updates the FTS row in the same transaction as the
-  source row; no separate index file or rebuild step.
+- `nodes_fts` is a regular FTS5 table keyed by the source row's rowid. Every
+  write updates the FTS row in the same transaction as the source row; no
+  separate index file or rebuild step.
 - FTS5 `trigram` handles CJK substrings; queries shorter than three characters
   need a `LIKE` fallback with a limit, or a later bigram table if measurements
   show it is needed. Do not implement a custom tokenizer in the first version.
 - Asset files are content-addressed under the app data directory; SQLite
-  stores metadata only. `assets_fts` is keyed by `assets.rowid`.
-- Schema changes use the `schema_migrations` table and ordered SeaORM schema
-  steps. Back up the database before a destructive migration.
-- The ORM owns ordinary tables. FTS5/RTree virtual-table DDL, `MATCH`,
-  `snippet()`, `bm25()` and the escaped `LIKE` fallback are the only
-  handwritten SQL, isolated in `schema.rs` and `search.rs`.
+  stores metadata only.
+- The release schema is the frozen v1 script in `schema/v1.sql`, included
+  verbatim by `MIGRATION_1`; there is no entity-generated DDL and no migration
+  chain before the first release. Pre-release data is reset, not migrated.
+- The ORM owns ordinary tables. Handwritten SQLite SQL is confined to the
+  frozen DDL, open and reset statements in `schema/v1.sql`, `schema/v1.rs`,
+  `schema/package.rs` and `schema/reset.rs`; the FTS5/RTree virtual-table
+  adapters and repairs in `search.rs`, `edge_index.rs` and
+  `schema/maintenance.rs`; and the connection/integrity PRAGMAs in
+  `db/worker.rs` and `db/verify.rs`.
 - One dedicated database worker owns the single SeaORM connection and receives
   typed jobs from NSH's blocking pool. SeaORM's sync Rusqlite connection is not
   `Send`, and a single writer is the correct SQLite model anyway.
@@ -316,7 +328,8 @@ Use SQLite FTS5 as the only full-text engine:
   it.
 - For 1–2 character CJK queries, use a bounded `LIKE` fallback. If that is too
   slow in P0, add a bigram side table; do not replace FTS5 with a JS index.
-- Search across documents is a `document_id` filter on the same index.
+- Search is per package: the open document's `nodes_fts` is the only index in
+  scope.
 
 ## Viewport and Leafer scene
 
@@ -821,22 +834,23 @@ Windows-host screenshot of the palette and its results. P2 is done.
 
 - Rust unit tests use `:memory:` databases; the reopen, path-with-spaces and
   benchmark-seed tests use real files. Every test gets a fresh database.
-- There is no full migration-from-old-schema test yet; `check_legacy_schema`
-  runs on every open and a test proves it rejects a pre-`seq` database even
-  when the old database recorded migration 1.
+- The frozen v1 schema has no legacy migration chain: `schema/v1.rs` inspects
+  `application_id`/`user_version` and refuses foreign, newer, older or
+  incomplete packages; tests cover each `FileState`.
 - Search fixtures include English, Chinese and mixed text; they assert the
   1–2 character LIKE fallback, per-term matching for mixed short/long queries,
   the trigram path, kind filters and a zero limit.
 - Mutation tests cover insert, move, bounds, text and its FTS update, delete
   with edges, undo, redo and index restoration. Nested transactions and
   1,000-node batches still lack Rust tests.
-- `flow/scene.test.ts` covers viewport diffing, the low-zoom card cap,
+- `flow/canvas/model/scene/scene.test.ts` covers viewport diffing, the low-zoom card cap,
   selected-card pinning, change-set card creation, pinned connectors and
   transform-free commits; `App.test.tsx` covers add, delete (through search),
   selection, panning, zooming and the search palette.
 - The 100k benchmark is an ignored Rust test; `bun run test:bench` runs it and
-  reports build, viewport, scene, bounds, selective/common/CJK search timings.
-  It does not print open, commit or undo timings. `bun run test:100k` seeds 100k
+  reports build, viewport, scene, bounds, selective/common/CJK search,
+  setNodeBounds/undo/redo, open/migrate/recovery, gc and compactBounds
+  timings. `bun run test:100k` seeds 100k
   nodes and drives the real desktop host through pan, zoom, search, reveal and
   Fit, saving screenshots under `.nsh/bench/` for manual review.
 - TSX integration tests use `nsh test` with the Rust registry; `cargo test`
@@ -851,29 +865,32 @@ Windows-host screenshot of the palette and its results. P2 is done.
 
 ## Risks and mitigations
 
-| Risk                                          | Mitigation                                                                                                                    |
-| --------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------- |
-| Rust build/toolchain complexity               | P0 builds the mixed app on all three desktop targets; document C++/SDK prerequisites; CI matrix.                              |
-| FFI overhead or accidental blocking           | Worker thread, bulk APIs, revision change sets, no per-frame calls; measure p95.                                              |
-| FTS5 trigram index size and CJK short queries | Benchmark index size; use bounded LIKE fallback; add bigram table only if measured.                                           |
-| Leafer still cannot show 100k nodes           | Virtualization, selection pinning and a card cap are in; very low zoom still culls tiny cards (cluster/minimum-size pending). |
-| Asset display path                            | Verify `Image`/Leafer runtime file URLs in P1 before building the library UI.                                                 |
-| SQLite writer contention                      | One dedicated writer thread and WAL; add a read-only pool only if a measured read path blocks writes.                         |
-| Undo memory growth                            | Cap in-memory history; store inverse commands, not snapshots.                                                                 |
-| Schema/data loss                              | Migrations with backups, WAL checkpoint, integrity check, export path.                                                        |
-| Mixed API changes in NSH 0.x                  | Pin the `nsh` CLI version in the repo; keep the Rust boundary small.                                                          |
-| Silent index drift                            | FTS and RTree updates are in the same transaction as node writes; tests cover undo and delete.                                |
+| Risk                                          | Mitigation                                                                                                                                  |
+| --------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------- |
+| Rust build/toolchain complexity               | P0 builds the mixed app on all three desktop targets; document C++/SDK prerequisites; CI matrix.                                            |
+| FFI overhead or accidental blocking           | Worker thread, bulk APIs, revision change sets, no per-frame calls; measure p95.                                                            |
+| FTS5 trigram index size and CJK short queries | Benchmark index size; use bounded LIKE fallback; add bigram table only if measured.                                                         |
+| Leafer still cannot show 100k nodes           | Virtualization, selection pinning and a card cap are in; very low zoom still culls tiny cards (cluster/minimum-size pending).               |
+| Asset display path                            | Verify `Image`/Leafer runtime file URLs in P1 before building the library UI.                                                               |
+| SQLite writer contention                      | One dedicated writer thread and WAL; add a read-only pool only if a measured read path blocks writes.                                       |
+| Undo memory growth                            | Cap in-memory history by entry/byte budget; forward and inverse `HistoryOp`s are field-scoped, with row snapshots where restore needs them. |
+| Schema/data loss                              | Migrations with backups, WAL checkpoint, integrity check, export path.                                                                      |
+| Mixed API changes in NSH 0.x                  | Pin the `nsh` CLI version in the repo; keep the Rust boundary small.                                                                        |
+| Silent index drift                            | FTS and RTree updates are in the same transaction as node writes; tests cover undo and delete.                                              |
 
 ## Open questions
 
-- One database for all documents or one file per document; start with one file
-  and `document_id`, split only if backup/export requirements demand it.
+- One package is one SQLite database plus its assets directory; the pre-v1
+  `document_id` multi-canvas model was dropped. Backup/export operates on the
+  package.
 - Whether very low zoom should draw a minimum-size card, a cluster summary or
   a density texture. Leafer currently culls cards only a few pixels tall, so
   the fitted 100k view is blank until the user zooms in slightly.
 - Whether undo must survive process restarts; if yes, persist a bounded
   command log in P4.
-- Whether search should span all documents or only the open canvas.
+- Whether a future release needs cross-package title search in the project
+  list; per-package content search is fixed and cross-package content search
+  is out of scope.
 - Which filters the palette needs once image, text and asset nodes exist; the
   current UI exposes the kind filter that the backend already supports.
 - The runtime asset URL strategy for locally imported files.
@@ -883,21 +900,24 @@ Windows-host screenshot of the palette and its results. P2 is done.
 - SQLite's RTree stores 32-bit floats while nodes use f64. Very large
   infinite-canvas coordinates will round; decide on a scaled/integer index or
   another spatial scheme before coordinates approach that precision limit.
-- `node_assets` links are cascaded away with a deleted node but are not part of
-  the undo payload. Capture and restore them when P3 adds asset mutations.
+- The v1 schema has no `node_assets` table: asset references live on
+  `result_items.asset_id` and `node_inputs.asset_id`. Undo restores an input
+  row, including its `asset_id`, from the `HistoryOp` snapshot; `HistoryRefs`
+  only invalidate overlapping history entries.
 - The Leafer adapter rasterizes a layer whose compositing must stay inside it
   as one SVG image; that path needs an NSH host whose canvas draws SVG (see
   [../nsh.md](../nsh.md)). Images referenced by `asset:`/file/URL inside such
   a layer are not embedded yet, and a layer containing patterned strokes or
   text rasterizes whole: keep those out of very large layers.
-- Seeding writes nodes and edges in two transactions. A crash between them
-  leaves a partial demo that is not reseeded because the document is non-empty.
+- Seeding writes nodes, edges, batches and inputs in one transaction. A crash
+  leaves no partial demo, and the non-empty guard prevents a second seed.
 - Database failures currently reach only `console.error`; surface an error
   state to the user before release.
 
 ## Rollback
 
-P0, P1 and P2 are implemented. Rolling back to the TSX-only scene is a git
-revert of the native crate, `FlowScene` and the search palette; there is no
-shipped user data format to preserve yet. Once packaged data exists, a rollback must export or migrate
-`flow.db` first.
+The Rust core through the frozen v1 schema is implemented. Rolling back to the
+TSX-only scene is a git revert of the native crate, `FlowScene` and the search
+palette; there is no shipped user data format to preserve yet. Once packaged
+data exists, a rollback must export or migrate each project package
+(`project.db` and `assets/`) first.

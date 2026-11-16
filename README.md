@@ -205,9 +205,10 @@ src/                   the NSH app: its root, entry, config and assets
     src/db/undo.rs     undo/redo and history helpers
     src/db/metadata.rs counts, bounds cache and emptiness
     src/entity/        SeaORM entities, one file per table
-    src/schema.rs      table creation and the virtual-table adapter
-    src/mutation/      transactional commands and undo payloads, with shared
-                       row/tag helpers and tx/ families
+    src/schema/        frozen v1 DDL, open guard, package and maintenance
+    src/mutation/      command families (nodes, edges, inputs, manual, runs,
+                       seed, apply) with shared support and tx helpers
+    src/rows.rs        Model → summary conversions shared by reads and writes
     src/search.rs      FTS5 search and the short-query fallback
     src/viewport.rs    RTree viewport reads
     src/scene.rs       visible nodes + edges, and document bounds

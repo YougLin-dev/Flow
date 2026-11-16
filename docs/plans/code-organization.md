@@ -7,7 +7,8 @@
   and search areas, the probes, the page area and workspace split, and full
   structure enforcement). Phase 6/7 were re-baselined on 2026-11-16 after the
   database v1 and project-layer work; §16.3 records the measurements and
-  decisions, and the steps in §11 are the current cut.
+  decisions. Phase 6 is done (2026-11-16, §16.4); Phase 7's steps in §11 are
+  the current cut.
 - **Scope:** `src/` (TSX app) and `src/native/` (Rust document core).
 - **Related:** [standards](../standards.md), [architecture](../architecture.md),
   [conventions](../conventions.md), [testing](../testing.md),
@@ -1023,7 +1024,7 @@ src/native/src/
 ├── db/
 │   ├── mod.rs              Database handle, jobs and wrappers (run/run_mutation), fields
 │   ├── worker.rs           worker loop, open_connection, sqlite_url*/configure
-│   ├── open.rs             v1 open guard, identity/version, managed package open
+│   ├── open.rs             open entry points and managed package open (guard in schema/v1.rs)
 │   ├── session.rs          close/recovery, clean_shutdown, project_info/save_view, quit
 │   ├── verify.rs           integrity check and repair
 │   ├── undo.rs             undo/redo, empty_change, lock_history
@@ -1043,7 +1044,7 @@ src/native/src/
 │   ├── runs.rs             begin/settle/apply result/save run/status/recover
 │   ├── seed.rs             seed_document, empty_change_tx
 │   ├── apply.rs            apply_ops (history replay)
-│   ├── support.rs          Mutation::commit and pure assembly/conversions
+│   ├── support.rs          pure assembly/row+tag conversions (Mutation in mod.rs)
 │   └── tx/
 │       ├── mod.rs
 │       └── nodes.rs, edges.rs, inputs.rs, runs.rs
@@ -1051,16 +1052,18 @@ src/native/src/
 ├── document.rs             document row identity/revision (current_rev, bump_rev)
 ├── schema/
 │   ├── v1.rs               frozen DDL include + validators; v1/tests/* beside it
-│   ├── v1/tests/           shape, constraints, triggers, reset
+│   ├── v1/tests/           fixtures/open guard, shape, surface, constraints, producers, triggers
 │   ├── package.rs          checkpoint, clean/dirty, snapshot, identity rekey
 │   ├── maintenance.rs      FTS/RTree parity repair (verify calls it)
 │   └── reset.rs            dev-only destructive reset
-├── project/                managed root, store/lease, catalog and package ops
+├── project.rs              ProjectStore/ProjectLease FFI half + module declarations
+├── project/                catalog, package, lock, paths, create, commit and ops helpers (test_support in cfg(test))
+├── schema.rs               schema module declarations
 ├── history.rs              History/HistoryOp + row snapshots
 ├── asset.rs, gc.rs, viewport.rs, scene.rs, detail.rs, search.rs, edge_index.rs
 ├── fsutil.rs
 ├── entity/                 one file per table (unchanged)
-├── types.rs, clock.rs, constants.rs
+├── types.rs, clock.rs
 ```
 
 The old `store/` umbrella is dropped: the v1 work never created it, and the
@@ -1085,9 +1088,10 @@ Rules:
   `pub(in crate::mutation)` (or `pub(crate)`), not `pub(super)`; `pub(super)`
   only reaches the `tx` parent, not `mutation::nodes`/`mutation::edges`.
 - Keep one transaction per command, one worker job per command, and
-  `apply_ops` as the only replay path. `apply_ops` may call only `tx/*` and
-  `support`; calling a command would nest a transaction and double-bump the
-  revision.
+  `apply_ops` as the only replay path. `apply_ops` never calls a command
+  family: that would nest a transaction and double-bump the revision. It may
+  use the `tx/*` and `support` helpers plus the document, entity and edge-index
+  primitives it needs.
 - `sync_inputs` stays separate from the connect snapshot helper: it rebuilds
   positions from 0 per port; connect uses `max_input_position_tx` and
   `input-{edge}-{item}` ids.
@@ -1098,11 +1102,12 @@ Rules:
 ### 9.1 Deduplication, with safety notes
 
 Re-checked after database v1 (2026-11-16): the row conversions
-(top-level `rows.rs`), tag serialization, `stale_summaries_tx`,
-`Mutation::commit`, `ChangeSet::empty(rev)`, the connect/update snapshot
-helper and the two parameterized cases (delete-input modes, node insert)
-still apply. The FTS-refresh-for-update/replace item is obsolete: the v1
-write paths refresh their own indexes. Verify each target against the code
+(top-level `rows.rs`), tag serialization, `Mutation::commit`,
+`ChangeSet::empty(rev)`, the connect/update snapshot helper and the two
+parameterized cases (delete-input modes, node insert) still apply. The
+FTS-refresh-for-update/replace and `stale_summaries_tx` items are obsolete:
+the v1 write paths and triggers refresh their own indexes, and there is no
+`stale_summaries_tx` left to extract. Verify each target against the code
 when its family moves; do not carry an item whose code is gone.
 
 Safe extractions:
@@ -1111,11 +1116,8 @@ Safe extractions:
   (keep the `tags_json` `unwrap_or_default` fallback).
 - Tag serialization helper (preserve the error text).
 - Snapshot extraction for connect/update only.
-- `stale_summaries_tx` (order: self then descendants).
-- FTS refresh for update/replace paths only; insert paths have no `Model`,
-  only `last_insert_id`.
 - `Mutation::commit` as a pure assembler; it does **not** absorb
-  `bump_document_rev` (`recover_runs` bumps conditionally).
+  `document::bump_rev` (`recover_runs` bumps conditionally).
 - `ChangeSet::empty(rev)` must take the revision; a default `0` would break
   the TSX revision fence.
 
@@ -1167,11 +1169,12 @@ Risky; parameterize, do not collapse:
   test paths become `db::tests::benchmark::*`. Update
   `scripts/smoke-100k.mjs`, `docs/testing.md`, `docs/plans/rust-core.md` and
   the `database-design.md` status in the same PR. Make the smoke script
-  pre-delete `flow.db`/`-wal`/`-shm` and assert the seeder wrote the
-  fixture, so a filter mismatch fails instead of reusing a stale database.
+  pre-delete the `FLOW_BENCH_DB` database and its `-wal`, `-shm` and assets
+  directory, and assert the seeder wrote the fixture, so a filter mismatch
+  fails instead of reusing a stale database.
 - `schema/v1.rs` is 82% tests: move them to
-  `schema/v1/tests/{mod,shape,constraints,triggers}.rs`, splitting the
-  548-line shape test if it stays unwieldy. `v1.sql`, `MIGRATION_1` and the
+  `schema/v1/tests/{mod,shape,surface,constraints,producers,triggers}.rs`;
+  the old in-file shape test is split into shape and surface. `v1.sql`, `MIGRATION_1` and the
   pinned digest do not move; the assembled DDL must stay byte-identical.
   `schema/package.rs` tests may follow later; leave `project/catalog.rs` and
   `project/ops.rs` tests where they are until a measured need.
@@ -1187,8 +1190,8 @@ Risky; parameterize, do not collapse:
   top-level `rows.rs`.
 - `assets_fts` is absent from the frozen v1 schema; the old decision item is
   closed, not carried into Phase 6.
-- Virtual-table DDL lives in the frozen `schema/v1.rs`; correct the comment
-  in `entity/mod.rs` that names `search.rs`/`edge_index.rs`.
+- Virtual-table DDL lives in the frozen `schema/v1.sql`; the entity comment
+  already points there and to the `search.rs`/`edge_index.rs` adapters.
 - `sqlite_url*`, `configure` and `open_connection` stay `pub(crate)` `db`
   items; `project/` and `schema/` call them.
 - `store/` is not a Phase 6 target and `reads/` is a later optional mechanical
@@ -1309,12 +1312,13 @@ Explicitly update:
 - `docs/conventions.md`: add the glossary and placement tree; update the Rust
   file map.
 - `docs/testing.md`: fix the nonexistent `flow/edge-flow.test.ts`; update
-  every path reference (about 65 occurrences on 38 lines); update the 100k
-  benchmark filter name after Phase 6.
+  every path reference (about 65 occurrences on 38 lines); the 100k benchmark
+  filter is `db::tests::benchmark::*` (done in Phase 6).
 - `docs/node-editor.md`: update every path reference (about 30 occurrences
   on 26 lines).
-- `docs/plans/rust-core.md`: update the benchmark filter names after Phase 6.
-- `scripts/smoke-100k.mjs`: update the benchmark filter name after Phase 6.
+- `docs/plans/rust-core.md`: the benchmark filter names are updated (done in
+  Phase 6).
+- `scripts/smoke-100k.mjs`: the benchmark filter is updated (done in Phase 6).
 - `CLAUDE.md`: remove `src/tool.ts`, update canvas paths, add the area rule.
 - `docs/adr/0007-code-organization.md`: new ADR.
 - `docs/code-map.md`: new area/ownership table.
@@ -1530,6 +1534,9 @@ compatibility shims after a phase.
 
 ### Phase 6 — Rust core split (parallel with phases 2–5)
 
+**Status: done (2026-11-16).** Steps 6-0 through 6-10 landed; the final
+measurements and invariant checks are in §16.4.
+
 Re-baselined 2026-11-16 against the v1 core (§16.3). Each step or sub-step
 is one PR; none changes FFI names, worker jobs, transaction boundaries or the
 frozen v1 schema. Start with the docs cut (6-0), then move tests before production.
@@ -1562,12 +1569,13 @@ PR.
 6-7. **mutation: command families, one per PR.** nodes, edges, inputs,
 manual, runs, seed, apply (in that order). Keep one transaction per
 command, the `run`/`run_mutation` semantics and `apply_ops` as the only
-replay path, which may call only `tx/*` and `support`.
+replay path, which never calls a command family.
 6-8. **Deduplication.** Safe first: `ChangeSet::empty(rev)`,
 `Mutation::commit`, `rows.rs` conversions, tag helpers. Then the careful
 items with §9.1's parameterization: delete-input modes, connect/update
-snapshot, node builder, stale-summaries order. Run `bun run test:bench`
-and the 100k smoke after the careful half.
+snapshot and node builder (the stale-summaries and FTS-refresh items are
+obsolete in v1). Run `bun run test:bench` and the 100k smoke after the
+careful half.
 6-9. **Schema tests (recommended, separate).** Move `schema/v1.rs` tests to
 `schema/v1/tests/*`; change no SQL, `MIGRATION_1` or digest, and run the
 schema/reset tests before and after.
@@ -2020,10 +2028,11 @@ the by-default failures, the advisory Rust/budget channels and the nested
 part-folder walk; the final gate is 183 source files, 17 areas, 22 lint
 tests/169 expects and 550 app/Rust tests (548 passed, 2 pre-existing
 ignored benchmarks). §14 status at this point: gates green, no root modules,
-every area has a facade, lint/structure fail on violations, FlowPage is
-208 lines, and the §6.4 duplicates routed so far are cleared. Remaining §14
-items are the Rust core split (Phase 6) and the internal splits plus the
-remaining §6.4 sweep (Phase 7).
+every area has a facade, lint/structure fail on violations, FlowPage was
+208 lines when Phase 5 completed (269 raw lines now after the project layer),
+and the §6.4 duplicates routed so far are cleared. The Rust core
+split (Phase 6) is now done; the remaining §14 items are the internal splits
+and the remaining §6.4 sweep (Phase 7).
 
 ### 16.3 Phase 6/7 re-baseline after database v1 (2026-11-16)
 
@@ -2051,10 +2060,12 @@ Decisions:
   mechanical move.
 - `mutation.rs` splits support + tx first, then one command family per PR,
   with `manual.rs` and `seed.rs` so no production file grows past ~460 lines.
-  `apply_ops` may call only `tx/*` and `support`.
-- The FTS-refresh-for-update/replace dedup item is obsolete in the v1 paths;
-  the other §9.1 items remain. `assets_fts` is gone from the frozen schema,
-  and `bump_rev`/`current_rev` already live in `document.rs`.
+  `apply_ops` never calls a command family; it may use `tx/*`/`support` plus
+  the document, entity and edge-index primitives.
+- The FTS-refresh-for-update/replace and `stale_summaries_tx` dedup items are
+  obsolete in the v1 paths; the parameterized items remain and landed in 6-8.
+  `assets_fts` is gone from the frozen schema, and `bump_rev`/`current_rev`
+  already live in `document.rs`.
 - Schema test moves are in scope for `schema/v1.rs` (82% tests); moving
   `schema/package.rs` or `project/*` tests is optional later. `v1.sql`,
   `MIGRATION_1` and the pinned digest never move.
@@ -2064,6 +2075,47 @@ Decisions:
 - No FFI name, worker job, transaction boundary or frozen-schema change is
   part of either phase. Both start with a docs cut (6-0/7-0); Phase 7 can run
   alongside Phase 6 after the docs.
+
+### 16.4 Phase 6 close-out (2026-11-16)
+
+Phase 6 is complete. The final production layout is
+`db/{mod,worker,open,session,verify,undo,metadata,tests}`,
+`mutation/{mod,nodes,edges,inputs,manual,runs,seed,apply,support,tx}`,
+top-level `rows.rs`, and
+`schema/v1/tests/{mod,shape,surface,constraints,producers,triggers}`. Within
+the split, the largest production files are `db/mod.rs` (513 raw lines),
+`mutation/apply.rs` (437), `schema/v1.rs` (396, its tests moved out) and
+`mutation/nodes.rs` (358); the touched production modules are within the
+500-code-line budget when measured as documented (blank and comment lines
+excluded; inline test modules are not part of a file's production budget).
+Standalone test modules are outside the production budget:
+`db/tests/runs.rs` is 1,201 raw lines and `db/tests/benchmark.rs` 1,197. The
+pre-existing `project/{catalog,ops}.rs` and `history.rs` are outside Phase 6
+and unchanged.
+
+Deduplication (6-8) landed in two PRs: `ChangeSet::empty(rev)`,
+`Mutation::{commit,with_refs}`, the `rows.rs` `From<&Model>` conversions and
+shared tag/snapshot row helpers, then the parameterized delete-input modes,
+connect/update snapshot helper and node insert builder. The FTS-refresh item
+and `stale_summaries_tx` were re-checked against v1: the former is obsolete
+and the latter no longer exists, so neither was carried.
+
+Invariants verified at close-out:
+
+- `git diff 66c9847..HEAD -- src/native/src/lib.rs` is one added line
+  (`mod rows;`); the `#[native_module]` exports are unchanged.
+- The `Job` enum is token-identical to the pre-split `db.rs` (visibility and
+  whitespace aside).
+- `git diff 66c9847..HEAD -- src/native/src/schema/v1.sql` is empty and its
+  sha256 is still
+  `bba8ca75beab3ced9e0a7079d452dbe5e836a595c0e71a2e32cd1aed7424463d`;
+  `MIGRATION_1` still includes the file.
+- Every command keeps one `conn.transaction`, and `apply_ops` remains the only
+  replay path and never calls a command family.
+- Test evidence re-run during close-out on the f95fd73 tree: `cargo test` 272
+  passed / 2 ignored, `bun run test` 846 (844 passed, 2 skipped),
+  `bun run test:bench` 2 passed (66.78s), `bun run test:100k` 1 passed, and
+  `bun run test:host` 14 passed plus its 100k smoke 1 passed.
 
 ---
 
@@ -2197,17 +2249,17 @@ Re-baselined 2026-11-16 (§16.3). `Current` sizes are total / test lines.
 | `mutation.rs` manual/save-run/recover               | `mutation/manual.rs`, `mutation/runs.rs`                                                                                                                                                       |
 | `mutation.rs` seed                                  | `mutation/seed.rs`                                                                                                                                                                             |
 | `mutation.rs` `apply_ops`                           | `mutation/apply.rs`                                                                                                                                                                            |
-| `mutation.rs` `Mutation::commit`/pure helpers       | `mutation/support.rs`                                                                                                                                                                          |
+| `mutation.rs` `Mutation::commit`/pure helpers       | `mutation/mod.rs` (constructors) and `mutation/support.rs` (row/tag helpers)                                                                                                                   |
 | `mutation.rs` tx helpers                            | `mutation/tx/{mod,nodes,edges,inputs,runs}.rs`                                                                                                                                                 |
 | `mutation.rs` row conversions                       | top-level `rows.rs` (shared by reads)                                                                                                                                                          |
-| `schema/v1.rs` tests (1,837)                        | `schema/v1/tests/{mod,shape,constraints,triggers}.rs`; DDL, `MIGRATION_1` and digest untouched                                                                                                 |
+| `schema/v1.rs` tests (1,837)                        | `schema/v1/tests/{mod,shape,surface,constraints,producers,triggers}.rs`; DDL, `MIGRATION_1` and digest untouched                                                                               |
 | `schema/package.rs`, `project/{..}.rs`              | stay; moving their tests is optional later                                                                                                                                                     |
 | `viewport.rs`, `scene.rs`, `detail.rs`, `search.rs` | stay; optional `reads/` move after Phase 6                                                                                                                                                     |
 | `document.rs`                                       | stay; already owns `current_rev` and `bump_rev`                                                                                                                                                |
 | `gc.rs`, `fsutil.rs`, `edge_index.rs`, `history.rs` | stay                                                                                                                                                                                           |
 | `store/` umbrella                                   | dropped (no consumer)                                                                                                                                                                          |
 | `detail.rs`/`viewport.rs` test data                 | `db/tests/*`; keep reference oracles in place                                                                                                                                                  |
-| `entity/mod.rs` ownership comment                   | update to the frozen `schema/v1.rs`                                                                                                                                                            |
+| `entity/mod.rs` ownership comment                   | done: names the frozen `schema/v1.sql` and the `search.rs`/`edge_index.rs` adapters                                                                                                            |
 
 ## Appendix C — References
 

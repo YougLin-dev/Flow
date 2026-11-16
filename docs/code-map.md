@@ -127,17 +127,22 @@ tests) live in `pages/flow/workspace`. Phase 4 then split the page:
 `flow-workspace.ts` owns construction and disposal, `flow-actions.ts` the key
 actions and Escape order, and `flow-effects.ts` the selection, composer and
 menu-dismissal effects; `FlowPage.tsx` keeps one synchronous construction
-call, the hook registrations and render, and is 208 lines (target ~250).
+call, the hook registrations and render, and is 269 raw lines.
 Phase 5 turned every rule on: the legacy allow-list is gone, the area matrix,
 facade, forbidden-folder, segment, native-seam and unclassified rules fail
 `bun run check`, and the budget still reports above 12 direct entries and
 fails above 20. The old → new map is in
-[the plan's Appendix A](plans/code-organization.md#appendix-a--tsx-placement-map).
+[the plan's Appendix A](plans/code-organization.md#appendix-a--tsx-placement-map-non-test).
 The project layer added `flow/projects` (managed root, store adapter, lease
 session and pure list helpers) over the Rust `ProjectStore`; it imports
 `flow/document` through its facade. The next slice added `pages/projects`
 (the projects screen and its app-lifetime home state) and mounted the session
 in `pages/flow`: the shell chooses the project list or the canvas, and the
-workspace leases and opens the chosen package. Do not add a new file at the
+workspace leases and opens the chosen package. The Rust core split (Phase 6)
+is also complete: the final `db/`, `mutation/` and `rows.rs` production
+layout is in
+[the plan's Appendix B](plans/code-organization.md#appendix-b--rust-placement-map)
+and the README production tree; Appendix B also lists the test-module layout.
+Do not add a new file at the
 `components/`, `flow/` or `pages/` root:
 `scripts/structure.mjs` fails it.

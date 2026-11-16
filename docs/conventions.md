@@ -109,15 +109,19 @@ Decision tree:
   asset bytes in `asset.rs`; package
   collection in `gc.rs`; creating and managing packages in `project.rs` and
   `project/`; durable file helpers in `fsutil.rs`; `db/` owns the handle,
-  worker, open guard, close/session state, verify, undo and metadata, and
-  `schema.rs` owns table creation and the package-wide statements in
-  `schema/package.rs`. Raw SQLITE SQL belongs only
-  in `schema.rs` and the production `search.rs` for virtual tables and in `schema/package.rs` for
-  checkpointing, snapshotting and rekeying a package. The Phase 6 target is
+  worker, open entry points, close/session state, verify, undo and metadata,
+  and `schema/` owns the frozen v1 script, the open guard and the package-wide
+  statements in `schema/package.rs`. Raw SQLite SQL belongs only in
+  `schema/v1.sql`, the open/reset statements in `schema/v1.rs` and
+  `schema/reset.rs`, the production `search.rs` and `edge_index.rs`
+  virtual-table adapters, `schema/maintenance.rs` index repair, the connection
+  and integrity PRAGMAs in `db/worker.rs` and `db/verify.rs`, and
+  `schema/package.rs` for checkpointing, snapshotting and rekeying a package.
+  The Phase 6 layout is
   `db/{mod,worker,open,session,verify,undo,metadata,tests}`,
-  `mutation/{mod,nodes,edges,inputs,manual,runs,seed,apply,support,tx}` and
-  top-level `rows.rs`; `store/` is dropped and `reads/` is a later optional
-  move. FFI stays unchanged.
+  `mutation/{mod,nodes,edges,inputs,manual,runs,seed,apply,support,tx}`,
+  top-level `rows.rs` and `schema/v1/tests/`; `store/` is dropped and `reads/`
+  is a later optional move. FFI stays unchanged.
   The exact map is in [the plan](plans/code-organization.md) Appendix B.
 
 ## Imports

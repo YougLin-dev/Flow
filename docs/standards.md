@@ -120,10 +120,12 @@ SQL. Database calls cross the boundary in batches, not per node or per
 frame. (Review; `boundaries/native-outside-seam`.)
 
 Ordinary database work uses SeaORM entities and SeaQuery in `src/native/`;
-handwritten SQL is limited to the FTS5/RTree virtual-table adapters
-(`schema.rs`, the production `search.rs`, `edge_index.rs`), migrations, and the package
-lifecycle statements in `schema/package.rs` (checkpoint, snapshot, identity
-rekey). Do not build query strings by interpolating values, and do not add a second database driver or
+handwritten SQL is limited to the frozen DDL in `schema/v1.sql`, the
+open/reset statements in `schema/v1.rs` and `schema/reset.rs`, the FTS5/RTree
+virtual-table adapters (the production `search.rs`, `edge_index.rs`),
+`schema/maintenance.rs` index repair, the connection and integrity PRAGMAs in
+`db/worker.rs` and `db/verify.rs`, and the package lifecycle statements in
+`schema/package.rs` (checkpoint, snapshot, identity rekey). Do not build query strings by interpolating values, and do not add a second database driver or
 ORM. (Review)
 
 ### 3.3 Facades and internals
