@@ -5,6 +5,7 @@
 //! production split; tests that need it spell the full path.
 
 use super::*;
+use crate::db::verify::verify_connection;
 
 #[test]
 fn verify_stops_at_the_entry_when_a_close_is_pending() {

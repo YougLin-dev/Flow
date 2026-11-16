@@ -17,7 +17,7 @@ tooling (`package.json`, `vite.config.ts`, `tsconfig.json`, `scripts/`,
 | Module              | kebab-case                     | `canvas-controller.ts`, `camera.ts` |
 | Module test         | `<module>.test.ts` beside it   | `canvas-controller.test.ts`         |
 | Build/check tooling | kebab-case `.mjs` / `.js`      | `test-host.mjs`, `boundaries.js`    |
-| Rust module         | snake_case `.rs`               | `db.rs`, `history.rs`               |
+| Rust module         | snake_case `.rs`               | `db/worker.rs`, `history.rs`        |
 | Directory           | lowercase kebab-case           | `components/`, `flow/`              |
 | Asset               | lowercase, `-` and `@2x`/`@3x` | `pin-active.png`, `node@2x.png`     |
 
@@ -108,16 +108,16 @@ Decision tree:
   production modules `search.rs`, `viewport.rs`, `scene.rs` or `detail.rs`;
   asset bytes in `asset.rs`; package
   collection in `gc.rs`; creating and managing packages in `project.rs` and
-  `project/`; durable file helpers in `fsutil.rs`; `db.rs` owns the worker
-  handle, history and startup, and `schema.rs` owns table creation and the
-  package-wide statements in `schema/package.rs`. Raw SQLITE SQL belongs only
+  `project/`; durable file helpers in `fsutil.rs`; `db/` owns the handle,
+  worker, open guard, close/session state, verify, undo and metadata, and
+  `schema.rs` owns table creation and the package-wide statements in
+  `schema/package.rs`. Raw SQLITE SQL belongs only
   in `schema.rs` and the production `search.rs` for virtual tables and in `schema/package.rs` for
   checkpointing, snapshotting and rekeying a package. The Phase 6 target is
-  `db/{mod,worker,startup,undo,tests}`,
-  `mutation/{mod,nodes,edges,inputs,runs,apply,support,tx}`,
-  `reads/{mod,viewport,scene,detail,search,metadata}` and
-  `store/{mod,schema,edge_index,document,queries,rows,gc}`; FFI stays
-  unchanged.
+  `db/{mod,worker,open,session,verify,undo,metadata,tests}`,
+  `mutation/{mod,nodes,edges,inputs,manual,runs,seed,apply,support,tx}` and
+  top-level `rows.rs`; `store/` is dropped and `reads/` is a later optional
+  move. FFI stays unchanged.
   The exact map is in [the plan](plans/code-organization.md) Appendix B.
 
 ## Imports

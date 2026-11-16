@@ -42,8 +42,10 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use super::*;
 use crate::clock::now_ms;
 use crate::entity::{edges as edge_rows, node_inputs, nodes as node_rows, result_batches};
+use crate::history::HistoryOp;
 use crate::types::EdgePoint;
-use sea_orm::{ColumnTrait, QueryFilter, QueryTrait};
+use sea_orm::sea_query::Expr;
+use sea_orm::{ColumnTrait, ConnectionTrait, EntityTrait, QueryFilter, QuerySelect, QueryTrait};
 
 fn current_rev(db: &Database) -> i64 {
     db.run(|conn| document::current_rev(conn).map_err(|error| error.to_string()))

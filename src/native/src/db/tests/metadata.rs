@@ -5,6 +5,8 @@
 //! production split; tests that need it spell the full path.
 
 use super::*;
+use crate::db::metadata::{has_edges, has_nodes};
+use crate::db::worker::{OpenMode, open_connection};
 
 #[test]
 fn empty_document_has_no_nodes_or_edges() {

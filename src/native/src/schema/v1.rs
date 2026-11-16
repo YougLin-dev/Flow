@@ -115,7 +115,7 @@ pub enum FileState {
 }
 
 /// Sets the schema-context pragmas and asserts them. Connection tuning
-/// (`busy_timeout`, `cache_size`, WAL, `synchronous`) stays in `db.rs` until
+/// (`busy_timeout`, `cache_size`, WAL, `synchronous`) stays in `db/worker.rs` until
 /// the legacy and v1 open paths merge.
 pub fn configure<C: ConnectionTrait>(conn: &C) -> Result<(), String> {
     conn.execute_unprepared("PRAGMA foreign_keys = ON; PRAGMA recursive_triggers = OFF;")

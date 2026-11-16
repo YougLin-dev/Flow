@@ -4,6 +4,7 @@
 //! `use super::*;`.
 
 use super::*;
+use crate::db::worker::{OpenMode, open_connection};
 
 fn explain_plan(conn: &DatabaseConnection, built: sea_orm::Statement) -> String {
     let statement = sea_orm::Statement {

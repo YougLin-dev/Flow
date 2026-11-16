@@ -5,6 +5,7 @@
 //! production split; tests that need it spell the full path.
 
 use super::*;
+use crate::db::session::CLOSE_FAILED_AFTER_STOP;
 
 #[test]
 fn close_marks_the_package_clean_and_stops_the_worker() {

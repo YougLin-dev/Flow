@@ -197,7 +197,13 @@ src/                   the NSH app: its root, entry, config and assets
   native/              mixed NSH Rust crate (SQLite/FTS5/RTree document core)
     Cargo.toml
     src/lib.rs         exports the @flow/native Document class
-    src/db.rs          database handle, worker thread, WAL
+    src/db/mod.rs      database handle and command wrappers
+    src/db/worker.rs   worker thread, connections, WAL and SQLite URLs
+    src/db/open.rs     open entry points and managed package open
+    src/db/session.rs  close, recovery state and saved view
+    src/db/verify.rs   integrity check and repair
+    src/db/undo.rs     undo/redo and history helpers
+    src/db/metadata.rs counts, bounds cache and emptiness
     src/entity/        SeaORM entities, one file per table
     src/schema.rs      table creation and the virtual-table adapter
     src/mutation.rs    transactional commands and undo payloads

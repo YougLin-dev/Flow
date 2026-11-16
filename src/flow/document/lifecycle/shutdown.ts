@@ -9,7 +9,7 @@
  * Prefix of a close failure that ran to completion: the worker acknowledged
  * the close (and dropped its connection) but could not checkpoint cleanly.
  * The package is merely dirty and verifies on its next open, so the project
- * lease may be released. Mirrors `db.rs::CLOSE_FAILED_AFTER_STOP`.
+ * lease may be released. Mirrors `db/session.rs::CLOSE_FAILED_AFTER_STOP`.
  */
 export const CLOSE_FAILED_AFTER_STOP = "the document closed with a recovery warning: ";
 

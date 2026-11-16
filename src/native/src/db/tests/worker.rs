@@ -1,6 +1,7 @@
 //! Worker queue and history-lock ordering tests.
 
 use super::*;
+use crate::db::undo::lock_history;
 
 #[test]
 fn a_panicking_job_is_reported_and_the_worker_survives() {
