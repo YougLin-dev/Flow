@@ -5,7 +5,9 @@
   shell, AsyncDrain core, connector layer, the eight `flow/` area moves,
   `components/app`, the canvas world and its overlays, the composer, minimap
   and search areas, the probes, the page area and workspace split, and full
-  structure enforcement).
+  structure enforcement). Phase 6/7 were re-baselined on 2026-11-16 after the
+  database v1 and project-layer work; §16.3 records the measurements and
+  decisions, and the steps in §11 are the current cut.
 - **Scope:** `src/` (TSX app) and `src/native/` (Rust document core).
 - **Related:** [standards](../standards.md), [architecture](../architecture.md),
   [conventions](../conventions.md), [testing](../testing.md),
@@ -171,14 +173,16 @@ logical:
 
 ### 1.6 Rust core has the same disease in one file
 
-`src/native/src/db.rs` is 4,978 lines, but only 569 are production code; the
-rest is one 4,409-line inline test module (57 tests plus the 100k benchmark
-apparatus). `mutation.rs` is 2,205 lines and contains node, edge, input, run,
-replay and low-level transaction helpers in one namespace. The audit found 21
-transaction wrappers, 19 `ChangeSet` literals, 22 `bump_document_rev` calls,
-six result-DTO construction sites and three copies of stale-propagation logic.
-The single-worker / single-transaction design is correct; the file layout is
-not.
+`src/native/src/db.rs` is 11,316 lines, but only 1,267 are production code;
+the rest is one 10,049-line inline test module (166 tests plus the 100k
+benchmark apparatus, about 1,256 lines of it). `mutation.rs` is 3,176
+production lines and still contains node, edge, input, manual/run, replay and
+low-level transaction helpers in one namespace. The v1 work also left
+`schema/v1.rs` 82% tests (1,837 of 2,231 lines) and grew the lifecycle,
+verify, GC and package-session domains inside `db.rs`. The single-worker /
+single-transaction design is correct; the file layout is not. The original
+audit's wrapper and `ChangeSet` counts were re-checked when Phase 6 was
+re-baselined: §9.1 lists which duplication items remain.
 
 ### 1.7 Root cause: layers were mistaken for folders
 
@@ -355,6 +359,7 @@ every module lives in a named area subdirectory.
 | `composer`  | —                     | `components/composer` (sheet, text/image variants, attachments, footer)           | `flow/composer` (draft state, placement)                                 |
 | `minimap`   | —                     | `components/minimap`                                                              | `flow/minimap` (mapping, drag controller)                                |
 | `document`  | —                     | —                                                                                 | `flow/document` (lifecycle, sessions, commands, assets, viewport)        |
+| `projects`  | `pages/projects`      | —                                                                                 | `flow/projects` (managed root, store adapter, lease session, list copy)  |
 | `execution` | —                     | —                                                                                 | `flow/execution` (run lifecycle, providers)                              |
 | `nodes`     | —                     | (node visuals live in `components/canvas`)                                        | `flow/nodes` (node kinds, ports, settings)                               |
 | `shared`    | —                     | `components/primitives` (Icon, buttons, menu item, panel recipe)                  | `flow/shared` (geometry, equality, async drain, flags, wheel, shortcuts) |
@@ -430,6 +435,15 @@ src/
 ├── App.tsx
 ├── store.ts
 ├── pages/
+│   ├── projects/
+│   │   ├── index.ts
+│   │   ├── ProjectsPage.tsx           list screen, row menu and dialogs
+│   │   ├── projects-home.ts           app-lifetime store/list/current-project state
+│   │   ├── project-action-run.ts      dismissed-dialog run rule
+│   │   ├── ProjectDialogShell.tsx
+│   │   ├── ProjectNameDialog.tsx
+│   │   ├── DeleteProjectDialog.tsx
+│   │   └── ImportProjectDialog.tsx
 │   └── flow/
 │       ├── index.ts
 │       ├── FlowPage.tsx
@@ -437,6 +451,7 @@ src/
 │           ├── flow-workspace.ts      composition root: construct/dispose, applyChanges
 │           ├── flow-actions.ts        add/delete/undo/redo/fit/zoom/selection commands
 │           ├── flow-effects.ts        selection→composer, draft sync, menu dismissal
+│           ├── save-drafts.ts         close-time composer/inline writes
 │           ├── bindings.ts            keymap commands
 │           ├── page-chrome.ts         page-root pointer/wheel forwarding
 │           └── search-navigation.ts   reveal a search hit
@@ -577,6 +592,12 @@ src/
 │   │   ├── index.ts
 │   │   ├── runner.ts
 │   │   └── providers.ts
+│   ├── projects/
+│   │   ├── index.ts
+│   │   ├── project-store.ts           the FFI store port and race errors
+│   │   ├── project-session.ts         lease + managed open/switch/close
+│   │   ├── project-list.ts            frozen order, status and relative-time copy
+│   │   └── projects-root.ts           managed-root launch precedence
 │   └── document/
 │       ├── index.ts
 │       ├── lifecycle/
@@ -624,6 +645,7 @@ allowed.
 | `flow/execution`        | `flow/shared`, `flow/nodes` (facades)                                                                                          |
 | `flow/composer`         | `flow/shared`, `flow/nodes`, `flow/canvas` (facades)                                                                           |
 | `flow/document`         | `flow/shared`, `flow/nodes`, `flow/canvas`, `flow/execution` (facades)                                                         |
+| `flow/projects`         | `flow/shared`, `flow/document` (facades)                                                                                       |
 | `components/primitives` | `flow/shared` (facade)                                                                                                         |
 | `components/app`        | `components/primitives`, `flow/shared` (facades)                                                                               |
 | `components/probes`     | `components/primitives`, `flow/canvas` (facades)                                                                               |
@@ -632,18 +654,20 @@ allowed.
 | `components/minimap`    | `components/primitives`, `flow/shared`, `flow/canvas`, `flow/minimap` (facades; `flow/minimap` is same feature, deep allowed)  |
 | `components/search`     | `components/primitives`, `flow/shared` (facades)                                                                               |
 | `pages/flow`            | any area (deep imports allowed as the composition root)                                                                        |
+| `pages/projects`        | any area (composition root, deep imports allowed)                                                                              |
 | `store.ts`              | `flow/shared` only if a pure helper is needed                                                                                  |
-| `App.tsx`               | `pages/flow`, `components/app`, `store.ts`                                                                                     |
+| `App.tsx`               | `pages/flow`, `pages/projects`, `components/app`, `flow/projects`, `store.ts`                                                  |
 
 Cross-feature component imports (for example `components/canvas` importing
 `components/composer`) are not allowed; pages compose them. The matrix
 governs area-to-area imports: a pair not in the table is a lint error, while
 asset imports (for example a PNG in `TitleBar`) and external packages are not
-area imports. Outside `flow/document`, all `@flow/native` **type** imports go
-through `flow/shared/native-types.ts` (re-exported from the `flow/shared`
-facade); `flow/document` and tests may import types directly, and only
-`flow/document` may import `@flow/native` at runtime. This makes the native
-boundary enforceable without depending on an Oxlint `importKind` flag.
+area imports. Outside `flow/document` and `flow/projects`, all `@flow/native`
+**type** imports go through `flow/shared/native-types.ts` (re-exported from
+the `flow/shared` facade); those two areas and tests may import types
+directly, and they are the only areas that may import `@flow/native` at
+runtime. This makes the native boundary enforceable without depending on an
+Oxlint `importKind` flag.
 
 ### 4.7 Placement decision tree
 
@@ -997,60 +1021,66 @@ The current behavior and FFI surface are correct; this is a file-layout change.
 src/native/src/
 ├── lib.rs                  FFI seam; unchanged method names/signatures
 ├── db/
-│   ├── mod.rs              Database handle, job dispatch, run/run_mutation
-│   ├── worker.rs           worker loop, open_connection, sqlite_url/URI/config
-│   ├── startup.rs          open_connection; calls migrate + store::document::ensure_document
+│   ├── mod.rs              Database handle, jobs and wrappers (run/run_mutation), fields
+│   ├── worker.rs           worker loop, open_connection, sqlite_url*/configure
+│   ├── open.rs             v1 open guard, identity/version, managed package open
+│   ├── session.rs          close/recovery, clean_shutdown, project_info/save_view, quit
+│   ├── verify.rs           integrity check and repair
 │   ├── undo.rs             undo/redo, empty_change, lock_history
+│   ├── metadata.rs         counts, bounds cache, is_empty (may move to reads/ later)
 │   └── tests/
 │       ├── mod.rs          fixtures/shared helpers
-│       ├── nodes.rs, edges.rs, inputs.rs, runs.rs
-│       ├── scene.rs, search.rs, assets.rs, history.rs
-│       ├── startup.rs      reopen/path/schema/persistence tests
+│       ├── worker.rs, startup.rs, session.rs, verify.rs, gc.rs, reset.rs
+│       ├── nodes.rs, edges.rs, inputs.rs, settings.rs, manual.rs, runs.rs
+│       ├── scene.rs, search.rs, previews.rs, indexes.rs, assets.rs, history.rs
 │       └── benchmark.rs    the 100k apparatus (keep #[ignore])
 ├── mutation/
 │   ├── mod.rs              facade: Mutation + public commands
 │   ├── nodes.rs            insert/move/bounds/text/settings/delete
 │   ├── edges.rs            insert/delete/connect/update
 │   ├── inputs.rs           add/remove/reorder/sync
-│   ├── runs.rs             manual text/upload, save run, status, recover
+│   ├── manual.rs           set_manual_text/upload, insert_upload_node
+│   ├── runs.rs             begin/settle/apply result/save run/status/recover
+│   ├── seed.rs             seed_document, empty_change_tx
 │   ├── apply.rs            apply_ops (history replay)
-│   ├── support.rs          pure ChangeSet assembly/conversions
+│   ├── support.rs          Mutation::commit and pure assembly/conversions
 │   └── tx/
-│       ├── nodes.rs, edges.rs, inputs.rs, indexes.rs, rows.rs
-├── reads/
-│   ├── mod.rs              pub(crate) mod / pub(crate) use for db
-│   ├── viewport.rs
-│   ├── scene.rs
-│   ├── detail.rs
-│   ├── search.rs
-│   └── metadata.rs         counts, bounds cache, is_empty
-├── store/
-│   ├── mod.rs
-│   ├── schema.rs
-│   ├── edge_index.rs
-│   ├── document.rs         ensure_document, bump_document_rev, current_rev
-│   ├── queries.rs          shared find/lookup helpers
-│   └── rows.rs             Model → Summary conversions
+│       ├── mod.rs
+│       └── nodes.rs, edges.rs, inputs.rs, runs.rs
+├── rows.rs                 Model → Summary conversions (shared by mutation/reads)
+├── document.rs             document row identity/revision (current_rev, bump_rev)
+├── schema/
+│   ├── v1.rs               frozen DDL include + validators; v1/tests/* beside it
+│   ├── v1/tests/           shape, constraints, triggers, reset
+│   ├── package.rs          checkpoint, clean/dirty, snapshot, identity rekey
+│   ├── maintenance.rs      FTS/RTree parity repair (verify calls it)
+│   └── reset.rs            dev-only destructive reset
+├── project/                managed root, store/lease, catalog and package ops
 ├── history.rs              History/HistoryOp + row snapshots
-├── asset.rs                metadata + bytes
+├── asset.rs, gc.rs, viewport.rs, scene.rs, detail.rs, search.rs, edge_index.rs
+├── fsutil.rs
 ├── entity/                 one file per table (unchanged)
-├── types.rs
-├── clock.rs
-└── constants.rs             DOCUMENT_ID, SCHEMA_VERSION
+├── types.rs, clock.rs, constants.rs
 ```
+
+The old `store/` umbrella is dropped: the v1 work never created it, and the
+code that would fill it already has owners (`document.rs`, `schema/`,
+`rows.rs`, `project/`). `reads/` is not a Phase 6 gate either: the read
+modules work flat today, so a later mechanical move can take
+`viewport/scene/detail/search/metadata` together once Phase 6 lands.
 
 Rules:
 
-- Runtime dependency graph: `lib.rs → db → {mutation, reads, store, asset,
-  history} → entity/types`. `mutation` and `reads` are peers, not a chain;
-  `mutation` uses `store`/`history`/`entity`, `reads` uses `store`/`entity`.
-  `store/schema` defines virtual tables; `store/edge_index` is used by both.
-  `#[cfg(test)]` schema tests may call `mutation`/`reads`; that is the one
-  test exemption.
+- Runtime dependency graph: `lib.rs → db → {mutation, reads, asset, history,
+  project?} → entity/types`. `mutation` and the read modules are peers, not a
+  chain. Keep `project/` above the document core: it calls `db` and
+  `schema/package`, never the reverse.
 - `mutation/mod.rs` re-exports the public command functions so every
   `db.rs` call path stays stable during migration.
-- `reads/mod.rs` must expose what `db` calls (`pub(crate) mod viewport;` or
-  `pub(crate) use`), or `db` cannot see the read functions.
+- `db/metadata.rs` exposes what `db` and the read modules need; if it moves
+  to `reads/`, use `pub(crate)` so `db` can still see it.
+- `sqlite_url`, `sqlite_url_ro`, `sqlite_url_rw` and `configure` stay
+  reachable as `pub(crate)` `db` items: `project/` and `schema/` call them.
 - Visibility in `mutation/tx/`: a helper used by a sibling command family is
   `pub(in crate::mutation)` (or `pub(crate)`), not `pub(super)`; `pub(super)`
   only reaches the `tx` parent, not `mutation::nodes`/`mutation::edges`.
@@ -1066,6 +1096,14 @@ Rules:
 - Keep the `#[cfg(test)] pub fn apply_ops` wrapper on `Database`.
 
 ### 9.1 Deduplication, with safety notes
+
+Re-checked after database v1 (2026-11-16): the row conversions
+(top-level `rows.rs`), tag serialization, `stale_summaries_tx`,
+`Mutation::commit`, `ChangeSet::empty(rev)`, the connect/update snapshot
+helper and the two parameterized cases (delete-input modes, node insert)
+still apply. The FTS-refresh-for-update/replace item is obsolete: the v1
+write paths refresh their own indexes. Verify each target against the code
+when its family moves; do not carry an item whose code is gone.
 
 Safe extractions:
 
@@ -1096,40 +1134,56 @@ Risky; parameterize, do not collapse:
   `#[path]`.
 - `db::tests` is a descendant of `db`, so `Database::run`/`run_mutation`, the
   `assets_dir` field and the test `apply_ops` wrapper stay visible. Helpers
-  that move to `db/worker.rs` (`sqlite_url`, `open_connection`) use
-  `pub(super)`; helpers in `reads/metadata.rs` (`has_nodes`, `has_edges`) need
-  `pub(crate)`, because `pub(super)` there reaches only `reads`. Reuse the
-  visibility rather than an unused re-export, because `clippy -D warnings`
-  fails on unused imports.
-- Keep fixtures (`node`, `connect`, `scene_between`, `preview_*`) in
-  `db/tests/mod.rs`; child modules use `use super::*`. Benchmark-only imports
-  (`AtomicU64`, `fs`, `Path`, `PathBuf`, `now_ms`, `OVERVIEW_LIMIT`,
-  `NODE_LIMIT`) must be imported explicitly in `benchmark.rs`; keep
-  `mod benchmark;` in `tests/mod.rs` or the ignored tests disappear.
+  that move to `db/worker.rs` (`sqlite_url*`, `open_connection`, `configure`)
+  stay `pub(crate)`, because `project/` and `schema/` call them too. Helpers
+  in `db/metadata.rs` (`has_nodes`, `has_edges`) need `pub(crate)` rather
+  than `pub(super)`; reuse the visibility instead of an unused re-export,
+  because `clippy -D warnings` fails on unused imports.
+- Keep fixtures (`node`, `connect`, `scene_between`, `preview_*`, the
+  package/DB writers) in `db/tests/mod.rs`; child modules use `use super::*`.
+  Benchmark-only imports (`AtomicU64`, `fs`, `Path`, `PathBuf`, `now_ms`,
+  `OVERVIEW_LIMIT`, `NODE_LIMIT`) must be imported explicitly in
+  `benchmark.rs`; keep `mod benchmark;` in `tests/mod.rs` or the ignored
+  tests disappear.
 - Do **not** move the reference oracles in `detail.rs`/`viewport.rs` into
   `db/tests/`: they intentionally share private production builders so the
   oracle cannot drift. Move only test data.
-- Add `startup.rs` for `persists_across_reopen`, path-with-spaces, schema
-  cascade and recovery-query tests.
-- The benchmark test paths change to `db::tests::benchmark::*`; update
-  `scripts/smoke-100k.mjs`, `docs/testing.md` and `docs/plans/rust-core.md`
-  in the same Phase 6 PR, or the 100k filter silently matches nothing.
+- The v1 domains get their own files: `worker` (queue/lane), `startup`
+  (open guard, identity/version, paths, sqlite URLs), `session`
+  (close/clean-shutdown/recovery-pending/project_info/save_view), `verify`,
+  `gc`, `reset`, `previews` and `indexes` (the `EXPLAIN QUERY PLAN` tests).
+  `history`/`inputs`/`runs` are the largest groups; split them by behavior
+  later only if review size demands it.
+- The benchmark apparatus moves to `db/tests/benchmark.rs`, so its ignored
+  test paths become `db::tests::benchmark::*`. Update
+  `scripts/smoke-100k.mjs`, `docs/testing.md`, `docs/plans/rust-core.md` and
+  the `database-design.md` status in the same PR. Make the smoke script
+  pre-delete `flow.db`/`-wal`/`-shm` and assert the seeder wrote the
+  fixture, so a filter mismatch fails instead of reusing a stale database.
+- `schema/v1.rs` is 82% tests: move them to
+  `schema/v1/tests/{mod,shape,constraints,triggers}.rs`, splitting the
+  548-line shape test if it stays unwieldy. `v1.sql`, `MIGRATION_1` and the
+  pinned digest do not move; the assembled DDL must stay byte-identical.
+  `schema/package.rs` tests may follow later; leave `project/catalog.rs` and
+  `project/ops.rs` tests where they are until a measured need.
 
 ### 9.3 Unassigned items and schema debt
 
-- `document.rs::current_rev` → `store/document.rs`.
+- `document.rs` already owns `current_rev` and `bump_rev`; `ensure_document`
+  and `schema::migrate` no longer exist, so the old `store/document.rs`
+  item and startup description are dropped.
 - `db.rs::empty_change`, `db.rs::lock_history` → `db/undo.rs`.
-- `bump_document_rev` → `store/document.rs` (it is defined in `mutation.rs`
-  today).
 - `history.rs` keeps `History`/`HistoryOp` **and** the `NodeRow`/`EdgeRow`/
   `InputRow` snapshots that `HistoryOp` references; conversions go in
-  `store/rows.rs`.
-- `assets_fts` is created but never populated or searched. Decide in Phase 6:
-  implement indexing or drop it with migration 6 (`DROP TABLE`, remove from
-  `VIRTUAL_TABLES`/`RESET_TABLES`, delete the entity, bump
-  `SCHEMA_VERSION`). Removing it from the lists alone leaves dead tables.
-- `store/schema.rs` is the only virtual-table DDL owner; correct the comment
-  in `entity/mod.rs` that says DDL lives in `search.rs`/`edge_index.rs`.
+  top-level `rows.rs`.
+- `assets_fts` is absent from the frozen v1 schema; the old decision item is
+  closed, not carried into Phase 6.
+- Virtual-table DDL lives in the frozen `schema/v1.rs`; correct the comment
+  in `entity/mod.rs` that names `search.rs`/`edge_index.rs`.
+- `sqlite_url*`, `configure` and `open_connection` stay `pub(crate)` `db`
+  items; `project/` and `schema/` call them.
+- `store/` is not a Phase 6 target and `reads/` is a later optional mechanical
+  move (§9 target tree).
 
 ---
 
@@ -1304,10 +1358,10 @@ A standard without owners is a suggestion. Before Phase 1:
 
 ## 11. Migration plan
 
-Each phase is a separate PR (or a small stack), does not change behavior, and
-ends with `bun run check` and `bun run test`. Host tests run after phases 3 and
-4; the 100k benchmark runs if any hot path is touched. Each phase names an
-owner and an effort (S/M/L) before it starts; rollback is reverting the PR.
+Each phase is a series of small PRs, does not change behavior, and ends with
+`bun run check` and `bun run test`. Host tests run after phases 3 and 4; the
+100k benchmark runs if any hot path is touched. Each phase names an owner and
+an effort (S/M/L) before it starts; rollback is reverting the PR.
 There are no data or schema changes in Phases 0–5; the optional `assets_fts`
 migration in Phase 6 is the one exception and is reversible by keeping the
 table.
@@ -1323,8 +1377,8 @@ table.
 | 3     | `components/` areas                  | `@YougLin-dev` | L      |
 | 4     | Page decomposition                   | `@YougLin-dev` | M      |
 | 5     | Enforce the matrix                   | `@YougLin-dev` | S      |
-| 6     | Rust core split (parallel)           | `@YougLin-dev` | L      |
-| 7     | Internal splits (optional)           | `@YougLin-dev` | L      |
+| 6     | Rust core split (10 PRs; §11)        | `@YougLin-dev` | L      |
+| 7     | Internal splits (incremental; §11)   | `@YougLin-dev` | L      |
 
 The repository has one maintainer today, so every phase names that owner.
 Split the rows when a second owner joins; the phase does not start without an
@@ -1467,48 +1521,91 @@ compatibility shims after a phase.
 
 ### Phase 6 — Rust core split (parallel with phases 2–5)
 
-1. Move `db.rs` tests to `db/tests/*`; add visibility (`pub(super)`/
-   `pub(crate)`) for relocated private helpers; move only test data, not the
-   reference oracles. Keep `mod benchmark;`.
-2. Split `db.rs` into `db/{mod,worker,startup,undo}.rs`; move counts/bounds/
-   is_empty to `reads/metadata.rs`; move `ensure_document`/`current_rev` to
-   `store/document.rs` (`db/startup.rs` keeps `open_connection` and calls
-   `schema::migrate` + `store::document::ensure_document`); move
-   `empty_change`/`lock_history` to `db/undo.rs`. `bump_document_rev` is
-   defined in `mutation.rs` and moves with the mutation split (step 3).
-3. Split `mutation.rs` behind the existing facade, one command family per
-   commit; extract `support.rs` and `tx/*` first; fix `reads/mod.rs`
-   visibility.
-4. Deduplicate with the safety notes in §9.1; run the ignored 100k benchmark.
-5. Update `scripts/smoke-100k.mjs`, `docs/testing.md` and
-   `docs/plans/rust-core.md` for the new `db::tests::benchmark::*` filter
-   names; update the ownership comments; decide `assets_fts`.
+Re-baselined 2026-11-16 against the v1 core (§16.3). Each step is one PR;
+none changes FFI names, worker jobs, transaction boundaries or the frozen v1
+schema. Start with the docs cut (6-0), then move tests before production.
+
+6-0. **Docs only.** This re-baseline: §1.6, §9–§9.3, Appendix B and the
+Phase 6/7 steps. No code moves.
+6-1. **db tests: fixtures and benchmark.** Create `db/tests/mod.rs` with the
+shared fixtures and `db/tests/worker.rs`; move the 100k apparatus to
+`db/tests/benchmark.rs`. Update the four filter references and make the
+smoke script pre-delete its database and assert the seeder (so a stale
+fixture cannot pass). Keep `db::tests` a descendant of `db`.
+6-2. **db tests: reads.** Move the scene, search, previews and EXPLAIN
+(`indexes`) groups verbatim.
+6-3. **db tests: commands.** Move nodes, edges, inputs, settings, manual,
+runs, assets and history verbatim. Keep the reference oracles in
+`viewport.rs`/`detail.rs`.
+6-4. **db tests: lifecycle.** Move startup, session, verify, gc and reset;
+add the managed-session integration test (lease + `open_package` + close)
+here.
+6-5. **db production.** `git mv db.rs db/mod.rs`; extract
+`db/{worker,open,session,verify,undo,metadata}.rs`; keep the `Database`
+fields and `run`/`run_mutation` wrappers in `mod.rs`; keep `sqlite_url*`
+and `configure` `pub(crate)`. No behavior change.
+6-6. **mutation: support and tx.** `git mv mutation.rs mutation/mod.rs`;
+extract `support.rs` and `tx/{mod,nodes,edges,inputs,runs}.rs` with
+`pub(in crate::mutation)` visibility. Commands stay in `mod.rs` for this
+PR.
+6-7. **mutation: command families, one per PR.** nodes, edges, inputs,
+manual, runs, seed, apply (in that order). Keep one transaction per
+command, the `run`/`run_mutation` semantics and `apply_ops` as the only
+replay path, which may call only `tx/*` and `support`.
+6-8. **Deduplication.** Safe first: `ChangeSet::empty(rev)`,
+`Mutation::commit`, `rows.rs` conversions, tag helpers. Then the careful
+items with §9.1's parameterization: delete-input modes, connect/update
+snapshot, node builder, stale-summaries order. Run `bun run test:bench`
+and the 100k smoke after the careful half.
+6-9. **Schema tests (recommended, separate).** Move `schema/v1.rs` tests to
+`schema/v1/tests/*`; change no SQL, `MIGRATION_1` or digest, and run the
+schema/reset tests before and after.
+6-10. **Close-out.** Update the code map, ownership comments, `rust-core.md`
+and this plan; confirm the FFI surface, worker jobs, transactions and
+frozen schema are unchanged; mark Phase 6 done.
 
 ### Phase 7 — Internal splits (incremental, after enforcement)
 
-- `FlowScene` pure helpers (`scene-hits`, `scene-selection`,
-  `scene-records`, `scene-overrides`) behind the existing class.
-- `CanvasController` hit-priority/drag-resize/marquee/hover helpers; one
-  batch remains in the class.
-- Migrate `ViewportController` and `MinimapLoader` to `AsyncDrain` one per
-  PR, each with its existing test as the oracle. Do not treat them as one
-  identical state machine: their scheduling, revision fences and retry rules
-  differ. (`PreviewLoader` migrates with the core in Phase 1c.) When they
-  migrate, have each loader check its own disposed flag at the top of its
-  step: a join that lands in the drain's settlement gap can force one
-  follow-up after `dispose()` starts, and the current app avoids it only
-  because the page marks the host disposed first.
-- `NodeSession` split into composer/inline/asset/command sessions behind the
-  facade; preserve `protected nodeDetail`, generation fencing and
-  `copyNodeWithDrafts`/`deleteNodeWithDrafts`, or update the harness and its
-  tests in the same PR.
-- `FlowPage`/`flow-workspace` further extraction only if it is still too
-  large.
-- Optional: move `MiniMap`'s touch/drag state into `MinimapController`,
-  keeping the responders on the mounted panel.
-- Split the largest tests by behavior.
-- Optional: a short `README.md` in `flow/canvas` and `flow/document` with
-  invariants.
+Re-baselined 2026-11-16; the targets are unchanged by database v1, but their
+sizes and some §6.4 items moved. One PR each, behavior-preserving.
+
+7-0. **Docs (can run with Phase 6).** Add `flow/projects`/`pages/projects`
+to §4.5/§4.6 and Appendix A and refresh the structure counts. Leave
+`pages/projects/projects-home.ts` (377 lines) unsplit for now.
+7-1. **§6.4 cleanup.** Extract `flow/canvas/model/screen-rect.ts`
+(`screenRectOf`) and route resize-handles/frame-surface; move FlowCard's
+status tables to `components/canvas/world/status-visual.ts`; alias
+`MinimapSize`/`MinimapRect` to `flow/shared`'s `Size`/`Rect`. Re-check
+the remaining §6.4 items (wheel helper, MenuItem/TooltipPill/IconButton)
+and implement only where two real consumers exist.
+7-2. **MinimapLoader onto AsyncDrain** (S): keep the 150 ms debounce and its
+retry rule local; `minimap-loader.test.ts` is the oracle.
+7-3. **ViewportController onto AsyncDrain** (M): keep the timer, generation
+fences, `pendingFit` and fit-before-read; check `disposed` at the top of
+each step. Do not batch with the minimap.
+7-4. **MiniMap touch/drag state into MinimapController** (optional S),
+responders staying on the mounted panel; add controller tests. Host tests.
+7-5. **Scene: hits.** Extract `scene-hits.ts`; rename the hit test and move
+the hit cases out of `scene.test.ts`.
+7-6. **Scene: records and overrides.** Extract the pure helpers with their
+tests; keep per-id signals and keyed flags in the class.
+7-7. **Scene: selection.** Extract `scene-selection.ts`; add its test.
+7-8. **CanvasController: drag/resize and marquee** pure helpers with unit
+tests.
+7-9. **CanvasController: hit priority** shared by down and hover; down/up/
+hover stay the only writers and batch owners. Host tests.
+7-10. **NodeSession: composer session** (L, highest risk). Extract
+`session/composer-session.ts` (asset cache included), preserving
+`protected nodeDetail`, generation fencing and
+`copyNodeWithDrafts`/`deleteNodeWithDrafts`, or update the harness in the
+same PR.
+7-11. **NodeSession: commands.** Extract `commands/edge-commands.ts` behind
+the facade.
+7-12. **NodeSession: inputs.** Extract `session/input-session.ts`; split the
+remaining native test by behavior.
+7-13. **Close-out.** README invariants for `flow/canvas` and
+`flow/document`; optional `flow-workspace` project-lifecycle extraction
+only if its code-line count grows past the cap; split the largest tests.
 
 ### Migration mechanics that keep the gate green
 
@@ -1917,6 +2014,46 @@ every area has a facade, lint/structure fail on violations, FlowPage is
 items are the Rust core split (Phase 6) and the internal splits plus the
 remaining §6.4 sweep (Phase 7).
 
+### 16.3 Phase 6/7 re-baseline after database v1 (2026-11-16)
+
+Three read-only audits re-measured the core against the plan: `db.rs` is
+1,267 production + 10,049 test lines (166 tests, 2 ignored benchmarks, about
+1,256 benchmark lines); `mutation.rs` is 3,176 production lines with no
+in-file tests; `schema/v1.rs` is 394 production + 1,837 test lines;
+`project/catalog.rs` and `project/ops.rs` are 766 each (their tests are
+434/453). The plan's §1.6 measurements, `db.rs` test list, `startup`/`store`
+items and Appendix B were stale.
+
+Decisions:
+
+- Move tests before production. `db::tests` stays a descendant of `db` and
+  the fixtures stay in `db/tests/mod.rs`; the reference oracles in
+  `viewport.rs`/`detail.rs` stay put.
+- The benchmark moves to `db/tests/benchmark.rs`; its filter becomes
+  `db::tests::benchmark::*` in `scripts/smoke-100k.mjs`, `docs/testing.md`,
+  `docs/plans/rust-core.md` and the `database-design.md` status, and the
+  smoke script pre-deletes its database and asserts the seeder so a filter
+  mismatch fails instead of passing on a stale fixture.
+- `db.rs` production splits into `worker/open/session/verify/undo/metadata`;
+  `gc.rs`, `schema/reset.rs` and `document.rs` already have owners. The
+  `store/` umbrella is dropped (no consumer); `reads/` is a later optional
+  mechanical move.
+- `mutation.rs` splits support + tx first, then one command family per PR,
+  with `manual.rs` and `seed.rs` so no production file grows past ~460 lines.
+  `apply_ops` may call only `tx/*` and `support`.
+- The FTS-refresh-for-update/replace dedup item is obsolete in the v1 paths;
+  the other §9.1 items remain. `assets_fts` is gone from the frozen schema,
+  and `bump_rev`/`current_rev` already live in `document.rs`.
+- Schema test moves are in scope for `schema/v1.rs` (82% tests); moving
+  `schema/package.rs` or `project/*` tests is optional later. `v1.sql`,
+  `MIGRATION_1` and the pinned digest never move.
+- Phase 7's targets remain. `FlowPage` is done (269 raw lines),
+  `flow-workspace` is 481 code lines (below the cap, optional), and
+  `pages/projects/projects-home.ts` (377 lines) is noted but left unsplit.
+- No FFI name, worker job, transaction boundary or frozen-schema change is
+  part of either phase. Both start with a docs cut (6-0/7-0); Phase 7 can run
+  alongside Phase 6 after the docs.
+
 ---
 
 ## Appendix A — TSX placement map (non-test)
@@ -2029,39 +2166,37 @@ ComposerAttachments,ComposerFooter,ImageComposer}.tsx`,
 panel.ts}`, `components/probes/{ImageLoadProbe,ZoomProbe}.tsx`,
 `components/search/search-filters.ts`, `pages/flow/workspace/*`.
 
+The projects areas (`flow/projects`, `pages/projects`) were added after this
+migration by the database v1 work, so they have no old → new rows here; their
+layout is §4.5 and `docs/code-map.md`.
+
 ## Appendix B — Rust placement map
 
-| Current                                              | Target                                                                                                                |
-| ---------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------- |
-| `db.rs` production                                   | `db/{mod,worker,startup,undo}.rs`                                                                                     |
-| `db.rs` tests (line 570+)                            | `db/tests/{mod,nodes,edges,inputs,runs,scene,search,assets,history,startup,benchmark}.rs` (fixtures live in `mod.rs`) |
-| `mutation.rs` `Mutation`                             | `mutation/mod.rs`                                                                                                     |
-| `mutation.rs` nodes                                  | `mutation/nodes.rs`                                                                                                   |
-| `mutation.rs` edges                                  | `mutation/edges.rs`                                                                                                   |
-| `mutation.rs` inputs                                 | `mutation/inputs.rs`                                                                                                  |
-| `mutation.rs` manual/runs                            | `mutation/runs.rs`                                                                                                    |
-| `mutation.rs` `apply_ops`                            | `mutation/apply.rs`                                                                                                   |
-| `mutation.rs` pure helpers                           | `mutation/support.rs`                                                                                                 |
-| `mutation.rs` tx helpers                             | `mutation/tx/{nodes,edges,inputs,indexes,rows}.rs`                                                                    |
-| `db.rs` counts/bounds/is_empty                       | `reads/metadata.rs`                                                                                                   |
-| `db.rs` ensure_document                              | `store/document.rs`                                                                                                   |
-| `db.rs` empty_change/lock_history                    | `db/undo.rs`                                                                                                          |
-| `mutation.rs` bump_document_rev                      | `store/document.rs`                                                                                                   |
-| `document.rs` current_rev                            | `store/document.rs`                                                                                                   |
-| `viewport.rs`                                        | `reads/viewport.rs`                                                                                                   |
-| `scene.rs`                                           | `reads/scene.rs`                                                                                                      |
-| `detail.rs`                                          | `reads/detail.rs`                                                                                                     |
-| `search.rs`                                          | `reads/search.rs`                                                                                                     |
-| `schema.rs`                                          | `store/schema.rs`                                                                                                     |
-| `edge_index.rs`                                      | `store/edge_index.rs`                                                                                                 |
-| `gc.rs`                                              | `store/gc.rs`                                                                                                         |
-| `project.rs`                                         | `store/projects/mod.rs`                                                                                               |
-| `project/{paths,lock,package,catalog,create,ops}.rs` | `store/projects/{paths,lock,package,catalog,create,ops}.rs`                                                           |
-| `schema/package.rs`                                  | `store/package.rs`                                                                                                    |
-| `fsutil.rs`                                          | `store/fsutil.rs`                                                                                                     |
-| `history.rs` row snapshots                           | stay in `history.rs` (referenced by `HistoryOp`)                                                                      |
-| `detail.rs`/`viewport.rs` test data                  | `db/tests/*`; keep reference oracles in place                                                                         |
-| `entity/mod.rs` ownership comment                    | update to `store/schema.rs`                                                                                           |
+Re-baselined 2026-11-16 (§16.3). `Current` sizes are total / test lines.
+
+| Current                                             | Target                                                                                                                                                                           |
+| --------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `db.rs` production (1,267)                          | `db/{mod,worker,open,session,verify,undo,metadata}.rs`                                                                                                                           |
+| `db.rs` tests (10,049)                              | `db/tests/{mod,worker,startup,session,verify,gc,reset,nodes,edges,inputs,settings,manual,runs,scene,search,previews,indexes,assets,history,benchmark}.rs` (fixtures in `mod.rs`) |
+| `db.rs` `empty_change`/`lock_history`               | `db/undo.rs`                                                                                                                                                                     |
+| `db.rs` counts/bounds/is_empty                      | `db/metadata.rs` (`reads/metadata.rs` later, optional)                                                                                                                           |
+| `db.rs` `sqlite_url*`/`configure`/`open_connection` | `db/worker.rs`, `pub(crate)` (project/ and schema/ call them)                                                                                                                    |
+| `mutation.rs` `Mutation` + public commands          | `mutation/mod.rs`                                                                                                                                                                |
+| `mutation.rs` nodes/edges/inputs                    | `mutation/{nodes,edges,inputs}.rs`                                                                                                                                               |
+| `mutation.rs` manual/save-run/recover               | `mutation/manual.rs`, `mutation/runs.rs`                                                                                                                                         |
+| `mutation.rs` seed                                  | `mutation/seed.rs`                                                                                                                                                               |
+| `mutation.rs` `apply_ops`                           | `mutation/apply.rs`                                                                                                                                                              |
+| `mutation.rs` `Mutation::commit`/pure helpers       | `mutation/support.rs`                                                                                                                                                            |
+| `mutation.rs` tx helpers                            | `mutation/tx/{mod,nodes,edges,inputs,runs}.rs`                                                                                                                                   |
+| `mutation.rs` row conversions                       | top-level `rows.rs` (shared by reads)                                                                                                                                            |
+| `schema/v1.rs` tests (1,837)                        | `schema/v1/tests/{mod,shape,constraints,triggers}.rs`; DDL, `MIGRATION_1` and digest untouched                                                                                   |
+| `schema/package.rs`, `project/{..}.rs`              | stay; moving their tests is optional later                                                                                                                                       |
+| `viewport.rs`, `scene.rs`, `detail.rs`, `search.rs` | stay; optional `reads/` move after Phase 6                                                                                                                                       |
+| `document.rs`                                       | stay; already owns `current_rev` and `bump_rev`                                                                                                                                  |
+| `gc.rs`, `fsutil.rs`, `edge_index.rs`, `history.rs` | stay                                                                                                                                                                             |
+| `store/` umbrella                                   | dropped (no consumer)                                                                                                                                                            |
+| `detail.rs`/`viewport.rs` test data                 | `db/tests/*`; keep reference oracles in place                                                                                                                                    |
+| `entity/mod.rs` ownership comment                   | update to the frozen `schema/v1.rs`                                                                                                                                              |
 
 ## Appendix C — References
 
