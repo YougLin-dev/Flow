@@ -77,8 +77,8 @@ the native type seam), `components/primitives` (`Icon`, `icon-shape`) and
 `components/canvas` (`port-visuals`) exist, and the app harness lives in
 `src/test-support/app.ts`. Phase 1b added `components/composer`
 (`ComposerSheet` with `TextComposer`/`ImageComposer` as configurations).
-`flow/shared/async-drain.ts` now backs `PreviewLoader`; the viewport and
-minimap loaders migrate in Phase 7. Phase 1d added
+`flow/shared/async-drain.ts` now backs `PreviewLoader`, `ViewportController`
+and `MinimapLoader` (Phase 7 batch 2, 2026-11-16). Phase 1d added
 `components/canvas/world/{connector-layer,ConnectorCanvas}` for the two
 connector layers and `components/primitives/panel.ts` for the floating-panel
 chrome. Phase 2 step 1 moved the node-kind registry to `flow/nodes` and

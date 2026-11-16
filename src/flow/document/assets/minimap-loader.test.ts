@@ -23,6 +23,7 @@ test("compares overview reads by value, ignoring the revision", () => {
 
 interface DeferredOverview {
   readonly resolve: (overview: Overview) => void;
+  readonly reject: (error: Error) => void;
 }
 
 function overview(rev: number, cards: OverviewCard[] = []): Overview {
@@ -63,8 +64,8 @@ function change(rev: number, changed: NodeSummary[], removed: string[] = []): Ch
 function stubDocument(deferreds: DeferredOverview[]): Document {
   const stub = {
     overview: (): Promise<Overview> =>
-      new Promise((resolve) => {
-        deferreds.push({ resolve });
+      new Promise((resolve, reject) => {
+        deferreds.push({ resolve, reject });
       }),
   };
   return stub as unknown as Document;
@@ -244,6 +245,37 @@ test("schedule coalesces a burst of changes into one read", async () => {
   await flushRead();
 
   expect(loader.overview()?.rev).toBe(1);
+});
+
+test("a change during a failed read retries once and settles both callers", async () => {
+  const deferreds: DeferredOverview[] = [];
+  const document = stubDocument(deferreds);
+  const { host } = stubHost(document);
+  const loader = new MinimapLoader(host);
+  const originalError = console.error;
+  let logged = 0;
+  console.error = () => {
+    logged += 1;
+  };
+  try {
+    const first = loader.refresh();
+    loader.noteRev(2);
+    const joined = loader.refresh();
+
+    deferreds[0]?.reject(new Error("the worker is unavailable"));
+    await flushRead();
+
+    // The joined change deserves one follow-up read, not a spin.
+    expect(deferreds).toHaveLength(2);
+    deferreds[1]?.resolve(overview(2));
+    await Promise.all([first, joined]);
+
+    expect(loader.overview()?.rev).toBe(2);
+    expect(logged).toBe(1);
+  } finally {
+    console.error = originalError;
+    loader.dispose();
+  }
 });
 
 test("a failed first read does not spin", async () => {

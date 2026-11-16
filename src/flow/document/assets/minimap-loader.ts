@@ -1,9 +1,11 @@
 /** Loads the whole document's card silhouettes for the minimap. */
 import { signal, type Accessor } from "nsh";
 import {
+  AsyncDrain,
   sameBounds,
   type ChangeSet,
   type Document,
+  type DrainStepResult,
   type Overview,
   type OverviewCard,
 } from "../../shared";
@@ -59,8 +61,7 @@ export class MinimapLoader {
   private timer: number | null = null;
   private generation = 0;
   private lastRev = 0;
-  private inFlight = false;
-  private dirty = false;
+  private readonly drain = new AsyncDrain();
 
   constructor(
     private readonly host: MinimapHost,
@@ -98,40 +99,36 @@ export class MinimapLoader {
   async refresh(): Promise<void> {
     const document = this.host.document();
     if (!document || this.host.isDisposed()) return;
-    if (this.inFlight) {
-      // One follow-up read for every change that landed during this read.
-      this.dirty = true;
-      return;
-    }
-    this.inFlight = true;
-    this.dirty = false;
+    // Every request wants the newest overview, so a request that joins the
+    // active drain asks for one follow-up read.
+    const joined = this.drain.join();
+    if (joined !== null) return joined;
+    return this.drain.start((isDirty) => this.drainStep(document, isDirty));
+  }
+
+  /** One queued iteration: a read now, and at most one for newer changes. */
+  private async drainStep(document: Document, isDirty: () => boolean): Promise<DrainStepResult> {
+    if (this.host.isDisposed()) return "done";
+    const generation = ++this.generation;
     try {
-      while (true) {
-        const generation = ++this.generation;
-        // eslint-disable-next-line no-await-in-loop
-        const overview = await document.overview();
-        if (this.host.isDisposed() || generation !== this.generation) break;
-        // A read that started before a newer command must not replace the
-        // newer overview; the newest change loads it again.
-        if (overview.rev >= this.lastRev) {
-          this.lastRev = overview.rev;
-          this.publish(overview);
-        } else {
-          this.dirty = true;
-        }
-        if (!this.dirty) break;
-        this.dirty = false;
-      }
+      const overview = await document.overview();
+      if (this.host.isDisposed() || generation !== this.generation) return "done";
+      // A read that started before a newer command must not replace the
+      // newer overview; the newest change loads it again.
+      if (overview.rev < this.lastRev) return "continue";
+      this.lastRev = overview.rev;
+      this.publish(overview);
+      // A change that joined during the read asks for one more read even
+      // though this snapshot was current.
+      return isDirty() ? "continue" : "done";
     } catch (error) {
       if (!this.host.isDisposed()) {
         console.error("Flow could not read the document overview", error);
         // A change that arrived during the failed read deserves one retry;
         // with no new change a persistent error must not spin.
-        if (this.dirty) this.schedule();
+        if (isDirty()) return "continue";
       }
-    } finally {
-      this.inFlight = false;
-      this.dirty = false;
+      return "done";
     }
   }
 
@@ -163,11 +160,11 @@ export class MinimapLoader {
   }
 
   dispose(): void {
+    // The generation fence drops a read that is still in flight; the drain
+    // then settles every joined caller.
     this.generation += 1;
     if (this.timer !== null) this.scheduler.clearTimeout(this.timer);
     this.timer = null;
-    this.inFlight = false;
-    this.dirty = false;
     this.published = null;
     this.rects.clear();
     this.overviewState.set(null);

@@ -7,8 +7,8 @@
   and search areas, the probes, the page area and workspace split, and full
   structure enforcement). Phase 6/7 were re-baselined on 2026-11-16 after the
   database v1 and project-layer work; §16.3 records the measurements and
-  decisions. Phase 6 is done (2026-11-16, §16.4); Phase 7's steps in §11 are
-  the current cut.
+  decisions. Phase 6 is done (2026-11-16, §16.4); Phase 7 runs in six review
+  batches, with 7-0 through 7-4 done.
 - **Scope:** `src/` (TSX app) and `src/native/` (Rust document core).
 - **Related:** [standards](../standards.md), [architecture](../architecture.md),
   [conventions](../conventions.md), [testing](../testing.md),
@@ -531,7 +531,7 @@ src/
 │   │   ├── index.ts
 │   │   ├── geometry.ts                Point/Box/Size, containsPoint, overlaps, mergeBounds
 │   │   ├── equality.ts                exact vs tolerant comparators, named explicitly
-│   │   ├── async-drain.ts             shared in-flight/resolver core (loaders migrate one per PR)
+│   │   ├── async-drain.ts             shared in-flight/resolver core (all three loaders use it)
 │   │   ├── keyed-flags.ts
 │   │   ├── wheel.ts                   wheelNotches / wheelNotchesOf / wheelZoomFactor
 │   │   ├── shortcuts.ts               key names and labels
@@ -870,7 +870,7 @@ shape) stays in `model/camera.ts`.
 | Duplication                                                                | Extraction                                                                                                                | Home                                                           |
 | -------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------- |
 | TextComposer/NodeComposer shell (~68 lines)                                | `ComposerSheet` + `ComposerAttachments` + `ComposerFooter`                                                                | `components/composer`                                          |
-| Single-flight drains (3 copies)                                            | shared in-flight/resolver core; migrate one loader per PR with its existing test as the oracle                            | `flow/shared/async-drain.ts`                                   |
+| Single-flight drains (3 copies)                                            | shared in-flight/resolver core; migrate viewport/minimap in Phase 7 batch 2 with their tests as oracles                   | `flow/shared/async-drain.ts`                                   |
 | Result batch/item construction (6 sites)                                   | `resultBatch`, `textResultItem`, `imageResultItem`, `manualTextResult`                                                    | `flow/shared/result-inputs.ts`                                 |
 | Rect/screen conversion (3 copies)                                          | `containsPoint`, `overlaps`, `mergeBounds` in `geometry.ts`; `screenRectOf` in `flow/canvas/model/screen-rect.ts`         | `flow/shared` + canvas model                                   |
 | Equality helpers (~10 variants)                                            | `sameRect`, `sameRectWithin`, `samePoint`, `sameBox`, `sameBounds`                                                        | `flow/shared/equality.ts`                                      |
@@ -1439,8 +1439,9 @@ boundary, `settingsOpen`, `settingsLabel`, every `testID` and the existing
 app tests; add a test for the shared shell.
 1c. **AsyncDrain core.** Add `flow/shared/async-drain.ts` and migrate
 `PreviewLoader` in the same PR, using `preview-loader.test.ts` as the oracle.
-Migrate `ViewportController` and `MinimapLoader` one per PR in Phase 7; their
-scheduling, revision fences and retry rules differ, so do not batch them.
+`ViewportController` and `MinimapLoader` migrated in Phase 7 batch 2
+(2026-11-16) with their tests as oracles; each loader keeps its scheduling,
+revision fences and retry rule local, which is the part that differs.
 1d. **Connector and primitive reuse.** Extract `connector-layer.ts` and
 `ConnectorCanvas` for `FlowEdges`/`FlowPreviews`; keep the computed layer
 box per mounted layer, keep `token()` calls inside `draw` so theme switches
@@ -1586,7 +1587,12 @@ frozen schema are unchanged; mark Phase 6 done.
 ### Phase 7 — Internal splits (incremental, after enforcement)
 
 Re-baselined 2026-11-16; the targets are unchanged by database v1, but their
-sizes and some §6.4 items moved. One PR each, behavior-preserving.
+sizes and some §6.4 items moved. Behavior-preserving except where a step
+records a deliberate adjustment, in six review batches (2026-11-16):
+7-0/7-1, 7-2/7-3/7-4, 7-5/7-6/7-7, 7-8/7-9, 7-10 alone, and 7-11/7-12/7-13.
+Each batch is one implementation, one two-reviewer round and one commit;
+batching keeps the review on the batch's change set instead of fragmenting
+it per step. 7-10 stays alone as the highest-risk extraction.
 
 7-0. **Docs (can run with Phase 6).** Add `flow/projects`/`pages/projects`
 to §4.5/§4.6 and Appendix A and refresh the structure counts. Leave
@@ -1604,12 +1610,31 @@ shared component would be pass-through indirection — keep them local until
 an identical second control appears. The tooltip pill's shared part is the
 one-line class literal, which §6.3 allows to repeat.
 7-2. **MinimapLoader onto AsyncDrain** (S): keep the 150 ms debounce and its
-retry rule local; `minimap-loader.test.ts` is the oracle.
+retry rule local; `minimap-loader.test.ts` is the oracle. Done 2026-11-16:
+the debounce, revision drop and one-follow-up rules are unchanged. The one
+deliberate adjustment: a failed read with a joined change is the drain's
+immediate one-retry instead of a re-armed 150 ms timer (the timer still
+serves change bursts), and a joined caller now settles with the drain
+instead of immediately — unobservable in production, where the only caller
+is the timer's `void this.refresh()`. `dispose` fences the in-flight read
+by generation. The timing adjustment is recorded here rather than split
+out, under the Phase 7 batching decision above.
 7-3. **ViewportController onto AsyncDrain** (M): keep the timer, generation
 fences, `pendingFit` and fit-before-read; check `disposed` at the top of
-each step. Do not batch with the minimap.
+each step. Done 2026-11-16, batched with 7-2/7-4: each step takes the
+pending fit before its read and re-queues a fit that landed during the
+read, every joined request asks for the follow-up read, and a resize joins
+an active drain so its fit cannot be dropped as the read finishes; all
+eleven controller tests pass unchanged.
 7-4. **MiniMap touch/drag state into MinimapController** (optional S),
 responders staying on the mounted panel; add controller tests. Host tests.
+Done 2026-11-16: the owning finger moved into the controller (`start`,
+`move` and `end` take an optional touch id) and the panel handlers pass the
+event identifier; three controller tests cover a second finger, the
+overlay's pointer moves and the press-then-touch pointer path. No new host
+assertion: the drag publishes no
+probe or text a host test could read; the host suite passes without changes
+(14 platform tests plus the smoke test on this machine).
 7-5. **Scene: hits.** Extract `scene-hits.ts`; rename the hit test and move
 the hit cases out of `scene.test.ts`.
 7-6. **Scene: records and overrides.** Extract the pure helpers with their
@@ -1667,7 +1692,7 @@ quality follow-up and can slip.
 | Perf regression from "cleaner" props                      | FlowCard's accessors are load-bearing                                           | Keep accessor props; no `camera.scale` read per card; benchmark after Phase 3                                    |
 | Batching lost in extracted gestures                       | One event would become several update rounds                                    | Only the facade opens `batch`; helpers are pure                                                                  |
 | A page-only helper is imported by a component             | Components→pages is forbidden                                                   | Split pure policies (`wheel`, `shortcuts`) into `flow/shared` first; pass callbacks as props                     |
-| Phase 1 is treated as behavior-free                       | ComposerSheet, AsyncDrain and equality unification change real behavior         | Split into 1a–1d; existing tests first; migrate loaders one per PR                                               |
+| Phase 1 is treated as behavior-free                       | ComposerSheet, AsyncDrain and equality unification change real behavior         | Split into 1a–1d; existing tests first; migrate loaders with their tests as oracles (Phase 7 batch 2)            |
 | FlowCard parts re-create reactive graphs                  | A part reading `node()` or `camera.scale` rebuilds every card or stops updating | Pass the existing `CardGeometry`/`CardContent` instances and accessors; keep the two unit tests plus an app test |
 | FlowCanvas input state remounts                           | Press/pinch/suppress state resets                                               | Instantiate the input class once in the always-mounted body or page; run host/touch tests                        |
 | Lint cannot resolve facades                               | String matching cannot tell an area facade from a deep import                   | fs-based resolution with `.ts`/`.tsx`/`index.ts`; native types through `flow/shared/native-types`                |
@@ -1769,7 +1794,7 @@ Their findings and dispositions:
 | BLOCKER  | `composer-detail` created a document→composer edge                      | Reload policy stays `flow/document/session`; view helpers move to `components/composer/detail-view.ts`                        |
 | BLOCKER  | Geometry imported camera model types                                    | `Size`/`BoxGeometry` move to `flow/shared`; `tooltip`/`view-culling` use them                                                 |
 | BLOCKER  | Harness `open("./App.tsx")` breaks after the move                       | False: `open` is relative to the test file; the path stays                                                                    |
-| MAJOR    | `AsyncDrain` is not one identical state machine                         | Add the core and migrate `PreviewLoader` in 1c; migrate viewport/minimap one per PR in Phase 7 with their tests as oracles    |
+| MAJOR    | `AsyncDrain` is not one identical state machine                         | Add the core and migrate `PreviewLoader` in 1c; migrate viewport/minimap in Phase 7 batch 2 with their tests as oracles       |
 | MAJOR    | FlowCard parts can duplicate reactive graphs                            | Pass existing `CardGeometry`/`CardContent` instances/accessors; never read `node()`/`camera.scale` in a part; add an app test |
 | MAJOR    | FlowCanvas input state ownership                                        | Instantiate once in the always-mounted body or page; no conditional mount; run host/touch tests                               |
 | MAJOR    | NodeSession split in the move PR breaks `protected nodeDetail` tests    | Move the class intact in Phase 2; split in Phase 7 with harness updates                                                       |
@@ -1860,8 +1885,8 @@ pins the shared shell for both variants. `LEGACY_FLAT` is down to 76.
 Phase 1c extracted `flow/shared/async-drain.ts` (join/settle, one follow-up,
 racing starts) and migrated `PreviewLoader` onto it; `preview-loader.test.ts`
 stayed the oracle and passes unchanged. `ViewportController` and
-`MinimapLoader` keep their own drains until Phase 7, as their scheduling,
-revision fences and retry rules differ.
+`MinimapLoader` kept their own drains until Phase 7 batch 2, as their
+scheduling, revision fences and retry rules differ.
 
 Phase 1d extracted `components/canvas/world/{connector-layer,ConnectorCanvas}`
 for `FlowEdges`/`FlowPreviews`: the per-mounted-layer computed box, the

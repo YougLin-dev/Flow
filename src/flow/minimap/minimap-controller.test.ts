@@ -39,6 +39,44 @@ test("moving a drag centers the camera by the pointer delta", () => {
   ]);
 });
 
+test("a second finger does not move or end a touch drag", () => {
+  const { controller, centers } = record();
+  controller.start(START, 7);
+
+  controller.move({ x: 30, y: 20 }, 8);
+  expect(centers).toEqual([]);
+  controller.end(8);
+  expect(controller.dragging()).toBe(true);
+
+  controller.move({ x: 30, y: 20 }, 7);
+  expect(centers).toEqual([[180, 90]]);
+  controller.end(7);
+  expect(controller.dragging()).toBe(false);
+});
+
+test("the overlay's pointer drives a drag that a touch began", () => {
+  const { controller, centers } = record();
+  controller.start(START, 7);
+
+  // The capture surface reports page points with no touch identity.
+  controller.move({ x: 30, y: 20 });
+  expect(centers).toEqual([[180, 90]]);
+  controller.end();
+  expect(controller.dragging()).toBe(false);
+});
+
+test("a reporting-pointer touch still drives a drag a press began", () => {
+  const { controller, centers } = record();
+  // A press on the panel starts the drag, and the platform then reports the
+  // same pointer as a touch.
+  controller.start(START);
+
+  controller.move({ x: 30, y: 20 }, 8);
+  expect(centers).toEqual([[180, 90]]);
+  controller.end(8);
+  expect(controller.dragging()).toBe(false);
+});
+
 test("moves without a drag and a non-positive scale do nothing", () => {
   const { controller, centers } = record();
 

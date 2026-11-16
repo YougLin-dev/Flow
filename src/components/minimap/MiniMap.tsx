@@ -53,9 +53,6 @@ interface CardPoint {
 }
 
 export function MiniMap(props: MiniMapProps) {
-  // The finger that began the drag: other fingers must not move or end it.
-  let dragTouch: number | null = null;
-
   // The map's world region is the union of the content and the current view.
   // Bounds equality keeps a camera move inside the content from waking every
   // silhouette: only a union that actually changes rescales the map.
@@ -88,8 +85,9 @@ export function MiniMap(props: MiniMapProps) {
     if (props.drag.dragging()) return;
     const layout = mapLayout();
     if (layout === null || !(layout.scale > 0)) return;
-    dragTouch = touch;
-    props.drag.start({ point, center: centerOfView(), scale: layout.scale });
+    // The controller keeps the finger that owns the drag: other fingers
+    // must not move or end it.
+    props.drag.start({ point, center: centerOfView(), scale: layout.scale }, touch);
   };
 
   const onDown = (event: PressEvent): void => {
@@ -105,27 +103,19 @@ export function MiniMap(props: MiniMapProps) {
 
   // Touches stay with the responder view, so they keep arriving here even
   // outside the panel. The event is about the finger that changed, which is
-  // not necessarily `touches[0]`.
+  // not necessarily `touches[0]`; the controller ignores another finger.
   const onTouchMove = (event: GestureResponderEvent): void => {
-    if (!props.drag.dragging()) return;
-    if (dragTouch !== null && event.identifier !== dragTouch) return;
-    props.drag.move({ x: event.pageX, y: event.pageY });
+    props.drag.move({ x: event.pageX, y: event.pageY }, event.identifier);
   };
 
   const onTouchEnd = (event: GestureResponderEvent): void => {
-    if (!props.drag.dragging()) return;
-    if (dragTouch !== null && event.identifier !== dragTouch) return;
     // Apply the lift point: the last move may lag it by a frame.
-    props.drag.move({ x: event.pageX, y: event.pageY });
-    dragTouch = null;
-    props.drag.end();
+    props.drag.move({ x: event.pageX, y: event.pageY }, event.identifier);
+    props.drag.end(event.identifier);
   };
 
   const onTouchCancel = (event: GestureResponderEvent): void => {
-    if (!props.drag.dragging()) return;
-    if (dragTouch !== null && event.identifier !== dragTouch) return;
-    dragTouch = null;
-    props.drag.end();
+    props.drag.end(event.identifier);
   };
 
   const cardStyle = (card: OverviewCard): ViewStyle => {

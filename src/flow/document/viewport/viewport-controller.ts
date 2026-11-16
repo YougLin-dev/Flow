@@ -2,7 +2,13 @@
  * The camera and viewport read loop: fitting, panning, zooming and throttled
  * scene reads. It owns no UI; the page binds the values it publishes.
  */
-import type { ChangeSet, Document, Viewport } from "../../shared";
+import {
+  AsyncDrain,
+  type ChangeSet,
+  type Document,
+  type DrainStepResult,
+  type Viewport,
+} from "../../shared";
 import type { CanvasCamera, FlowScene } from "../../canvas";
 
 const VIEWPORT_MARGIN = 0.25;
@@ -42,9 +48,7 @@ export class ViewportController {
   private zoomFrame = 0;
   private lastRev = 0;
   private userCamera = false;
-  private inFlight: Promise<void> | null = null;
-  private dirty = false;
-  private pendingResolvers: Array<() => void> = [];
+  private readonly drain = new AsyncDrain();
 
   constructor(
     private readonly host: ViewportHost,
@@ -83,79 +87,54 @@ export class ViewportController {
     const document = this.host.document();
     const scene = this.host.scene();
     if (!document || !scene || this.host.isDisposed()) return Promise.resolve();
-    if (this.inFlight !== null) {
-      // Join the active drain; one follow-up will read the newest rect.
-      this.dirty = true;
-      return new Promise<void>((resolve) => {
-        this.pendingResolvers.push(resolve);
-      });
-    }
-    // Publish the drain before starting it: a read that settles synchronously
-    // would otherwise clear `inFlight` before it was ever assigned.
-    const drain = new Promise<void>((resolve) => {
-      this.pendingResolvers.push(resolve);
-    });
-    this.inFlight = drain;
-    void this.runReads(document, scene);
-    return drain;
+    // The camera may have moved since the active read began, so every
+    // request that joins asks for the follow-up read.
+    const joined = this.drain.join();
+    if (joined !== null) return joined;
+    return this.drain.start((isDirty) => this.drainStep(document, scene, isDirty));
   }
 
-  /** One queued drain: a current read plus at most one per newer request. */
-  private async runReads(document: Document, scene: FlowScene): Promise<void> {
-    while (true) {
-      if (this.host.isDisposed()) break;
-      // Clear the flags before awaiting so a request arriving during this
-      // read marks the loop dirty again.
-      this.dirty = false;
-      const pendingFit = this.pendingFitGeneration;
-      this.pendingFitGeneration = null;
-      if (pendingFit !== null && !this.userCamera) {
-        // Apply the newest automatic fit before the scene read; `false` keeps
-        // this same drain as the only timer and read path.
-        // eslint-disable-next-line no-await-in-loop
-        await this.fitToDocument(true, false, pendingFit);
-        if (this.host.isDisposed()) break;
-      }
-      const { rect, margin } = this.visibleRect();
-      const generation = ++this.generation;
-      // The card budget is read before the await so the read and the client
-      // slicer agree on the same camera scale for this snapshot.
-      const camera = this.host.camera();
-      const scale = camera?.scale ?? 1;
-      const maxCards = scale < 0.15 ? 300 : scale < 0.4 ? 800 : 2_000;
-      try {
-        // The drain is deliberately sequential: one read, then at most one
-        // follow-up for the newest rect.
-        // eslint-disable-next-line no-await-in-loop
-        const snapshot = await document.scene(rect, margin, maxCards);
-        if (
-          !this.host.isDisposed() &&
-          generation === this.generation &&
-          snapshot.rev >= this.lastRev
-        ) {
-          this.lastRev = snapshot.rev;
-          scene.apply(snapshot, { maxCards });
-          this.host.schedulePreviews();
-        }
-      } catch (error) {
-        if (!this.host.isDisposed()) console.error("Flow could not read the viewport", error);
-      }
-      if (this.host.isDisposed()) break;
-      // A resize arrived during the read: the newest fit must be applied
-      // before joined callers observe the drain's settlement.
-      if (this.pendingFitGeneration !== null) this.dirty = true;
-      if (!this.dirty) break;
+  /** One queued iteration: a pending fit, then a read of the visible rect. */
+  private async drainStep(
+    document: Document,
+    scene: FlowScene,
+    isDirty: () => boolean,
+  ): Promise<DrainStepResult> {
+    if (this.host.isDisposed()) return "done";
+    const pendingFit = this.pendingFitGeneration;
+    this.pendingFitGeneration = null;
+    if (pendingFit !== null && !this.userCamera) {
+      // Apply the newest automatic fit before the scene read; `false` keeps
+      // this same drain as the only timer and read path.
+      await this.fitToDocument(true, false, pendingFit);
+      if (this.host.isDisposed()) return "done";
     }
-    this.finishReads();
-  }
-
-  private finishReads(): void {
-    this.inFlight = null;
-    const resolvers = this.pendingResolvers;
-    this.pendingResolvers = [];
-    // Callers observe settlement, not proof that an outdated revision was
-    // applied: a dropped read resolves here once its request finishes.
-    for (const resolve of resolvers) resolve();
+    const { rect, margin } = this.visibleRect();
+    const generation = ++this.generation;
+    // The card budget is read before the await so the read and the client
+    // slicer agree on the same camera scale for this snapshot.
+    const camera = this.host.camera();
+    const scale = camera?.scale ?? 1;
+    const maxCards = scale < 0.15 ? 300 : scale < 0.4 ? 800 : 2_000;
+    try {
+      const snapshot = await document.scene(rect, margin, maxCards);
+      if (
+        !this.host.isDisposed() &&
+        generation === this.generation &&
+        snapshot.rev >= this.lastRev
+      ) {
+        this.lastRev = snapshot.rev;
+        scene.apply(snapshot, { maxCards });
+        this.host.schedulePreviews();
+      }
+    } catch (error) {
+      if (!this.host.isDisposed()) console.error("Flow could not read the viewport", error);
+    }
+    if (this.host.isDisposed()) return "done";
+    // A resize or a request arrived during the read: the newest fit must be
+    // applied before joined callers observe the drain's settlement.
+    if (this.pendingFitGeneration !== null) return "continue";
+    return isDirty() ? "continue" : "done";
   }
 
   /** Publishes the camera's current scale, deferred to the next frame. */
@@ -212,10 +191,12 @@ export class ViewportController {
       return;
     }
     // One newest fit token: repeated resizes before the timer replace it, so
-    // the drain reads bounds once at the final stage size.
+    // the drain reads bounds once at the final stage size. An active drain
+    // sees the pending fit after its read; joining it also covers a resize
+    // that lands while the read finishes. Otherwise the timer starts one.
     this.fitGeneration += 1;
     this.pendingFitGeneration = this.fitGeneration;
-    if (this.inFlight !== null) this.dirty = true;
+    if (this.drain.active) void this.drain.join();
     else this.schedule();
   }
 
