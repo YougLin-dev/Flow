@@ -104,7 +104,7 @@ Decision tree:
   Keep SQLite and search code in Rust, and keep TSX/canvas code out of the
   crate.
 - SeaORM entities are one file per table under `src/native/src/entity/`, named
-  after the table. Today commands live in `mutation.rs`; reads in the
+  after the table. Today commands live in `mutation/`; reads in the
   production modules `search.rs`, `viewport.rs`, `scene.rs` or `detail.rs`;
   asset bytes in `asset.rs`; package
   collection in `gc.rs`; creating and managing packages in `project.rs` and
