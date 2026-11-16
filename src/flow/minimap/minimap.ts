@@ -3,12 +3,10 @@
  * uniform scale that fits the document together with the camera's viewport,
  * shared by the card silhouettes, the viewport rectangle and drag-to-pan.
  */
-import type { Viewport } from "../shared";
+import type { Rect, Size, Viewport } from "../shared";
 
-export interface MinimapSize {
-  readonly width: number;
-  readonly height: number;
-}
+/** The minimap panel's size, by the shared size shape. */
+export type MinimapSize = Size;
 
 export interface MinimapLayout {
   /** Minimap points per world point. */
@@ -18,12 +16,8 @@ export interface MinimapLayout {
   readonly offsetY: number;
 }
 
-export interface MinimapRect {
-  readonly x: number;
-  readonly y: number;
-  readonly width: number;
-  readonly height: number;
-}
+/** A minimap-space rectangle, by the shared rect shape. */
+export type MinimapRect = Rect;
 
 /** Where a minimap drag began: a page point, the view's world center and
  * the map scale at that moment. */

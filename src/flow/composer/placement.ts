@@ -1,4 +1,4 @@
-import type { CanvasCamera } from "../canvas";
+import { screenRectOf, type CanvasCamera } from "../canvas";
 import type { BoxGeometry, StageSize } from "../shared";
 
 export interface ComposerAnchor {
@@ -41,11 +41,9 @@ export function composerAnchor(
   panelWidth: number,
   gap = 10,
 ): ComposerAnchor {
-  const screen = camera.toScreen(rect.x, rect.y);
-  const width = rect.width * camera.scale;
-  const height = rect.height * camera.scale;
+  const screen = screenRectOf(camera, rect);
   return {
-    left: screen.x + width / 2 - panelWidth / 2,
-    top: screen.y + height + gap,
+    left: screen.x + screen.width / 2 - panelWidth / 2,
+    top: screen.y + screen.height + gap,
   };
 }

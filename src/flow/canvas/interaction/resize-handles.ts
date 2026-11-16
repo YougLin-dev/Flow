@@ -3,19 +3,13 @@ import type { NodeSummary } from "../../shared";
 import type { CanvasCamera } from "../model/camera";
 import type { CanvasCursor } from "../model/cursor";
 import type { FlowScene } from "../model/scene/scene";
+import { screenRectOf } from "../model/screen-rect";
 import { handleAt, type ResizeHandle, type ScreenRect } from "../geometry/selection";
 
 /** The screen rectangle of a card, or null when it is not in the scene. */
 export function screenRect(scene: FlowScene, camera: CanvasCamera, id: string): ScreenRect | null {
   const rect = scene.cardRect(id);
-  if (!rect) return null;
-  const topLeft = camera.toScreen(rect.x, rect.y);
-  return {
-    x: topLeft.x,
-    y: topLeft.y,
-    width: rect.width * camera.scale,
-    height: rect.height * camera.scale,
-  };
+  return rect === null ? null : screenRectOf(camera, rect);
 }
 
 /**

@@ -10,6 +10,7 @@ import type { ScreenRect } from "../geometry/selection";
 import type { GroupPort } from "../model/scene/group-ports";
 import { groupPortAt } from "../model/scene/group-ports";
 import type { FlowScene } from "../model/scene/scene";
+import { screenRectOf } from "../model/screen-rect";
 import { containsPoint, type BoxGeometry } from "../../shared";
 
 /** How far a card's port icon reaches outside its border. */
@@ -39,13 +40,7 @@ export function selectionFrame(bounds: BoxGeometry, scale: number): BoxGeometry 
 
 /** A world rectangle's screen rectangle under the camera. */
 export function frameScreenRect(camera: CanvasCamera, bounds: BoxGeometry): ScreenRect {
-  const topLeft = camera.toScreen(bounds.x, bounds.y);
-  return {
-    x: topLeft.x,
-    y: topLeft.y,
-    width: bounds.width * camera.scale,
-    height: bounds.height * camera.scale,
-  };
+  return screenRectOf(camera, bounds);
 }
 
 /** Whether a screen point is inside the frame a marquee left around `bounds`. */

@@ -1596,7 +1596,13 @@ to §4.5/§4.6 and Appendix A and refresh the structure counts. Leave
 status tables to `components/canvas/world/status-visual.ts`; alias
 `MinimapSize`/`MinimapRect` to `flow/shared`'s `Size`/`Rect`. Re-check
 the remaining §6.4 items (wheel helper, MenuItem/TooltipPill/IconButton)
-and implement only where two real consumers exist.
+and implement only where two real consumers exist. Audit result
+(2026-11-16): wheel conversion already has one owner; the menu/tooltip/
+icon-button candidates share only a `Button`+`Icon` shape or a one-line
+class literal while their sizes (18–46pt), roles and states differ, so the
+shared component would be pass-through indirection — keep them local until
+an identical second control appears. The tooltip pill's shared part is the
+one-line class literal, which §6.3 allows to repeat.
 7-2. **MinimapLoader onto AsyncDrain** (S): keep the 150 ms debounce and its
 retry rule local; `minimap-loader.test.ts` is the oracle.
 7-3. **ViewportController onto AsyncDrain** (M): keep the timer, generation

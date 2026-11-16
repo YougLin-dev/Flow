@@ -14,6 +14,7 @@ import { Image as ImageIcon } from "lucide";
 import type { BoxGeometry, NodeSummary } from "../../../flow/shared";
 import { Icon } from "../../primitives";
 import { Port } from "./Port";
+import { statusDot, statusTextClass } from "./status-visual";
 import { portKey, type PortHover } from "../../../flow/canvas/interaction/canvas-controller";
 import {
   CardContent,
@@ -413,36 +414,6 @@ function UploadEmpty() {
       </Text>
     </View>
   );
-}
-
-function statusDot(status: string): string {
-  switch (status) {
-    case "running":
-      return "bg-chart-1";
-    case "done":
-      return "bg-chart-3";
-    case "failed":
-      return "bg-destructive";
-    case "stale":
-      return "bg-chart-4";
-    default:
-      return "bg-muted-foreground";
-  }
-}
-
-function statusTextClass(status: string): string {
-  switch (status) {
-    case "running":
-      return "text-chart-1";
-    case "done":
-      return "text-chart-3";
-    case "failed":
-      return "text-destructive";
-    case "stale":
-      return "text-chart-4";
-    default:
-      return "text-muted-foreground";
-  }
 }
 
 function truncate(text: string, limit: number): string {

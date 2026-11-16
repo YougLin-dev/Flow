@@ -6,6 +6,7 @@
  */
 export type { BoxGeometry } from "../shared";
 export { CanvasCamera, wheelNotches, wheelZoomFactor, type CameraSize } from "./model/camera";
+export { screenRectOf } from "./model/screen-rect";
 export { CardContent } from "./model/cards/card-content";
 export type { CardImageEvent } from "./model/cards/card-image";
 export { CardGeometry, cardLocalLayout, type CardSize } from "./model/cards/card-geometry";
