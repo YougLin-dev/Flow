@@ -1030,8 +1030,8 @@ src/native/src/
 │   ├── metadata.rs         counts, bounds cache, is_empty (may move to reads/ later)
 │   └── tests/
 │       ├── mod.rs          fixtures/shared helpers
-│       ├── worker.rs, startup.rs, session.rs, verify.rs, gc.rs, reset.rs
-│       ├── nodes.rs, edges.rs, inputs.rs, settings.rs, manual.rs, runs.rs
+│       ├── worker.rs, startup.rs, session.rs, verify.rs, gc.rs, reset.rs, metadata.rs
+│       ├── nodes.rs, edges.rs, inputs.rs, settings.rs, manual.rs, runs.rs, seed.rs
 │       ├── scene.rs, search.rs, previews.rs, indexes.rs, assets.rs, history.rs
 │       └── benchmark.rs    the 100k apparatus (keep #[ignore])
 ├── mutation/
@@ -1142,12 +1142,13 @@ Risky; parameterize, do not collapse:
 - Keep fixtures (`node`, `connect`, `scene_between`, `preview_*`, the
   package/DB writers) in `db/tests/mod.rs`; child modules use `use super::*`.
   A test module named like a production module shadows that binding for every
-  `use super::*` child: `scene`/`search`/`gc` are crate-root modules, while
-  `worker`/`session`/`verify` are db-owned after the production split. Spell
-  them `crate::scene`/`crate::search`/`crate::gc` and `crate::db::...`; the
-  note is in `db/tests/mod.rs`. The `nodes`/`edges` test modules also shadow
-  the SeaORM entities (imported as `node_rows`/`edge_rows`); `assets` is the
-  next entity collision, addressed as `crate::entity::assets` if needed.
+  `use super::*` child: `scene`/`search`/`gc`/`history` are crate-root
+  modules, while `worker`/`session`/`verify`/`metadata` are db-owned after the
+  production split. Spell them `crate::scene`/`crate::search`/`crate::gc`/`crate::history`
+  and `crate::db::...`; the note is in `db/tests/mod.rs`. The `nodes`/`edges`
+  test modules also shadow the SeaORM entities (imported as
+  `node_rows`/`edge_rows`); `assets` is the next entity collision, addressed
+  as `crate::entity::assets` if needed.
   Benchmark-only imports (`AtomicU64`, `fs`, `Path`, `PathBuf`, `now_ms`,
   `OVERVIEW_LIMIT`, `NODE_LIMIT`) must be imported explicitly in
   `benchmark.rs`; keep `mod benchmark;` in `tests/mod.rs` or the ignored
@@ -1158,7 +1159,8 @@ Risky; parameterize, do not collapse:
 - The v1 domains get their own files: `worker` (queue/lane), `startup`
   (open guard, identity/version, paths, sqlite URLs), `session`
   (close/clean-shutdown/recovery-pending/project_info/save_view), `verify`,
-  `gc`, `reset`, `previews` and `indexes` (the `EXPLAIN QUERY PLAN` tests).
+  `gc`, `reset`, `previews`, `indexes` (the `EXPLAIN QUERY PLAN` tests),
+  `seed` (the document seed commands) and `metadata` (counts/bounds/is_empty).
   `history`/`inputs`/`runs` are the largest groups; split them by behavior
   later only if review size demands it.
 - The benchmark apparatus moves to `db/tests/benchmark.rs`, so its ignored
@@ -1542,12 +1544,13 @@ fixture cannot pass). Keep `db::tests` a descendant of `db`.
 6-2. **db tests: reads.** Move the scene, search, previews and EXPLAIN
 (`indexes`) groups verbatim.
 6-3. **db tests: commands.** Move the node/edge/input tests (6-3a), the
-settings/manual/history tests (6-3b) and the runs/assets tests (6-3c) as
+settings/manual/history tests (6-3b) and the runs/assets/seed tests (6-3c) as
 separate PRs; keep the reference oracles in `viewport.rs`/`detail.rs`. The
 combined group is about 5.5k test lines, too large for one review.
 6-4. **db tests: lifecycle.** Move startup, session, verify, gc and reset;
-add the managed-session integration test (lease + `open_package` + close)
-here.
+move the document metadata tests (empty bounds, bounds cache, empty document)
+into `metadata.rs`; add the managed-session integration test (lease +
+`open_package` + close) here.
 6-5. **db production.** `git mv db.rs db/mod.rs`; extract
 `db/{worker,open,session,verify,undo,metadata}.rs`; keep the `Database`
 fields and `run`/`run_mutation` wrappers in `mod.rs`; keep `sqlite_url*`
@@ -2182,29 +2185,29 @@ layout is §4.5 and `docs/code-map.md`.
 
 Re-baselined 2026-11-16 (§16.3). `Current` sizes are total / test lines.
 
-| Current                                             | Target                                                                                                                                                                           |
-| --------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `db.rs` production (1,267)                          | `db/{mod,worker,open,session,verify,undo,metadata}.rs`                                                                                                                           |
-| `db.rs` tests (10,049)                              | `db/tests/{mod,worker,startup,session,verify,gc,reset,nodes,edges,inputs,settings,manual,runs,scene,search,previews,indexes,assets,history,benchmark}.rs` (fixtures in `mod.rs`) |
-| `db.rs` `empty_change`/`lock_history`               | `db/undo.rs`                                                                                                                                                                     |
-| `db.rs` counts/bounds/is_empty                      | `db/metadata.rs` (`reads/metadata.rs` later, optional)                                                                                                                           |
-| `db.rs` `sqlite_url*`/`configure`/`open_connection` | `db/worker.rs`, `pub(crate)` (project/ and schema/ call them)                                                                                                                    |
-| `mutation.rs` `Mutation` + public commands          | `mutation/mod.rs`                                                                                                                                                                |
-| `mutation.rs` nodes/edges/inputs                    | `mutation/{nodes,edges,inputs}.rs`                                                                                                                                               |
-| `mutation.rs` manual/save-run/recover               | `mutation/manual.rs`, `mutation/runs.rs`                                                                                                                                         |
-| `mutation.rs` seed                                  | `mutation/seed.rs`                                                                                                                                                               |
-| `mutation.rs` `apply_ops`                           | `mutation/apply.rs`                                                                                                                                                              |
-| `mutation.rs` `Mutation::commit`/pure helpers       | `mutation/support.rs`                                                                                                                                                            |
-| `mutation.rs` tx helpers                            | `mutation/tx/{mod,nodes,edges,inputs,runs}.rs`                                                                                                                                   |
-| `mutation.rs` row conversions                       | top-level `rows.rs` (shared by reads)                                                                                                                                            |
-| `schema/v1.rs` tests (1,837)                        | `schema/v1/tests/{mod,shape,constraints,triggers}.rs`; DDL, `MIGRATION_1` and digest untouched                                                                                   |
-| `schema/package.rs`, `project/{..}.rs`              | stay; moving their tests is optional later                                                                                                                                       |
-| `viewport.rs`, `scene.rs`, `detail.rs`, `search.rs` | stay; optional `reads/` move after Phase 6                                                                                                                                       |
-| `document.rs`                                       | stay; already owns `current_rev` and `bump_rev`                                                                                                                                  |
-| `gc.rs`, `fsutil.rs`, `edge_index.rs`, `history.rs` | stay                                                                                                                                                                             |
-| `store/` umbrella                                   | dropped (no consumer)                                                                                                                                                            |
-| `detail.rs`/`viewport.rs` test data                 | `db/tests/*`; keep reference oracles in place                                                                                                                                    |
-| `entity/mod.rs` ownership comment                   | update to the frozen `schema/v1.rs`                                                                                                                                              |
+| Current                                             | Target                                                                                                                                                                                         |
+| --------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `db.rs` production (1,267)                          | `db/{mod,worker,open,session,verify,undo,metadata}.rs`                                                                                                                                         |
+| `db.rs` tests (10,049)                              | `db/tests/{mod,worker,startup,session,verify,gc,reset,metadata,nodes,edges,inputs,settings,manual,runs,seed,scene,search,previews,indexes,assets,history,benchmark}.rs` (fixtures in `mod.rs`) |
+| `db.rs` `empty_change`/`lock_history`               | `db/undo.rs`                                                                                                                                                                                   |
+| `db.rs` counts/bounds/is_empty                      | `db/metadata.rs` (`reads/metadata.rs` later, optional)                                                                                                                                         |
+| `db.rs` `sqlite_url*`/`configure`/`open_connection` | `db/worker.rs`, `pub(crate)` (project/ and schema/ call them)                                                                                                                                  |
+| `mutation.rs` `Mutation` + public commands          | `mutation/mod.rs`                                                                                                                                                                              |
+| `mutation.rs` nodes/edges/inputs                    | `mutation/{nodes,edges,inputs}.rs`                                                                                                                                                             |
+| `mutation.rs` manual/save-run/recover               | `mutation/manual.rs`, `mutation/runs.rs`                                                                                                                                                       |
+| `mutation.rs` seed                                  | `mutation/seed.rs`                                                                                                                                                                             |
+| `mutation.rs` `apply_ops`                           | `mutation/apply.rs`                                                                                                                                                                            |
+| `mutation.rs` `Mutation::commit`/pure helpers       | `mutation/support.rs`                                                                                                                                                                          |
+| `mutation.rs` tx helpers                            | `mutation/tx/{mod,nodes,edges,inputs,runs}.rs`                                                                                                                                                 |
+| `mutation.rs` row conversions                       | top-level `rows.rs` (shared by reads)                                                                                                                                                          |
+| `schema/v1.rs` tests (1,837)                        | `schema/v1/tests/{mod,shape,constraints,triggers}.rs`; DDL, `MIGRATION_1` and digest untouched                                                                                                 |
+| `schema/package.rs`, `project/{..}.rs`              | stay; moving their tests is optional later                                                                                                                                                     |
+| `viewport.rs`, `scene.rs`, `detail.rs`, `search.rs` | stay; optional `reads/` move after Phase 6                                                                                                                                                     |
+| `document.rs`                                       | stay; already owns `current_rev` and `bump_rev`                                                                                                                                                |
+| `gc.rs`, `fsutil.rs`, `edge_index.rs`, `history.rs` | stay                                                                                                                                                                                           |
+| `store/` umbrella                                   | dropped (no consumer)                                                                                                                                                                          |
+| `detail.rs`/`viewport.rs` test data                 | `db/tests/*`; keep reference oracles in place                                                                                                                                                  |
+| `entity/mod.rs` ownership comment                   | update to the frozen `schema/v1.rs`                                                                                                                                                            |
 
 ## Appendix C — References
 
