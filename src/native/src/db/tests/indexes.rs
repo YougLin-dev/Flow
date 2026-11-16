@@ -23,10 +23,10 @@ fn running_work_queries_use_partial_indexes() {
     let conn = open_connection(":memory:", OpenMode::Create)
         .expect("open memory database")
         .conn;
-    let nodes_statement = nodes::Entity::find()
-        .filter(nodes::Column::Status.eq("running"))
+    let nodes_statement = node_rows::Entity::find()
+        .filter(node_rows::Column::Status.eq("running"))
         .select_only()
-        .column(nodes::Column::Id)
+        .column(node_rows::Column::Id)
         .build(conn.get_database_backend());
     let nodes_plan = explain_plan(&conn, nodes_statement);
     assert!(

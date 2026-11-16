@@ -1141,10 +1141,13 @@ Risky; parameterize, do not collapse:
   because `clippy -D warnings` fails on unused imports.
 - Keep fixtures (`node`, `connect`, `scene_between`, `preview_*`, the
   package/DB writers) in `db/tests/mod.rs`; child modules use `use super::*`.
-  A test module named like a production module (`scene`, `search`, `worker`,
-  `session`, `verify`, `gc`) shadows that binding for every `use super::*`
-  child, so production modules are spelled `crate::...`; the note is in the
-  `db/tests/mod.rs` header.
+  A test module named like a production module shadows that binding for every
+  `use super::*` child: `scene`/`search`/`gc` are crate-root modules, while
+  `worker`/`session`/`verify` are db-owned after the production split. Spell
+  them `crate::scene`/`crate::search`/`crate::gc` and `crate::db::...`; the
+  note is in `db/tests/mod.rs`. The `nodes`/`edges` test modules also shadow
+  the SeaORM entities (imported as `node_rows`/`edge_rows`); `assets` is the
+  next entity collision, addressed as `crate::entity::assets` if needed.
   Benchmark-only imports (`AtomicU64`, `fs`, `Path`, `PathBuf`, `now_ms`,
   `OVERVIEW_LIMIT`, `NODE_LIMIT`) must be imported explicitly in
   `benchmark.rs`; keep `mod benchmark;` in `tests/mod.rs` or the ignored
