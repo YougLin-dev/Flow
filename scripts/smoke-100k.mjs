@@ -18,7 +18,7 @@
  * screenshots live under `.nsh/bench` and are not committed.
  */
 import { spawnSync } from "node:child_process";
-import { mkdirSync, rmSync } from "node:fs";
+import { existsSync, mkdirSync, rmSync, statSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 
 const targets = { win32: "windows", darwin: "macos", linux: "linux" };
@@ -30,8 +30,13 @@ if (!target) {
 
 const dbPath = resolve(".nsh/bench/flow-100k.db");
 mkdirSync(dirname(dbPath), { recursive: true });
-// The fixture is a package: the database and its asset directory. A stale
+// The fixture is a package: the database and its asset directory. Remove
+// every part first, so a seeder filter mismatch fails the existence check
+// below instead of passing on a database left by an earlier run. A stale
 // assets tree from an older fixture version would be read by the new rows.
+for (const suffix of ["", "-wal", "-shm"]) {
+  rmSync(`${dbPath}${suffix}`, { force: true });
+}
 rmSync(join(dirname(dbPath), "assets"), { recursive: true, force: true });
 
 const seedStarted = Date.now();
@@ -42,7 +47,7 @@ const seed = spawnSync(
     "--release",
     "--manifest-path",
     "src/native/Cargo.toml",
-    "db::tests::seed_benchmark_database",
+    "db::tests::benchmark::seed_benchmark_database",
     "--",
     "--ignored",
     "--nocapture",
@@ -51,7 +56,17 @@ const seed = spawnSync(
 );
 if (seed.error) throw seed.error;
 if (seed.status !== 0) process.exit(seed.status ?? 1);
-console.log(`100k smoke seed elapsed=${Date.now() - seedStarted}ms path=${dbPath}`);
+const seededBytes = existsSync(dbPath) ? statSync(dbPath).size : 0;
+if (seededBytes === 0) {
+  console.error(
+    `The 100k seeder wrote no database at ${dbPath}; check the test filter ` +
+      "db::tests::benchmark::seed_benchmark_database.",
+  );
+  process.exit(1);
+}
+console.log(
+  `100k smoke seed elapsed=${Date.now() - seedStarted}ms path=${dbPath} bytes=${seededBytes}`,
+);
 console.log(
   "100k smoke profile: release Rust fixture seed, then a development host via nsh test --target with --trace/--fps/--verbose; these are not release-host timings",
 );

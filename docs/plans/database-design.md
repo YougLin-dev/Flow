@@ -941,7 +941,7 @@ The project layer above the document core owns the managed projects root, the pr
 2. Delete or move the whole package: `<project>/` (its database, `-wal`, `-shm` and `assets/`). For the current legacy `FLOW_DB_PATH` development file, delete that file, its `-wal`/`-shm` and its existing legacy asset directory.
 3. Reopen. The new binary creates v1 and the atomic seed runs.
 
-This is required because every current v5 development database has `application_id=0`. The error message must name the package path and the legacy files. The 100k benchmark and smoke scripts must perform the same delete before seeding. The benchmark seeder currently deletes only db/-wal/-shm (`db.rs:4767-4769`) and would leave the project assets directory behind; the smoke creates the parent directory only (`scripts/smoke-100k.mjs:31-34`).
+This is required because every current v5 development database has `application_id=0`. The error message must name the package path and the legacy files. The seeder (`src/native/src/db/tests/benchmark.rs`) deletes the database, `-wal` and `-shm` before writing; the smoke deletes those files plus the package's `assets/` directory before re-seeding, and fails if the seeder wrote no database, so a filter mismatch cannot pass on a stale fixture.
 
 ### 9.4 In-app destructive reset (dev-only)
 
@@ -977,7 +977,7 @@ Close or `close()` the document, or run `PRAGMA wal_checkpoint(TRUNCATE)`. Copy 
 
 ### 9.7 Benchmark and smoke contract
 
-Keep the exact cargo filter `db::tests::seed_benchmark_database` and `FLOW_BENCH_DB` (`scripts/smoke-100k.mjs:37-52`); the smoke now deletes the db/-wal/-shm and the package assets directory before re-seeding. `FIXTURE_VERSION` is `100k-grid-edges-images-v2-typed-ports`; `docs/testing.md` and `docs/plans/rust-core.md` are re-baselined to it together. The seeder inserts batches as `running`, inserts items, then settles; image items have assets. The smoke runs `src/Smoke100k.host.test.tsx`, which opens with `flowZoomProbe`/`flowSelectionProbe` and waits on `id:zoom-probe`/`id:canvas-probe` state instead of painted text or fixed sleeps; every other test run skips it on the bench-path gate.
+Keep the exact cargo filter `db::tests::benchmark::seed_benchmark_database` and `FLOW_BENCH_DB` (`scripts/smoke-100k.mjs`); the smoke deletes the db/-wal/-shm and the package assets directory before re-seeding and fails if the seeder wrote no database (so a filter mismatch cannot pass on a stale fixture). `FIXTURE_VERSION` is `100k-grid-edges-images-v2-typed-ports`; `docs/testing.md` and `docs/plans/rust-core.md` are re-baselined to it together. The seeder inserts batches as `running`, inserts items, then settles; image items have assets. The smoke runs `src/Smoke100k.host.test.tsx`, which opens with `flowZoomProbe`/`flowSelectionProbe` and waits on `id:zoom-probe`/`id:canvas-probe` state instead of painted text or fixed sleeps; every other test run skips it on the bench-path gate.
 
 ## 10. SeaORM entity/module mapping
 
@@ -1077,7 +1077,7 @@ run_command(f) = conn.transaction(|txn| {
 
 ### 11.3 100k benchmark plan
 
-Use the exact fixture contract (`db::tests::seed_benchmark_database`, `FLOW_BENCH_DB`, counts 100k/99k, overview 400, previews 2,000/8,000/2,000, recovery 100) in a dedicated benchmark directory so `<db-parent>/assets` is not shared with another database. Reset the package: the DB, -wal, -shm and the project assets directory; bump `FIXTURE_VERSION`; re-baseline:
+Use the exact fixture contract (`db::tests::benchmark::seed_benchmark_database`, `FLOW_BENCH_DB`, counts 100k/99k, overview 400, previews 2,000/8,000/2,000, recovery 100) in a dedicated benchmark directory so `<db-parent>/assets` is not shared with another database. Reset the package: the DB, -wal, -shm and the project assets directory; bump `FIXTURE_VERSION`; re-baseline:
 
 - open/close (target <300 ms; integrity checks outside open)
 - bounds (target O(1) document read; compaction separate)

@@ -466,7 +466,7 @@ Measured 2026-11-11 on branch `advisor/009-bench-coverage` at `59d5b6e`
 
 ```sh
 cargo test --manifest-path src/native/Cargo.toml --release \
-  db::tests::hundred_thousand_nodes_benchmark -- --ignored --nocapture --test-threads=1
+  db::tests::benchmark::hundred_thousand_nodes_benchmark -- --ignored --nocapture --test-threads=1
 ```
 
 - **Machine**: Windows 11 Pro 10.0.26300 (x64), Intel Core i7-14650HX
