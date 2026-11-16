@@ -329,8 +329,8 @@ node, editing the body, removing an input, switching nodes and the canvas and
 card context menus. `App.projects.test.tsx` drives the managed startup: it
 creates and opens a project through the dialog, returns to the list (reopening
 proves the lease was released), renames, duplicates and deletes through a
-row's actions menu, closes a row menu by scrolling, imports an unzipped
-package folder by path and shows a failed import in its dialog, dismisses the
+row's actions menu, closes a row menu by scrolling, imports a package folder
+by path and shows a failed import in its dialog, dismisses the
 dialog with Escape, shows a project held by another window without opening
 it, and renames the open project from the canvas (the new title survives the
 close and a reopen). `pages/projects/projects-home.test.ts` covers the list state with a fake

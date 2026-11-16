@@ -1,8 +1,8 @@
 /**
- * The import dialog: one folder path, Cancel and Import. NSH has no folder
- * picker and the file picker hands back bytes rather than a path, so the
- * dialog asks for the unzipped package folder's path directly; the Rust
- * store canonicalizes it, refuses a source inside the managed root, and
+ * The import dialog: one folder or archive path, Cancel and Import. NSH has
+ * no folder picker and the file picker hands back bytes rather than a path,
+ * so the dialog asks for the path directly; the Rust store reads a package
+ * folder or a `.zip` of one, refuses a folder inside the managed root, and
  * imports a copy. Dismissal never waits for the store.
  */
 import { signal, Text, View, type InputRef } from "nsh";
@@ -29,12 +29,12 @@ export function ImportProjectDialog(props: ImportProjectDialogProps) {
   let input: InputRef | null = null;
 
   const submit = async (): Promise<void> => {
-    const folder = source().trim();
-    if (busy() || folder === "") return;
+    const sourcePath = source().trim();
+    if (busy() || sourcePath === "") return;
     busy.set(true);
     error.set(null);
     try {
-      await props.onImport(folder);
+      await props.onImport(sourcePath);
     } catch (cause) {
       error.set(`${props.failurePrefix} ${errorMessage(cause)}`);
     } finally {
@@ -47,7 +47,7 @@ export function ImportProjectDialog(props: ImportProjectDialogProps) {
       testID="project-import-dialog"
       accessibilityLabel="Import project"
       heading="Import project"
-      description="Enter the path of an unzipped Flow project folder — the one that holds project.db."
+      description="Enter the path of a Flow project folder (the one that holds project.db) or a .zip archive of one."
       error={error()}
       onCancel={() => props.onCancel()}
       onOpen={() => input?.focus()}
@@ -68,20 +68,20 @@ export function ImportProjectDialog(props: ImportProjectDialogProps) {
       }
     >
       <View class="mt-4 gap-2">
-        <Text class="text-sm font-medium text-popover-foreground">Folder</Text>
+        <Text class="text-sm font-medium text-popover-foreground">Folder or archive</Text>
         <Input
           ref={(node) => {
             input = node;
           }}
           testID="project-import-path"
-          accessibilityLabel="Project folder"
+          accessibilityLabel="Project folder or archive"
           value={source()}
           onChange={(event) => {
             source.set(event.value);
             error.set(null);
           }}
           onSubmit={() => void submit()}
-          placeholder="The folder that holds project.db"
+          placeholder="A package folder or .zip archive"
           autoFocus
           autoCapitalize="none"
           autoCorrect={false}

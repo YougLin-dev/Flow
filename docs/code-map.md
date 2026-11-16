@@ -136,7 +136,12 @@ fails above 20. The old → new map is in
 The project layer added `flow/projects` (managed root, store adapter, lease
 session and pure list helpers) over the Rust `ProjectStore`; catalog rows
 carry database/WAL stamps, so a list re-reads a changed package without a
-watcher, and the projects page revalidates on a foreground return or wake. It
+watcher, and the projects page revalidates on a foreground return or wake.
+The store's `project/archive.rs` reads a `.zip` package: it refuses duplicate
+names, multiple end records and ZIP64, checks the one end record's declared
+entry count before the parser allocates, then extracts through a strict
+allowlist into an owner-only temp directory before the folder import
+validates it ([ADR 0008](adr/0008-zip-dependency.md)). It
 imports `flow/document` through its facade. The next slice added `pages/projects`
 (the projects screen and its app-lifetime home state) and mounted the session
 in `pages/flow`: the shell chooses the project list or the canvas, and the

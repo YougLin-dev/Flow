@@ -207,8 +207,12 @@ The canvas stays in TSX and owns only the scene model and its views.
   also rename the open project through one document-worker command. Both
   change only title/`updated_at` (no rev or history) and never move the
   directory, and the list re-reads the changed package by stamp.
-  Imports accept an unpacked package directory, not an archive; pre-v1
-  packages are refused rather than migrated. The app starts on the projects
+  Imports accept a package folder or a `.zip` of one (stored/deflate only,
+  ZIP64 refused; a strict `project.db` and `assets/<sha256>` allowlist with
+  size caps, duplicate names refused, and exactly one end record whose
+  declared count and directory size are checked before the parser allocates,
+  extracted to an owner-only temp directory before the same validation);
+  pre-v1 packages are refused rather than migrated. The app starts on the projects
   screen (`pages/projects`) when it has a managed root: the list shows
   recency, an open-in-another-window badge and unreadable fallback rows, and
   creates, renames, duplicates, deletes and imports projects through the same
@@ -223,8 +227,7 @@ The canvas stays in TSX and owns only the scene model and its views.
   packages. There
   is no filesystem watcher or timer: the projects page revalidates quietly
   when the app returns to the foreground or wakes, and a deep catalog refresh
-  remains the recovery path after a refusal. Zipped-package import and
-  backup/restore remain.
+  remains the recovery path after a refusal. Backup/restore remains.
 - The decision and the phased migration are recorded in
   [ADR 0002](adr/0002-rust-document-core.md),
   [ADR 0003](adr/0003-orm-seaorm.md) and

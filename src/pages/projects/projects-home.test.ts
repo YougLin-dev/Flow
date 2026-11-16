@@ -300,8 +300,8 @@ test("an empty import path never reaches the store", async () => {
       }),
   });
   await home.refresh();
-  expect(await rejection(home.importProject("   "))).toBe("the project folder is empty");
-  expect(await rejection(home.importProject('""'))).toBe("the project folder is empty");
+  expect(await rejection(home.importProject("   "))).toBe("the project import path is empty");
+  expect(await rejection(home.importProject('""'))).toBe("the project import path is empty");
   expect(called).toBe(false);
   home.dispose();
 });

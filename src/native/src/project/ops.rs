@@ -11,7 +11,7 @@
 //! to the source).
 
 use std::fs;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use sea_orm::{
     ActiveModelTrait, ActiveValue::Set, ActiveValue::Unchanged, Database, DatabaseConnection,
@@ -22,6 +22,7 @@ use crate::db;
 use crate::document;
 use crate::entity::document as document_row;
 use crate::fsutil;
+use crate::project::archive;
 use crate::project::commit::TempPackage;
 use crate::project::lock::PackageLock;
 use crate::project::paths;
@@ -173,14 +174,76 @@ pub(crate) fn duplicate_project(
     Ok(entry)
 }
 
-/// Imports an unpacked package directory from outside the managed root.
-/// The source is never locked or written: it may be a backup or another
-/// application's copy. The identity is kept when its directory is free,
-/// otherwise the copy is rekeyed; either way the first managed open verifies
-/// the imported package.
+/// A source prepared for import: a directory to read, or an archive already
+/// unpacked into a staging directory. The store prepares before taking the
+/// catalog lock, so a large archive never blocks the other project actions.
+pub(crate) enum PreparedImport {
+    Directory(PathBuf),
+    Archive {
+        extracted: archive::Extracted,
+        source: PathBuf,
+    },
+}
+
+/// Inspects an import source: an unpacked package directory or a `.zip`
+/// archive of one. An archive is extracted here, before any catalog lock.
+pub(crate) fn prepare_import(source: &str) -> Result<PreparedImport, String> {
+    let path = Path::new(source);
+    let metadata = fs::metadata(path).map_err(|_| package::missing_database(path))?;
+    if metadata.is_file() {
+        let extracted = archive::extract(path)?;
+        Ok(PreparedImport::Archive {
+            extracted,
+            source: path.to_owned(),
+        })
+    } else {
+        Ok(PreparedImport::Directory(path.to_owned()))
+    }
+}
+
+/// Imports a prepared source. The source is never locked or written: it may
+/// be a backup or another application's copy. The identity is kept when its
+/// directory is free, otherwise the copy is rekeyed; either way the first
+/// managed open verifies the imported package.
+pub(crate) fn import_prepared(
+    root: &Path,
+    prepared: PreparedImport,
+) -> Result<catalog::Entry, String> {
+    match prepared {
+        PreparedImport::Directory(source) => import_directory(root, &source),
+        PreparedImport::Archive { extracted, source } => {
+            let staging = extracted.path().to_owned();
+            // `import_directory` canonicalizes its source before building
+            // messages. Report the user's archive instead of the transient
+            // staging path, which is gone by the time the dialog shows it.
+            let reported = fs::canonicalize(&staging).unwrap_or_else(|_| staging.clone());
+            import_directory(root, &staging).map_err(|error| {
+                error
+                    .replace(
+                        &reported.display().to_string(),
+                        &source.display().to_string(),
+                    )
+                    .replace(
+                        &staging.display().to_string(),
+                        &source.display().to_string(),
+                    )
+            })
+        }
+    }
+}
+
+/// Imports a package from outside the managed root: an unpacked package
+/// directory or a `.zip` archive of one. The store splits this into
+/// `prepare_import` and `import_prepared`; tests use the shorthand.
+#[cfg(test)]
 pub(crate) fn import_project(root: &Path, source: &str) -> Result<catalog::Entry, String> {
-    let source_dir =
-        fs::canonicalize(source).map_err(|_| package::missing_database(Path::new(source)))?;
+    import_prepared(root, prepare_import(source)?)
+}
+
+/// Imports one unpacked package directory; the archive reader hands its
+/// temp directory to the same checks and commit.
+fn import_directory(root: &Path, source: &Path) -> Result<catalog::Entry, String> {
+    let source_dir = fs::canonicalize(source).map_err(|_| package::missing_database(source))?;
     let canonical_root = fs::canonicalize(root).map_err(|error| error.to_string())?;
     if source_dir == canonical_root || source_dir.starts_with(&canonical_root) {
         return Err("the project is already managed; duplicate it instead".to_owned());
@@ -372,6 +435,48 @@ mod tests {
         fs::write(dir.join(hash), bytes).expect("asset file");
     }
 
+    /// Zips a package the way the import dialog receives one: the database
+    /// and its assets, deflated, optionally under one wrapper directory with
+    /// the directory entries Explorer's Compress folder writes.
+    fn zip_package(root: &Path, id: &str, destination: &Path, wrapper: Option<&str>) {
+        use std::io::Write;
+        use zip::ZipWriter;
+        use zip::write::SimpleFileOptions;
+
+        let file = fs::File::create(destination).expect("zip file");
+        let mut writer = ZipWriter::new(file);
+        let package = paths::package_dir(root, id);
+        let prefix = wrapper.map_or_else(String::new, |name| format!("{name}/"));
+        if let Some(name) = wrapper {
+            writer
+                .add_directory(format!("{name}/"), SimpleFileOptions::default())
+                .expect("wrapper directory");
+            writer
+                .add_directory(format!("{name}/assets/"), SimpleFileOptions::default())
+                .expect("assets directory");
+        }
+        let options =
+            SimpleFileOptions::default().compression_method(zip::CompressionMethod::Deflated);
+        writer
+            .start_file(format!("{prefix}{}", paths::DATABASE_FILE), options)
+            .expect("database entry");
+        writer
+            .write_all(&fs::read(package.join(paths::DATABASE_FILE)).expect("read database"))
+            .expect("write database");
+        if let Ok(entries) = fs::read_dir(package.join(paths::ASSETS_DIR)) {
+            for entry in entries.flatten() {
+                let name = entry.file_name().to_string_lossy().into_owned();
+                writer
+                    .start_file(format!("{prefix}{}/{}", paths::ASSETS_DIR, name), options)
+                    .expect("asset entry");
+                writer
+                    .write_all(&fs::read(entry.path()).expect("read asset"))
+                    .expect("write asset");
+            }
+        }
+        writer.finish().expect("finish zip");
+    }
+
     fn id_update_aborts(conn: &DatabaseConnection) -> bool {
         conn.execute_raw(Statement::from_string(
             DbBackend::Sqlite,
@@ -392,6 +497,108 @@ mod tests {
         .expect("row")
         .try_get_by_index::<i64>(0)
         .expect("count")
+    }
+
+    #[test]
+    fn importing_a_zip_package_copies_its_content_and_identity() {
+        use sha2::{Digest, Sha256};
+
+        let source = TempRoot::new("zip-source");
+        let created = create(&source, "Archived");
+        let hash = format!("{:x}", Sha256::digest(b"png"));
+        {
+            let conn = open(source.path(), &created.path);
+            insert_node(&conn, "n1");
+            insert_asset(&conn, &hash, 3);
+            write_asset(source.path(), &created.path, &hash, b"png");
+            crate::schema::package::checkpoint_truncate(&conn).expect("checkpoint");
+        }
+        let archive = source.path().join("package.zip");
+        zip_package(source.path(), &created.path, &archive, None);
+
+        let target = TempRoot::new("zip-target");
+        let imported =
+            import_project(target.path(), &archive.to_string_lossy()).expect("import the archive");
+        assert_eq!(imported.title, "Archived");
+        assert_eq!(imported.project_id, created.project_id);
+        assert_eq!(
+            imported.stamp,
+            stamp::package_stamp(&paths::package_dir(target.path(), &imported.path)),
+            "the import stores the committed package's stamp"
+        );
+        let conn = open(target.path(), &imported.path);
+        assert_eq!(node_count(&conn), 1);
+        assert!(
+            paths::assets_dir(target.path(), &imported.path)
+                .join(&hash)
+                .is_file(),
+            "the asset came out of the archive"
+        );
+    }
+
+    #[test]
+    fn importing_the_same_zip_twice_mints_a_new_identity() {
+        let source = TempRoot::new("zip-collision-source");
+        let created = create(&source, "Copied");
+        let archive = source.path().join("package.zip");
+        zip_package(source.path(), &created.path, &archive, None);
+
+        let target = TempRoot::new("zip-collision-target");
+        let first = import_project(target.path(), &archive.to_string_lossy()).expect("first");
+        let second = import_project(target.path(), &archive.to_string_lossy()).expect("second");
+        assert_ne!(first.project_id, second.project_id);
+        assert_eq!(first.title, second.title, "the title is preserved");
+        assert!(paths::package_dir(target.path(), &first.path).is_dir());
+        assert!(paths::package_dir(target.path(), &second.path).is_dir());
+    }
+
+    #[test]
+    fn importing_a_non_archive_file_is_refused() {
+        let source = TempRoot::new("zip-bad-source");
+        let path = source.path().join("bad.zip");
+        fs::write(&path, b"not a zip").expect("write");
+        let target = TempRoot::new("zip-bad-target");
+        let error = import_project(target.path(), &path.to_string_lossy())
+            .expect_err("a non-archive is refused");
+        assert!(error.contains("not a valid zip file"), "{error}");
+    }
+
+    #[test]
+    fn importing_a_wrapped_zip_with_directory_entries_works() {
+        let source = TempRoot::new("zip-wrapped-source");
+        let created = create(&source, "Wrapped");
+        let archive = source.path().join("package.zip");
+        zip_package(source.path(), &created.path, &archive, Some("My Project"));
+
+        let target = TempRoot::new("zip-wrapped-target");
+        let imported = import_project(target.path(), &archive.to_string_lossy())
+            .expect("import the wrapped archive");
+        assert_eq!(imported.project_id, created.project_id);
+        assert_eq!(imported.title, "Wrapped");
+        assert!(paths::package_dir(target.path(), &imported.path).is_dir());
+    }
+
+    #[test]
+    fn an_archive_with_a_foreign_database_reports_the_archive_path() {
+        use std::io::Write;
+        use zip::ZipWriter;
+        use zip::write::SimpleFileOptions;
+
+        let source = TempRoot::new("zip-foreign-source");
+        let archive = source.path().join("foreign.zip");
+        let file = fs::File::create(&archive).expect("zip file");
+        let mut writer = ZipWriter::new(file);
+        writer
+            .start_file(paths::DATABASE_FILE, SimpleFileOptions::default())
+            .expect("database entry");
+        writer.write_all(b"not a database").expect("database");
+        writer.finish().expect("finish zip");
+
+        let target = TempRoot::new("zip-foreign-target");
+        let error = import_project(target.path(), &archive.to_string_lossy())
+            .expect_err("a foreign database is refused");
+        assert!(error.contains("foreign.zip"), "{error}");
+        assert!(!error.contains("flow-import"), "{error}");
     }
 
     #[test]

@@ -18,6 +18,7 @@ use std::sync::{Arc, Mutex, MutexGuard};
 
 use nsh_core::prelude::*;
 
+mod archive;
 mod catalog;
 mod commit;
 mod create;
@@ -101,6 +102,7 @@ impl ProjectStore {
         crate::off_thread(move || {
             let _catalog = lock_catalog(&state)?;
             paths::sweep_residue(&state.root);
+            archive::sweep_staging();
             let entries = catalog::refresh(&state.root)?;
             Ok(entries
                 .into_iter()
@@ -184,17 +186,20 @@ impl ProjectStore {
         .await
     }
 
-    /// Imports an unpacked package directory from outside the root. The
-    /// source is read only; the copy gets a fresh identity when the source's
-    /// identity is already taken.
+    /// Imports a package folder or a `.zip` archive of one from outside the
+    /// root. An archive is unpacked before the catalog lock is taken, so a
+    /// large source does not block the other project actions. The source is
+    /// read only; the copy gets a fresh identity when the source's identity
+    /// is already taken.
     pub async fn import_project(
         this: Instance<Self>,
         source: String,
     ) -> Result<ProjectEntry, String> {
         let state = this.with(|store| Arc::clone(&store.state));
+        let prepared = crate::off_thread(move || ops::prepare_import(&source)).await?;
         crate::off_thread(move || {
             let _catalog = lock_catalog(&state)?;
-            let entry = ops::import_project(&state.root, &source)?;
+            let entry = ops::import_prepared(&state.root, prepared)?;
             Ok(entry_view(&state, entry))
         })
         .await
@@ -251,6 +256,7 @@ impl Drop for ProjectLease {
 fn open_state(root: String) -> Result<StoreState, String> {
     let root = paths::prepare_root(&root)?;
     paths::sweep_residue(&root);
+    archive::sweep_staging();
     Ok(StoreState {
         root,
         catalog: Mutex::new(()),

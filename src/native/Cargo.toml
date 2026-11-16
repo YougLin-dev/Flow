@@ -22,3 +22,8 @@ sea-orm-sync = { version = "2.0.4", default-features = false, features = [
 rusqlite = { version = "0.38", features = ["bundled"] }
 serde_json = "1.0"
 sha2 = "0.10"
+# The package importer reads a user-supplied .zip (ADR 0008). Only stored and
+# deflate entries are accepted; the default features would pull encryption and
+# extra codecs the importer refuses. zlib-rs is the pure-Rust flate2 backend,
+# selected here instead of inheriting another crate's default backend.
+zip = { version = "9.6", default-features = false, features = ["deflate-flate2-zlib-rs"] }

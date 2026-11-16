@@ -84,7 +84,7 @@ export interface ProjectsHome {
   duplicate(project: ProjectEntry, title: string): Promise<ProjectEntry>;
   /** Deletes a closed project's package. */
   remove(project: ProjectEntry): Promise<void>;
-  /** Imports an unzipped package folder from outside the managed root. */
+  /** Imports an outside package folder or `.zip` archive of one. */
   importProject(source: string): Promise<ProjectEntry>;
   /** Returns from the canvas to the list; the workspace closed the project. */
   showProjects(): void;
@@ -334,7 +334,7 @@ export function createProjectsHome(root: string, options: ProjectsHomeOptions = 
 
   const importProject = async (rawSource: string): Promise<ProjectEntry> => {
     const source = cleanSource(rawSource);
-    if (source === "") throw new Error("the project folder is empty");
+    if (source === "") throw new Error("the project import path is empty");
     return act(
       async () => (await ensureStore()).importProject(source),
       (entry) => {

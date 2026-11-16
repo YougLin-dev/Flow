@@ -6,8 +6,8 @@ refusal, on return, and on a foreground return or wake, with no filesystem
 watcher; a cached readable row is re-read only when its package stamp
 changed, while fallback and identity-mismatched rows are re-read on every
 list.
-Importing a zipped package and backup/restore are later slices; an open
-project is renamed from the canvas, not from this list.
+Backup/restore is a later slice; an open project is renamed from the canvas,
+not from this list.
 
 The data model and the store live in
 [database-design.md](database-design.md) §8.7. This page records the screen's
@@ -18,8 +18,8 @@ and tests refer to.
 
 - **Primary task:** open an existing project.
 - **Secondary tasks:** create a new project (an empty canvas), rename one,
-  duplicate one, delete one, and import an unzipped package folder from
-  outside the managed root.
+  duplicate one, delete one, and import a package folder or `.zip` archive
+  from outside the managed root.
 - **Object:** one self-contained project package (`project.db` + `assets/`).
 - **Always available:** the project list, `New project`, `Import project…`,
   and for the open project a way back to the list.
@@ -78,9 +78,10 @@ and tests refer to.
   destructive action.
 - Rename and duplicate open the name dialog prefilled (rename with the title,
   duplicate with `<title> copy`); delete opens a confirmation that names the
-  project and says it cannot be undone. Import opens a folder-path field:
-  NSH has no folder picker, and the file picker returns bytes rather than a
-  path, while the store imports an unzipped package directory from a path.
+  project and says it cannot be undone. Import opens a folder-or-archive
+  path field: NSH has no folder picker, and the file picker returns bytes
+  rather than a path, while the store imports a package folder or `.zip`
+  archive from a path.
 - The dialogs are the semantic `Dialog`: they take focus, trap it, and
   dismiss on Escape, the backdrop or Cancel at any time. A write in flight is
   committed by the store, so the page ignores a late success (its row update
@@ -130,8 +131,8 @@ this screen should move onto them then.
 - Headless: `src/App.projects.test.tsx` creates a project through the dialog,
   opens it, closes it back to the list, reopens it (which proves the lease was
   released), renames, duplicates and deletes it through the row's actions
-  menu, imports an unzipped package folder by path and keeps a failed import
-  in its dialog, closes a row menu by scrolling, dismisses the dialog with
+  menu, imports a package folder by path and keeps a failed import in its
+  dialog, closes a row menu by scrolling, dismisses the dialog with
   Escape, shows a project held by another window as labelled and non-opening,
   and renames the open project from the canvas (the list shows the new title
   after closing, and reopening prefills the rename dialog with it).
@@ -165,7 +166,12 @@ this screen should move onto them then.
   strict version 2 parsing), readable rows carry a database+WAL stamp whose
   mismatch re-reads the package while preserving its open order, a version 1
   catalog rebuilds once, and `entry_view` maps the flag to `unreadable` on
-  both sides.
+  both sides. The zip reader is covered with flat and wrapped archives
+  (including directory entries), deflate entries, unsafe and duplicate names,
+  encryption, symlinks and other compression methods, multiple and ZIP64
+  end records, every size/entry cap, a lying declared size, trailing bytes
+  (including beyond a 64 KiB tail), staging cleanup, the archive-path error
+  message, and the import's identity/asset/collision behavior.
 - Visual, on the real Windows host at 960×640 and 420×760 in light and dark:
   the list, the empty state, the row actions menu, the rename, duplicate,
   delete and import dialogs, and the canvas chrome (title bar with the project
