@@ -1,17 +1,21 @@
 # Plan: NSH 窗口模型 v2 与 Flow 迁移（任务、验收、评审）
 
-Status: detailed implementation plan, delivered locally on 2026-11-18. The
+Status: detailed implementation plan, delivered on 2026-11-18. The
 short agent-facing goal is [`window-model-v2-goal.md`](window-model-v2-goal.md);
 this document is the authoritative task/acceptance/review reference it points
 to; the review gate record is
 [`window-model-v2-review.md`](window-model-v2-review.md).
 
-Delivery note (2026-11-17): the plan's push/pin preconditions do not apply to
-this delivery — the task forbids pushing NSH or opening an upstream PR. The
-window model is committed locally on `feat/window-model-v2` in
-`E:\code\mine\nsh-pr`; Flow depends on that checkout by path
-(`src/native/Cargo.toml`) and its CLI/types come from the same tree. Turning
-that into a commit pin is a release step once NSH is pushed.
+Delivery note (2026-11-18): the window model is pushed on
+`YougLin-dev/nsh` (`feat/window-model-v2`, rebased onto upstream `main`) at
+commit `025650b0b3731533773d8a2188e3f2ef97469944`, with the
+[upstream pull request](https://github.com/longbridge/nsh/pull/2307) opened.
+Flow pins that commit for `nsh-core`
+(`src/native/Cargo.toml`), takes its CLI and generated types from it, and CI
+and the installer workflow build the CLI from the pin
+(`.github/actions/nsh`). The earlier note that the task forbade pushing and
+an upstream PR described the initial constraint; the user authorized push and
+the PR on 2026-11-18.
 
 ## 这是一个完整交付，不是分阶段交接
 
@@ -338,7 +342,8 @@ Application Host (invisible)
 
 ## B0. 前置条件
 
-- Part A 已完成并合入 `E:\code\mine\nsh-pr` 的 fork main。
+- Part A 已完成；交付在 `E:\code\mine\nsh-pr` 的 `feat/window-model-v2` 分支上
+  （推送与 PR 见文首的 delivery note）。
 - NSH 设计文档：`E:\code\mine\nsh-pr\docs\dev\window-model.md`。
 - Flow 当前 `main` 工作区：`E:\code\mine\oflow`（有 projects 功能）。
   **不要用 Delta worktree 里的旧 Flow 代码做迁移。**

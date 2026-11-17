@@ -157,7 +157,7 @@ above, and found these remaining or newly introduced defects:
   or first open) app window instead of the host on macOS, Windows and Linux.
 - Docs: GPUI `defaultVisible` wording, `isAvailable` terminal exception, the
   RFC's native-test status, and every remaining website `mount(...)` example
-  (160 blocks in 126 files; EN and zh-CN) now declares a top-level
+  (192 mount-bearing blocks in 148 files; EN and zh-CN) now declares a top-level
   `<Window id="main">` — in the mount wrapper, or in the `App` it mounts —
   with the window import added to each block. Every modified TSX block was
   parsed with Bun's TSX transpiler. The macOS menu-bar example now calls
@@ -190,9 +190,38 @@ and stops at the shared mount check, so the rest of that suite does not run
 until the embedding model is migrated; this is recorded in
 `docs/dev/gpui.md`.
 
+Delivery follow-up (2026-11-18): the path-dependency blocker is closed. NSH
+is pushed on `YougLin-dev/nsh` at `025650b0b3731533773d8a2188e3f2ef97469944`
+(rebased onto upstream `main`), with the
+[upstream PR](https://github.com/longbridge/nsh/pull/2307) opened; Flow pins
+that commit for `nsh-core`, regenerates its types from the same commit, and both
+workflows build the CLI from it. The rebase's conflicts (headless host
+hiding, the mobile system bar and window sizes in the screen model, packaging
+data dirs, and a duplicated `nsh/desktop` docs row) were resolved and the
+full gate rerun before the push.
+
 Addendum: the gate found and fixed a pre-existing Windows portability bug in
 `nsh-js`'s browser `path` module (see above); the reviewer verified the diff
 and confirmed the prior SIGN OFF stands. The same review notes that upstream's
 other `path` exports (`join`, `normalize`, `format`, `sep`) still carry
 Windows semantics — pre-existing, outside the v2 diff, and a follow-up if
 `nsh:path` must be fully POSIX on Windows.
+
+Final review round (2026-11-18, on the delivery commit): three independent
+reviewers (the app-root guard, the rebase, and the Flow pin/CI/docs) and an
+adversarial verification pass confirmed six findings, all fixed: the Windows
+`transparent` example still mounted a plain root (it now declares its window
+with `transparent` and `taskbar` attributes); the new app-root guard dropped
+`request_attention`, an app-level request (it now passes like the attributes
+do, documented and covered by the guard test); the second rebase lost
+upstream's Linux desktop-entry rows in `docs/dev/linux.md` (restored); two
+upstream TSX entries (`examples/bench/TextViewStream.tsx` and the
+`input-focus` gallery fixture) lacked their top-level `<Window>` (added; both
+parse with Bun's TSX transpiler); and the PR body's website-sweep count was
+stale (192 mount-bearing blocks in 148 files, all declaring `<Window>`). Two
+further notes were refuted by verification (a test-coverage suggestion for
+the guard, and the gallery fixture, already fixed at verification time). The
+final tree passed `cargo test --workspace` (6133 passed, 0 failed, 77
+ignored), `cargo clippy --workspace --all-targets -- -D warnings`, the GPUI
+workspace's clippy and `cargo +nightly fmt --all --check`, and was pushed as
+`025650b0b3731533773d8a2188e3f2ef97469944`.

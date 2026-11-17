@@ -32,18 +32,22 @@ toolchain and the platform build dependencies below; the mixed app's
 
 ## Requirements
 
-- **All hosts:** Bun, the `nsh` CLI and Rust/Cargo. The app currently takes
-  `nsh-core` from the local `../nsh-pr` checkout (window-model v2, unpushed),
-  so the CLI and Rust core come from that checkout; once NSH is pushed the
-  lock file pins the commit.
+- **All hosts:** Bun, the `nsh` CLI and Rust/Cargo. The CLI is built from
+  `YougLin-dev/nsh` at commit `025650b0b3731533773d8a2188e3f2ef97469944`
+  (window-model v2), the commit `src/native/Cargo.lock` pins for `nsh-core`.
+  The installer workflow builds the CLI and this OS's runtime from that
+  checkout; a manual `bun run package` uses the `nsh` on `PATH`, which must
+  be that commit.
 - **Windows:** Visual Studio Build Tools with the C++ workload and the Windows
   SDK (for the Rust runtime and bundled SQLite); the packager downloads NSIS
   itself.
 - **macOS:** Xcode command line tools (for `codesign`, `hdiutil` and the Rust
   native build).
 - **Linux:** a C/C++ toolchain for the Rust build, `dpkg` tools and FUSE for
-  AppImage; the app needs GTK 4.14+ and WebKitGTK 6.0 at run time. The
-  generated `.deb` declares `libgtk-4-1` and `libwebkitgtk-6.0-4`.
+  AppImage; the app needs GTK 4.14+ and WebKitGTK 6.0 at run time. Building
+  the runner needs `libgtk-4-dev`, `libwebkitgtk-6.0-dev` and the GStreamer
+  dev packages; the installer workflow installs them. The generated `.deb`
+  declares `libgtk-4-1` and `libwebkitgtk-6.0-4`.
 
 ## Icons
 

@@ -7,10 +7,10 @@ publish = false
 [workspace]
 
 [dependencies]
-# The local NSH checkout with the window-model v2 work (the fork's `main`
-# once it is pushed): an input under the canvas's scaled camera draws,
-# places its caret and takes clicks where it shows.
-nsh-core = { path = "../../../nsh-pr/crates/nsh-core" }
+# NSH's app-host window model (v2): the fork commit that delivers it until
+# the design lands upstream. The CLI and generated types come from the same
+# commit (`.github/actions/nsh` builds it in CI).
+nsh-core = { git = "https://github.com/YougLin-dev/nsh", rev = "025650b0b3731533773d8a2188e3f2ef97469944" }
 # Synchronous SeaORM. `rusqlite` is the SQLite driver; the direct dependency
 # enables the bundled SQLite build (including FTS5 and RTree).
 sea-orm-sync = { version = "2.0.4", default-features = false, features = [
