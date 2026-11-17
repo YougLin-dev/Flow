@@ -4,9 +4,8 @@ Flow's first executable node layer: kinds declare named, typed input and
 output ports, connections bind one output port to one input port, and types
 carry text or image items. This document records the M1 contract; the
 long-term direction is still [the Rust document core plan](plans/rust-core.md).
-Paths below are the current flat homes; the Phase 2–3 move keeps this
-contract and relocates the modules per [the code map](code-map.md) and plan
-Appendix A.
+Paths below are the current area homes; this contract is unchanged. The area
+map is [the code map](code-map.md).
 
 ## Data model
 
@@ -17,8 +16,11 @@ content-addressed `assets/` directory. The opener checks `application_id` and
 schema or a newer one without dropping anything; there is no migration from
 the pre-release development schemas because every current row is test data.
 The TSX side seeds the text → image example through one transactional
-`seedDocument` command (`flow/document/lifecycle/seed.ts`), and the document
-records `demo_seeded` so an emptied project is not reseeded.
+`seedDocument` command (`flow/document/lifecycle/seed.ts`) when
+`flow/document/lifecycle/seed-decision.ts` allows it: the legacy/dev open may
+seed, while a managed project's initial content was decided at creation (the
+Projects screen creates it blank), so opening it never injects the demo. The
+document records `demo_seeded` so an emptied project is not reseeded.
 
 | Table            | Role                                                                            |
 | ---------------- | ------------------------------------------------------------------------------- |

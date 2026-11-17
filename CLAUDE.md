@@ -10,7 +10,7 @@ changing code; this file is the short list. The structure decision is
 ## Gate
 
 Run `bun run check` (format + lint + type check + Rust format/clippy +
-boundary-rule tests; file names and dependency direction are lint rules) and
+boundary/structure rule tests; file names and dependency direction are lint rules) and
 `bun run test` (Rust unit tests plus TSX tests) before you finish.
 `bun run check:fix` applies safe fixes. `bun run check:structure` (part of
 `check`) enforces the area shape: it fails a new module at the `components/`,
@@ -25,11 +25,13 @@ repeats the platform tests (`*.host.test.tsx`) on this OS's real desktop host.
 - **App code lives in `src/`:** the entry, `nsh.json`, `theme.json` and assets
   are the NSH app root; the repository root is tooling only.
 - **No `any`.** Narrow `unknown` with type guards.
-- **Dependencies flow down.** `src/App.tsx → pages → components/store`.
-  `components/` and foundations never import a page; foundations (`flow/`)
-  never import the store. Inside each layer, code lives in areas with one
-  `index.ts` facade; cross-area imports use it, except the same-feature deep
-  import (`components/canvas` ↔ `flow/canvas`) and `pages/flow`. No new
+- **Dependencies flow down.** `src/App.tsx → pages → components → flow`;
+  only the shell and pages import the store. `components/` and foundations
+  never import a page; foundations (`flow/`) never import the store. Inside
+  each layer, code lives in areas with one `index.ts` facade; cross-area
+  imports use it, except the same-feature deep import
+  (`components/canvas` ↔ `flow/canvas`) and the `pages/flow` / `pages/projects`
+  composition roots. No new
   module at the `components/`, `flow/` or `pages/` root. The
   `boundaries/no-upward-import` rule (`lint/boundaries.js`) enforces the
   layer graph; `lint/structure-map.js` and `scripts/structure.mjs` hold the
@@ -42,20 +44,22 @@ repeats the platform tests (`*.host.test.tsx`) on this OS's real desktop host.
 - **Signals stay private in `src/store.ts`.** Export readers and actions;
   pages bind them to presentational components.
 - **The canvas is native views.** Cards, ports, selection and the composer are
-  ordinary NSH views; connectors are stroked in one native `<Canvas>` layer
-  (never a retained scene), and hit testing stays in the scene model. Keep
+  ordinary NSH views; connectors are stroked in two native `<Canvas>` layers
+  (committed edges and connection previews), never a retained scene, and hit
+  testing stays in the scene model. Keep
   geometry and the scene in `src/flow/canvas/{geometry,model}`, gestures in
   `src/flow/canvas/interaction/`, and the views in
   `src/components/canvas/FlowCanvas.tsx` and its parts; extend those with tests
   instead of adding a canvas library. The composer's draft and placement live
-  in `flow/composer/`; see the code map and plan Appendix A.
+  in `flow/composer/`; see the code map.
 - **The document core is Rust's.** `src/native/` is the mixed NSH Rust crate;
   it owns SQLite, FTS5, RTree, undo history and asset metadata. TSX must not
   open SQLite or write SQL. The canvas stays in TSX/QuickJS and is never moved
   into Rust. Keep calls coarse-grained; no per-node or per-frame FFI.
-- **The scene is viewport-driven.** `FlowScene` reconciles only the nodes and
-  edges in `scene(rect, margin)`; keep the card budget, throttled reads and
-  selected-card pinning. Never instantiate the whole document in the view tree.
+- **The scene is viewport-driven.** `FlowScene` reconciles the snapshot from
+  `document.scene(rect, margin, maxCards)` via `apply(snapshot, { maxCards })`;
+  keep the card budget, throttled reads and selected-card pinning. Never
+  instantiate the whole document in the view tree.
 - **Files stay focused.** The `max-lines` lint rule caps a module at 500 code
   lines; treat that as a prompt to find a seam, not a target.
 - **Design tokens only.** No raw hex/rgba or palette classes in app code; add
@@ -63,9 +67,9 @@ repeats the platform tests (`*.host.test.tsx`) on this OS's real desktop host.
 - **The sandbox is declared.** `src/nsh.json` grants no remote hosts; add one
   to `capabilities.network` only for a real integration, and keep the
   `capabilities` key (its presence switches the app to allow-list mode).
-- **File names:** PascalCase components, kebab-case modules,
-  `*.test.ts(x)` beside the code — enforced by `unicorn/filename-case` with
-  per-extension overrides in `vite.config.ts`.
+- **File names:** PascalCase components, kebab-case modules — enforced by
+  `unicorn/filename-case` with per-extension overrides in `vite.config.ts`;
+  keep `*.test.ts(x)` beside its subject as a review convention.
 - **Tests:** one behaviour, `app.waitUntil` instead of sleeps, stable
   `testID`s, clean up controllers and document sessions you create. Only
   platform tests use the `.host.test.tsx` suffix; everything else is headless.

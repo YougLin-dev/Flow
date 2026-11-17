@@ -133,8 +133,8 @@ The app starts on the project list when it has a managed root:
 
 App-wide motion tokens (durations, easings, press scales) and the styled `ui`
 layer are still missing from the app; this screen matches its existing
-controls. Establishing both is part of the code-organization follow-up, and
-this screen should move onto them then.
+controls. The code-organization follow-up closed without them (§16.4–§16.5),
+so a future motion pass should move this screen onto them.
 
 ## Verification
 

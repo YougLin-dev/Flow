@@ -1,11 +1,15 @@
 # Rust document core plan
 
-- **Status:** P0–P2 complete. The implemented core covers asset
-  import/hash/dedup/metadata, runs, the project layer, the frozen v1 schema and
-  the Phase 6 Rust split. Asset-library browsing and thumbnail generation are
-  deferred, and P4 hardening remains. The canvas this plan calls a Leafer
-  scene is now a native view tree
-  ([ADR 0004](../adr/0004-native-view-canvas.md)).
+- **Status:** P0–P3 implemented except the deferred asset library and
+  thumbnail generation; P4 mostly implemented (backup/restore, post-open
+  verify, packaging and the ADR updates are done; install/launch tests and the
+  open decisions at the end remain). The implemented core covers asset
+  import/hash/dedup/metadata, runs, the project layer, the frozen v1 schema
+  and the Phase 6 Rust split. This is the original P0 plan and its decision log, not current
+  guidance: the Leafer references below describe the plan as written, while
+  the canvas is a native view tree ([ADR 0004](../adr/0004-native-view-canvas.md));
+  use [architecture](../architecture.md), [code-map](../code-map.md) and
+  [testing](../testing.md) for the implemented tree.
 - **Date:** 2026-11-07
 - **Related:** [ADR 0002](../adr/0002-rust-document-core.md),
   [ADR 0003](../adr/0003-orm-seaorm.md)
@@ -13,7 +17,8 @@
 ## Goal
 
 Move Flow's document, search and persistence layer from QuickJS to a Rust
-crate while keeping Leafer and the UI in TSX. The target is a desktop-only
+crate while keeping the UI in TSX (the canvas is now a native view tree,
+[ADR 0004](../adr/0004-native-view-canvas.md)). The target is a desktop-only
 infinite canvas with 50k–100k+ nodes, connected panels, runtime state, undo,
 an asset library and fast full-text search.
 
@@ -23,7 +28,7 @@ spike and does not rewrite the UI.
 ## Non-goals
 
 - No web or mobile target.
-- No Rust rewrite of Leafer, its editor, camera or hit testing.
+- No Rust rewrite of the canvas, its editor, camera or hit testing.
 - No remote database or search service in the first version.
 - No multi-user collaboration in the first version.
 - No custom search engine; SQLite FTS5 is the search engine.
@@ -33,8 +38,8 @@ spike and does not rewrite the UI.
 
 ```text
 App.tsx / TSX / QuickJS
-  ├─ pages/FlowPage.tsx
-  ├─ leafer/*                     scene, editor, camera, NSH canvas adapter
+  ├─ pages/flow/FlowPage.tsx
+  ├─ flow/canvas + components/canvas   scene, camera, native views
   └─ @flow/native                 generated Rust boundary
        └─ src/native (Rust)
             ├─ Document            commands, revisions, undo/redo
@@ -49,12 +54,14 @@ App.tsx / TSX / QuickJS
 Rules:
 
 - SQLite belongs to Rust. TSX never opens the database or writes SQL.
-- Leafer remains the scene graph and editor. Rust returns node summaries and
-  change sets; TSX maps them to Leafer objects.
+- The canvas was the scene graph and editor in the original plan; the
+  implemented canvas is a native view tree (ADR 0004). Rust returns node
+  summaries and change sets; TSX applies them to the scene model.
 - Calls across the boundary are coarse-grained and batch-oriented. No
   per-node or per-frame FFI calls.
-- Rust is the source of truth. The TSX store keeps only view state (tool,
-  zoom label, selection count, transient drag state).
+- Rust is the source of truth. The TSX store keeps only view state (zoom
+  percentage, selection count, window pin); transient drag state stays in the
+  canvas controller.
 
 ## Repository layout
 
@@ -68,15 +75,22 @@ src/
     src/
       lib.rs                       #[native_module("@flow/native")]
       types.rs                     shared JsObject/PropEnum types
-      db/                          handle, worker, open, session, verify, undo, metadata
+      db/                          handle, worker, open, session, verify, undo, metadata, tests
       entity/                      SeaORM entities, one file per table
       schema/                      frozen v1 DDL, open guard, package, maintenance, reset
       mutation/                    command families, replay and tx/support helpers
+      project.rs, project/         managed root, packages, locks, catalog, import/backup
       rows.rs                      Model → summary conversions shared by reads/writes
       asset.rs                     content-addressed files and asset metadata
+      document.rs                  document row and camera
+      detail.rs                    node detail and previews
       viewport.rs                  RTree viewport reads
+      scene.rs                     visible nodes/edges and document bounds
+      edge_index.rs                connector curve bounds
+      gc.rs                        asset and batch collection
       search.rs                    FTS5 search and short-query fallback
       history.rs                   reversible command operations
+      fsutil.rs, clock.rs          durable file helpers and time
 ```
 
 Use the specifier `@flow/native` rather than `flow/native` to avoid colliding
@@ -86,7 +100,9 @@ with the existing `src/flow/` foundation directory. The mixed app keeps
 The crate depends on `nsh-core` from the pinned fork commit (0.5.0 in
 `Cargo.lock`), `sea-orm-sync` 2.0.4 with SeaQuery 1.0
 (MIT/Apache-2.0), `rusqlite` 0.38 with bundled SQLite (MIT; SQLite itself is
-public domain) and `serde_json` 1.0 (MIT/Apache-2.0). `sea-orm-sync`'s
+public domain), `serde_json` 1.0 (MIT/Apache-2.0), `sha2` 0.10 (asset
+hashing) and `zip` 9.6 with only stored/deflate features for package import
+([ADR 0008](../adr/0008-zip-dependency.md)). `sea-orm-sync`'s
 `rusqlite` feature selects the sync driver; the direct `rusqlite` dependency
 enables the bundled SQLite build with FTS5 and RTree.
 `src/native/Cargo.lock` is committed; new runtime crates need an ADR and a
@@ -266,12 +282,11 @@ impl Document {
 }
 ```
 
-`Command`, `SearchFilters`, `NodeSummary`, `ChangeSet`, `SearchHit` and
-`Viewport` cross the boundary as generated `JsObject`/`PropEnum` types. Keep
-them small and stable; put node-specific properties in `data_json`, not in a
-new FFI field for every node type. P0 exposes the explicit methods above; a
-single `apply(commands)` entry point can wrap them in P1 when the UI needs a
-transactional command batch.
+`SearchFilters`, `NodeSummary`, `ChangeSet`, `SearchHit` and `Viewport` cross
+the boundary as generated `JsObject`/`PropEnum` types. Keep them small and
+stable; put node-specific properties in `data_json`, not in a new FFI field
+for every node type. Commands are explicit methods; the optional
+`apply(commands)` batch entry point was not added.
 
 The database handle moves each query or transaction to NSH's blocking pool
 with `blocking`; a dedicated worker thread owns the single connection. The
@@ -331,24 +346,24 @@ Use SQLite FTS5 as the only full-text engine:
 - Search is per package: the open document's `nodes_fts` is the only index in
   scope.
 
-## Viewport and Leafer scene
+## Viewport and the scene (original Leafer plan)
 
-Leafer must not instantiate all nodes:
+The implemented path reconciles `FlowScene`'s native card views from each
+viewport snapshot ([architecture](../architecture.md)); the query, throttle
+and budget rules below still hold. The view must not instantiate all nodes:
 
 - Query `nodes_rtree` for the visible rectangle plus a margin.
-- TSX keeps a `Map<nodeId, LeaferNode>`; add, update and remove only the
-  difference between viewport results.
-- Query viewport at a throttled rate (for example every 50–100 ms during
-  pan/zoom), not once per animation frame. Leafer can move existing nodes
-  between queries.
+- Reconcile only the difference between viewport snapshots; keep selected
+  cards and their connectors alive while pinned.
+- Query the viewport at a throttled rate (80 ms) during pan/zoom, not once
+  per animation frame.
 - Fetch edges for visible nodes, or edges whose bounding box intersects the
   viewport; render only those.
-- Keep selected nodes alive even when they leave the viewport so the editor
-  box remains valid.
-- At low zoom, render simplified clusters or a capped number of nodes. Rust
-  cannot make 100k Leafer nodes viable.
-- Do not create or destroy thousands of Leafer objects in one JS call. Batch
-  scene changes across frames and watch the 2 second call budget.
+- At low zoom, cap the card budget (300 below 0.15 scale, 800 below 0.4, else
+  2000). A minimum-size or cluster representation at very low zoom remains to
+  be designed.
+- Do not create or destroy thousands of views in one call. Batch scene
+  changes and watch the 2 second call budget.
 
 ## Assets
 
@@ -360,8 +375,8 @@ Leafer must not instantiate all nodes:
   asset on every scene update.
 - Use Rust's filesystem APIs; the TSX `fs` 8 MiB write cap does not apply to
   native Rust code.
-- P1 must verify how a runtime asset file is displayed through NSH `Image` /
-  Leafer (`file://`, Blob, or a host URL). Do not assume `asset:` works for
+- P1 must verify how a runtime asset file is displayed through NSH `Image`
+  (the implementation uses `AssetUrls` `blob:` URLs). Do not assume `asset:` works for
   files created after packaging.
 - Failed imports and orphaned files are cleaned by a later maintenance task;
   deleting an asset row must not delete a file still referenced by another
@@ -383,7 +398,7 @@ not promises:
 | Any TSX→Rust call                        | under 2 s, with no OOM |
 
 If a target is missed, record the measured number and adjust the design before
-starting P1. A fast database with an unvirtualized Leafer scene still fails.
+starting P1. A fast database with an unvirtualized canvas still fails.
 
 ### P0 measured results
 
@@ -765,12 +780,12 @@ boundary is not workable.
   selects this legacy document for a run.)
 - Seed `flow/data.ts` into an empty document; every later scene read comes
   from SQLite.
-- Replace the static `buildScene` with `flow/scene.ts`'s `FlowScene`: cards
-  are added, updated and removed from the viewport snapshot only. Selected
+- Replace the static `buildScene` with `src/flow/canvas/model/scene/scene.ts`'s
+  `FlowScene`: cards are reconciled from the viewport snapshot only. Selected
   cards survive leaving the viewport, and low zoom caps the card budget
   (300 below 0.15 scale, 800 below 0.4, else 2000).
-- Throttle viewport reads to 80 ms during pan/zoom; Leafer moves existing
-  cards between reads.
+- Throttle viewport reads to 80 ms during pan/zoom; the scene moves existing
+  native card views between reads.
 - Order viewport reads with nodes inside `rect` before margin-only nodes, so
   prefetch cannot consume the card budget, and sample capped low-zoom reads
   by a deterministic hash of the internal sequence instead of insertion
@@ -780,13 +795,13 @@ boundary is not workable.
   Deleting a node records its connected edges so undo restores them.
 - Wire `mod+z`/`mod+shift+z`/`mod+y`, `N`, `L`, Delete/Backspace and keep the
   existing camera, selection, tool and Escape behavior.
-- Add `scene(rect, margin)` and `bounds()` so the UI reads a viewport and Fit
-  reads the whole document in one call each.
+- Add `scene(rect, margin, maxCards)` and `bounds()` so the UI reads a viewport
+  and Fit reads the whole document in one call each.
 
 Gate: existing canvas tests pass and the Rust 100k benchmark covers viewport,
 scene and bounds reads. The real-host 100k UI pass is `bun run test:100k`,
 which pans, zooms, searches, reveals the last node and fits the document
-against a seeded database. At the Fit scale (~5%) Leafer culls cards only a
+against a seeded database. At the Fit scale (~5%) the canvas culls cards only a
 few pixels tall, so that screenshot is blank; the smoke captures the 6%
 overview, where the sampled cards render. A minimum-size or cluster
 representation at very low zoom remains open.
@@ -803,8 +818,9 @@ representation at very low zoom remains open.
 - The palette is mounted only while open, so its arrow bindings disappear with
   it and the canvas keeps its arrow-pan shortcuts. Escape closes the palette
   before it clears the canvas selection.
-- Type filters are wired to `SearchFilters.kind` (`All`, `Panels`); more kinds
-  and tag filters can reuse the same row when the data model needs them.
+- Type filters are wired to `SearchFilters.kind` (`All`, `Text`, `Images`,
+  `Uploads`); more kinds and tag filters can reuse the same row when the data
+  model needs them.
 - Rust tests cover title, body and tag matches, the 1–2 character CJK fallback,
   the trigram path, kind filtering and `getNode`; the benchmark now also
   reports short CJK and CJK trigram searches. UI tests cover opening by
@@ -813,20 +829,25 @@ representation at very low zoom remains open.
 Gate: `bun run check`, `bun run test`, `bun run test:bench`, plus a real
 Windows-host screenshot of the palette and its results. P2 is done.
 
-### P3 — assets
+### P3 — assets (import and references done)
 
-- File import, content hashing, deduplication and metadata.
-- Asset library browsing; node asset references.
-- Thumbnail generation and cleanup.
-- Verify display of runtime files through NSH and Leafer.
+- File import, content hashing, deduplication and metadata: done.
+- Node asset references: done (`result_items.asset_id`, `node_inputs.asset_id`).
+- Runtime display uses `AssetUrls` `blob:` URLs, not Leafer.
+- Asset library browsing and thumbnail generation remain deferred.
 
-### P4 — hardening and release
+### P4 — hardening and release (mostly done)
 
-- Backup/restore, migration rollback story, integrity check on startup.
-- Persisted undo decision, if product requires it.
-- Packaging for macOS, Windows and Linux; install and launch tests.
-- Update `docs/architecture.md`, `CLAUDE.md`, `docs/testing.md` and the ADR
-  status to Accepted.
+- Backup/restore: done (`project/backup.rs`). There is no migration chain
+  pre-release; the v1 guard refuses an older or newer `user_version`.
+- Integrity check on an unclean open: done (`verify()`); restore and import
+  mark the replacement package dirty so the next managed open runs it, a
+  backup preserves the source's closed state, and reset recreates the frozen
+  schema in place.
+- Packaging for macOS, Windows and Linux: done ([packaging](../packaging.md)).
+- ADR 0002/0003 status: Accepted.
+- Remaining: install and launch tests, the persisted-undo decision, and the
+  very-low-zoom representation.
 - Remove web/mobile assumptions from testing and packaging where they no
   longer apply.
 
@@ -870,8 +891,8 @@ Windows-host screenshot of the palette and its results. P2 is done.
 | Rust build/toolchain complexity               | P0 builds the mixed app on all three desktop targets; document C++/SDK prerequisites; CI matrix.                                            |
 | FFI overhead or accidental blocking           | Worker thread, bulk APIs, revision change sets, no per-frame calls; measure p95.                                                            |
 | FTS5 trigram index size and CJK short queries | Benchmark index size; use bounded LIKE fallback; add bigram table only if measured.                                                         |
-| Leafer still cannot show 100k nodes           | Virtualization, selection pinning and a card cap are in; very low zoom still culls tiny cards (cluster/minimum-size pending).               |
-| Asset display path                            | Verify `Image`/Leafer runtime file URLs in P1 before building the library UI.                                                               |
+| Very low zoom renders tiny cards              | Virtualization, selection pinning and a card cap are in; a cluster/minimum-size representation is still pending.                            |
+| Asset display path                            | Runtime asset display is resolved by `AssetUrls` `blob:` URLs; thumbnail generation remains deferred.                                       |
 | SQLite writer contention                      | One dedicated writer thread and WAL; add a read-only pool only if a measured read path blocks writes.                                       |
 | Undo memory growth                            | Cap in-memory history by entry/byte budget; forward and inverse `HistoryOp`s are field-scoped, with row snapshots where restore needs them. |
 | Schema/data loss                              | Migrations with backups, WAL checkpoint, integrity check, export path.                                                                      |
@@ -880,37 +901,29 @@ Windows-host screenshot of the palette and its results. P2 is done.
 
 ## Open questions
 
-- One package is one SQLite database plus its assets directory; the pre-v1
-  `document_id` multi-canvas model was dropped. Backup/export operates on the
-  package.
+Resolved by the frozen v1 design: one package is one SQLite database plus its
+assets directory (the pre-v1 `document_id` multi-canvas model was dropped);
+there is no `node_assets` table (references live on `result_items.asset_id`
+and `node_inputs.asset_id`, and undo restores them from the `HistoryOp`
+snapshot); seeding writes nodes, edges, batches and inputs in one transaction
+with a `demo_seeded` guard; the palette's kind filter is `All`, `Text`,
+`Images`, `Uploads`; runtime assets display through `AssetUrls` `blob:` URLs;
+undo is in-memory, bounded and scoped to v1.
+
+Still open:
+
 - Whether very low zoom should draw a minimum-size card, a cluster summary or
-  a density texture. Leafer currently culls cards only a few pixels tall, so
-  the fitted 100k view is blank until the user zooms in slightly.
+  a density texture; the fitted 100k view still culls cards only a few pixels
+  tall.
 - Whether undo must survive process restarts; if yes, persist a bounded
-  command log in P4.
+  command log.
 - Whether a future release needs cross-package title search in the project
   list; per-package content search is fixed and cross-package content search
   is out of scope.
-- Which filters the palette needs once image, text and asset nodes exist; the
-  current UI exposes the kind filter that the backend already supports.
-- The runtime asset URL strategy for locally imported files.
-- Whether low-zoom aggregation needs a separate cluster table or can be
-  computed from viewport summaries.
 - Whether one writer connection is enough under real editing/search load.
 - SQLite's RTree stores 32-bit floats while nodes use f64. Very large
   infinite-canvas coordinates will round; decide on a scaled/integer index or
   another spatial scheme before coordinates approach that precision limit.
-- The v1 schema has no `node_assets` table: asset references live on
-  `result_items.asset_id` and `node_inputs.asset_id`. Undo restores an input
-  row, including its `asset_id`, from the `HistoryOp` snapshot; `HistoryRefs`
-  only invalidate overlapping history entries.
-- The Leafer adapter rasterizes a layer whose compositing must stay inside it
-  as one SVG image; that path needs an NSH host whose canvas draws SVG (see
-  [../nsh.md](../nsh.md)). Images referenced by `asset:`/file/URL inside such
-  a layer are not embedded yet, and a layer containing patterned strokes or
-  text rasterizes whole: keep those out of very large layers.
-- Seeding writes nodes, edges, batches and inputs in one transaction. A crash
-  leaves no partial demo, and the non-empty guard prevents a second seed.
 - Database failures currently reach only `console.error`; surface an error
   state to the user before release.
 

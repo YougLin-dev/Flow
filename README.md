@@ -3,8 +3,8 @@
 An infinite flow canvas built with [Native Shell](https://nsh.dev/) (NSH). The
 canvas is a native NSH view tree — cards, ports, selection and the composer
 are ordinary views, so text, focus and accessibility are the platform's, while
-hit testing is the scene model's. Connectors are stroked on a native canvas
-layer so the curves stay smooth and sharp at any zoom. A mixed-app Rust crate in `src/native/` owns the document
+hit testing is the scene model's. Connectors are stroked on native canvas
+layers so the curves stay smooth and sharp at any zoom. A mixed-app Rust crate in `src/native/` owns the document
 database, search and undo core; the canvas stays in TSX. `⌘K` / `Ctrl+K` (or
 the Search button) opens a command palette over the Rust full-text index.
 
@@ -62,21 +62,21 @@ repository root.
 
 ## Commands
 
-| Command              | What it does                                                              |
-| -------------------- | ------------------------------------------------------------------------- |
-| `bun run dev`        | Runs the app on this machine (`nsh run src`).                             |
-| `bun run build`      | Builds the bundle for deployment (`nsh build src`, output in `.nsh/out`). |
-| `bun run test`       | Runs Rust unit tests plus every app test (`*.test.ts(x)`) headless.       |
-| `bun run test:host`  | Runs the platform tests (`*.host.test.tsx`) on this machine's host.       |
-| `bun run test:lint`  | Runs the dependency-boundary rule's tests (`bun test lint`).              |
-| `bun run test:bench` | Runs the ignored 100k SQLite/FTS5/RTree benchmark.                        |
-| `bun run test:100k`  | Seeds 100k nodes and drives the real host UI against them.                |
-| `bun run typecheck`  | Type-checks with NSH's compiler settings (`nsh check src`).               |
-| `bun run lint`       | Checks types, then lints with Oxlint; `lint:fix` applies fixes.           |
-| `bun run fmt`        | Formats with Oxfmt (`vp fmt`); `fmt:rust` formats the native crate.       |
-| `bun run check`      | Format, lint, type-check, Rust fmt/clippy and boundary-rule tests.        |
-| `bun run check:fix`  | Same, applying every automatic fix.                                       |
-| `bun run package`    | Builds the native installer for this OS (`docs/packaging.md`).            |
+| Command              | What it does                                                                             |
+| -------------------- | ---------------------------------------------------------------------------------------- |
+| `bun run dev`        | Runs the app on this machine (`nsh run src`).                                            |
+| `bun run build`      | Builds the bundle for deployment (`nsh build src`, output in `.nsh/out`).                |
+| `bun run test`       | Runs Rust unit tests plus every app test (`*.test.ts(x)`) headless.                      |
+| `bun run test:host`  | Runs the platform tests (`*.host.test.tsx`) on this machine's host.                      |
+| `bun run test:lint`  | Runs the boundary and structure rule tests (`bun test lint scripts/structure.test.mjs`). |
+| `bun run test:bench` | Runs the ignored 100k SQLite/FTS5/RTree benchmark.                                       |
+| `bun run test:100k`  | Seeds 100k nodes and drives the real host UI against them.                               |
+| `bun run typecheck`  | Type-checks with NSH's compiler settings (`nsh check src`).                              |
+| `bun run lint`       | Checks types, then lints with Oxlint; `lint:fix` applies fixes.                          |
+| `bun run fmt`        | Formats with Oxfmt (`vp fmt`); `fmt:rust` formats the native crate.                      |
+| `bun run check`      | Format, lint, type-check, Rust fmt/clippy and boundary/structure tests.                  |
+| `bun run check:fix`  | Same, applying every automatic fix.                                                      |
+| `bun run package`    | Builds the native installer for this OS (`docs/packaging.md`).                           |
 
 `bun run test:host` runs only the `*.host.test.tsx` platform tests, each in its
 own native host process; `bun run test` already runs them headless along with
@@ -121,7 +121,14 @@ src/                   the NSH app: its root, entry, config and assets
         flow-effects.ts the selection and composer effects
         flow-workspace.ts the document session, scene, camera and controllers
         page-chrome.ts the page root's pointer and wheel forwarding
+        save-drafts.ts  the close-time draft save
         search-navigation.ts revealing a search hit
+    projects/
+      index.ts         the page area facade
+      ProjectsPage.tsx the project list: header, rows, menus and dialogs
+      projects-home.ts the app-lifetime store, list and current project
+      project-action-run.ts the dialog's in-flight action rule
+      *Dialog.tsx      create, rename, duplicate, delete, import, backup, restore
   components/
     app/
       TitleBar.tsx     custom title bar (pin, drag, native window controls)
@@ -198,6 +205,12 @@ src/                   the NSH app: its root, entry, config and assets
       minimap-controller.ts the minimap drag state
     nodes/
       node-kinds.ts    the node kinds: ports, settings and model catalogs
+    projects/
+      index.ts         the area facade
+      project-store.ts the native ProjectStore adapter
+      project-session.ts the open-project lease
+      project-list.ts  the frozen list order, status copy and relative time
+      projects-root.ts the managed-root launch choice
     canvas/
       index.ts         the area facade: the model and geometry other areas use
       geometry/        connection curves, edge clipping, grid and preview cells,
@@ -232,14 +245,13 @@ src/                   the NSH app: its root, entry, config and assets
     src/viewport.rs    RTree viewport reads
     src/scene.rs       visible nodes + edges, and document bounds
     src/history.rs     reversible undo/redo operations
-  lib/
-    window-chrome.ts   hides the native title bar and reports its metrics
   assets/              icons and images (imported by modules)
 lint/
   boundaries.js        Oxlint JS plugin: dependencies flow down
 scripts/
   package.mjs          installer build
-  dev.mjs              dev host launcher with a persistent FLOW_DB_PATH
+  dev.mjs              dev host launcher with a persistent projects root
+                       (FLOW_DB_PATH opens one legacy document instead)
   test-host.mjs        native test host for this OS
   smoke-100k.mjs       100k-node seed + real-host UI smoke
 .github/workflows/     CI and installer builds
@@ -254,9 +266,9 @@ root keeps the toolchain (`package.json`, `vite.config.ts`, `tsconfig.json`,
 
 The structure follows NSH's [project structure](https://nsh.dev/zh-CN/docs/project-structure/)
 and [coding guides](https://nsh.dev/zh-CN/docs/coding-guides/): dependencies
-flow down only (`src/App.tsx → pages/ → components/ → nsh`), the store's
-signals stay private behind functions, and tests sit beside the code they
-test.
+flow down only (`src/App.tsx → pages → components → flow`), only the shell and
+pages import the store, its signals stay private behind functions, and tests
+normally sit beside the code they test.
 
 ## Documentation
 

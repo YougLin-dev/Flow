@@ -13,10 +13,13 @@
 - **Related:** [standards](../standards.md), [architecture](../architecture.md),
   [conventions](../conventions.md), [testing](../testing.md),
   [node editor](../node-editor.md), [ADR 0004](../adr/0004-native-view-canvas.md).
-- **Reading guide:** §3–§7 and §10–§11 are the normative standard and
-  migration; §2 is the external research annex; §16 is the cross-review log;
-  Appendices A/B are the execution maps. A reviewer approving the standard
-  reads §0, §3–§7, §10–§11 and the appendices.
+- **Reading guide:** §3–§7 record the standard as adopted; §2 is the external
+  research annex; §16 is the cross-review log; Appendices A/B are the
+  historical old → new maps. The live normative rules are in
+  [standards](../standards.md), [conventions](../conventions.md),
+  [code-map](../code-map.md) and `lint/structure-map.js`; §10–§11 and the
+  phase sections are the completed migration record. A reviewer reads §0,
+  §3–§7 and the appendices for the rationale.
 
 ## 0. Summary (中文摘要)
 
@@ -418,7 +421,7 @@ Forbidden folder names: `utils`, `helpers`, `common`, `misc`, `data`,
 - A facade is curated: export the model/geometry surface other features need,
   not everything. For example, `flow/canvas/index.ts` exports `FlowScene`,
   `CanvasCamera`, `portOffset`, the scene-port queries (`capacityOf`,
-  `hasPortEdge`, `incomingEdgeCount`, `portOffsetAt`, `portCenterWorld`), the
+  `hasPortEdge`, `incomingEdgeCount`), the
   `ConnectionPair` type that `flow/document` needs and `CardImageEvent`
   (defined in `flow/canvas/model/cards/card-image.ts`) for
   `components/probes`; it does **not** export `CanvasController`, which only
@@ -429,7 +432,15 @@ Forbidden folder names: `utils`, `helpers`, `common`, `misc`, `data`,
 - A one-module area still gets `index.ts` so it can grow without changing
   call sites.
 
-### 4.5 Full target tree
+### 4.5 Target tree as planned (optional items not taken)
+
+The tree records the plan's target before the close-out. Not created:
+`components/primitives/{IconButton,MenuItem,TooltipPill}.tsx`,
+`components/canvas/world/{CardTitle,CardBody}.tsx`,
+`components/canvas/context-menu/menu-items.ts` and
+`flow/canvas/interaction/canvas-input.ts` (the phase records in §16.2 and
+§16.5). Landed but not listed in this planned tree:
+`flow/document/lifecycle/{open-report,seed-decision,shutdown}.ts`.
 
 ```
 src/
@@ -677,7 +688,8 @@ Oxlint `importKind` flag.
 
 ### 4.7 Placement decision tree
 
-When adding a file, answer in order:
+The normative copy is [conventions.md § Placement](../conventions.md#placement);
+this plan keeps the rationale. When adding a file, answer in order:
 
 1. Is it a view? → `components/<area>/...`.
 2. Does it own retained state, signals or domain rules? →
@@ -686,11 +698,13 @@ When adding a file, answer in order:
    or `flow/shared/geometry.ts` (generic).
 4. Is it a pointer/keyboard state machine? → `flow/<area>/interaction/...`.
 5. Does it call the native document, picker or asset store? →
-   `flow/document/...`, the only area allowed to call `@flow/native` at
-   runtime. The runner in `flow/execution` reaches the document through
-   callbacks supplied by the page, not by importing the native module.
+   `flow/document/...` or `flow/projects/...`, the only areas allowed to call
+   `@flow/native` at runtime. The runner in `flow/execution` reaches the
+   document through callbacks supplied by the page, not by importing the
+   native module.
 6. Does it create/dispose page objects, bind keys or create effects? →
-   `pages/flow/workspace/...`.
+   `pages/<area>/...`, e.g. `pages/flow/workspace/...` or
+   `pages/projects/projects-home.ts`.
 7. Is it a fixture, fake or probe? → `test/`, `test-support/` or
    `components/probes/`.
 8. Is it generic UI used by more than one feature? → `components/primitives/`.
@@ -698,6 +712,8 @@ When adding a file, answer in order:
    in the owning area.
 
 ### 4.8 Glossary
+
+The normative copy is [conventions.md § Placement](../conventions.md#placement).
 
 | Term            | Meaning                                                                 |
 | --------------- | ----------------------------------------------------------------------- |
@@ -950,13 +966,15 @@ outside `components/probes`/`test/`."
    `CardGeometry`, `CardContent` and `sameBounds` exist to keep viewport reads
    and camera ticks from waking every card. A refactor must preserve the
    object-identity behavior these rely on.
-6. **Coarse FFI.** `@flow/native` is called only from `flow/document` at
-   runtime; outside `flow/document`, type imports go through
-   `flow/shared/native-types.ts`. No per-node or per-frame calls. The canvas never imports a document service
-   except through page-supplied callbacks.
-7. **Viewport budget.** `FlowScene` reconciles only `scene(rect, margin)` and
-   keeps the card budget, throttled reads and selected-card pinning. Moving
-   files must not introduce a whole-document read.
+6. **Coarse FFI.** `@flow/native` is called at runtime only from
+   `flow/document` and `flow/projects`; every other area imports the generated
+   types through `flow/shared/native-types.ts`. No per-node or per-frame
+   calls. The canvas never imports a document service except through
+   page-supplied callbacks.
+7. **Viewport budget.** `FlowScene` reconciles the snapshot from
+   `document.scene(rect, margin, maxCards)` via `apply(snapshot, { maxCards })`
+   and keeps the card budget, throttled reads and selected-card pinning.
+   Moving files must not introduce a whole-document read.
 8. **No second canvas/render loop.** Connectors stay in native canvas layers
    (one for committed edges, one for previews); cards stay native views;
    geometry stays in `flow/canvas/geometry`.
@@ -1237,9 +1255,9 @@ adds:
 - `test-support-in-production`: production code importing `test/` or
   `test-support/`.
 - `native-outside-seam`: the `@flow/native` specifier outside
-  `flow/shared/native-types.ts`, `flow/document/**` and tests. Outside
-  `flow/document`, types go through `flow/shared/native-types.ts`; runtime
-  calls are document-only.
+  `flow/shared/native-types.ts`, `flow/document/**`, `flow/projects/**` and
+  tests. Outside those two areas, types go through
+  `flow/shared/native-types.ts`; runtime calls are document/project-only.
 - `unclassified-source`: a file not matched by the manifest.
 - Tests and `test/` folders remain exempt.
 
@@ -1385,9 +1403,8 @@ Each phase is a series of small PRs, does not change behavior, and ends with
 `bun run check` and `bun run test`. Host tests run after phases 3 and 4; the
 100k benchmark runs if any hot path is touched. Each phase names an owner and
 an effort (S/M/L) before it starts; rollback is reverting the PR.
-There are no data or schema changes in Phases 0–5; the optional `assets_fts`
-migration in Phase 6 is the one exception and is reversible by keeping the
-table.
+No phase changes data or schema: `assets_fts` was dropped before the frozen
+v1 schema, so no migration is carried (§9.3, §16.3).
 
 | Phase | Scope                                | Owner          | Effort |
 | ----- | ------------------------------------ | -------------- | ------ |
@@ -2115,7 +2132,7 @@ part-folder walk; the final gate is 183 source files, 17 areas, 22 lint
 tests/169 expects and 550 app/Rust tests (548 passed, 2 pre-existing
 ignored benchmarks). §14 status at this point: gates green, no root modules,
 every area has a facade, lint/structure fail on violations, FlowPage was
-208 lines when Phase 5 completed (269 raw lines now after the project layer),
+208 lines when Phase 5 completed (269 raw lines at the Phase 6 close-out),
 and the §6.4 duplicates routed so far are cleared. The Rust core
 split (Phase 6) is now done; the remaining §14 items are the internal splits
 and the remaining §6.4 sweep (Phase 7).
@@ -2155,7 +2172,8 @@ Decisions:
 - Schema test moves are in scope for `schema/v1.rs` (82% tests); moving
   `schema/package.rs` or `project/*` tests is optional later. `v1.sql`,
   `MIGRATION_1` and the pinned digest never move.
-- Phase 7's targets remain. `FlowPage` is done (269 raw lines),
+- Phase 7's targets remain. `FlowPage` is done (269 raw lines at the
+  re-baseline; 323 after the projects UI),
   `flow-workspace` is 481 code lines (below the cap, optional), and
   `pages/projects/projects-home.ts` (377 lines) is noted but left unsplit.
 - No FFI name, worker job, transaction boundary or frozen-schema change is
@@ -2332,7 +2350,8 @@ subject; see §8.
 | `flow/node-session-harness.ts`       | `flow/document/test/node-session-harness.ts`                                                                     |
 | `app-test-harness.ts`                | `test-support/app.ts`                                                                                            |
 
-New modules introduced by the plan: `flow/shared/{index,geometry,equality,
+New modules the plan introduced, including the optional items not created
+(§4.5): `flow/shared/{index,geometry,equality,
 async-drain,keyed-flags,wheel,shortcuts,native-types,result-inputs}.ts`,
 `flow/canvas/model/{cursor,screen-rect}.ts`,
 `flow/canvas/model/scene/{scene-types,scene-hits,scene-selection,

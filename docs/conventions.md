@@ -36,8 +36,7 @@ A module belongs to one **layer** (`pages`, `components`, `flow`) and one
 `geometry/`, `model/`, `interaction/` and `test/` are reserved segments; any
 other folder is a part folder named after what it draws or does. No new module
 at the `components/`, `flow/` or `pages/` root; no `utils/`, `helpers/`,
-`common/`, `misc/`, `data/` or `types/`. During the migration the plan's
-Appendix A lists the remaining root modules; add no new one.
+`common/`, `misc/`, `data/` or `types/`.
 
 Decision tree:
 
@@ -48,7 +47,8 @@ Decision tree:
 5. Calls the native document, picker, runner or asset store? `flow/document/...`
    or `flow/projects/...` (the only runtime `@flow/native` importers); the
    runner reaches the document through page callbacks.
-6. Creates/disposes page objects, binds keys or effects? `pages/flow/workspace/...`.
+6. Creates/disposes page objects, binds keys or effects? `pages/<area>/...`,
+   e.g. `pages/flow/workspace/...` or `pages/projects/projects-home.ts`.
 7. Fixture, fake or probe? `test/`, `test-support/` or `components/probes/`.
 8. Generic UI used by more than one feature? `components/primitives/`.
 9. Otherwise stop: name the job and put it in the owning area.
@@ -117,12 +117,13 @@ Decision tree:
   virtual-table adapters, `schema/maintenance.rs` index repair, the connection
   and integrity PRAGMAs in `db/worker.rs` and `db/verify.rs`, and
   `schema/package.rs` for checkpointing, snapshotting and rekeying a package.
-  The Phase 6 layout is
+  The current layout is
   `db/{mod,worker,open,session,verify,undo,metadata,tests}`,
   `mutation/{mod,nodes,edges,inputs,manual,runs,seed,apply,support,tx}`,
-  top-level `rows.rs` and `schema/v1/tests/`; `store/` is dropped and `reads/`
-  is a later optional move. FFI stays unchanged.
-  The exact map is in [the plan](plans/code-organization.md) Appendix B.
+  top-level `rows.rs` and `schema/v1/tests/`; `store/` was dropped and `reads/`
+  remains an optional future move. FFI stays unchanged. The area map is in
+  [code-map](code-map.md); Appendix B of [the plan](plans/code-organization.md)
+  records the completed Phase 6 old → new map.
 
 ## Imports
 
@@ -137,12 +138,13 @@ TypeScript setting `verbatimModuleSyntax` and the lint rule
 `typescript/consistent-type-imports` enforce it. `import/no-cycle`,
 `import/no-duplicates` and `import/no-self-import` are errors.
 
-Dependencies flow down: `App.tsx → pages → components/store`, and
-`pages → flow`. Lower layers never import a page or the shell; the
-`boundaries/no-upward-import` rule (`lint/boundaries.js`) reports a violation.
-Cross-area imports use the target's `index.ts`; the same-feature deep import
-(`components/canvas` ↔ `flow/canvas`) and `pages/flow` are the documented
-exceptions. The area matrix is in [code-map](code-map.md).
+Dependencies flow down: `App.tsx → pages → components → flow`; only the shell
+and pages may import the store. Lower layers never import a page or the shell;
+the `boundaries/no-upward-import` rule (`lint/boundaries.js`) reports a
+violation. Cross-area imports use the target's `index.ts`; the same-feature
+deep import (`components/canvas` ↔ `flow/canvas`) and the `pages/flow` /
+`pages/projects` composition roots are the documented exceptions. The area
+matrix is in [code-map](code-map.md).
 
 ## Types
 
@@ -174,7 +176,7 @@ The compiler runs with `strict`, `verbatimModuleSyntax`,
 ## State
 
 - Signals are private to `store.ts`; export readers and actions.
-- A reader is a function (`currentTool()`), not the signal itself, so callers
+- A reader is a function (`zoomPercent()`), not the signal itself, so callers
   cannot write it.
 - Read signals in bindings (JSX attributes, `computed`, `effect`) and event
   handlers. Do not read state in a timer or outside an owner.
@@ -218,15 +220,15 @@ run `bun run check:fix` before committing.
 
 ## Checks
 
-| Command                   | Checks                                                |
-| ------------------------- | ----------------------------------------------------- |
-| `bun run fmt`             | Formatting only                                       |
-| `bun run lint`            | NSH check, then Oxlint (names and boundaries)         |
-| `bun run typecheck`       | NSH's TypeScript settings via `nsh check src`         |
-| `bun run check`           | Formatting + lint + type check + rule/structure tests |
-| `bun run check:structure` | Area, facade, root and budget gate (part of check)    |
-| `bun run test`            | Headless tests                                        |
-| `bun run test:lint`       | Boundary and structure rule tests (part of check)     |
+| Command                   | Checks                                                                  |
+| ------------------------- | ----------------------------------------------------------------------- |
+| `bun run fmt`             | Formatting only                                                         |
+| `bun run lint`            | NSH check, then Oxlint (names and boundaries)                           |
+| `bun run typecheck`       | NSH's TypeScript settings via `nsh check src`                           |
+| `bun run check`           | Formatting + lint + type check + Rust fmt/clippy + rule/structure tests |
+| `bun run check:structure` | Area, facade, root and budget gate (part of check)                      |
+| `bun run test`            | Rust unit tests and headless TSX tests                                  |
+| `bun run test:lint`       | Boundary and structure rule tests (part of check)                       |
 
 `bun run check` must pass before a commit, warnings included
 (`--deny-warnings`). It also runs `bun run test:lint`, the tests for the local

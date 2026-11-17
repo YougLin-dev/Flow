@@ -10,6 +10,7 @@
 /src/flow/execution/ @YougLin-dev
 /src/flow/composer/ @YougLin-dev
 /src/flow/document/ @YougLin-dev
+/src/flow/projects/ @YougLin-dev
 
 /src/components/primitives/ @YougLin-dev
 /src/components/app/ @YougLin-dev
@@ -20,6 +21,7 @@
 /src/components/search/ @YougLin-dev
 
 /src/pages/flow/ @YougLin-dev
+/src/pages/projects/ @YougLin-dev
 /src/store.ts @YougLin-dev
 /src/App.tsx @YougLin-dev
 

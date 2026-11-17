@@ -105,7 +105,7 @@ named after what they draw or do. Every area MUST appear in
 [`lint/structure-map.js`](../lint/structure-map.js) and
 [`docs/code-map.md`](code-map.md); cross-area imports MUST use the facade,
 except the same-feature deep import (`components/canvas` ↔ `flow/canvas`)
-and the `pages/flow` composition root. A new directory or facade MUST extend
+and the `pages/flow` / `pages/projects` composition roots. A new directory or facade MUST extend
 `lint/boundaries.test.js` with both a file and a bare-directory spelling
 plus an allowed and a disallowed direction; an unexplained `other`
 classification is a review failure. (Lint, Lint test, Review)
@@ -158,7 +158,8 @@ two independently useful parts or grows past about 300 code lines. `utils/`,
 
 - One job per module, named after it. Components are PascalCase `.tsx`, one
   component per file, named after the export. Modules and directories are
-  kebab-case. Tests are `<subject>.test.ts(x)` beside the subject. (Lint)
+  kebab-case. Tests are `<subject>.test.ts(x)` beside the subject. (Lint for
+  names; Review for placement)
 - `max-lines` caps a module at 500 code lines, excluding blanks and comments.
   It is a prompt to find a seam, never a target. Avoid `utils.ts` grab bags.
   (Lint)
@@ -203,7 +204,7 @@ two independently useful parts or grows past about 300 code lines. `utils/`,
   a comment naming the invariant. Any remaining cast is a review item. (Lint
   `no-unsafe-type-assertion` and `no-non-null-assertion`; tests disable only
   the former.)
-- A switch over a closed union (`Tool`, operation kinds, path rules, drag
+- A switch over a closed union (`ResizeHandle`, operation kinds, path rules, drag
   modes, future routes) MUST handle every member or end with a `default` that
   throws an `Error` naming the unexpected value. A normal fallback is
   forbidden because it hides a new member. (Lint, Type, Review)
@@ -226,15 +227,17 @@ two independently useful parts or grows past about 300 code lines. `utils/`,
 
 | Owner                                | Owns                                                                 |
 | ------------------------------------ | -------------------------------------------------------------------- |
-| `src/store.ts`                       | tool, zoom percentage, selection count, window pin                   |
+| `src/store.ts`                       | zoom percentage, selection count, window pin                         |
+| App shell (`src/App.tsx`)            | the projects home (store, list and current project)                  |
 | Page (`src/pages/flow/FlowPage.tsx`) | `FlowScene`, `CanvasCamera`, `CanvasController`, stage size, session |
 | Component                            | transient press, hover, cursor and pinch state it renders            |
-| Future route (`NavStack`)            | stable route identity and the data the page needs                    |
+| Future routing (`NavStack`)          | stable route identity and the data the page needs; not used yet      |
 
 Every signal in `src/store.ts` MUST stay module-private. The module MUST export
-readers (`currentTool()`, `zoomPercent()`) and actions (`setTool`,
-`togglePinned`), never a signal, setter or mutable object. Actions MUST enforce
-their invariants; `togglePinned` no-ops when `nsh/desktop` is unavailable. A
+readers (`zoomPercent()`, `selectedCount()`, `isPinned()`) and actions
+(`setZoomPercent`, `setSelectedCount`, `togglePinned`), never a signal, setter
+or mutable object. Actions MUST enforce
+their invariants; `togglePinned` no-ops on Linux and when `nsh/desktop` is unavailable. A
 reader MUST read the signal when called, not capture it at module load. The
 store MUST NOT hold per-mount handles such as the camera or scene. A page
 MUST NOT keep a private copy of store state. Components MUST take values and
@@ -252,7 +255,7 @@ checks signal privacy.)
 ### 6.2 Reactivity
 
 A component body MUST be one-time setup. Props and signals MUST be read where
-they are used (`props.title`, `currentTool()`), never destructured or cached in
+they are used (`props.title`, `zoomPercent()`), never destructured or cached in
 the body unless a one-time read is intended. Conditional bindings (`&&`,
 ternary) are fine; reactive lists SHOULD use `<Each>` and reactive conditionals
 MAY use `<If>` or function children. Static `.map` over a constant array is
@@ -268,7 +271,7 @@ write a signal it also reads.
 User intent belongs in the handler or keymap action that received it. NSH does
 not accept signal writes from inside the canvas draw/layout computation;
 publish from a layout event, an action or after the frame, as `FlowPage` does
-in `onSize` and for the zoom label. (Review; behavior tests expose stale
+in `onSize` and for the camera-scale store the zoom probe reads. (Review; behavior tests expose stale
 snapshots. No lint sees destructuring, mirroring or effects.)
 
 ### 6.3 UI, design tokens and accessibility
@@ -293,16 +296,15 @@ Prefer `nsh/base` controls (`Button`, `Checkbox`, and the like) over a
 pressable `View`; an icon-only control MUST set `accessibilityLabel`, and a
 `testID` is not a name. Expose selection with `selected`, disabled with
 `disabled`, and never with color alone. The canvas MUST have a label;
-selection count, active tool and zoom MUST be mirrored in accessible text
-whenever their chrome is shown, as the overlays do. Every chrome action MUST
+selection count and zoom MUST be mirrored in accessible text whenever their
+chrome is shown. Every chrome action MUST
 be keyboard operable except a
 documented path-dependent exception. Keyboard-operable views MUST have a
 visible `focus:` style. Canvas direct manipulation is the documented
 exception: selecting, moving and resizing cards is a pointer gesture. Every
 edit reachable that way also has a native path: selecting a card opens the
 composer, whose controls are ordinary NSH controls with names, focus and
-keyboard operation, and the selection badge carries the selection state and
-the Escape hint. A drag- or pinch-only non-canvas
+keyboard operation, and Escape dismisses the top layer. A drag- or pinch-only non-canvas
 operation MUST have a single-pointer, non-drag alternative; new camera
 animation MUST honor `reduceMotion()`. Small icon targets SHOULD use
 `hitSlop` to reach roughly 44 by 44 points. Contrast is 4.5:1 for normal text
@@ -312,18 +314,17 @@ host screen-reader pass; `App.test.tsx` uses `id:` and `label:` selectors.)
 
 ## 7. The native canvas
 
-Paths in this section are the current flat homes. The Phase 2–3 move keeps
-these rules and relocates the same modules to
-`flow/canvas/{geometry,model,interaction}` and `components/canvas/`; the
-target is in [code-map](code-map.md) and plan Appendix A.
+Paths below are the current area homes; the area map is in
+[code-map](code-map.md).
 
 ### 7.1 Scene, views and camera
 
 `src/flow/canvas/model/scene/scene.ts` is the only scene model. It holds the nodes and edges of
 the current viewport snapshot, the selection, transient gesture geometry,
 previews and the connection preview; it owns no views. `FlowScene` MUST
-reconcile only what `scene(rect, margin)` returns, keep the card budget,
-throttled reads, hash sampling and selected-card pinning, and MUST NOT
+reconcile the snapshot from `document.scene(rect, margin, maxCards)` via
+`apply(snapshot, { maxCards })`, keep the card budget, throttled reads and
+selected-card pinning, and MUST NOT
 instantiate the whole document. (Test, Review)
 
 `components/canvas/FlowCanvas.tsx` renders one world view whose transform is the
@@ -344,16 +345,16 @@ selection handles, marquee boxes and the composer are screen-space geometry.
 ### 7.2 Hit testing and pointer input
 
 Hit tests MUST answer from the scene model, never from pixel sampling:
-`nodeAt` returns the topmost card by `z` (ties to the last), `portZoneAt` the
-topmost card's side zone under a point with the plus's followed position (a
-card under the pointer hides a lower card's plus), and `edgeAt` the connector
+`nodeAt` returns the topmost card by `z` (ties to the last), `portAt` the
+topmost typed port under a point within a side or type filter (a covering card
+hides a lower card's port), and `edgeAt` the connector
 within the edge hit distance. A miss returns `null`. A selected card that
 leaves the viewport stays in the scene, with its port buttons and connectors,
 while pinned. (Test)
 
 `CanvasController` is the one pointer router: it selects and toggles cards,
-drags, resizes from a handle, box-selects, pans with the hand tool, and drives
-the port/edge gestures. The page MUST NOT add a second press path; new canvas
+drags, resizes from a handle, box-selects, pans with a secondary-button drag,
+and drives the port/edge gestures. The page MUST NOT add a second press path; new canvas
 interaction belongs in the controller and its pure geometry modules in
 `flow/canvas/geometry/`. A press that starts an edge gesture MUST be
 consumed before card selection. (Test, Review)
@@ -367,7 +368,7 @@ Direct manipulation is the documented pointer exception: selecting, moving
 and resizing cards is a gesture. Every edit reachable that way MUST also have
 the native composer path. A drag MUST set transient overrides and write the
 document once on release (`setNodeBounds`); a cancelled gesture MUST drop the
-overrides without a write. Touch is one finger for the current tool and two
+overrides without a write. Touch is one finger for the active gesture and two
 fingers for pinch-zoom/pan; trailing mouse events after touches MUST be
 ignored. Hover MUST NOT change the selection. (Test, Host for real pointers)
 
@@ -525,7 +526,8 @@ automated evidence from host/manual evidence. (Test, Host, CI)
 A change that alters behavior, commands, architecture, conventions, testing,
 packaging or the sandbox MUST update the affected canonical document in the
 same PR: `README.md`, `docs/architecture.md`, `docs/conventions.md`,
-`docs/testing.md`, `docs/packaging.md`, `CLAUDE.md` or this standard. Each rule
+`docs/code-map.md`, `docs/testing.md`, `docs/node-editor.md` when the document
+contract changes, `docs/packaging.md`, `CLAUDE.md` or this standard. Each rule
 MUST have one canonical home; summaries MUST link to it, and if a summary and
 the canonical text disagree, the PR MUST fix the summary. Examples MUST use
 real paths and commands. (Review)
@@ -548,10 +550,9 @@ breaking change to MAJOR, except while the app is `0.y.z`. A stable surface
 `@deprecated` with its replacement and removal release and survive at least one
 MINOR release before removal as a breaking change. (Review, CI)
 
-The repository SHOULD add `.github/CODEOWNERS` for `src/components/`,
-`src/flow/`, `src/pages/`, `src/store.ts`, `src/theme.json`, `src/nsh.json`,
-`docs/` and `.github/workflows/`, and SHOULD link this standard from
-`README.md` and `CLAUDE.md`. A PR MUST implement one self-contained
+The repository has `.github/CODEOWNERS` with a global owner and per-area
+entries; keep its area entries aligned with `lint/structure-map.js`.
+`README.md` and `CLAUDE.md` link this standard. A PR MUST implement one self-contained
 behavior, ideally one layer. It SHOULD stay near 100 changed lines and SHOULD
 be split above roughly 1,000, excluding `bun.lock` and generated output.
 Refactors, formatting, dependency bumps and behavior changes MUST be separate
@@ -648,9 +649,10 @@ that bypasses review MUST be reviewed retroactively within one business day.
 **Adoption debt.** These current deviations MUST NOT be copied, and each MUST
 be fixed when its file is touched:
 
-- The canvas renders every visible card as an NSH view. The card budget and
-  hash sampling keep low-zoom scenes bounded, but a minimum-size or cluster
-  representation at very low zoom is still to be designed.
+- The canvas renders every visible card as an NSH view. The card budget,
+  throttled reads and selected-card pinning keep low-zoom scenes bounded, but a
+  minimum-size or cluster representation at very low zoom is still to be
+  designed.
 - The workflows still use mutable action tags and pipe NSH installers to a
   shell; the tag/version check is now in `release.yml`. Vendor or checksum the
   installer scripts when CI security is next reviewed.
@@ -667,19 +669,19 @@ be fixed when its file is touched:
   credentials; until then CI produces ad-hoc-signed builds.
 - Flow is desktop-only; the app tests target the headless/desktop surface and
   do not cover web, iOS or Android. Those are not release targets.
-- `docs/standards.md` is adopted with this change; keep it in the same commit
-  as the code it governs, and update it in the PR that changes a rule.
 
 ## 13. Recipes for common changes
 
 **New page.** Add `src/pages/<name>/` with an `index.ts` facade and one
-PascalCase `<Name>Page.tsx`; mount it in `src/App.tsx`. The one existing page
-is `src/pages/flow/FlowPage.tsx` (plan Appendix A). When a
-second page exists, create one `createNavStack<Route>()` at the root and render
-through `<NavStack>`; pages stay mounted, so use stable route identity and
-carry page data in the route. Share mutable state only through `src/store.ts`;
-keep camera and scene state in the page. Add an `App.test.tsx` flow and update
-`docs/architecture.md` if ownership changes. (Test, Review)
+PascalCase `<Name>Page.tsx`; mount it in `src/App.tsx`. The two current pages
+are `pages/flow` and `pages/projects`; the shell switches between the project
+list and the canvas with `<If when={home.current()}>`, not a navigation stack.
+Use `createNavStack<Route>()` and `<NavStack>` only when route identity or
+back-stack behavior is actually needed; pages stay mounted, so use stable
+route identity and carry page data in the route. Share mutable state only
+through `src/store.ts`; keep camera and scene state in the page. Add an
+app-level test flow and update `docs/architecture.md` if ownership changes.
+(Test, Review)
 
 **New component.** Add one `src/components/<area>/<Name>.tsx` with an exported
 `interface <Name>Props`; take current values and intent callbacks, not setters.
@@ -698,8 +700,7 @@ top-level layer, not an area, requires an ADR. (Review, Lint test.)
 **New canvas feature.** Keep pure geometry in `flow/canvas/geometry/`, the
 model in `flow/canvas/model/`, gestures in `flow/canvas/interaction/`, camera
 math in `flow/canvas/model/camera.ts`, and the view in
-`components/canvas/`. Until a module moves, plan Appendix A maps the current
-flat file. Add the unit test for the new rule and an `App.test.tsx` flow when
+`components/canvas/`. Add the unit test for the new rule and an app-level flow when
 the user can reach it. Do not add a canvas library or a second render loop.
 Update the area map in `docs/code-map.md` and the coverage list in
 `docs/testing.md`. (Test, Review)

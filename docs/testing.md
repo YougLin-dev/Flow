@@ -76,9 +76,10 @@ deletes the database files before writing the same 100,000-node /
 99,000-edge text graph as the release benchmark's
 `100k-grid-edges-images-v2-typed-ports` fixture into
 `.nsh/bench/flow-100k.db`, but deliberately leaves its 2,000 image nodes as
-text and stores no image batches. (At this commit image previews are data URLs
-that QuickJS and native `Image` decode; that separate cost would mask graph
-and canvas work. The Rust benchmark still reads the persisted image assets.)
+text and stores no image batches. (Image previews load as `blob:` URLs from
+the asset cache (`flow/document/assets/asset-urls.ts`); a real image batch
+would add decode cost that masks graph and canvas work. The Rust benchmark
+still reads the persisted image assets.)
 The smoke points the app at the database with `FLOW_DB_PATH` and runs
 `src/Smoke100k.host.test.tsx` with `--target`, `--trace`, `--fps` and
 `--verbose`. The test opens with `flowZoomProbe`/`flowSelectionProbe`, then
@@ -100,7 +101,8 @@ designed.
 Use `bun run dev:release -- --fps -v` on the real desktop for performance
 investigations. This optimizes the generated host and app Rust core; normal
 `bun dev` leaves those hot crates at `-O0`. It uses the same persistent
-`.nsh/dev` document as `bun dev`. Record the machine, OS, commit, window size,
+`.nsh/dev/projects` root as `bun dev`; an explicit `FLOW_DB_PATH` selects a
+single legacy document for either command. Record the machine, OS, commit, window size,
 display refresh rate, host profile, document/card/connector counts, and
 selection size with every measurement.
 
@@ -191,7 +193,9 @@ response metrics:
 
 ### Before baseline
 
-These observations are to reproduce, not thresholds or CI assertions:
+These are historical observations from before the 2026-11-12 typed-port change
+removed the connector comet; they cannot be reproduced on `main` and are kept
+as the starting point for plans 001–018, not as thresholds or CI assertions:
 
 - Advisor probe of the real development document (11 cards, 26 connectors),
   1800×1180 release/LTO Windows host at Flow `1956ebb` / NSH `f0b4659`: all
@@ -217,40 +221,46 @@ These observations are to reproduce, not thresholds or CI assertions:
 | ------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Unit   | `flow/canvas/model/camera.test.ts`, `flow/minimap/minimap.test.ts`, `flow/minimap/minimap-controller.test.ts`, `flow/document/assets/minimap-loader.test.ts`, `pages/flow/workspace/search-navigation.test.ts`, `flow/shared/keyed-flags.test.ts`, `flow/canvas/interaction/hover-flags.test.ts`, `flow/canvas/model/scene/scene.test.ts`, `flow/canvas/model/scene/scene-preview-stacking.test.ts`, `flow/document/assets/preview-loader.test.ts`, `flow/shared/async-drain.test.ts`, `flow/shared/geometry.test.ts`, `components/canvas/world/connector-layer.test.ts`, `flow/canvas/geometry/selection.test.ts`, `flow/composer/placement.test.ts`, `flow/canvas/interaction/canvas-controller.test.ts`, `flow/canvas/interaction/frame-connection.test.ts`, `flow/canvas/interaction/right-gesture.test.ts`, `flow/canvas/interaction/context-menu.test.ts`, `pages/flow/workspace/flow-effects.test.ts`, `pages/flow/workspace/page-chrome.test.ts`, `flow/composer/composer-state.test.ts`, `flow/canvas/geometry/grid.test.ts`, `flow/canvas/geometry/connection.test.ts`, `flow/canvas/model/edge-layer.test.ts`, `flow/canvas/geometry/preview-grid.test.ts`, `flow/document/lifecycle/seed.test.ts`, `flow/document/lifecycle/database-path.test.ts`, `flow/nodes/node-kinds.test.ts`, `flow/projects/project-list.test.ts`, `flow/projects/project-session.test.ts`, `store.test.ts` | Pure logic, the scene model, gesture routing, camera math, placement, drafts, grid and preview coverage, minimap mapping, sampling and dragging, search reveals, connector geometry, right-button pan and menu placement.                                                                                                                 |
 | Native | `native.test.ts`, `flow/document/session/node-session-*.native.test.ts`, `flow/document/session/node-session-inline.native.test.ts`, `flow/projects/project-store.native.test.ts`, Rust tests in `db/tests/` (the 100k fixture in `db/tests/benchmark.rs`) and `src/native/src/search.rs`, `viewport.rs`, `edge_index.rs`, `schema/v1/tests/`, `schema/package.rs` and the `project/` modules                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   | SeaORM schema/persistence, assets, FTS5/RTree plans, connector curve bounds, the project open guard, commands, history, undo, runs, the composer session, package snapshots/rekeying, and the managed project store over fixed real roots under `.nsh` that each test clears through the store (the test host grants no `fs` capability). |
-| App    | `App.test.tsx`, `App.projects.test.tsx`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         | The mounted app headless: text, presses, drags, keyboard, composer and inputs.                                                                                                                                                                                                                                                            |
-| Host   | `App.host.test.tsx`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             | The same app on the real window: rendering, native input, title bar, pinning and appearance repaint.                                                                                                                                                                                                                                      |
+| App    | `App.test.tsx`, `App.composer.test.tsx`, `App.pan.test.tsx`, `App.projects.test.tsx`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            | The mounted app headless: text, presses, drags, keyboard, composer, inputs and the project list.                                                                                                                                                                                                                                          |
+| Host   | `App.host.test.tsx`, `Smoke100k.host.test.tsx`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  | The same app on the real window: rendering, native input, title bar, pinning and appearance repaint; the 100k smoke.                                                                                                                                                                                                                      |
 
-Prefer the lowest level that can catch the bug. The scene and controller unit
+The Where column lists representative paths. For the TSX files,
+`find src -name '*.test.ts*' -not -path '*/.nsh/*'` lists the tracked tests;
+the Rust test modules are the ones named in the Native row. Prefer the lowest
+level that can catch the bug. The scene and controller unit
 tests construct a `FlowScene` and `CanvasCamera` and drive the controller's
 pointer methods directly; only behaviour that needs the mounted view tree
-belongs in `App.test.tsx`, and only behaviour whose subject is the platform
+belongs in an app-level `App.*.test.tsx` file, and only behaviour whose subject is the platform
 belongs in `App.host.test.tsx`.
 
 ## Writing an app test
 
 ```tsx
-import { open, test } from "nsh/test";
+import { expect, test } from "nsh/test";
+import { openApp, percentOf, selectedOf } from "./test-support/app";
 
-test("clears the selection with Escape", async () => {
-  const app = await open("./App.tsx");
-  await app.waitUntil(() => app.texts().some((text) => /^\d+%$/.test(text)));
+test("adds a card with the toolbar and deletes it with Backspace", async () => {
+  const app = await openApp();
+  await app.waitUntil(() => percentOf(app) > 0);
 
-  // A new node is selected and its composer is open; the first Escape closes
-  // the composer, the second clears the selection.
-  await app.keyboard.press("n");
-  await app.waitUntil(() => app.shows("id:node-composer"));
+  await app.press("id:add-text-node");
+  await app.waitUntil(() => selectedOf(app) === 1);
+
+  // The new node's composer is open, so Backspace is held back; Escape closes
+  // the composer while keeping the node selected.
   await app.keyboard.press("escape");
-  await app.waitUntil(() => app.texts().some((text) => text.includes("Esc to clear")));
-
-  await app.keyboard.press("escape");
-  await app.waitUntil(() => !app.texts().some((text) => text.includes("card selected")));
+  await app.keyboard.press("backspace");
+  await app.waitUntil(() => selectedOf(app) === 0);
+  expect(selectedOf(app)).toBe(0);
 });
 ```
 
-- `open(entry)` mounts the app; each test gets a fresh engine and module state.
+- `openApp()` (in `test-support/app.ts`) mounts the app with the camera and
+  selection probes; each test gets a fresh engine and module state.
 - Find elements by `testID` (`app.press("id:flow-canvas")`,
-  `app.drag("id:flow-canvas", { x, y })`) or by visible text
-  (`app.press("Fit")`). Avoid positional selectors.
+  `app.drag("id:flow-canvas", { x, y })`), by accessible label
+  (`app.press("label:Fit")`) or by visible text
+  (`app.shows("text:No cards match")`). Avoid positional selectors.
 - `app.drag(target, { x, y })` moves by a delta from the element's center;
   `app.press`, `app.hover`, `app.keyboard.press`, `app.texts()` and
   `app.screenshot()` cover the rest. Mouse buttons need a desktop platform:
@@ -269,8 +279,8 @@ test("clears the selection with Escape", async () => {
 Cards and the composer are ordinary views, so their text appears in
 `app.texts()` and their controls are found by `testID` or label. Pointer
 interaction still goes through the canvas: `app.drag("id:flow-canvas", delta)`
-moves the pointer, and the page's overlays (selection count, zoom percentage,
-tool state) reflect the scene.
+moves the pointer, and the `flowZoomProbe`/`flowSelectionProbe` values reflect
+the scene; the app chrome has no zoom or selection readout.
 
 For behaviour below the pointer, test the pieces directly:
 
@@ -294,8 +304,9 @@ For behaviour below the pointer, test the pieces directly:
   tolerant comparisons (null handling and the 0.01 world-unit epsilon), the
   shortcut key names, and the result DTO factories (shared defaults,
   caller-supplied batch ids, optional asset keys). `keepsWheel` has no unit
-  test because it is a deliberate no-op; the four views that pass it as
-  `onWheel` are its only wiring.
+  test because it is a deliberate no-op; the three views that pass it as
+  `onWheel` (`CanvasContextMenu`, `InlineTextEditor`, `ComposerSheet`) are its
+  only wiring.
 - `components/canvas/world/connector-layer.ts`: the canvas position/size and
   padded origin mapping for a layer box, including the missing-box and
   no-padding cases, the accessor staying live, and the cubic trace in canvas
@@ -323,10 +334,12 @@ For behaviour below the pointer, test the pieces directly:
   in-place editor's scaled body box.
 - `ComposerState` in `flow/composer/composer-state.test.ts`: drafts, reloads and saves.
 
-`App.test.tsx` drives the mounted path end to end: box selection, Shift
-toggling, pan, zoom, search reveal, opening the native composer, running a
-node, editing the body, removing an input, switching nodes and the canvas and
-card context menus. `App.projects.test.tsx` drives the managed startup: it
+`App.test.tsx` drives the mounted path headless: toolbar adds and delete,
+selection and Shift toggling, zoom/fit, search reveal, and the canvas and card
+context menus. `App.pan.test.tsx` covers arrow-key pan; `App.composer.test.tsx`
+covers opening, running, editing, removing inputs and switching nodes;
+`App.host.test.tsx` repeats the platform-sensitive subset (box selection, real
+pointer, title bar, pin, appearance). `App.projects.test.tsx` drives the managed startup: it
 creates and opens a project through the dialog, returns to the list (reopening
 proves the lease was released), renames, duplicates and deletes through a
 row's actions menu, closes a row menu by scrolling, imports a package folder
@@ -360,8 +373,11 @@ test-support entry proves that a foreground return and a system wake each run
 a quiet list read.
 `App.host.test.tsx` repeats the subset
 whose subject is the platform itself (window, real input, rendering, desktop
-APIs); it is also the only file `bun run test:host` runs. The zoom label is the
-easiest observable: it is `—` before the first fit and `<n>%` afterwards.
+APIs). `bun run test:host` runs every `*.host.test.tsx`; besides `App.host`,
+`Smoke100k.host.test.tsx` is the only other host file, and it returns
+immediately unless `FLOW_DB_PATH` names the 100k bench package. The camera
+probe is the easiest observable: `percentOf(app)` reads `id:zoom-probe`, which
+`FlowPage` mounts when `host.params.flowZoomProbe` is set.
 
 ## Rules
 

@@ -72,96 +72,11 @@ an expiry.
 
 ## Migration status
 
-Phase 1a has started the source moves: `flow/shared` (the shared kernel and
-the native type seam), `components/primitives` (`Icon`, `icon-shape`) and
-`components/canvas` (`port-visuals`) exist, and the app harness lives in
-`src/test-support/app.ts`. Phase 1b added `components/composer`
-(`ComposerSheet` with `TextComposer`/`ImageComposer` as configurations).
-`flow/shared/async-drain.ts` now backs `PreviewLoader`, `ViewportController`
-and `MinimapLoader` (Phase 7 batch 2, 2026-11-16). Phase 1d added
-`components/canvas/world/{connector-layer,ConnectorCanvas}` for the two
-connector layers and `components/primitives/panel.ts` for the floating-panel
-chrome. Phase 2 step 1 moved the node-kind registry to `flow/nodes` and
-`KeyedFlags` to `flow/shared`, both behind their area facades. Step 2 moved
-the pure-math modules to `flow/canvas/geometry` behind the `flow/canvas`
-facade and moved the generic rectangle types and helpers (`BoxGeometry`,
-`overlaps`, `mergeBounds`, `containsPoint`) into `flow/shared/geometry.ts`.
-Step 3 moved the canvas model to `flow/canvas/model` (camera, the scene and its
-ports/record equality, the card content/geometry/layout and the connector
-layer), added `scene-types.ts`, `cursor.ts`, `cards/card-image.ts` and
-`cards/inline-body.ts` to break the scene/helper and controller/handle cycles,
-and left the placement half of `overlay.ts` for the composer step. Step 4
-moved the interaction modules to `flow/canvas/interaction` and added the
-document-facing `ConnectionPair` type to the facade; `canvas-input.ts` was not
-extracted because §11 marks it optional and the touch state must stay on the
-mounted view. Step 5 moved the minimap mapping and drag controller to
-`flow/minimap`; `minimap-loader.ts` stays at the flow root until step 8 moves
-it to the document assets. Step 6 moved the composer draft and the placement
-half of the old `overlay.ts` to `flow/composer`; `composer-detail.ts` moves
-with the document step. Step 7 split `flow/execution.ts` into
-`flow/execution/{runner,providers}.ts` behind the area facade, moving code
-without changes. Step 8 moved the document lifecycle, sessions, commands,
-assets and viewport under `flow/document/{lifecycle,session,commands,assets,
-viewport,test}`; the composer reload policy split from `composer-detail.ts`,
-`sameOverview` moved with the minimap loader, and `ViewportHost.fallbackBounds`
-replaced the controller's seed import. The structure walker now skips only
-`src/assets/`, so area-owned `assets/` part folders are classified. Phase 3
-started with `components/app` (title bar, brand card, frame rate). Phase 3
-step 2 moved the canvas view and its world parts (`FlowCanvas`, `FlowCard`,
-`FlowEdges`, `FlowPreviews`, `GridBackground`, `Port`) under
-`components/canvas`; the page imports the area facade. The overlay half of the
-canvas move (plan Phase 3 item 2) put the selection surfaces, the inline
-editor and upload button, the toolbar and zoom controls, the port tooltip and
-the context menu into the area's `selection/`, `editing/`, `controls/`,
-`feedback/` and `context-menu/` parts (the frame and marquee share
-`selection/selection-visuals.ts`). Phase 3 step 4 completed the composer area
-(the attachment tile, model select and `detail-view.ts`; the sheet and
-variants landed in Phase 1b), `components/minimap` and `components/search`
-(including the one `search-filters.ts` type); the page imports both new
-facades. Phase 3 step 5 moved the three test probes out of the production views
-(and the components root) into `components/probes` behind a facade; `FlowCard`
-keeps only the optional `imageEvent` observation seam. Phase 4 started with the page
-move: `FlowPage` now lives at `pages/flow/FlowPage.tsx` behind the page area
-facade, and `bindings`, `page-chrome` and `search-navigation` (with their
-tests) live in `pages/flow/workspace`. Phase 4 then split the page:
-`flow-workspace.ts` owns construction and disposal, `flow-actions.ts` the key
-actions and Escape order, and `flow-effects.ts` the selection, composer and
-menu-dismissal effects; `FlowPage.tsx` keeps one synchronous construction
-call, the hook registrations and render, and is 269 raw lines.
-Phase 5 turned every rule on: the legacy allow-list is gone, the area matrix,
-facade, forbidden-folder, segment, native-seam and unclassified rules fail
-`bun run check`, and the budget still reports above 12 direct entries and
-fails above 20. The old → new map is in
-[the plan's Appendix A](plans/code-organization.md#appendix-a--tsx-placement-map-non-test).
-The project layer added `flow/projects` (managed root, store adapter, lease
-session and pure list helpers) over the Rust `ProjectStore`; catalog rows
-carry database/WAL stamps, so a list re-reads a changed package without a
-watcher, and the projects page revalidates on a foreground return or wake.
-The store's `project/archive.rs` reads a `.zip` package: it refuses duplicate
-names, multiple end records and ZIP64, checks the one end record's declared
-entry count before the parser allocates, then extracts through a strict
-allowlist into an owner-only temp directory before the folder import
-validates it ([ADR 0008](adr/0008-zip-dependency.md)). `project/backup.rs`
-copies a closed package to a folder outside the root and restores a
-same-identity backup (folder or `.zip`) through a verified replacement and a
-recoverable directory swap. It
-imports `flow/document` through its facade. The next slice added `pages/projects`
-(the projects screen and its app-lifetime home state) and mounted the session
-in `pages/flow`: the shell chooses the project list or the canvas, and the
-workspace leases and opens the chosen package. The Rust core split (Phase 6)
-is also complete: the final `db/`, `mutation/` and `rows.rs` production
-layout is in
-[the plan's Appendix B](plans/code-organization.md#appendix-b--rust-placement-map)
-and the README production tree; Appendix B also lists the test-module layout.
-Phase 7 batch 3 split the scene's queries into `scene-hits`, `scene-selection`,
-`scene-records` and `scene-overrides`; `FlowScene` remains the single state
-owner. Batch 4 moved `CanvasController`'s gesture math to
-`interaction/gesture-math.ts` and its press/hover classification to
-`interaction/hit-priority.ts`. Batch 5 moved the composer's detail and
-asset URL cache into `session/composer-session.ts`; `NodeSession` keeps the
-facade and its protected detail-read hook. Batch 6 moved the edge commands
-to `commands/edge-commands.ts` and the composer's input commands to
-`session/input-session.ts`, leaving `NodeSession` a 290-line facade, and
-added the README architecture invariants. Do not add a new file at the
-`components/`, `flow/` or `pages/` root:
-`scripts/structure.mjs` fails it.
+The area and Rust-core migration is complete. The close-outs are
+[§16.4](plans/code-organization.md#164-phase-6-close-out-2026-11-16) and
+[§16.5](plans/code-organization.md#165-phase-7-close-out-2026-11-16); the old →
+new maps are
+[Appendix A](plans/code-organization.md#appendix-a--tsx-placement-map-non-test)
+and [Appendix B](plans/code-organization.md#appendix-b--rust-placement-map).
+New files follow the area rules; do not add a module at the `components/`,
+`flow/` or `pages/` root, which `scripts/structure.mjs` fails.

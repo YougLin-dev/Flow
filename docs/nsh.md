@@ -55,17 +55,11 @@ that needs rasterization is simply left out there.
    beyond `MAX_TEXT_CHARS` is refused before layout, and text is drawn from a
    given font database without depending on the machine's fonts.
 
-The changes were developed against an NSH checkout at 0.4.0. Build its CLI and
-point the app's tools at it:
-
-```sh
-cargo build -p nsh-cli
-PATH=/path/to/nsh/target/debug:$PATH bun run test:host
-PATH=/path/to/nsh/target/debug:$PATH bun run test:100k
-```
-
-`nsh test --target windows` (or the host of this OS) builds the development
-host from the patched source.
+These changes shipped in NSH 0.5.0. The app's Rust core pins the
+`nsh-core`/`nsh-macros` crates to `YougLin-dev/nsh` main at `966752c`
+(`src/native/Cargo.lock`); the CLI requirement is NSH 0.5.0 or newer
+(`README.md`; CI pins `v0.5.0`). The SVG policy and its constants are in
+`crates/nsh-core/src/svg/`.
 
 ## What stays bounded
 
@@ -78,4 +72,4 @@ their pixel area counts toward `MAX_LAYER_PIXELS`; a nested
 from the budget. Text uses the system fonts the platform's text engine uses,
 and the cap applies before usvg lays it out. An image referenced by `asset:`, file or remote
 URL inside a rasterized layer is not embedded; keep such images out of
-compositing layers (see the adoption debt in [standards.md](standards.md)).
+compositing layers.

@@ -14,7 +14,8 @@ together, while the repository root holds `package.json`, `vite.config.ts`,
 ## Layers
 
 ```
-App.tsx                     app shell: title bar + page, nothing else
+App.tsx                     app shell: title bar + page switch, nothing else
+ ├─ pages/projects/         the project list: home, rows, menus and dialogs
  ├─ pages/flow/FlowPage.tsx the page: workspace, effects and render
  │   ├─ pages/flow/workspace/* the workspace object, actions and effects
  │   ├─ components/*        presentational views and the canvas surface
@@ -26,8 +27,8 @@ App.tsx                     app shell: title bar + page, nothing else
 
 Dependencies point down only. `store.ts` and `components/` never import a
 page or the shell; pages never import one another's internals. Shared state
-crosses pages through `store.ts` — currently there is one page, but the rule
-keeps the door open for more without rewiring. The `boundaries/no-upward-import`
+crosses pages through `store.ts`; the two current pages are `pages/flow` and
+`pages/projects`. The `boundaries/no-upward-import`
 Oxlint plugin (`lint/boundaries.js`) reports a violation while linting.
 
 Inside those layers, code is grouped into **areas** with one `index.ts`
@@ -45,9 +46,10 @@ component area and the `pages/flow` page area use the area layout;
 holds the old → new map. New files follow the area rules; the structure report
 fails a new module at those roots.
 
-The app deliberately has no `NavStack`: a single-window canvas has nowhere to
-navigate, so the shell mounts `FlowPage` directly. If a second page appears
-(settings, a project list), wrap the pages in `createNavStack<Route>()` and
+The app deliberately has no `NavStack`: with a managed root the shell renders
+`ProjectsPage` until a project is current, then `FlowPage`, because the
+project list is launch state rather than a navigation stack. If settings or
+back/forward routing appears, wrap the pages in `createNavStack<Route>()` and
 render them through `<NavStack>`; the page files and the store stay as they
 are.
 
@@ -77,9 +79,11 @@ The canvas stays in TSX and owns only the scene model and its views.
   semantics; [the database design](plans/database-design.md) records the
   frozen schema.
 - Ordinary tables are SeaORM entities; SeaQuery builds dynamic filters and
-  joins. Only the FTS5/RTree virtual-table adapters (`schema/v1.sql`,
-  `schema/maintenance.rs`, the production `search.rs`, `edge_index.rs`)
-  contain static SQLite SQL.
+  joins. Static SQLite SQL stays in the FTS5/RTree virtual-table adapters
+  (`schema/v1.sql`, `schema/maintenance.rs`, the production `search.rs`,
+  `edge_index.rs`), the open/reset statements in `schema/v1.rs` and
+  `schema/reset.rs`, the package lifecycle statements in `schema/package.rs`,
+  and the connection/integrity PRAGMAs in `db/worker.rs` and `db/verify.rs`.
 - Database work runs on NSH's blocking pool, then through a handle to one
   dedicated database worker thread. That thread owns the connection, which
   keeps the single-writer design and avoids sending SeaORM's sync Rusqlite
@@ -99,8 +103,9 @@ The canvas stays in TSX and owns only the scene model and its views.
   one transaction; a managed project makes that decision at creation (a blank
   project records `demo_seeded=1`), and the `demo_seeded` flag keeps an
   emptied project from being reseeded. The v1 guard deliberately refuses a
-  pre-v1 development database: before the first launch of this build, delete
-  `.nsh/dev/flow.db` (and its `-wal`/`-shm` files) and `.nsh/dev/assets`.
+  pre-v1 package: before the first launch of this build, remove any pre-v1
+  package under `.nsh/dev/projects` (or delete an explicit `FLOW_DB_PATH`
+  database and its `-wal`/`-shm` files).
 - The package records its lifecycle. On quit the workspace stops in-flight
   runs (their batches settle cancelled), then saves the camera and
   checkpoints in one `closeWithView` job: the WAL is checkpointed,
@@ -133,7 +138,8 @@ The canvas stays in TSX and owns only the scene model and its views.
   restored instead of fitting. The frozen schema has no saved-view marker,
   so the `0, 0, 1` default is the never-saved sentinel; a view saved at
   exactly that value is indistinguishable and refits.
-- `FlowScene` is driven from `scene(rect, margin)` snapshots. Drag/resize,
+- `FlowScene` is driven from `document.scene(rect, margin, maxCards)`
+  snapshots applied with `apply(snapshot, { maxCards })`. Drag/resize,
   add, delete and connect each send one command; undo/redo return change sets.
   A card is stored as an axis-aligned world rectangle, so gestures commit a
   rectangle, never transformed bounds.
@@ -303,18 +309,21 @@ result batches and the assets.
 
 ## State
 
-`store.ts` keeps its signals private and exports readers (`currentTool()`,
-`zoomPercent()`) and actions (`setTool`, `togglePinned`). A page reads a
+`store.ts` keeps its signals private and exports readers (`zoomPercent()`,
+`selectedCount()`, `isPinned()`) and actions (`setZoomPercent`,
+`setSelectedCount`, `togglePinned`). A page reads a
 reader where the value is displayed; NSH tracks that read and updates only
 the binding. Nothing writes another page's local state.
 
 State that belongs to one mounted page stays there: the page's workspace
 object (`pages/flow/workspace/flow-workspace.ts`) owns the `FlowScene`, the
 `CanvasCamera`, the `CanvasController`, the stage size and the document
-session, because they live and die with the page. Values the
-chrome and overlays share (zoom label, selection count, window pin) move to
-the store. `App` binds the store's `isPinned`/`togglePinned` into
-`TitleBar`, so the component stays reusable.
+session, because they live and die with the page. The shell creates the
+projects home (`pages/projects/projects-home.ts`), which owns the project
+store, list and current project. Values the probes and the title bar share
+(camera scale, selection count, window pin) live in the store; the app chrome
+has no zoom or selection readout. `App` passes the store's
+`isPinned`/`togglePinned` into `TitleBar`, so the component stays reusable.
 
 ## The canvas
 
@@ -389,9 +398,10 @@ wheel over it zooms the canvas about the viewport's center.
 
 The canvas context menu (`components/canvas/context-menu/CanvasContextMenu.tsx`)
 is a native-view
-popup anchored at a secondary-button press: on empty canvas it adds a text or
-image card at the pressed world point, on a card it copies or deletes the
-pressed card, on a connector it deletes that connector, and it closes on a
+popup anchored at a secondary-button press: on empty canvas it adds a text,
+image or upload card at the pressed world point; on a text card it offers
+Edit text, Copy node and Delete node; on any other card, Copy node and
+Delete node; on a connector it deletes that connector, and it closes on a
 primary press or Escape. Opening a card's menu selects that card (a card
 already inside a multiple selection keeps the selection) without opening its
 composer, and opening a connector's menu selects that connector, so the menu
@@ -548,7 +558,7 @@ bound once by the page: `mod+=`/`mod+-`/`mod+0`
 zoom and fit, `mod+z`/`mod+shift+z` undo and redo, Delete/Backspace delete
 the selected edge or cards, arrows pan, `mod+k` opens search, and Escape
 dismisses the top layer (search, inline editor, selected edge, composer, then
-the selection). The toolbar's Text and Image buttons add nodes. Each command
+the selection). The toolbar's Text, Image and Upload buttons add nodes. Each command
 exists once.
 
 Pointer gestures above the canvas: dragging an output port previews a
@@ -603,13 +613,12 @@ keep it in place.
 
 ## Extending
 
-Paths below are the post-migration homes. Until a move lands, Appendix A of
-[the plan](plans/code-organization.md) maps the current file.
+Paths below are the current area homes; the old → new map is Appendix A of
+[the plan](plans/code-organization.md).
 
 - **A new page** — `pages/<name>/` with its `index.ts` facade, mounted by
   `App.tsx` (or a nav stack); share state through `store.ts`, never through
-  another page. Until a second page exists, the one page is
-  `pages/flow/FlowPage.tsx`.
+  another page. The two current pages are `pages/flow` and `pages/projects`.
 - **A new node kind** — add it to `flow/nodes/node-kinds.ts` (appearance,
   settings parsing, ports through its resolver), give it a provider in
   `flow/execution/providers.ts` if it runs, and extend
