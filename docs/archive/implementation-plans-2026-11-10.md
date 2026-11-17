@@ -10,8 +10,8 @@ They targeted the canvas performance problem behind a 70 fps group drag at
 document scale. Names and paths quoted in the old plans describe the tree at
 execution time (for example `src/flow/scene.ts`); the current tree is in
 [the code map](../code-map.md). The NSH pins they name
-(`f0b4659`, `bc17f693`) were current then; the crate now pins the fork at
-`966752c` (`src/native/Cargo.lock`).
+(`f0b4659`, `bc17f693`) were current then; the crate's fork pin is
+recorded in `src/native/Cargo.lock`.
 
 ## Status
 

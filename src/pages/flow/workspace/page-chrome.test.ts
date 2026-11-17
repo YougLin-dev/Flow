@@ -22,6 +22,10 @@ function mouseAt(pressedButton: "left" | "right" | null, x: number, y: number): 
     modifiers: MODIFIERS,
     pressedButton,
     button: null,
+    pointerType: "mouse",
+    pressure: pressedButton === null ? 0 : 0.5,
+    tiltX: 0,
+    tiltY: 0,
   };
 }
 

@@ -13,9 +13,9 @@ const selectSeed = async (app: App, query: string, testId: string): Promise<void
   await app.waitUntil(() => app.shows(testId));
   // Enter opens the active result, as the palette's footer says. On the
   // test host the first synthetic pointer press is lost once the window is
-  // taller than the display (NSH 966752c's background test host), and the
-  // palette's pointer path is covered by "searches cards and reveals the
-  // chosen one"; these tests are about the composer.
+  // taller than the display, and the palette's pointer path is covered by
+  // "searches cards and reveals the chosen one"; these tests are about the
+  // composer.
   await app.submit("id:search-input");
 };
 

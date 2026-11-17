@@ -56,7 +56,7 @@ that needs rasterization is simply left out there.
    given font database without depending on the machine's fonts.
 
 These changes shipped in NSH 0.5.0. The app's Rust core pins the
-`nsh-core`/`nsh-macros` crates to `YougLin-dev/nsh` main at `966752c`
+`nsh-core`/`nsh-macros` crates to `YougLin-dev/nsh` main at `e2479085c`
 (`src/native/Cargo.lock`); the CLI requirement is NSH 0.5.0 or newer
 (`README.md`), and CI installs the upstream nightly because the app also uses
 `wakeCount`, which is newer than the latest stable. The SVG policy and its
