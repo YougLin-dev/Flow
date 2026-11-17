@@ -34,7 +34,10 @@ host to `capabilities.network` deliberately.
 ## Requirements
 
 - [Bun](https://bun.sh/) 1.4 or newer (`packageManager` pins the exact version)
-- The `nsh` CLI 0.5.0 or newer (CI pins `v0.5.0`)
+- The `nsh` CLI 0.5.0 or newer; CI installs the upstream nightly because the
+  app uses APIs newer than the latest stable (`wakeCount`, `App.wake`). The
+  Rust core pins the fork at `966752c` (`src/native/Cargo.lock`), and a local
+  host should match that pin.
 - A Rust toolchain with Cargo (for the `src/native/` mixed-app crate)
 
 ## Quick start

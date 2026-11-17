@@ -10,9 +10,6 @@ on:
 permissions:
   contents: read
 
-env:
-  NSH_VERSION: v0.5.0
-
 jobs:
   package:
     name: Installer (${{ matrix.os }})
@@ -42,18 +39,23 @@ jobs:
             exit 1
           }
 
-      - name: Install NSH (macOS and Linux)
+      # Like CI, installers are built with the NSH nightly (the app uses APIs
+      # newer than the latest stable); the Rust core is pinned by Cargo.lock.
+      - name: Install NSH nightly (macOS and Linux)
         if: runner.os != 'Windows'
         run: |
-          curl -fsSL https://nsh.dev/install.sh | sh
+          curl -fsSL https://nsh.dev/install.sh | sh -s -- --nightly
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+          "$HOME/.local/bin/nsh" --version
 
-      - name: Install NSH (Windows)
+      - name: Install NSH nightly (Windows)
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
+          $env:NSH_VERSION = 'nightly'
           irm https://nsh.dev/install.ps1 | iex
           "$env:LOCALAPPDATA\nsh\bin" | Out-File -FilePath $env:GITHUB_PATH -Append
+          & "$env:LOCALAPPDATA\nsh\bin\nsh.exe" --version
 
       - run: bun install --frozen-lockfile
 

@@ -12,10 +12,6 @@ concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: true
 
-env:
-  # Keep CI on the same NSH release the project is developed against.
-  NSH_VERSION: v0.5.0
-
 jobs:
   check:
     name: Check and test (${{ matrix.os }})
@@ -37,18 +33,24 @@ jobs:
         with:
           workspaces: src/native -> target
 
-      - name: Install NSH (macOS and Linux)
+      # CI takes the NSH nightly: the app uses JS APIs (wakeCount, App.wake)
+      # that are newer than the latest stable release. The Rust core stays
+      # pinned by src/native/Cargo.lock.
+      - name: Install NSH nightly (macOS and Linux)
         if: runner.os != 'Windows'
         run: |
-          curl -fsSL https://nsh.dev/install.sh | sh
+          curl -fsSL https://nsh.dev/install.sh | sh -s -- --nightly
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+          "$HOME/.local/bin/nsh" --version
 
-      - name: Install NSH (Windows)
+      - name: Install NSH nightly (Windows)
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
+          $env:NSH_VERSION = 'nightly'
           irm https://nsh.dev/install.ps1 | iex
           "$env:LOCALAPPDATA\nsh\bin" | Out-File -FilePath $env:GITHUB_PATH -Append
+          & "$env:LOCALAPPDATA\nsh\bin\nsh.exe" --version
 
       - run: bun install --frozen-lockfile
 
