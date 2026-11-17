@@ -17,6 +17,7 @@ import {
 } from "../../flow/projects";
 import type { ProjectEntry } from "../../flow/shared";
 import { Icon } from "../../components/primitives";
+import { clearNewProjectRequest, newProjectRequested } from "../../store";
 import { BackupProjectDialog } from "./BackupProjectDialog";
 import { DeleteProjectDialog } from "./DeleteProjectDialog";
 import { ImportProjectDialog } from "./ImportProjectDialog";
@@ -49,6 +50,10 @@ const MENU_POPUP = "min-w-40 rounded-(--radius) border border-border bg-popover 
 const MENU_ITEM = "rounded-(--radius) px-2 py-1.5 hover:bg-muted focus:bg-accent active:bg-accent";
 
 export function ProjectsPage(props: ProjectsPageProps) {
+  // The window can show while project windows opened or closed since the
+  // list was read: each later mount re-reads the catalog. The first mount
+  // follows the home's own initial load.
+  if (!props.home.loading()) void props.home.refresh();
   const dialog = signal<ProjectDialog | null>(null);
   // The open row menu, keyed by project id: a `List` cell keeps no state.
   const menuFor = signal<string | null>(null);
@@ -82,6 +87,14 @@ export function ProjectsPage(props: ProjectsPageProps) {
     menuFor.set(null);
     dialog.set(next);
   };
+
+  // The app-level New shortcut shows Projects and asks for this dialog.
+  effect(() => {
+    if (newProjectRequested()) {
+      clearNewProjectRequest();
+      openDialog({ kind: "create" });
+    }
+  });
 
   /**
    * Opens the identity-reading actions. A menu built before a deep re-read
@@ -229,6 +242,41 @@ export function ProjectsPage(props: ProjectsPageProps) {
           </View>
         </View>
 
+        {props.home.recovery() ? (
+          <View
+            testID="project-recovery"
+            class="flex-row flex-wrap items-center justify-between gap-3 rounded-(--radius) border border-border bg-card px-4 py-3"
+          >
+            <View class="min-w-0 flex-1 gap-1">
+              <Text class="text-sm font-medium text-card-foreground">
+                Continue where you left off?
+              </Text>
+              <Text class="text-sm text-muted-foreground">
+                {`“${props.home.recovery()?.title ?? "The project"}” was open when Flow last ended without closing it.`}
+              </Text>
+            </View>
+            <View class="flex-row gap-2">
+              <Button
+                testID="recovery-continue"
+                onPress={() => {
+                  props.home.clearActionError();
+                  props.home.recover();
+                }}
+                class={OUTLINE}
+              >
+                <Text class="text-sm text-card-foreground">Continue</Text>
+              </Button>
+              <Button
+                testID="recovery-dismiss"
+                onPress={() => props.home.dismissRecovery()}
+                class={OUTLINE}
+              >
+                <Text class="text-sm text-card-foreground">Not now</Text>
+              </Button>
+            </View>
+          </View>
+        ) : null}
+
         {props.home.actionError() ? (
           <View
             testID="project-action-error"
@@ -318,63 +366,70 @@ export function ProjectsPage(props: ProjectsPageProps) {
                     ) : null}
                   </View>
                 </Button>
-                <Menu
-                  open={menuFor() === project().projectId}
-                  onOpenChange={(event) => menuFor.set(event.open ? project().projectId : null)}
-                  placement="bottom"
-                  align="end"
-                  popupClass={MENU_POPUP}
-                  trigger={
-                    <Button
-                      testID={`project-actions-${project().projectId}`}
-                      accessibilityLabel={`Actions for ${projectControlName(project())}`}
-                      class={ACTIONS}
-                    >
-                      <Icon
-                        icon={MoreHorizontal}
-                        size={16}
-                        tint={() => token("muted-foreground")}
-                      />
-                    </Button>
-                  }
-                >
-                  {/* Rename and duplicate read the package identity, which a
+                {/* A project open in a window of this app holds its package:
+                    its actions wait until the window closes. */}
+                {project().openHere ? null : (
+                  <Menu
+                    open={menuFor() === project().projectId}
+                    onOpenChange={(event) => menuFor.set(event.open ? project().projectId : null)}
+                    placement="bottom"
+                    align="end"
+                    popupClass={MENU_POPUP}
+                    trigger={
+                      <Button
+                        testID={`project-actions-${project().projectId}`}
+                        accessibilityLabel={`Actions for ${projectControlName(project())}`}
+                        class={ACTIONS}
+                      >
+                        <Icon
+                          icon={MoreHorizontal}
+                          size={16}
+                          tint={() => token("muted-foreground")}
+                        />
+                      </Button>
+                    }
+                  >
+                    {/* Rename and duplicate read the package identity, which a
                       fallback row does not have; delete deliberately does
                       not, so a damaged package stays removable. */}
-                  {project().unreadable ? null : (
-                    <MenuItem class={MENU_ITEM} onSelect={() => beginEdit("rename", project())}>
-                      <Text class="text-sm text-popover-foreground">Rename…</Text>
-                    </MenuItem>
-                  )}
-                  {project().unreadable ? null : (
-                    <MenuItem class={MENU_ITEM} onSelect={() => beginEdit("duplicate", project())}>
-                      <Text class="text-sm text-popover-foreground">Duplicate…</Text>
-                    </MenuItem>
-                  )}
-                  {project().unreadable ? null : (
-                    <MenuItem
-                      class={MENU_ITEM}
-                      onSelect={() => openDialog({ kind: "backup", project: project() })}
-                    >
-                      <Text class="text-sm text-popover-foreground">Back up…</Text>
-                    </MenuItem>
-                  )}
-                  {/* Restoring replaces the package with a verified backup of
+                    {project().unreadable ? null : (
+                      <MenuItem class={MENU_ITEM} onSelect={() => beginEdit("rename", project())}>
+                        <Text class="text-sm text-popover-foreground">Rename…</Text>
+                      </MenuItem>
+                    )}
+                    {project().unreadable ? null : (
+                      <MenuItem
+                        class={MENU_ITEM}
+                        onSelect={() => beginEdit("duplicate", project())}
+                      >
+                        <Text class="text-sm text-popover-foreground">Duplicate…</Text>
+                      </MenuItem>
+                    )}
+                    {project().unreadable ? null : (
+                      <MenuItem
+                        class={MENU_ITEM}
+                        onSelect={() => openDialog({ kind: "backup", project: project() })}
+                      >
+                        <Text class="text-sm text-popover-foreground">Back up…</Text>
+                      </MenuItem>
+                    )}
+                    {/* Restoring replaces the package with a verified backup of
                       the same identity, so it is also the recovery path for a
                       damaged row that still has its directory. */}
-                  <MenuItem
-                    class={MENU_ITEM}
-                    onSelect={() => openDialog({ kind: "restore", project: project() })}
-                  >
-                    <Text class="text-sm text-popover-foreground">Restore…</Text>
-                  </MenuItem>
-                  <MenuItem
-                    class={MENU_ITEM}
-                    onSelect={() => openDialog({ kind: "delete", project: project() })}
-                  >
-                    <Text class="text-sm text-destructive">Delete…</Text>
-                  </MenuItem>
-                </Menu>
+                    <MenuItem
+                      class={MENU_ITEM}
+                      onSelect={() => openDialog({ kind: "restore", project: project() })}
+                    >
+                      <Text class="text-sm text-popover-foreground">Restore…</Text>
+                    </MenuItem>
+                    <MenuItem
+                      class={MENU_ITEM}
+                      onSelect={() => openDialog({ kind: "delete", project: project() })}
+                    >
+                      <Text class="text-sm text-destructive">Delete…</Text>
+                    </MenuItem>
+                  </Menu>
+                )}
               </View>
             )}
           </List>

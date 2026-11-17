@@ -895,7 +895,6 @@ dependencies = [
 [[package]]
 name = "nsh-core"
 version = "0.5.0"
-source = "git+https://github.com/YougLin-dev/nsh.git?branch=main#e2479085c14362f3f42b008a5433c43e4fe16b91"
 dependencies = [
  "cap-std",
  "crc32fast",
@@ -924,7 +923,6 @@ dependencies = [
 [[package]]
 name = "nsh-macros"
 version = "0.5.0"
-source = "git+https://github.com/YougLin-dev/nsh.git?branch=main#e2479085c14362f3f42b008a5433c43e4fe16b91"
 dependencies = [
  "imagesize",
  "proc-macro2",

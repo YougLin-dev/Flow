@@ -159,18 +159,41 @@ export const AREAS = {
     deepSameFeature: [],
     compositionRoot: true,
   },
+  "pages/settings": {
+    layer: "page",
+    feature: "settings",
+    facade: "src/pages/settings/index.ts",
+    mayImport: [],
+    deepSameFeature: [],
+    compositionRoot: true,
+  },
   store: {
     layer: "store",
     feature: "store",
     facade: "src/store.ts",
-    mayImport: ["flow/shared"],
+    mayImport: ["flow/shared", "flow/projects"],
+    deepSameFeature: [],
+  },
+  startup: {
+    layer: "store",
+    feature: "startup",
+    facade: "src/startup.ts",
+    mayImport: ["store", "flow/shared"],
     deepSameFeature: [],
   },
   shell: {
     layer: "shell",
     feature: "shell",
     facade: "src/App.tsx",
-    mayImport: ["pages/flow", "pages/projects", "components/app", "flow/projects", "store"],
+    mayImport: [
+      "pages/flow",
+      "pages/projects",
+      "pages/settings",
+      "components/app",
+      "flow/projects",
+      "store",
+      "startup",
+    ],
     deepSameFeature: [],
   },
 };
@@ -238,7 +261,7 @@ export function layerOf(file) {
   if (isTestFile(file) || isTestSupportPath(file)) return "test";
   const stem = projectPath(file);
   if (stem === "App") return "shell";
-  if (stem === "store") return "store";
+  if (stem === "store" || stem === "startup") return "store";
   if (stem === "pages" || stem.startsWith("pages/")) return "page";
   if (stem === "components" || stem.startsWith("components/")) return "component";
   if (

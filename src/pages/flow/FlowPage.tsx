@@ -1,16 +1,15 @@
-import { ChevronLeft, Pencil } from "lucide";
-import { cleanup, effect, host, keymap, platform, signal, Text, token, View } from "nsh";
+import { Pencil } from "lucide";
+import { cleanup, effect, host, keymap, platform, signal, token, View } from "nsh";
 import { Button } from "nsh/base";
-import { Application, isAvailable } from "nsh/desktop";
+import { isAvailable } from "nsh/desktop";
 import { BrandCard, FrameRate } from "../../components/app";
-import { Icon, PANEL, PANEL_PILL } from "../../components/primitives";
+import { Icon } from "../../components/primitives";
 import { ImageComposer, TextComposer } from "../../components/composer";
 import { CanvasMenuLayer, FlowCanvas, NodeToolbar, ZoomControls } from "../../components/canvas";
 import { MiniMap, MinimapDragOverlay } from "../../components/minimap";
 import { SEARCH_FILTERS, SearchButton, SearchPalette } from "../../components/search";
 import { CanvasProbe, ImageLoadProbe, imageProbeText, ZoomProbe } from "../../components/probes";
 import { wheelZoomFactor } from "../../flow/canvas";
-import { selectedCount, setZoomPercent, zoomPercent } from "../../store";
 import { bindFlowKeys } from "./workspace/bindings";
 import { flowKeyActions } from "./workspace/flow-actions";
 import {
@@ -18,15 +17,19 @@ import {
   syncComposerState,
   syncSelection,
 } from "./workspace/flow-effects";
-import { createFlowWorkspace, type WorkspaceProject } from "./workspace/flow-workspace";
+import {
+  createFlowWorkspace,
+  type FlowWorkspace,
+  type WorkspaceProject,
+} from "./workspace/flow-workspace";
 import { pageChromeHandlers } from "./workspace/page-chrome";
 import { PROJECT_ACTION_FAILURE, ProjectNameDialog } from "../projects";
 
 export interface FlowPageProps {
   /** The managed project to open; absent on the legacy single-document path. */
   readonly project?: WorkspaceProject | null | undefined;
-  /** The project closed cleanly; the shell returns to the projects screen. */
-  readonly onClose?: (() => void) | undefined;
+  /** The workspace this page owns, for the window that closes and quits it. */
+  readonly onWorkspace?: ((workspace: FlowWorkspace) => void) | undefined;
   /** A managed open failed; the shell shows the list with the reason. */
   readonly onOpenError?: ((error: unknown) => void) | undefined;
   /** The open project was renamed; the shell updates its window title. */
@@ -38,11 +41,15 @@ export interface FlowPageProps {
  * document session, and the native composer attached to the selected card.
  */
 export function FlowPage(props: FlowPageProps = {}) {
+  // This page's own readout: a second project window has its own camera and
+  // selection, so neither is app state.
+  const zoomPercent = signal<number | null>(null);
   const workspace = createFlowWorkspace({
-    publishZoom: setZoomPercent,
+    publishZoom: (percent) => zoomPercent.set(percent),
     project: props.project ?? null,
     onOpenError: props.onOpenError,
   });
+  props.onWorkspace?.(workspace);
   const {
     camera,
     canvasMenu,
@@ -59,27 +66,11 @@ export function FlowPage(props: FlowPageProps = {}) {
     stage,
   } = workspace;
 
-  const closing = signal(false);
-  const closeFailed = signal(false);
   const renameOpen = signal(false);
   const projectTitle = signal(props.project?.title ?? "");
   // Identifies the live dialog run: a write that settles after its dialog was
   // dismissed must not close a later run the user has since opened.
   let renameRun = 0;
-
-  // The managed back path: close the document (and release its package) only
-  // when the worker acknowledged the close, then let the shell swap pages.
-  const closeToProjects = async (): Promise<void> => {
-    if (closing()) return;
-    closing.set(true);
-    const { closed } = await workspace.shutdown();
-    if (closed) {
-      props.onClose?.();
-      return;
-    }
-    closing.set(false);
-    closeFailed.set(true);
-  };
 
   const openRename = (): void => {
     renameRun += 1;
@@ -120,12 +111,6 @@ export function FlowPage(props: FlowPageProps = {}) {
 
   effect(() => syncSelection(workspace));
   effect(() => syncComposerState(workspace));
-  // The quit listener is the only teardown NSH awaits, so the camera save and
-  // the package checkpoint happen there; a plain unmount still frees handles.
-  // Its type says `() => void`, but NSH awaits a returned promise for up to
-  // 200 ms, which is what lets the close finish.
-  // eslint-disable-next-line @typescript-eslint/no-misused-promises
-  cleanup(Application.on("quit", () => workspace.shutdown()));
   cleanup(() => workspace.dispose());
 
   return (
@@ -164,20 +149,8 @@ export function FlowPage(props: FlowPageProps = {}) {
         <View class="flex-row items-center gap-2">
           {props.project ? (
             <Button
-              testID="back-to-projects"
-              disabled={closing() || closeFailed()}
-              onPress={() => void closeToProjects()}
-              class={`flex-row items-center gap-1.5 ${PANEL_PILL} disabled:opacity-40 focus-visible:ring-2 focus-visible:ring-ring active:bg-muted focus:bg-accent`}
-            >
-              <Icon icon={ChevronLeft} size={15} tint={() => token("muted-foreground")} />
-              <Text class="text-sm text-card-foreground">Projects</Text>
-            </Button>
-          ) : null}
-          {props.project ? (
-            <Button
               testID="rename-project"
               accessibilityLabel="Rename project"
-              disabled={closing() || closeFailed()}
               onPress={openRename}
               class="size-8 items-center justify-center rounded-full border border-border bg-card text-muted-foreground hover:bg-muted active:bg-accent focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-40"
             >
@@ -188,13 +161,6 @@ export function FlowPage(props: FlowPageProps = {}) {
             <SearchButton shortcut={keymap.label("mod+k")} onPress={() => searchOpen.set(true)} />
           )}
         </View>
-        {closeFailed() ? (
-          <View testID="project-close-error" class={`${PANEL} max-w-64 px-3 py-2`}>
-            <Text class="text-xs text-destructive">
-              Couldn’t close the project. Quit Flow to release it.
-            </Text>
-          </View>
-        ) : null}
       </View>
 
       {host.params.flowImageLoadProbe === 1 ? <ImageLoadProbe value={imageProbe()} /> : null}
@@ -202,7 +168,7 @@ export function FlowPage(props: FlowPageProps = {}) {
       {host.params.flowZoomProbe === 1 ? <ZoomProbe value={zoomPercent()} /> : null}
 
       {host.params.flowSelectionProbe === 1 ? (
-        <CanvasProbe selected={selectedCount()} composing={workspace.composerOpen()} />
+        <CanvasProbe selected={scene.selection().length} composing={workspace.composerOpen()} />
       ) : null}
 
       {workspace.composerOpen() ? null : <NodeToolbar onAdd={workspace.addNode} />}

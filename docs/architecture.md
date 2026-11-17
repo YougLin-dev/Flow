@@ -1,6 +1,6 @@
 # Architecture
 
-Flow is an NSH app. NSH owns the window, the view tree, input, theming and
+Flow is an NSH app. NSH owns the windows, the view trees, input, theming and
 packaging; the canvas is a native view tree, so cards, connectors, selection
 and the composer are ordinary NSH views rather than a drawn surface. A Rust
 document core supplies only the nodes and edges the viewport needs. Everything
@@ -14,16 +14,24 @@ together, while the repository root holds `package.json`, `vite.config.ts`,
 ## Layers
 
 ```
-App.tsx                     app shell: title bar + page switch, nothing else
+App.tsx                     app root: settings, session, window registry,
+ │                          Projects/Settings/project windows, quit coordinator
  ├─ pages/projects/         the project list: home, rows, menus and dialogs
- ├─ pages/flow/FlowPage.tsx the page: workspace, effects and render
- │   ├─ pages/flow/workspace/* the workspace object, actions and effects
- │   ├─ components/*        presentational views and the canvas surface
- │   ├─ flow/*              node kinds, execution, scene, camera, gestures
- │   └─ store.ts            shared state behind readers and actions
- ├─ components/app/TitleBar.tsx window chrome (props only)
- └─ store.ts                zoom, selection count and pinned state
+ ├─ pages/flow/ProjectWindow.tsx a project's window: save, close, release
+ │   └─ pages/flow/FlowPage.tsx the page: workspace, effects and render
+ │       ├─ pages/flow/workspace/* the workspace object, actions and effects
+ │       ├─ components/*        presentational views and the canvas surface
+ │       └─ flow/*              node kinds, execution, scene, camera, gestures
+ ├─ components/app/TitleBar.tsx window chrome (props only, one per window)
+ └─ store.ts                app-level state behind readers and actions
 ```
+
+`App.tsx` renders the app root, not a window: it declares every window as a
+top-level `<Window>` and keeps only state that outlives a window (settings,
+the session, the open-project registry and the quit coordinator). Each
+project window owns its own `ProjectStore` (one lease per store), document,
+undo, scene, camera, composer and search; closing a window disposes them
+without touching the other windows or the app root.
 
 Dependencies point down only. `store.ts` and `components/` never import a
 page or the shell; pages never import one another's internals. Shared state
@@ -46,12 +54,12 @@ component area and the `pages/flow` page area use the area layout;
 holds the old → new map. New files follow the area rules; the structure report
 fails a new module at those roots.
 
-The app deliberately has no `NavStack`: with a managed root the shell renders
-`ProjectsPage` until a project is current, then `FlowPage`, because the
-project list is launch state rather than a navigation stack. If settings or
-back/forward routing appears, wrap the pages in `createNavStack<Route>()` and
-render them through `<NavStack>`; the page files and the store stay as they
-are.
+The app deliberately has no `NavStack`: the Projects window shows
+`ProjectsPage`, and a project window shows `FlowPage`; the window registry
+decides which windows exist, and going back to the list is closing a window
+or opening Projects, not a navigation stack. If in-window routing appears
+later, wrap that window's content in `createNavStack<Route>()`; the page
+files and the store stay as they are.
 
 ## Native document core
 
@@ -223,16 +231,19 @@ The canvas stays in TSX and owns only the scene model and its views.
   assets, quick-checked and asset-verified); restore accepts a folder or
   `.zip` backup of the same identity, builds and verifies the replacement,
   and swaps directories under the package lock, parking the old directory
-  for crash recovery. The app starts on the projects
-  screen (`pages/projects`) when it has a managed root: the list shows
-  recency, an open-in-another-window badge and unreadable fallback rows, and
-  creates, renames, duplicates, deletes, imports, backs up and restores
-  projects through the same store (rename, duplicate and backup are hidden
-  for an unreadable row; restore and delete stay available so a damaged
-  package can be recovered or removed). Opening a project hands
-  its lease to the flow workspace, which closes the document before releasing
-  the package; the canvas's leading `Projects` control returns to the list,
-  and the window title bar names the open project. A readable catalog row
+  for crash recovery. With a managed root the app opens its Projects window
+  (`pages/projects`) on launch: the list shows recency, an open-in-this-app
+  or open-in-another-window badge and unreadable fallback rows, and creates,
+  renames, duplicates, deletes, imports, backs up and restores projects
+  through the catalogue store (rename, duplicate and backup are hidden for
+  an unreadable row; restore and delete stay available so a damaged package
+  can be recovered or removed). Opening a project closes Projects and opens
+  a window of its own; that window has its own store handle, so its lease
+  does not contend with another project window (the catalogue store reports
+  the other window's lease as elsewhere, and the shell folds its own windows
+  back into the row status). Closing the window saves drafts and camera,
+  closes the document, releases the lease, and opens Projects again when it
+  was the last project. A readable catalog row
   carries a stamp of its database and WAL (length and modification time); a
   list re-reads a readable row only when its stamp changed, so an out-of-band
   title or a same-identity restore surfaces without reopening quiet
@@ -309,21 +320,24 @@ result batches and the assets.
 
 ## State
 
-`store.ts` keeps its signals private and exports readers (`zoomPercent()`,
-`selectedCount()`, `isPinned()`) and actions (`setZoomPercent`,
-`setSelectedCount`, `togglePinned`). A page reads a
-reader where the value is displayed; NSH tracks that read and updates only
-the binding. Nothing writes another page's local state.
+`store.ts` is the app root's state: settings, the last session, which
+Projects/Settings/project windows are open, the quit flag and the per-project
+shutdown callbacks, behind readers (`appSettings()`, `appSession()`,
+`openProjectWindows()`, `projectsWindowOpen()`, `settingsWindowOpen()`,
+`isQuitting()`) and actions (`setAppSettings`, `setAppSession`,
+`openProjectWindow`, `closeProjectWindow`, `showProjectsWindow`,
+`setQuitting`, `shutdownAllProjects`). Signals stay private; the app root and
+pages bind the readers. Nothing writes another window's local state.
 
-State that belongs to one mounted page stays there: the page's workspace
-object (`pages/flow/workspace/flow-workspace.ts`) owns the `FlowScene`, the
-`CanvasCamera`, the `CanvasController`, the stage size and the document
-session, because they live and die with the page. The shell creates the
-projects home (`pages/projects/projects-home.ts`), which owns the project
-store, list and current project. Values the probes and the title bar share
-(camera scale, selection count, window pin) live in the store; the app chrome
-has no zoom or selection readout. `App` passes the store's
-`isPinned`/`togglePinned` into `TitleBar`, so the component stays reusable.
+State that belongs to one window stays there: each project window's
+`FlowWorkspace` owns its `ProjectStore`/lease, `FlowScene`, `CanvasCamera`,
+`CanvasController`, stage size, composer and document session, because they
+live and die with that window. The app root creates the projects home
+(`pages/projects/projects-home.ts`), which owns the catalogue store, list,
+recovery offer and current project, and survives every window. The title
+bar's pin is a signal inside `TitleBar` per window, so one project's pin does
+not lift another's window; zoom and selection probes are read from the
+workspace of the window under test.
 
 ## The canvas
 
@@ -582,30 +596,39 @@ double-clicking a text card opens its inline editor.
 `src/nsh.json`'s `window.titleBar` hides the native title bar before the
 first frame (32 points, close to the system caption's height), so the
 platform applies the app's own bar; the system keeps its window controls.
-`TitleBar` draws the app name and pin button and reports the space the system
-controls occupy through `titleBar()`, so the drag region and buttons never
-sit under the traffic lights or caption buttons. While it renders — the only
-time the window API answers — it sets the window's `level` from the `pinned`
-prop to `"floating"` or `"normal"`; the pin button calls the store, which
-flips that state.
+Every window renders its own `TitleBar`: Projects and Settings name the app,
+a project window names its project (a live rename updates the native title
+too). The bar draws the pin button and a compact `⋯` menu (Open Projects,
+Settings, Quit) and reports the space the system controls occupy through
+`titleBar()`, so the drag region and buttons never sit under the traffic
+lights or caption buttons. Its pin signal is per window: while it renders —
+the only time the window API answers — it sets that window's `level` to
+`"floating"` or `"normal"`.
 
-Where `nsh/desktop` is unavailable (tests and non-desktop hosts), the title
-bar is not mounted and `FlowPage` shows `BrandCard` instead, so the same app
-code runs in the headless test engine.
+The app-level shortcuts are declared once in the app root with
+`{ scope: "app" }`: `mod+shift+o` opens/focuses Projects and `mod+,` opens
+Settings, from any window. Canvas and dialog keys bind in their own window and
+fire only there.
+
+Where `nsh/desktop` is unavailable (tests and non-desktop hosts), `TitleBar`
+uses the configured height without asking the window API, and `FlowPage`
+shows `BrandCard` when there is no desktop title bar, so the same app code
+runs in the headless test engine.
 
 ## Sandbox
 
 `src/nsh.json` declares `capabilities.network.hosts: []`: the app reads its
 own bundled assets (`asset:` is always allowed) but may reach no remote host.
-`capabilities.application` is granted because the app acts on its own main
-window: the pin changes the window's `level`, and NSH gates every main-window
-desktop command behind that capability (the hidden title bar itself is
+`capabilities.application` is granted because the app owns its lifecycle: it
+sets the quit policy, coordinates `quitRequest`, answers `reopen` and opens
+its Projects/Settings/project windows (the hidden title bar itself is
 declared in `window.titleBar`, which the platform applies at launch). Its
 `capabilities.process.env` allow-list contains `FLOW_DB_PATH` and
 `FLOW_PROJECTS_ROOT`, the development, test and smoke path overrides, and
 `FLOW_FPS`, the frame-rate probe switch;
-`capabilities.windows.levels` grants the `floating` level the pin sets on the
-main window, and `capabilities.picker` is granted for local image uploads.
+`capabilities.windows.levels` grants the `floating` level a title-bar pin
+sets on its own window, and `capabilities.picker` is granted for local image
+uploads.
 NSH denies every capability not listed, so a new integration that fetches or
 loads a remote image must add that host deliberately. Adding the
 `capabilities` key is what changes the app from unrestricted to allow-list;

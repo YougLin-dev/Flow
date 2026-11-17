@@ -28,10 +28,9 @@ export interface ActiveProject {
   readonly title: string;
 }
 
-/** What the flow workspace needs to lease and open the project. */
-export interface OpenProjectDescriptor extends ActiveProject {
-  readonly store: ProjectStorePort;
-}
+/** A project the shell opens in a window of its own. Each window opens the
+ * root in its own store, so the catalogue's store is not carried along. */
+export interface OpenProjectDescriptor extends ActiveProject {}
 
 /** A project action whose dialog can outlive a dismissal. */
 export type ProjectAction =
@@ -57,6 +56,17 @@ export const PROJECT_ACTION_FAILURE: Record<ProjectAction, string> = {
 export interface ProjectsHomeOptions {
   /** Opens the FFI store; tests inject a fake. */
   readonly openStore?: (root: string) => Promise<ProjectStorePort>;
+  /** A row opened: the shell puts the project in a window of its own. */
+  readonly onOpen?: (project: OpenProjectDescriptor) => void;
+  /** A row is open already: the shell brings its window forward. */
+  readonly onFocus?: (projectId: string) => void;
+  /**
+   * Whether the app has a window open on `projectId`. Each project window
+   * opens its own store (one active lease per store), so the catalogue's
+   * store reports the other window's lease as elsewhere; the shell knows its
+   * own windows.
+   */
+  readonly isOpenInApp?: (projectId: string) => boolean;
 }
 
 export interface ProjectsHome {
@@ -99,10 +109,23 @@ export interface ProjectsHome {
   backup(project: ProjectEntry, destination: string): Promise<void>;
   /** Replaces a closed project with a backup of the same identity. */
   restore(project: ProjectEntry, source: string): Promise<ProjectEntry>;
+  /**
+   * The project the last run had open when it ended uncleanly, when the
+   * startup setting asks for it: the page offers to continue there.
+   */
+  recovery(): ProjectEntry | null;
+  /** Offers to continue with `project` (an unclean last run). */
+  showRecovery(project: ProjectEntry): void;
+  /** Opens the recovery project, clearing the offer. */
+  recover(): void;
+  /** Leaves the recovery project closed. */
+  dismissRecovery(): void;
   /** Returns from the canvas to the list; the workspace closed the project. */
   showProjects(): void;
   /** The workspace could not open the project; show the list with why. */
   reportOpenError(error: unknown): void;
+  /** Shows `message` above the list (a startup fallback, say). */
+  reportNotice(message: string): void;
   /** A dismissed dialog's action failed; show the list with why. */
   reportActionError(action: ProjectAction, error: unknown): void;
   /** Clears the action error (a dismiss or the start of another action). */
@@ -117,6 +140,7 @@ export function createProjectsHome(root: string, options: ProjectsHomeOptions = 
   const loading = signal(true);
   const loadError = signal<string | null>(null);
   const actionError = signal<string | null>(null);
+  const recovery = signal<ProjectEntry | null>(null);
   const active = signal<ActiveProject | null>(null);
   const opened = signal<ProjectStorePort | null>(null);
 
@@ -164,7 +188,13 @@ export function createProjectsHome(root: string, options: ProjectsHomeOptions = 
       // readable rows, so it cannot learn that a cached package broke.
       const entries = deep ? await store.refreshCatalog() : await store.listProjects();
       if (disposed || generation !== loadGeneration) return;
-      projects.set(sortProjects(entries));
+      projects.set(
+        sortProjects(entries).map((entry) =>
+          options.isOpenInApp?.(entry.projectId) === true
+            ? { ...entry, openHere: true, openElsewhere: false }
+            : entry,
+        ),
+      );
       // A successful read, quiet or not, makes a previous load error stale:
       // a foreground return can recover a list that failed to load.
       loadError.set(null);
@@ -215,18 +245,44 @@ export function createProjectsHome(root: string, options: ProjectsHomeOptions = 
       refreshQuietly();
       return;
     }
-    if (project.openElsewhere) {
-      fail(`“${project.title}” is open in another window.`);
-      refreshQuietly();
-      return;
-    }
-    if (project.openHere) {
+    // A row read before this app opened the project can still say
+    // "elsewhere": the app's own registry is checked first.
+    if (project.openHere || options.isOpenInApp?.(project.projectId) === true) {
+      if (options.onFocus !== undefined) {
+        actionError.set(null);
+        options.onFocus(project.projectId);
+        return;
+      }
       fail(`“${project.title}” is already open in this window.`);
       refreshQuietly();
       return;
     }
+    if (project.openElsewhere) {
+      fail(`“${project.title}” is open in another Flow window.`);
+      refreshQuietly();
+      return;
+    }
     actionError.set(null);
-    active.set({ projectId: project.projectId, title: project.title });
+    // Opening any project by its row answers the recovery offer too.
+    recovery.set(null);
+    const performOpen = (): void => {
+      if (disposed) return;
+      active.set({ projectId: project.projectId, title: project.title });
+      options.onOpen?.({
+        projectId: project.projectId,
+        title: project.title,
+      });
+    };
+    if (opened() !== null) {
+      performOpen();
+      return;
+    }
+    void ensureStore().then(performOpen, (error: unknown) => {
+      if (disposed) return;
+      fail(`Couldn’t open the project. ${errorMessage(error)}`);
+      active.set(null);
+      refreshQuietly();
+    });
   };
 
   /** Applies an action's result to the visible list. */
@@ -390,9 +446,23 @@ export function createProjectsHome(root: string, options: ProjectsHomeOptions = 
     active.set(null);
   };
 
+  const showRecovery = (project: ProjectEntry): void => {
+    recovery.set(project);
+  };
+
+  const recover = (): void => {
+    const project = recovery();
+    recovery.set(null);
+    if (project !== null) open(project);
+  };
+
+  const dismissRecovery = (): void => {
+    recovery.set(null);
+  };
+
   const reportOpenError = (error: unknown): void => {
     if (isProjectOpenElsewhere(error)) {
-      fail("The project is open in another window.");
+      fail("The project is open in another Flow window.");
     } else if (isAnotherProjectOpen(error)) {
       fail("Another project is already open in this window.");
     } else if (isProjectOpenHere(error)) {
@@ -412,12 +482,7 @@ export function createProjectsHome(root: string, options: ProjectsHomeOptions = 
     fail(`${PROJECT_ACTION_FAILURE[action]} ${errorMessage(error)}`);
   };
 
-  const current = (): OpenProjectDescriptor | null => {
-    const project = active();
-    const store = opened();
-    if (project === null || store === null) return null;
-    return { store, projectId: project.projectId, title: project.title };
-  };
+  const current = (): OpenProjectDescriptor | null => active();
 
   const dispose = (): void => {
     disposed = true;
@@ -442,8 +507,13 @@ export function createProjectsHome(root: string, options: ProjectsHomeOptions = 
     importProject,
     backup,
     restore,
+    recovery,
+    showRecovery,
+    recover,
+    dismissRecovery,
     showProjects,
     reportOpenError,
+    reportNotice: fail,
     reportActionError,
     clearActionError: () => actionError.set(null),
     dispose,

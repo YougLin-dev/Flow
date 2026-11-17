@@ -55,11 +55,12 @@ that needs rasterization is simply left out there.
    beyond `MAX_TEXT_CHARS` is refused before layout, and text is drawn from a
    given font database without depending on the machine's fonts.
 
-These changes shipped in NSH 0.5.0. The app's Rust core pins the
-`nsh-core`/`nsh-macros` crates to `YougLin-dev/nsh` main at `e2479085c`
-(`src/native/Cargo.lock`); the CLI requirement is NSH 0.5.0 or newer
-(`README.md`), and CI installs the upstream nightly because the app also uses
-`wakeCount`, which is newer than the latest stable. The SVG policy and its
+These changes shipped in NSH 0.5.0. The app's Rust core currently takes
+`nsh-core`/`nsh-macros` from the local checkout `../nsh-pr` (branch
+`feat/window-model-v2`, `src/native/Cargo.toml`) because the window-model v2
+APIs this app uses are not pushed yet; the CLI, generated types and Rust core
+must all come from that checkout. Once NSH is pushed the path dependency
+becomes a commit pin in `src/native/Cargo.lock`. The SVG policy and its
 constants are in `crates/nsh-core/src/svg/`.
 
 ## What stays bounded

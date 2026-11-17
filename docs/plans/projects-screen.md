@@ -1,7 +1,9 @@
 # Projects screen
 
 Status: implemented — the project list, create, rename, duplicate, delete,
-import, backup, restore, open, back to the list and quit. The catalog
+import, backup, restore, open, back to the list and quit, as a window of its
+own under NSH's window model. The window lists projects, closes when one
+opens, and comes back when the last project window closes. The catalog
 refreshes on action, on a refusal, on return, and on a foreground return or
 wake, with no filesystem watcher; a cached readable row is re-read only when
 its package stamp changed, while fallback and identity-mismatched rows are
@@ -23,9 +25,11 @@ and tests refer to.
   backup folder or `.zip`.
 - **Object:** one self-contained project package (`project.db` + `assets/`).
 - **Always available:** the project list, `New project`, `Import project…`,
-  and for the open project a way back to the list.
+  and from any window `mod+shift+o` (Projects) and the title bar's `⋯` menu;
+  a project goes back to the list by closing its window.
 - **Decisions the list must support:** how recently a project was opened or
-  updated; whether it is open in another window; whether its files can be read.
+  updated; whether it is open in this app or another window; whether its
+  files can be read; whether the last run left a project to continue.
 - **States:** loading the list; no projects; the store could not load (with
   Retry); the project can't open (unreadable, open elsewhere, unknown error);
   creating, renaming and duplicating (busy, invalid/refused title); deleting
@@ -34,7 +38,9 @@ and tests refer to.
   importing (busy, folder missing or not a package); backing up (busy,
   destination exists or lies inside the projects folder); restoring (busy,
   backup missing, damaged, of another project, or the project is open);
-  closing the canvas failed.
+  the last run ended uncleanly (Continue/Not now); a startup `lastProject`
+  fell back (missing, unreadable, held elsewhere); closing a project window
+  failed (the window and lease stay).
 - **Keyboard, touch and screen reader:** rows are buttons in list order, each
   followed by its actions button; Tab reaches both, Enter/Space opens a row,
   the actions button opens its menu (whose items take the keyboard focus), the
@@ -42,19 +48,34 @@ and tests refer to.
   and every icon-only or status element has a text or accessibility name.
   Touch targets keep the row and 32pt-control sizes; the app's desktop target
   is the reference today.
-- **Where:** the app's own window. The layout holds from the 420pt test width
-  up; it is a centered single column with the action at the header's end.
+- **Where:** the app's Projects window (`id: "projects"`), a normal NSH
+  window opened by the app root. Opening a project closes it and opens the
+  project's window; closing that project window when it is the last one
+  reopens Projects. The layout holds from the 420pt test width up; it is a
+  centered single column with the action at the header's end.
 
 ## Composition
 
-- `pages/projects/ProjectsPage.tsx` — the screen: header, action error, list,
-  menus and dialogs. It owns which action is open and which row's menu is
-  open (by project id, never in a cell); the home owns the store call.
-- `pages/projects/projects-home.ts` — the app-lifetime state: the FFI store,
-  the loaded list, loading/error, and the project the shell currently shows.
-  The shell creates one home; the canvas's lease and document stay owned by
-  the flow workspace. Every list mutation invalidates an in-flight list read,
-  so a snapshot from before the action cannot drop or resurrect a row.
+- `App.tsx` — the app root: it reads settings/session, creates one
+  `ProjectsHome`, declares the Projects, Settings and project windows, and
+  runs the quit coordinator. It passes `openProjectWindow`/`focusProjectWindow`
+  to the home and an `isOpenInApp` predicate so rows know the app's own
+  windows, whose leases the catalogue store reports as elsewhere.
+- `pages/flow/ProjectWindow.tsx` — one project's window: its `TitleBar`, the
+  save/close interception (`closeOnPress: false` only to save and release),
+  the close-failure message, and `FlowPage` with a store handle of its own.
+- `pages/settings/SettingsPage.tsx` — the Settings window's content: the
+  startup choice, written to `flow.settings.v1`.
+- `pages/projects/ProjectsPage.tsx` — the screen: header, recovery offer,
+  action error, list, menus and dialogs. It owns which action is open and
+  which row's menu is open (by project id, never in a cell); the home owns
+  the store call.
+- `pages/projects/projects-home.ts` — the app-lifetime state: the catalogue
+  store, the loaded list, loading/error, the recovery offer, and the project
+  the shell currently shows. The app root creates one home; each project
+  window's store, lease and document are owned by its flow workspace. Every
+  list mutation invalidates an in-flight list read, so a snapshot from before
+  the action cannot drop or resurrect a row.
 - `pages/projects/ProjectDialogShell.tsx` — the shared dialog surface: focus
   trap, Escape/backdrop dismissal, heading, description, error line and an
   actions row. `ProjectPathDialog` supplies the one-path form used by
@@ -65,12 +86,13 @@ and tests refer to.
 - `flow/projects/project-list.ts` — the frozen order, status copy, title for
   an unreadable fallback row, and relative time. These are pure and tested
   beside the area.
-- `components/app/TitleBar.tsx` — names the open project instead of the
-  tagline through a title accessor, so an open or renamed project updates it.
-  `components/search/SearchButton.tsx` no longer positions itself;
-  `pages/flow` owns the canvas's top-left control row, where the leading
-  `Projects` pill, the open project's rename pencil (which mounts the same
-  name dialog) and the search pill share one line.
+- `components/app/TitleBar.tsx` — one per window: Projects and Settings name
+  the app, a project window names its project through a title accessor so a
+  rename updates it. It owns that window's pin and its `⋯` menu (Open
+  Projects, Settings, Quit). `components/search/SearchButton.tsx` no longer
+  positions itself; `pages/flow` owns the project window's top-left control
+  row, where the open project's rename pencil (which mounts the same name
+  dialog) and the search pill share one line.
 - Rows are `List` cells: an open `Button` whose accessible name carries the
   title, subtitle and open/unreadable status (an explicit label wins over the
   row's text for a screen reader), followed by an icon-only actions button
@@ -99,17 +121,44 @@ and tests refer to.
   failure above the list; while the dialog is open it shows the failure in
   place. An app-level Escape binding also serves the headless runner, which
   does not deliver Escape to the native dialog.
-- Closing a project (the Projects control or quitting) saves the open
-  editors' drafts before the document closes: the composer's settings write
-  is enqueued first and the inline editor's commit is awaited, so the FIFO
-  worker lands both ahead of the close job.
+- Closing a project window (its close button, or quitting through the
+  app-level `quitRequest` coordinator) saves the open editors' drafts before
+  the document closes: the composer's settings write is enqueued first and
+  the inline editor's commit is awaited, so the FIFO worker lands both ahead
+  of the close job. A failed close keeps the window, its lease and the
+  document handle and says so inline; pressing close again runs another close
+  job (the lost part was the worker's job, not the handle). Quitting runs the
+  coordinator once more; if a close still fails, Flow stays open with a
+  notice, keeps the windows and their leases, and records the run unclean, so
+  the user can close the failing window and retry instead of losing work.
 
 ## Startup
 
-The app starts on the project list when it has a managed root:
+The app root reads `flow.settings.v1` and `flow.session.v1` before it shows a
+window. With a managed root:
+
+1. `startup: "projects"` (the default) shows the Projects window;
+2. `startup: "lastProject"` opens the session project directly when the last
+   run closed cleanly (`clean: true`) and the package still opens here;
+3. an unclean last run (`clean: false`) shows Projects with a Continue/Not
+   now card instead of opening on its own;
+4. a missing, unreadable or elsewhere-held session project shows Projects
+   with the reason.
+
+Opening a project hides Projects; closing the last project window shows
+Projects again. macOS does not quit with no windows; the app answers the
+system's `reopen` by showing/focusing Projects. On Windows and Linux, closing
+Projects with no project open quits. `Application.setQuitPolicy({
+quitOnLastWindowClosed: false })` leaves that decision to the app; the
+`quitRequest` coordinator saves every project, marks the session clean only
+when all closed, and quits only then; a failed save keeps the app open with a
+notice so the close can be retried.
+
+The managed root is resolved in this order:
 
 1. an explicit document path (`host.params.databasePath` or `FLOW_DB_PATH`)
-   keeps the legacy single-document canvas for that launch;
+   keeps the legacy single-document canvas for that launch, in one explicit
+   `<Window id="document">`;
 2. otherwise `host.params.projectsRoot`, `FLOW_PROJECTS_ROOT`, then
    `<dataDir>/projects`;
 3. without any of those (a host with no data directory) the legacy canvas
@@ -150,7 +199,16 @@ so a future motion pass should move this screen onto them.
   after closing, and reopening prefills the rename dialog with it).
   `components/app/TitleBar.test.tsx` proves the bar follows its title
   accessor, and `App.host.test.tsx` repeats the managed rename on the real
-  host and asserts the title bar's text.
+  host and asserts the title bar's text. `App.projects.test.tsx` also opens
+  two project windows at once (closing one leaves the other and no Projects
+  window, an open row focuses instead of duplicating, the last close returns
+  to Projects), opens Settings with `mod+,` in its own window and proves the
+  startup choice reaches `flow.settings.v1`. `App.startup.test.tsx` covers
+  the last-project launch, the unclean-run Continue card, and the missing
+  and elsewhere-held fallbacks with their reasons. `store.test.ts` covers the
+  open-project registry (focus, not a duplicate), the session's clean flag,
+  the quit coordinator (runs every registered shutdown and reports any
+  failed close) and that quitting does not reopen Projects.
   `projects-home.test.ts` covers load failure/retry, create
   (which adds its row without opening it, including past a stale in-flight
   list read), the dismissed action's error report, rename, duplicate, delete

@@ -41,14 +41,29 @@ test("closes without a view when no stage size arrived", async () => {
   expect(result.closed).toBe(true);
 });
 
-test("disposes the handle even when the close fails", async () => {
+test("keeps the handle when the close fails so a retry can run", async () => {
   const events: string[] = [];
-  const failing = ports(events, { x: 1, y: 2, zoom: 1 }, async () => {
-    throw new Error("the package is busy");
+  let attempts = 0;
+  const flaky = ports(events, { x: 1, y: 2, zoom: 1 }, async () => {
+    attempts += 1;
+    if (attempts === 1) throw new Error("the package is busy");
   });
-  const result = await shutdownWorkspace(failing);
-  expect(events).toEqual(["stop", "consumers", "closeWithView:1,2,1", "dispose"]);
-  expect(result.closed).toBe(false);
+  const first = await shutdownWorkspace(flaky);
+  expect(first.closed).toBe(false);
+  // No dispose: the window stays and the same handle is closed again.
+  expect(events).toEqual(["stop", "consumers", "closeWithView:1,2,1"]);
+
+  const second = await shutdownWorkspace(flaky);
+  expect(second.closed).toBe(true);
+  expect(events).toEqual([
+    "stop",
+    "consumers",
+    "closeWithView:1,2,1",
+    "stop",
+    "consumers",
+    "closeWithView:1,2,1",
+    "dispose",
+  ]);
 });
 
 test("reports closed when the worker stopped despite a recovery warning", async () => {

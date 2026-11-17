@@ -32,9 +32,10 @@ toolchain and the platform build dependencies below; the mixed app's
 
 ## Requirements
 
-- **All hosts:** Bun, the `nsh` CLI and Rust/Cargo. CI installs the upstream
-  nightly; the Rust core stays pinned by `src/native/Cargo.lock`, and a local
-  host should match that pin.
+- **All hosts:** Bun, the `nsh` CLI and Rust/Cargo. The app currently takes
+  `nsh-core` from the local `../nsh-pr` checkout (window-model v2, unpushed),
+  so the CLI and Rust core come from that checkout; once NSH is pushed the
+  lock file pins the commit.
 - **Windows:** Visual Studio Build Tools with the C++ workload and the Windows
   SDK (for the Rust runtime and bundled SQLite); the packager downloads NSIS
   itself.

@@ -225,22 +225,29 @@ two independently useful parts or grows past about 300 code lines. `utils/`,
 
 ### 6.1 State has one narrow owner
 
-| Owner                                | Owns                                                                 |
-| ------------------------------------ | -------------------------------------------------------------------- |
-| `src/store.ts`                       | zoom percentage, selection count, window pin                         |
-| App shell (`src/App.tsx`)            | the projects home (store, list and current project)                  |
-| Page (`src/pages/flow/FlowPage.tsx`) | `FlowScene`, `CanvasCamera`, `CanvasController`, stage size, session |
-| Component                            | transient press, hover, cursor and pinch state it renders            |
-| Future routing (`NavStack`)          | stable route identity and the data the page needs; not used yet      |
+| Owner                                | Owns                                                                                   |
+| ------------------------------------ | -------------------------------------------------------------------------------------- |
+| `src/store.ts`                       | app settings, the last session, which windows are open, quitting and project shutdowns |
+| App root (`src/App.tsx`)             | the projects home (catalogue store and list) and the window declarations               |
+| Project window (`ProjectWindow`)     | its `ProjectStore`/lease, `FlowPage` and the save/close interception                   |
+| Page (`src/pages/flow/FlowPage.tsx`) | `FlowScene`, `CanvasCamera`, `CanvasController`, stage size, composer and session      |
+| TitleBar (per window)                | that window's pin                                                                      |
+| Component                            | transient press, hover, cursor and pinch state it renders                              |
+| Future routing (`NavStack`)          | stable route identity and the data the page needs; not used yet                        |
 
 Every signal in `src/store.ts` MUST stay module-private. The module MUST export
-readers (`zoomPercent()`, `selectedCount()`, `isPinned()`) and actions
-(`setZoomPercent`, `setSelectedCount`, `togglePinned`), never a signal, setter
-or mutable object. Actions MUST enforce
-their invariants; `togglePinned` no-ops on Linux and when `nsh/desktop` is unavailable. A
+readers (`appSettings()`, `appSession()`, `openProjectWindows()`,
+`projectsWindowOpen()`, `settingsWindowOpen()`, `isQuitting()`) and actions
+(`setAppSettings`, `openProjectWindow`, `closeProjectWindow`,
+`shutdownAllProjects`, …), never a signal, setter or mutable object. Actions
+MUST enforce their invariants: closing the last project opens Projects unless
+the app is quitting; an already open project is focused, not opened twice. A
 reader MUST read the signal when called, not capture it at module load. The
-store MUST NOT hold per-mount handles such as the camera or scene. A page
-MUST NOT keep a private copy of store state. Components MUST take values and
+store MUST NOT hold per-window document state such as a lease, camera or
+scene. Its registry carries what a window needs to be opened (the catalogue
+store handle the app root opened asynchronously) and the shutdown callback the
+quit coordinator calls; neither is document state, and both die with the
+window. A page MUST NOT keep a private copy of store state. Components MUST take values and
 intent callbacks as props and MUST NOT import the store. A controlled
 component keeps no private copy: it receives the current value plus a change
 callback, and the owner applies the change so the next value matches what the
@@ -255,7 +262,7 @@ checks signal privacy.)
 ### 6.2 Reactivity
 
 A component body MUST be one-time setup. Props and signals MUST be read where
-they are used (`props.title`, `zoomPercent()`), never destructured or cached in
+they are used (`props.title`, `appSettings()`), never destructured or cached in
 the body unless a one-time read is intended. Conditional bindings (`&&`,
 ternary) are fine; reactive lists SHOULD use `<Each>` and reactive conditionals
 MAY use `<If>` or function children. Static `.map` over a constant array is

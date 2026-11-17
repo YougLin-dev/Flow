@@ -7,11 +7,10 @@ publish = false
 [workspace]
 
 [dependencies]
-# Our fork's `main`, synced from longbridge/nsh: an input under the canvas's
-# scaled camera draws, places its caret and takes clicks where it shows.
-# The lock pins the resolved commit; `cargo update -p nsh-core` follows a
-# newer `main`.
-nsh-core = { git = "https://github.com/YougLin-dev/nsh.git", branch = "main" }
+# The local NSH checkout with the window-model v2 work (the fork's `main`
+# once it is pushed): an input under the canvas's scaled camera draws,
+# places its caret and takes clicks where it shows.
+nsh-core = { path = "../../../nsh-pr/crates/nsh-core" }
 # Synchronous SeaORM. `rusqlite` is the SQLite driver; the direct dependency
 # enables the bundled SQLite build (including FTS5 and RTree).
 sea-orm-sync = { version = "2.0.4", default-features = false, features = [

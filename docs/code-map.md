@@ -13,7 +13,7 @@ updates the owner.
 | Shell      | `src/App.tsx`                                                                     | pages, components, store, foundations, assets  |
 | Page       | `src/pages/`                                                                      | pages, components, store, foundations, assets  |
 | Component  | `src/components/`                                                                 | components, foundations, assets                |
-| Store      | `src/store.ts`                                                                    | store, foundations, assets                     |
+| Store      | `src/store.ts`, `src/startup.ts`                                                  | store, foundations, assets                     |
 | Foundation | `src/flow/`                                                                       | foundations, assets                            |
 | Test       | `src/test-support/`, `**/test/`, `src/flow/document/test/node-session-harness.ts` | every layer; never imported by production      |
 | Asset      | `src/assets/`                                                                     | nothing                                        |
@@ -27,27 +27,29 @@ they may reach into any layer on purpose.
 `Facade` is the public entry for the area. `May import` lists areas; a
 same-feature deep import is the sibling area in the other layer.
 
-| Area                    | Layer      | Facade                               | May import                                                                           | Owner          |
-| ----------------------- | ---------- | ------------------------------------ | ------------------------------------------------------------------------------------ | -------------- |
-| `flow/shared`           | foundation | `src/flow/shared/index.ts`           | external packages; `@flow/native` types in `native-types.ts`                         | `@YougLin-dev` |
-| `flow/nodes`            | foundation | `src/flow/nodes/index.ts`            | `flow/shared`                                                                        | `@YougLin-dev` |
-| `flow/minimap`          | foundation | `src/flow/minimap/index.ts`          | `flow/shared`                                                                        | `@YougLin-dev` |
-| `flow/canvas`           | foundation | `src/flow/canvas/index.ts`           | `flow/shared`, `flow/nodes`                                                          | `@YougLin-dev` |
-| `flow/execution`        | foundation | `src/flow/execution/index.ts`        | `flow/shared`, `flow/nodes`                                                          | `@YougLin-dev` |
-| `flow/composer`         | foundation | `src/flow/composer/index.ts`         | `flow/shared`, `flow/nodes`, `flow/canvas`                                           | `@YougLin-dev` |
-| `flow/document`         | foundation | `src/flow/document/index.ts`         | `flow/shared`, `flow/nodes`, `flow/canvas`, `flow/execution`                         | `@YougLin-dev` |
-| `flow/projects`         | foundation | `src/flow/projects/index.ts`         | `flow/shared`, `flow/document`                                                       | `@YougLin-dev` |
-| `components/primitives` | component  | `src/components/primitives/index.ts` | `flow/shared`                                                                        | `@YougLin-dev` |
-| `components/app`        | component  | `src/components/app/index.ts`        | `components/primitives`, `flow/shared`                                               | `@YougLin-dev` |
-| `components/probes`     | component  | `src/components/probes/index.ts`     | `components/primitives`, `flow/canvas`                                               | `@YougLin-dev` |
-| `components/canvas`     | component  | `src/components/canvas/index.ts`     | `components/primitives`, `flow/shared`, `flow/nodes`, `flow/canvas` (same feature)   | `@YougLin-dev` |
-| `components/composer`   | component  | `src/components/composer/index.ts`   | `components/primitives`, `flow/shared`, `flow/nodes`, `flow/composer` (same feature) | `@YougLin-dev` |
-| `components/minimap`    | component  | `src/components/minimap/index.ts`    | `components/primitives`, `flow/shared`, `flow/canvas`, `flow/minimap` (same feature) | `@YougLin-dev` |
-| `components/search`     | component  | `src/components/search/index.ts`     | `components/primitives`, `flow/shared`                                               | `@YougLin-dev` |
-| `pages/flow`            | page       | `src/pages/flow/index.ts`            | any area (composition root, deep imports allowed)                                    | `@YougLin-dev` |
-| `pages/projects`        | page       | `src/pages/projects/index.ts`        | any area (composition root, deep imports allowed)                                    | `@YougLin-dev` |
-| `store`                 | store      | `src/store.ts`                       | `flow/shared` only if a pure helper is needed                                        | `@YougLin-dev` |
-| `shell`                 | shell      | `src/App.tsx`                        | `pages/flow`, `pages/projects`, `components/app`, `flow/projects`, `store`           | `@YougLin-dev` |
+| Area                    | Layer      | Facade                               | May import                                                                                              | Owner          |
+| ----------------------- | ---------- | ------------------------------------ | ------------------------------------------------------------------------------------------------------- | -------------- |
+| `flow/shared`           | foundation | `src/flow/shared/index.ts`           | external packages; `@flow/native` types in `native-types.ts`                                            | `@YougLin-dev` |
+| `flow/nodes`            | foundation | `src/flow/nodes/index.ts`            | `flow/shared`                                                                                           | `@YougLin-dev` |
+| `flow/minimap`          | foundation | `src/flow/minimap/index.ts`          | `flow/shared`                                                                                           | `@YougLin-dev` |
+| `flow/canvas`           | foundation | `src/flow/canvas/index.ts`           | `flow/shared`, `flow/nodes`                                                                             | `@YougLin-dev` |
+| `flow/execution`        | foundation | `src/flow/execution/index.ts`        | `flow/shared`, `flow/nodes`                                                                             | `@YougLin-dev` |
+| `flow/composer`         | foundation | `src/flow/composer/index.ts`         | `flow/shared`, `flow/nodes`, `flow/canvas`                                                              | `@YougLin-dev` |
+| `flow/document`         | foundation | `src/flow/document/index.ts`         | `flow/shared`, `flow/nodes`, `flow/canvas`, `flow/execution`                                            | `@YougLin-dev` |
+| `flow/projects`         | foundation | `src/flow/projects/index.ts`         | `flow/shared`, `flow/document`                                                                          | `@YougLin-dev` |
+| `components/primitives` | component  | `src/components/primitives/index.ts` | `flow/shared`                                                                                           | `@YougLin-dev` |
+| `components/app`        | component  | `src/components/app/index.ts`        | `components/primitives`, `flow/shared`                                                                  | `@YougLin-dev` |
+| `components/probes`     | component  | `src/components/probes/index.ts`     | `components/primitives`, `flow/canvas`                                                                  | `@YougLin-dev` |
+| `components/canvas`     | component  | `src/components/canvas/index.ts`     | `components/primitives`, `flow/shared`, `flow/nodes`, `flow/canvas` (same feature)                      | `@YougLin-dev` |
+| `components/composer`   | component  | `src/components/composer/index.ts`   | `components/primitives`, `flow/shared`, `flow/nodes`, `flow/composer` (same feature)                    | `@YougLin-dev` |
+| `components/minimap`    | component  | `src/components/minimap/index.ts`    | `components/primitives`, `flow/shared`, `flow/canvas`, `flow/minimap` (same feature)                    | `@YougLin-dev` |
+| `components/search`     | component  | `src/components/search/index.ts`     | `components/primitives`, `flow/shared`                                                                  | `@YougLin-dev` |
+| `pages/flow`            | page       | `src/pages/flow/index.ts`            | any area (composition root, deep imports allowed)                                                       | `@YougLin-dev` |
+| `pages/projects`        | page       | `src/pages/projects/index.ts`        | any area (composition root, deep imports allowed)                                                       | `@YougLin-dev` |
+| `pages/settings`        | page       | `src/pages/settings/index.ts`        | any area (composition root, deep imports allowed)                                                       | `@YougLin-dev` |
+| `store`                 | store      | `src/store.ts`                       | `flow/shared`, `flow/projects` (the project handle types)                                               | `@YougLin-dev` |
+| `startup`               | store      | `src/startup.ts`                     | `store`, `flow/shared`                                                                                  | `@YougLin-dev` |
+| `shell`                 | shell      | `src/App.tsx`                        | `pages/flow`, `pages/projects`, `pages/settings`, `components/app`, `flow/projects`, `store`, `startup` | `@YougLin-dev` |
 
 Cross-feature component imports (for example `components/canvas` importing
 `components/composer`) are not allowed; the page composes them. A pair not

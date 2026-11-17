@@ -436,7 +436,7 @@ test("explains why a listed project cannot open", async () => {
 
   home.open(entry(ID_B, "Held", { openElsewhere: true }));
   expect(home.current()).toBe(null);
-  expect(home.actionError()).toBe("“Held” is open in another window.");
+  expect(home.actionError()).toBe("“Held” is open in another Flow window.");
 
   home.clearActionError();
   home.open(entry(ID_A, "Free"));
@@ -478,7 +478,7 @@ test("a failed managed open returns to the list with a readable reason", async (
 
   home.reportOpenError(new Error("the project is open in another window"));
   expect(home.current()).toBe(null);
-  expect(home.actionError()).toBe("The project is open in another window.");
+  expect(home.actionError()).toBe("The project is open in another Flow window.");
 
   home.reportOpenError(new Error("the package has no Flow database"));
   expect(home.actionError()).toBe("Couldn’t open the project. the package has no Flow database");
@@ -525,7 +525,7 @@ test("a failed managed open re-reads the row that failed", async () => {
   // The other window took the lock after this list was read.
   held = true;
   home.reportOpenError(new Error(PROJECT_OPEN_ELSEWHERE));
-  expect(home.actionError()).toBe("The project is open in another window.");
+  expect(home.actionError()).toBe("The project is open in another Flow window.");
   await settle();
   expect(home.projects()[0]?.openElsewhere).toBe(true);
   home.dispose();

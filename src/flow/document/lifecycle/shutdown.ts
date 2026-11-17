@@ -51,6 +51,11 @@ export interface ShutdownPorts {
  * package must not race it — a leak is better than two writers. A close that
  * failed after the worker acknowledged it (the recovery-warning marker) did
  * stop; its package stays dirty and verifies on the next open.
+ *
+ * A handle whose close failed is kept, not disposed: the caller still owns a
+ * window with the package leased, and pressing close again must run another
+ * close job rather than return a spent handle. The caller disposes it when it
+ * gives up (its window unmounts or the app quits).
  */
 export async function shutdownWorkspace(ports: ShutdownPorts): Promise<{ closed: boolean }> {
   await ports.runner?.stop();
@@ -69,6 +74,6 @@ export async function shutdownWorkspace(ports: ShutdownPorts): Promise<{ closed:
     console.error("Flow could not close its document", error);
     closed = closeStoppedWorker(error);
   }
-  document.dispose();
+  if (closed) document.dispose();
   return { closed };
 }

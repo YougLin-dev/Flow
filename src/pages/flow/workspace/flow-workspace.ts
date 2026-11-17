@@ -15,7 +15,7 @@ import type {
 } from "../../../flow/shared";
 import { CanvasCamera, FlowScene } from "../../../flow/canvas";
 import { CanvasController } from "../../../flow/canvas/interaction/canvas-controller";
-import { ComposerState, composerPlacement } from "../../../flow/composer";
+import { ComposerState } from "../../../flow/composer";
 import { CanvasMenuController } from "../../../flow/canvas/interaction/context-menu";
 import {
   AssetUrls,
@@ -39,6 +39,7 @@ import {
   type ProjectLeasePort,
   type ProjectStorePort,
 } from "../../../flow/projects";
+import { createWorkspaceComposer, type WorkspaceComposer } from "./composer";
 import { saveOpenDrafts } from "./save-drafts";
 import { revealSearchHit } from "./search-navigation";
 
@@ -72,7 +73,7 @@ export interface FlowWorkspace {
   readonly minimap: MinimapLoader;
   readonly minimapDrag: MinimapController;
   readonly session: () => NodeSession | null;
-  readonly composerPosition: () => ReturnType<typeof composerPlacement>;
+  readonly composerPosition: WorkspaceComposer["position"];
   readonly composerOpen: () => boolean;
   readonly openComposer: (id: string) => void;
   readonly closeComposer: () => void;
@@ -199,41 +200,6 @@ export function createFlowWorkspace(deps: FlowWorkspaceDeps): FlowWorkspace {
     scene.select([]);
   };
 
-  const closeComposer = (): void => {
-    const session = currentSession();
-    composerState.save(session, session?.detail() ?? null);
-    composerState.reset();
-    session?.closeComposer();
-  };
-
-  /** Writes the inline editor's draft and closes it. */
-  const closeInlineDraft = (): void => {
-    void currentSession()?.commitInline();
-  };
-
-  const openComposer = (id: string): void => {
-    const session = currentSession();
-    if (!session) return;
-    // An upload card is its own control: selecting it closes an editor left
-    // open elsewhere, but shows the card's own button instead of a composer.
-    if (scene.node(id)?.kind === "upload") {
-      if (session.inlineId() !== null) closeInlineDraft();
-      if (session.composerId() !== null) closeComposer();
-      return;
-    }
-    const previous = session.composerId();
-    if (previous === id) return;
-    // Switching cards directly (a click or a search result) must keep the
-    // open composer's drafts; only the close paths saved them before.
-    if (previous !== null) {
-      composerState.save(session, session.detail());
-      composerState.reset();
-    }
-    if (session.inlineId() !== null && session.inlineId() !== id) closeInlineDraft();
-    if (session.inlineId() === id) return;
-    session.openComposer(id);
-  };
-
   const controller = new CanvasController({
     scene: () => scene,
     camera: () => camera,
@@ -258,17 +224,19 @@ export function createFlowWorkspace(deps: FlowWorkspaceDeps): FlowWorkspace {
     },
   });
 
-  const composerPosition = (): ReturnType<typeof composerPlacement> =>
-    composerPlacement(
-      currentSession()?.composerId() ?? null,
-      // A click on the selected card stays a click: only real movement (a
-      // drag, a resize or a pulled connector) hides the composer, so its
-      // native input keeps its draft and caret while the press is held.
-      controller.gestureMoved(),
-      (id) => scene.cardRect(id),
-      camera,
-      stage(),
-    );
+  const composer = createWorkspaceComposer({
+    session: currentSession,
+    state: composerState,
+    scene,
+    camera,
+    controller,
+    stage,
+  });
+  const composerPosition = composer.position;
+  const composerOpen = composer.open;
+  const openComposer = composer.openAt;
+  const closeComposer = composer.close;
+  const closeInlineDraft = composer.closeInlineDraft;
 
   /** Copies the card as the user sees it, including an open editor's drafts. */
   const copyNode = (nodeId: string): void => {
@@ -438,8 +406,31 @@ export function createFlowWorkspace(deps: FlowWorkspaceDeps): FlowWorkspace {
     } catch (error) {
       console.error("Flow could not open its document", error);
       if (!disposed) {
-        if (managed === null) camera.fit(CONTENT, stage());
-        else deps.onOpenError?.(error);
+        if (managed === null) {
+          camera.fit(CONTENT, stage());
+        } else {
+          // The package may have opened before the failure: close it (and
+          // release its lease when the worker acknowledged) before the
+          // window goes, so a retry can open the project again. This cannot
+          // call `shutdown()`: it waits for this very open.
+          shuttingDown = true;
+          const result = await shutdownWorkspace({
+            runner,
+            document,
+            view: null,
+            stopConsumers: stopLoaders,
+          });
+          if (result.closed && project !== null) {
+            project.lease.release();
+            project = null;
+          }
+          // This window is leaving: a close that failed cannot be retried
+          // from here, so release its handle with the window. The lease stays
+          // until the app quits when the close was not acknowledged.
+          if (!result.closed) document?.dispose();
+          forgetDocument();
+          deps.onOpenError?.(error);
+        }
       }
     } finally {
       opening = false;
@@ -489,8 +480,6 @@ export function createFlowWorkspace(deps: FlowWorkspaceDeps): FlowWorkspace {
     }
   };
 
-  const composerOpen = (): boolean => (currentSession()?.composerId() ?? null) !== null;
-
   const handleSize = (size: StageSize): void => {
     stage.set(size);
     viewport.setSize(size.width, size.height);
@@ -503,7 +492,10 @@ export function createFlowWorkspace(deps: FlowWorkspaceDeps): FlowWorkspace {
     viewport.onResize(size.width, size.height);
   };
 
+  let loadersStopped = false;
   const stopLoaders = (): void => {
+    if (loadersStopped) return;
+    loadersStopped = true;
     canvasMenu.close();
     disposed = true;
     if (verifyTimer !== null) {
@@ -516,6 +508,8 @@ export function createFlowWorkspace(deps: FlowWorkspaceDeps): FlowWorkspace {
     viewport.dispose();
     runner?.dispose();
     assets?.dispose();
+    runner = null;
+    assets = null;
     sessionState.set(null);
   };
 
@@ -539,42 +533,43 @@ export function createFlowWorkspace(deps: FlowWorkspaceDeps): FlowWorkspace {
     if (shutdownTask !== null) return shutdownTask;
     if (shuttingDown) return Promise.resolve(shutdownResult ?? { closed: false });
     shuttingDown = true;
-    shutdownTask = (async () => {
+    const task = (async () => {
       // A quit can race the open: wait for the handle it produces instead of
       // leaving that package neither closed nor disposed.
-      const task = openingTask;
-      if (task !== null) await task;
+      const pending = openingTask;
+      if (pending !== null) await pending;
       if (document === null && project === null) {
-        // Nothing was ever opened (a close before the first layout, or an
-        // open refused because shutdown began): there is nothing to close.
+        // Nothing was ever opened: there is nothing to close.
         shutdownResult = { closed: true };
         return shutdownResult;
       }
-      // The editors' drafts are document state too: write them before the
-      // close job so the FIFO worker lands them first. This covers both the
-      // Projects button and a quit.
+      // Drafts are document state: write them before the close job.
       await saveOpenDrafts(currentSession(), composerState);
-      // Before the camera has been fitted or restored it carries no view the
-      // user saw; saving it would overwrite the previous session's camera.
+      // An unfitted camera carries no view the user saw; keep the old one.
       const view = cameraReady ? camera.view() : null;
-      shutdownResult = await shutdownWorkspace({
+      const result = await shutdownWorkspace({
         runner,
         document,
         view: view === null ? null : { x: view.x, y: view.y, zoom: view.scale },
         stopConsumers: stopLoaders,
       });
-      // Release the package only after the worker acknowledged the close. A
-      // close that failed before its job ran keeps the lease: a leaked lock
-      // is better than two writers. The recovery-warning close counts as
-      // closed, and its dirty package verifies on the next open.
-      if (shutdownResult.closed && project !== null) {
+      shutdownResult = result;
+      // Release the package only after the worker acknowledged the close; a
+      // failed close keeps the lease (a leaked lock beats two writers).
+      if (result.closed && project !== null) {
         project.lease.release();
         project = null;
       }
-      forgetDocument();
-      return shutdownResult;
+      if (result.closed) forgetDocument();
+      if (!result.closed) {
+        // A failed close is not final: the next close press retries it.
+        shutdownTask = null;
+        shuttingDown = false;
+      }
+      return result;
     })();
-    return shutdownTask;
+    shutdownTask = task;
+    return task;
   };
 
   return {

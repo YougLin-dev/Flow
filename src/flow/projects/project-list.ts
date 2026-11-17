@@ -30,8 +30,8 @@ export function projectStatus(project: ProjectEntry): ProjectStatus {
 
 /** The row's status copy; empty for a closed project. */
 export function projectStatusLabel(project: ProjectEntry): string {
-  if (project.openHere) return "Open in this window";
-  if (project.openElsewhere) return "Open in another window";
+  if (project.openHere) return "Open";
+  if (project.openElsewhere) return "Open in another Flow window";
   return "";
 }
 

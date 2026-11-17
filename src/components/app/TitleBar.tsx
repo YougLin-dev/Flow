@@ -1,6 +1,12 @@
 import { Button } from "nsh/base";
-import { colorScheme, Image, platform, Text, View } from "nsh";
-import { currentWindow, titleBar } from "nsh/desktop";
+import { colorScheme, Image, platform, signal, Text, View } from "nsh";
+import {
+  currentWindow,
+  isAvailable,
+  Menu as DesktopMenu,
+  titleBar,
+  type MenuItem,
+} from "nsh/desktop";
 import appIcon from "../../assets/icons/32x32.png";
 import pinLight from "../../assets/pin-light.png";
 import pinDark from "../../assets/pin-dark.png";
@@ -13,36 +19,70 @@ import pinActive from "../../assets/pin-active.png";
 const TITLEBAR_HEIGHT = 32;
 
 export interface TitleBarProps {
-  /** Whether the window stays above the others. */
-  pinned: boolean;
-  /** The user asked to pin or unpin the window. */
-  onTogglePinned: () => void;
-  /**
-   * The open project's name; absent on the projects screen and legacy path.
-   * An accessor, so the bar follows an open or renamed project while the
-   * shell keeps running.
-   */
+  /** The open project's name; absent on the projects screen and legacy path. */
   title?: (() => string | undefined) | undefined;
+  /** Shows the Projects window, when the app has a managed root. */
+  onOpenProjects?: (() => void) | undefined;
+  /** Creates a project from anywhere in the app. */
+  onNewProject?: (() => void) | undefined;
+  /** Shows the Settings window. */
+  onOpenSettings?: (() => void) | undefined;
 }
 
 /**
- * The app-drawn title bar. `nsh.json` hides the system bar before the first
- * frame; the system keeps its window controls (traffic lights on macOS,
- * caption buttons on Windows and GTK), and `titleBar()` reports the room they
- * take so nothing is laid out underneath them. The bar drags the window, and
- * its pin button keeps the window above the others.
+ * The app-drawn title bar, one per window. `nsh.json` hides the system bar
+ * before the first frame; the system keeps its window controls (traffic
+ * lights on macOS, caption buttons on Windows and GTK), and `titleBar()`
+ * reports the room they take so nothing is laid out underneath them. The bar
+ * drags the window, its pin button keeps that window above the others, and
+ * its `⋯` opens the app's small menu.
  */
 export function TitleBar(props: TitleBarProps) {
+  // Per window, as the level it sets is: one project's pin does not lift
+  // another's window.
+  const pinned = signal(false);
   // NSH sets a window level on macOS and Windows, not on Linux; do not offer
   // a control whose state the window manager would not honor.
   const pinnable = platform.os !== "linux";
+  // Off the desktops (a phone, the web page) `<Window>` degrades to its
+  // content in the one surface; there is no window to ask about.
+  const win = isAvailable ? currentWindow() : null;
   // One reactive read: `titleBar()` reports the app's bar while it is hidden.
-  const area = titleBar();
-  if (pinnable) {
-    // The window API only answers while rendering; the core sends the level
-    // once and again only when it changes.
-    currentWindow().set({ level: props.pinned ? "floating" : "normal" });
-  }
+  const area = win ? titleBar() : { height: TITLEBAR_HEIGHT, left: 0, right: 0 };
+  // The window API only answers while rendering; the core sends the level
+  // once and again only when it changes.
+  win?.set({ level: pinned() ? "floating" : "normal" });
+
+  const togglePinned = (): void => {
+    if (!pinnable) return;
+    const next = !pinned();
+    pinned.set(next);
+    win?.set({ level: next ? "floating" : "normal" });
+  };
+
+  const openMenu = (): void => {
+    const items: MenuItem[] = [];
+    if (props.onNewProject) {
+      items.push({
+        label: "New Project…",
+        shortcut: "mod+n",
+        onSelect: props.onNewProject,
+      });
+    }
+    if (props.onOpenProjects) {
+      items.push({
+        label: "Open Projects",
+        shortcut: "mod+shift+o",
+        onSelect: props.onOpenProjects,
+      });
+    }
+    if (props.onOpenSettings) {
+      items.push({ label: "Settings…", shortcut: "mod+,", onSelect: props.onOpenSettings });
+    }
+    items.push({ type: "separator" }, { role: "quit" });
+    void DesktopMenu.popup(items);
+  };
+
   return (
     <View
       testID="title-bar"
@@ -51,9 +91,10 @@ export function TitleBar(props: TitleBarProps) {
       style={{
         height: area.height || TITLEBAR_HEIGHT,
         paddingLeft: area.left + 8,
-        // Where the system controls are on the right (Windows, GTK), the pin
-        // lane ends exactly where they begin, so it reads as part of them. On
-        // macOS they are on the left, and the bar keeps its usual margin.
+        // Where the system controls are on the right (Windows, GTK), the
+        // controls lane ends exactly where they begin, so it reads as part of
+        // them. On macOS they are on the left, and the bar keeps its usual
+        // margin.
         paddingRight: area.right || 8,
       }}
     >
@@ -69,21 +110,30 @@ export function TitleBar(props: TitleBarProps) {
       </View>
       {pinnable && (
         <Button
-          accessibilityLabel={props.pinned ? "Unpin window" : "Pin window on top"}
-          selected={props.pinned}
-          onPress={() => props.onTogglePinned()}
+          accessibilityLabel={pinned() ? "Unpin window" : "Pin window on top"}
+          selected={pinned()}
+          onPress={togglePinned}
           class="items-center justify-center hover:bg-titlebar-hover active:bg-titlebar-active focus:bg-accent"
-          classList={{ "bg-titlebar-pinned": props.pinned }}
+          classList={{ "bg-titlebar-pinned": pinned() }}
           // 46 points is the width of one Windows caption button, so the pin
           // lane reads as part of the system controls.
           style={{ width: 46, height: "100%" }}
         >
           <Image
-            src={props.pinned ? pinActive : colorScheme() === "dark" ? pinLight : pinDark}
+            src={pinned() ? pinActive : colorScheme() === "dark" ? pinLight : pinDark}
             style={{ width: 15, height: 13, objectFit: "contain", objectPosition: "center" }}
           />
         </Button>
       )}
+      <Button
+        testID="window-menu"
+        accessibilityLabel="Window menu"
+        onPress={openMenu}
+        class="items-center justify-center hover:bg-titlebar-hover active:bg-titlebar-active focus:bg-accent"
+        style={{ width: 46, height: "100%" }}
+      >
+        <Text class="text-base text-card-foreground">⋯</Text>
+      </Button>
     </View>
   );
 }
