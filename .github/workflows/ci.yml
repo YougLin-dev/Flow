@@ -33,24 +33,15 @@ jobs:
         with:
           workspaces: src/native -> target
 
-      # CI takes the NSH nightly: the app uses JS APIs (wakeCount, App.wake)
-      # that are newer than the latest stable release. The Rust core stays
-      # pinned by src/native/Cargo.lock.
-      - name: Install NSH nightly (macOS and Linux)
-        if: runner.os != 'Windows'
-        run: |
-          curl -fsSL https://nsh.dev/install.sh | sh -s -- --nightly
-          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
-          "$HOME/.local/bin/nsh" --version
+      # The pinned NSH is built from source: QuickJS is C, and bindgen needs
+      # libclang on Linux.
+      - name: Install the NSH build dependencies (Linux)
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y clang libclang-dev
 
-      - name: Install NSH nightly (Windows)
-        if: runner.os == 'Windows'
-        shell: pwsh
-        run: |
-          $env:NSH_VERSION = 'nightly'
-          irm https://nsh.dev/install.ps1 | iex
-          "$env:LOCALAPPDATA\nsh\bin" | Out-File -FilePath $env:GITHUB_PATH -Append
-          & "$env:LOCALAPPDATA\nsh\bin\nsh.exe" --version
+      # The window-model v2 APIs are not in an upstream release yet, so build
+      # the CLI from the same commit as the Rust core instead of the nightly.
+      - uses: ./.github/actions/nsh
 
       - run: bun install --frozen-lockfile
 

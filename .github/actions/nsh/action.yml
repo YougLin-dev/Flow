@@ -1,0 +1,65 @@
+name: Build pinned NSH
+description: Builds the NSH CLI from the fork commit the app's Rust core pins.
+
+# The window-model v2 APIs are not in an upstream NSH release yet. CI and the
+# installer workflow build the CLI from the same commit as `nsh-core`
+# (`src/native/Cargo.toml`) instead of installing the nsh.dev nightly. The
+# branch is fetched at depth 1 and checked against the pin, so a moved branch
+# fails here rather than silently building another revision.
+inputs:
+  release:
+    description: Build the release CLI (`true`) instead of the debug one
+    required: false
+    default: "false"
+
+runs:
+  using: composite
+  steps:
+    - name: Set up the Windows build
+      if: runner.os == 'Windows'
+      shell: bash
+      run: |
+        echo 'LIBCLANG_PATH=C:\Program Files\LLVM\bin' >> "$GITHUB_ENV"
+        echo 'RUST_MIN_STACK=268435456' >> "$GITHUB_ENV"
+
+    - name: Fetch the pinned NSH commit
+      shell: bash
+      env:
+        NSH_REPO: https://github.com/YougLin-dev/nsh
+        NSH_BRANCH: feat/window-model-v2
+        NSH_REV: 5b2f13c98baed2b7fe17d63ea86b03c3b56bb0e5
+      run: |
+        rm -rf "$RUNNER_TEMP/nsh"
+        git init --quiet "$RUNNER_TEMP/nsh"
+        git -C "$RUNNER_TEMP/nsh" remote add origin "$NSH_REPO"
+        git -C "$RUNNER_TEMP/nsh" fetch --quiet --depth 1 origin "$NSH_BRANCH"
+        git -C "$RUNNER_TEMP/nsh" checkout --quiet --detach FETCH_HEAD
+        test "$(git -C "$RUNNER_TEMP/nsh" rev-parse HEAD)" = "$NSH_REV" || {
+          echo "NSH $NSH_BRANCH no longer points at the pin $NSH_REV" >&2
+          echo "Update the pin in .github/actions/nsh and src/native/Cargo.toml." >&2
+          exit 1
+        }
+
+    - name: Build the CLI
+      shell: bash
+      env:
+        NSH_RELEASE: ${{ inputs.release }}
+        # The checkout's rust-toolchain.toml lists the mobile targets only the
+        # NSH release builds; stay on the runner's stable toolchain. The env
+        # line also keeps later `nsh package` cargo builds on stable.
+        RUSTUP_TOOLCHAIN: stable
+      run: |
+        echo 'RUSTUP_TOOLCHAIN=stable' >> "$GITHUB_ENV"
+        if [ "$NSH_RELEASE" = "true" ]; then
+          cargo build --locked --manifest-path "$RUNNER_TEMP/nsh/Cargo.toml" -p nsh-cli --release
+          bin="$RUNNER_TEMP/nsh/target/release"
+        else
+          cargo build --locked --manifest-path "$RUNNER_TEMP/nsh/Cargo.toml" -p nsh-cli
+          bin="$RUNNER_TEMP/nsh/target/debug"
+        fi
+        echo "$bin" >> "$GITHUB_PATH"
+        if [ "$RUNNER_OS" = "Windows" ]; then
+          "$bin/nsh.exe" --version
+        else
+          "$bin/nsh" --version
+        fi

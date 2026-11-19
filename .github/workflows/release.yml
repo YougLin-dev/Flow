@@ -39,23 +39,22 @@ jobs:
             exit 1
           }
 
-      # Like CI, installers are built with the NSH nightly (the app uses APIs
-      # newer than the latest stable); the Rust core is pinned by Cargo.lock.
-      - name: Install NSH nightly (macOS and Linux)
-        if: runner.os != 'Windows'
+      # The pinned NSH is built from source: QuickJS is C, and `nsh package`
+      # also builds this OS's release runner, which links GTK 4 and GStreamer
+      # on Linux.
+      - name: Install the NSH build dependencies (Linux)
+        if: runner.os == 'Linux'
         run: |
-          curl -fsSL https://nsh.dev/install.sh | sh -s -- --nightly
-          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
-          "$HOME/.local/bin/nsh" --version
+          sudo apt-get update
+          sudo apt-get install -y clang libclang-dev build-essential pkg-config \
+            libgtk-4-dev libwebkitgtk-6.0-dev \
+            libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev
 
-      - name: Install NSH nightly (Windows)
-        if: runner.os == 'Windows'
-        shell: pwsh
-        run: |
-          $env:NSH_VERSION = 'nightly'
-          irm https://nsh.dev/install.ps1 | iex
-          "$env:LOCALAPPDATA\nsh\bin" | Out-File -FilePath $env:GITHUB_PATH -Append
-          & "$env:LOCALAPPDATA\nsh\bin\nsh.exe" --version
+      # The installer embeds the runtime built from the same pinned checkout,
+      # not a runtime downloaded from nsh.dev.
+      - uses: ./.github/actions/nsh
+        with:
+          release: "true"
 
       - run: bun install --frozen-lockfile
 

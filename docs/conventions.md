@@ -176,7 +176,7 @@ The compiler runs with `strict`, `verbatimModuleSyntax`,
 ## State
 
 - Signals are private to `store.ts`; export readers and actions.
-- A reader is a function (`zoomPercent()`), not the signal itself, so callers
+- A reader is a function (`appSettings()`), not the signal itself, so callers
   cannot write it.
 - Read signals in bindings (JSX attributes, `computed`, `effect`) and event
   handlers. Do not read state in a timer or outside an owner.

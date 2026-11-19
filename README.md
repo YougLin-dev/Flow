@@ -34,10 +34,13 @@ host to `capabilities.network` deliberately.
 ## Requirements
 
 - [Bun](https://bun.sh/) 1.4 or newer (`packageManager` pins the exact version)
-- The `nsh` CLI 0.5.0 or newer; CI installs the upstream nightly because the
-  app uses APIs newer than the latest stable (`wakeCount`, `App.wake`). The
-  Rust core pins the fork at `e2479085c` (`src/native/Cargo.lock`), and a
-  local host should match that pin.
+- The `nsh` CLI built from `YougLin-dev/nsh` at commit
+  `025650b0b3731533773d8a2188e3f2ef97469944` (the window-model v2 delivery).
+  The Rust core pins the same commit in `src/native/Cargo.toml`, and the CLI,
+  its generated types and the Rust core must all come from it. Upstream
+  nsh.dev releases do not contain the v2 window APIs yet. Build the CLI from
+  a checkout of that commit with `cargo build --release -p nsh-cli` and put
+  its `target/release` on `PATH`; CI does the same (`.github/actions/nsh`).
 - A Rust toolchain with Cargo (for the `src/native/` mixed-app crate)
 
 ## Quick start

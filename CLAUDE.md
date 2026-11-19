@@ -43,6 +43,10 @@ repeats the platform tests (`*.host.test.tsx`) on this OS's real desktop host.
   interpolate values into a query.
 - **Signals stay private in `src/store.ts`.** Export readers and actions;
   pages bind them to presentational components.
+- **Windows are explicit.** Projects, Settings and every project window are
+  top-level `<Window>` scenes owned by `src/App.tsx`; Projects closes when a
+  project opens and returns when the last project window closes; quit goes
+  through the app-level coordinator.
 - **The canvas is native views.** Cards, ports, selection and the composer are
   ordinary NSH views; connectors are stroked in two native `<Canvas>` layers
   (committed edges and connection previews), never a retained scene, and hit

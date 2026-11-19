@@ -61,8 +61,10 @@ test("filters by a trimmed case-insensitive title fragment", () => {
 });
 
 test("labels the open states and keeps a closed row quiet", () => {
-  expect(projectStatusLabel(entry("a", "A", 1, null, true, false))).toBe("Open in this window");
-  expect(projectStatusLabel(entry("b", "B", 1, null, false, true))).toBe("Open in another window");
+  expect(projectStatusLabel(entry("a", "A", 1, null, true, false))).toBe("Open");
+  expect(projectStatusLabel(entry("b", "B", 1, null, false, true))).toBe(
+    "Open in another Flow window",
+  );
   expect(projectStatusLabel(entry("c", "C", 1, null))).toBe("");
 });
 

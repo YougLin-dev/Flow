@@ -4,6 +4,7 @@
  * `bun run test:host`; every other test file is headless-only.
  */
 import { type App, expect, open, type OpenOptions, test } from "nsh/test";
+import { closeProjectWindow, projectWindowId, waitForProjectWindow } from "./test-support/windows";
 
 /** Opens the composer of a seed node through search. */
 const selectSeed = async (app: App, query: string, testId: string): Promise<void> => {
@@ -60,7 +61,9 @@ const composingOf = (app: App): boolean => canvasState(app).composing;
 
 test("renames the open project and updates the title bar", async () => {
   const root = `.nsh/projects-host-rename-${Date.now()}`;
-  const app = await open("./App.tsx", { host: { params: { projectsRoot: root } } });
+  const app = await open("./App.tsx", {
+    host: { params: { projectsRoot: root, flowZoomProbe: 1 } },
+  });
   await app.waitUntil(() => app.shows("id:projects-page"));
   await app.press("id:new-project");
   await app.waitUntil(() => app.shows("id:project-title"));
@@ -218,6 +221,39 @@ test("shows the desktop title bar instead of the brand card", async () => {
   }
 });
 
+test("opens a managed project in a window of its own on this host", async () => {
+  const root = `.nsh/projects-host-window-${Date.now()}`;
+  const app = await open("./App.tsx", {
+    platform: "windows",
+    host: { params: { projectsRoot: root, flowZoomProbe: 1 } },
+  });
+  await app.waitUntil(() => app.shows("id:projects-page"));
+
+  await app.press("id:new-project");
+  await app.waitUntil(() => app.shows("id:project-title"));
+  await app.type("id:project-title", "Host window");
+  await app.press("id:project-submit");
+  await waitForProjectWindow(app);
+  await app.waitUntil(() => percentOf(app) > 0);
+  // Projects left the desktop while the project's window took its place.
+  await app.waitUntil(() => !app.shows("id:projects-page"));
+  expect(app.shows("id:projects-page")).toBe(false);
+  // The project's name is the window's title.
+  if (app.shows("id:title-bar")) {
+    await app.waitUntil(() => app.shows("text:Host window"));
+    // The app's own bar hides the system one on this window too, not only on
+    // the first window `nsh.json` configures.
+    const id = projectWindowId(app);
+    await app.waitUntil(() => {
+      const state = id === null ? null : app.window(id)?.state();
+      return state !== null && state.bounds.size.height - state.contentBounds.size.height < 15;
+    });
+  }
+
+  await closeProjectWindow(app);
+  await app.waitUntil(() => app.shows("id:projects-page"));
+});
+
 test("hides the system title bar under the app's own", async () => {
   const app = await openApp({ platform: "windows" });
   await app.waitUntil(() => percentOf(app) > 0);
@@ -230,9 +266,22 @@ test("hides the system title bar under the app's own", async () => {
   // `titleBar` set, say) adds its caption height. Both are reported in
   // points, so the gap does not depend on the display's scale.
   await app.waitUntil(() => {
-    const state = app.window("main").state();
+    const state = app.window("document").state();
     return state !== null && state.bounds.size.height - state.contentBounds.size.height < 15;
   });
+});
+
+test("opens the window menu from the title bar on this host", async () => {
+  const app = await openApp({ platform: "windows" });
+  await app.waitUntil(() => percentOf(app) > 0);
+  if (!app.shows("id:window-menu")) return;
+
+  await app.press("id:window-menu");
+  await app.waitUntil(() => app.menu() !== null);
+  const labels = (app.menu() ?? []).map((item) => item.label);
+  expect(labels).toContain("Settings…");
+  await app.closeMenu();
+  await app.waitUntil(() => app.menu() === null);
 });
 
 test("pins and unpins the desktop window", async () => {

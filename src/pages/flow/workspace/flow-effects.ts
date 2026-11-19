@@ -3,14 +3,12 @@ import { effect, untracked } from "nsh";
 import type { CanvasCamera, FlowScene } from "../../../flow/canvas";
 import type { CanvasMenuController } from "../../../flow/canvas/interaction/context-menu";
 import { samePoint, sameRect, type BoxGeometry, type Point } from "../../../flow/shared";
-import { setSelectedCount } from "../../../store";
 import type { FlowWorkspace } from "./flow-workspace";
 
 /** Publishes the selection count and opens or closes editors for a change. */
 export function syncSelection(workspace: FlowWorkspace): void {
   const ids = workspace.scene.selection();
   const session = workspace.session();
-  setSelectedCount(ids.length);
   // Opening or closing a composer must not re-arm this effect: only a
   // selection change (or the session appearing) re-runs it.
   untracked(() => {

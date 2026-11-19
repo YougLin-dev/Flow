@@ -22,13 +22,18 @@ All notable changes to Flow are recorded here. The format follows
   backup folder or .zip of the same project after verifying it. The
   canvas's
   rename control renames the open project in place; the title bar and the
-  list show the new name and the package never moves. Exactly one
-  project is open per window, and the canvas's leading
-  Projects control closes the document before releasing the package; closing
-  a project or quitting saves the open composer's draft and the inline
-  editor's text before the close, and dismissing the New project dialog while
-  a create is still writing leaves that row in the list instead of trapping
-  the dialog. The window title bar names the open project. `bun run dev` now keeps
+  list show the new name and the package never moves. Each project opens in
+  a window of its own, several at once; Projects closes when one opens and
+  returns when the last project window closes, Settings is its own window,
+  and the app-level quit coordinator saves and closes every project
+  before quitting, staying open with a notice if a close fails so it can be
+  retried. `mod+w` closes a project, `mod+shift+o` reopens Projects
+  and `mod+,` opens Settings from any window; closing a project or quitting
+  saves the open composer's draft and the inline editor's text before the
+  close, and dismissing the New project dialog while a create is still
+  writing leaves that row in the list instead of trapping the dialog. The
+  window title bar names the open project, and an unclean run offers to
+  continue it. `bun run dev` now keeps
   development data in `.nsh/dev/projects`; `FLOW_DB_PATH` still opens the
   legacy single document, and `FLOW_PROJECTS_ROOT` points the list at
   another root.
