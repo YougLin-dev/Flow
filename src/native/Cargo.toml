@@ -10,7 +10,7 @@ publish = false
 # NSH's app-host window model (v2): the fork commit that delivers it until
 # the design lands upstream. The CLI and generated types come from the same
 # commit (`.github/actions/nsh` builds it in CI).
-nsh-core = { git = "https://github.com/YougLin-dev/nsh", rev = "5b2f13c98baed2b7fe17d63ea86b03c3b56bb0e5" }
+nsh-core = { git = "https://github.com/YougLin-dev/nsh", rev = "e795db1ab0cf01eeb121c696f42ecbaa18c68384" }
 # Synchronous SeaORM. `rusqlite` is the SQLite driver; the direct dependency
 # enables the bundled SQLite build (including FTS5 and RTree).
 sea-orm-sync = { version = "2.0.4", default-features = false, features = [

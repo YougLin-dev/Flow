@@ -113,9 +113,9 @@ function App() {
 
   const ready = signal(false);
 
-  // The policy is the app's: with no project window open, Flow decides
+  // The mode is the app's: with no project window open, Flow decides
   // whether closing Projects ends it (macOS stays in the Dock).
-  Application.setQuitPolicy({ quitOnLastWindowClosed: false });
+  Application.setQuitMode("explicit");
 
   keymap.bind(
     {
