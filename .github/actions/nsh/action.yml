@@ -27,7 +27,7 @@ runs:
       env:
         NSH_REPO: https://github.com/YougLin-dev/nsh
         NSH_BRANCH: feat/window-model-v2
-        NSH_REV: e795db1ab0cf01eeb121c696f42ecbaa18c68384
+        NSH_REV: 2701ea61402d02bb83483937db49d0f138433ae4
       run: |
         rm -rf "$RUNNER_TEMP/nsh"
         git init --quiet "$RUNNER_TEMP/nsh"
