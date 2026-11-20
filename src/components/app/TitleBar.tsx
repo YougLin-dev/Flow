@@ -116,10 +116,11 @@ export function TitleBar(props: TitleBarProps) {
       </View>
       {pinnable && (
         <Button
+          testID="pin-window"
           accessibilityLabel={pinned() ? "Unpin window" : "Pin window on top"}
           selected={pinned()}
           onPress={togglePinned}
-          class="items-center justify-center hover:bg-titlebar-hover active:bg-titlebar-active focus:bg-accent"
+          class="items-center justify-center hover:bg-titlebar-hover active:bg-titlebar-active focus-visible:bg-accent"
           classList={{ "bg-titlebar-pinned": pinned() }}
           // 46 points is the width of one Windows caption button, so the pin
           // lane reads as part of the system controls.
@@ -135,7 +136,7 @@ export function TitleBar(props: TitleBarProps) {
         testID="window-menu"
         accessibilityLabel="Window menu"
         onPress={openMenu}
-        class="items-center justify-center hover:bg-titlebar-hover active:bg-titlebar-active focus:bg-accent"
+        class="items-center justify-center hover:bg-titlebar-hover active:bg-titlebar-active focus-visible:bg-accent"
         style={{ width: 46, height: "100%" }}
       >
         <Text class="text-base text-card-foreground">⋯</Text>

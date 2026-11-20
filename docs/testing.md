@@ -367,7 +367,11 @@ recovers a failed load, and a return during an in-flight load is ignored.
 active-project title state.
 `components/app/TitleBar.test.tsx` proves the bar follows its title accessor,
 and `App.host.test.tsx` repeats the managed open rename on the real host and
-asserts the title bar's text, so the shell's rename wiring is covered too.
+asserts the title bar's text, so the shell's rename wiring is covered too. The
+host file also proves the bar's controls keep no highlight a press's focus
+gave them and show the keyboard's focus (`focus-visible:`); the press one is
+gated to a real host, whose presses take the focus and which draws the
+screenshot that tells it from a headless run.
 `pages/projects/project-action-run.test.ts` pins the dismissed-dialog rule
 (no write starts, no result applies, a late failure reaches the list).
 `ProjectsPage.test.tsx` mounts the page over a fixed damaged package through a

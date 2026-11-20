@@ -284,6 +284,55 @@ test("opens the window menu from the title bar on this host", async () => {
   await app.waitUntil(() => app.menu() === null);
 });
 
+test("a title bar control keeps no highlight after a press", async () => {
+  const app = await openApp({ platform: "windows" });
+  await app.waitUntil(() => percentOf(app) > 0);
+  const pin = "label:Pin window on top";
+
+  // A web host owns the window; the app has no pin control there.
+  if (!app.shows(pin)) return;
+
+  // Only a real desktop's press gives its control the keyboard focus, so
+  // only there does the state the press leaves exist. The host draws the
+  // window; a headless run draws nothing and rejects its screenshot.
+  const drawsWindow = await app.screenshot().then(
+    () => true,
+    () => false,
+  );
+  if (!drawsWindow) return;
+
+  // The bar's controls show the pointer's states and the keyboard's
+  // focus-visible: state only, so the click leaves only the control's own
+  // (pinned) paint, as the system's caption buttons keep no focus highlight.
+  await app.press(pin);
+  await app.waitUntil(() => app.shows("label:Unpin window"));
+  // Off the control: the pointer's hover tint leaves with it, and one read
+  // shows what the press left (querying again could move the focus).
+  await app.hover("id:title-bar");
+  const pressed = app.viewStyle("id:pin-window")?.backgroundColor ?? null;
+  // Tab takes the focus to the window menu; the pin looks the same there as
+  // it did with the press's focus on it, so the focus paints nothing.
+  await app.keyboard.press("tab");
+  const unfocused = app.viewStyle("id:pin-window")?.backgroundColor ?? null;
+  expect(pressed).not.toBeNull();
+  expect(pressed).toBe(unfocused);
+});
+
+test("a title bar control shows the keyboard's focus", async () => {
+  const app = await openApp({ platform: "windows" });
+  await app.waitUntil(() => percentOf(app) > 0);
+  const menu = "id:window-menu";
+
+  // A web host owns the window; the app has no title bar there.
+  if (!app.shows(menu)) return;
+
+  // Tab reaches the bar's controls before the canvas: the pin, then the
+  // window menu, which shows the keyboard's focus (focus-visible:).
+  await app.keyboard.press("tab");
+  await app.keyboard.press("tab");
+  expect(app.viewStyle(menu)?.backgroundColor ?? null).not.toBeNull();
+});
+
 test("pins and unpins the desktop window", async () => {
   const app = await openApp({ platform: "windows" });
   await app.waitUntil(() => percentOf(app) > 0);

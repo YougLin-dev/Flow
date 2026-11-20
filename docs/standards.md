@@ -289,8 +289,8 @@ in `src/theme.json` via `token()` or token classes such as `bg-card`,
 MUST NOT contain raw hex, `rgb()`/`rgba()`/`hsl()` or palette classes. When a
 role is missing, add a semantic token with both light and dark values. Token
 classes adapt automatically, so `dark:` MUST NOT be used for token colors; use
-`hover:`, `active:`, `focus:`, `selected:` and `disabled:` or component state
-props. Exceptions: `src/theme.json` itself and test fixtures. A new or changed
+`hover:`, `active:`, `focus:` / `focus-visible:`, `selected:` and `disabled:`
+or component state props. Exceptions: `src/theme.json` itself and test fixtures. A new or changed
 token pair MUST
 be checked as an actual foreground/background pair: 4.5:1 for normal text,
 3:1 for large text, UI boundaries, focus and state indicators. Do not assume a
@@ -307,7 +307,9 @@ selection count and zoom MUST be mirrored in accessible text whenever their
 chrome is shown. Every chrome action MUST
 be keyboard operable except a
 documented path-dependent exception. Keyboard-operable views MUST have a
-visible `focus:` style. Canvas direct manipulation is the documented
+visible `focus-visible:` style: a press gives its control the keyboard focus
+on a desktop, and that focus MUST NOT leave a highlight behind, as the
+system's caption buttons keep none. Canvas direct manipulation is the documented
 exception: selecting, moving and resizing cards is a pointer gesture. Every
 edit reachable that way also has a native path: selecting a card opens the
 composer, whose controls are ordinary NSH controls with names, focus and
