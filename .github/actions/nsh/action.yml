@@ -1,11 +1,12 @@
 name: Build pinned NSH
 description: Builds the NSH CLI from the fork commit the app's Rust core pins.
 
-# The window-model v2 APIs are not in an upstream NSH release yet. CI and the
+# NSH's window model v2 is merged on main but not in a release yet. CI and the
 # installer workflow build the CLI from the same commit as `nsh-core`
 # (`src/native/Cargo.toml`) instead of installing the nsh.dev nightly. The
-# branch is fetched at depth 1 and checked against the pin, so a moved branch
-# fails here rather than silently building another revision.
+# fork's `main` is fetched at depth 1 and checked against the pin, so a moved
+# branch fails here rather than silently building another revision; sync the
+# fork's main and bump the pin to follow NSH.
 inputs:
   release:
     description: Build the release CLI (`true`) instead of the debug one
@@ -26,8 +27,8 @@ runs:
       shell: bash
       env:
         NSH_REPO: https://github.com/YougLin-dev/nsh
-        NSH_BRANCH: feat/window-model-v2
-        NSH_REV: 2701ea61402d02bb83483937db49d0f138433ae4
+        NSH_BRANCH: main
+        NSH_REV: 697857f6acd2b447c89b259d9deb568eefc2d741
       run: |
         rm -rf "$RUNNER_TEMP/nsh"
         git init --quiet "$RUNNER_TEMP/nsh"
