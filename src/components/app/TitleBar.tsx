@@ -1,11 +1,12 @@
 import { Button } from "nsh/base";
-import { colorScheme, Image, platform, signal, Text, View } from "nsh";
+import { colorScheme, computed, Image, platform, signal, Text, View } from "nsh";
 import {
   currentWindow,
   isAvailable,
   Menu as DesktopMenu,
   titleBar,
   type MenuItem,
+  type TitleBarArea,
 } from "nsh/desktop";
 import appIcon from "../../assets/icons/32x32.png";
 import pinLight from "../../assets/pin-light.png";
@@ -47,8 +48,13 @@ export function TitleBar(props: TitleBarProps) {
   // Off the desktops (a phone, the web page) `<Window>` degrades to its
   // content in the one surface; there is no window to ask about.
   const win = isAvailable ? currentWindow() : null;
-  // One reactive read: `titleBar()` reports the app's bar while it is hidden.
-  const area = win ? titleBar() : { height: TITLEBAR_HEIGHT, left: 0, right: 0 };
+  // A component body reads a signal once (a bar made before the platform
+  // reported the area would keep its first value), so the read is a
+  // `computed` that the style below reads: it reports the app's bar while
+  // it is hidden, and the style follows it, full screen included.
+  const area = computed<TitleBarArea>(() =>
+    win ? titleBar() : { height: TITLEBAR_HEIGHT, left: 0, right: 0 },
+  );
   // The window API only answers while rendering; the core sends the level
   // once and again only when it changes.
   win?.set({ level: pinned() ? "floating" : "normal" });
@@ -89,13 +95,13 @@ export function TitleBar(props: TitleBarProps) {
       desktop={{ windowDrag: true }}
       class="shrink-0 flex-row items-center border-b border-border bg-card"
       style={{
-        height: area.height || TITLEBAR_HEIGHT,
-        paddingLeft: area.left + 8,
+        height: area().height || TITLEBAR_HEIGHT,
+        paddingLeft: area().left + 8,
         // Where the system controls are on the right (Windows, GTK), the
         // controls lane ends exactly where they begin, so it reads as part of
         // them. On macOS they are on the left, and the bar keeps its usual
         // margin.
-        paddingRight: area.right || 8,
+        paddingRight: area().right || 8,
       }}
     >
       <View class="min-w-0 flex-1 flex-row items-center overflow-hidden">
