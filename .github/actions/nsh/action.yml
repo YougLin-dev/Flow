@@ -28,7 +28,7 @@ runs:
       env:
         NSH_REPO: https://github.com/YougLin-dev/nsh
         NSH_BRANCH: main
-        NSH_REV: 697857f6acd2b447c89b259d9deb568eefc2d741
+        NSH_REV: e0ca503108f5f6aa8501e17d342fc06de64f1975
       run: |
         rm -rf "$RUNNER_TEMP/nsh"
         git init --quiet "$RUNNER_TEMP/nsh"
