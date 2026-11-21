@@ -20,10 +20,10 @@ runs:
     - name: Install nshw
       shell: bash
       env:
-        NSHW_REV: f6f5484c983cf22cc6e2fb5675587147e8c45cce
+        NSHW_TAG: v0.1.1
         RUSTUP_TOOLCHAIN: stable
       run: |
-        cargo install --git https://github.com/YougLin-dev/nshw --rev "$NSHW_REV" --locked
+        cargo install --git https://github.com/YougLin-dev/nshw --tag "$NSHW_TAG" --locked
         echo "NSH_CACHE=$RUNNER_TEMP/nsh-cache" >> "$GITHUB_ENV"
         echo 'RUSTUP_TOOLCHAIN=stable' >> "$GITHUB_ENV"
         echo 'NSH_TOOLCHAIN_ALLOW=YougLin-dev/nsh' >> "$GITHUB_ENV"
