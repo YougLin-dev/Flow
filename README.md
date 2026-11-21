@@ -34,13 +34,15 @@ host to `capabilities.network` deliberately.
 ## Requirements
 
 - [Bun](https://bun.sh/) 1.4 or newer (`packageManager` pins the exact version)
-- The `nsh` CLI built from `YougLin-dev/nsh` at commit
-  `025650b0b3731533773d8a2188e3f2ef97469944` (the window-model v2 delivery).
-  The Rust core pins the same commit in `src/native/Cargo.toml`, and the CLI,
-  its generated types and the Rust core must all come from it. Upstream
-  nsh.dev releases do not contain the v2 window APIs yet. Build the CLI from
-  a checkout of that commit with `cargo build --release -p nsh-cli` and put
-  its `target/release` on `PATH`; CI does the same (`.github/actions/nsh`).
+- The [`nshw`](https://github.com/YougLin-dev/nshw) selector. `src/nsh.json`
+  declares the exact NSH revision and repository; the Rust core pins the same
+  commit in `src/native/Cargo.lock`. Keep those declarations synchronized.
+  Install it with
+  `cargo install --git https://github.com/YougLin-dev/nshw --rev f6f5484c983cf22cc6e2fb5675587147e8c45cce --locked`.
+  Project scripts call `nshw`, not an unrelated system `nsh`: it obtains the
+  declared desktop CLI, host and app and rejects a mismatch with the Cargo
+  lock. A fork selection additionally requires
+  `NSH_TOOLCHAIN_ALLOW=YougLin-dev/nsh` (CI sets it).
 - A Rust toolchain with Cargo (for the `src/native/` mixed-app crate)
 
 ## Quick start
@@ -61,7 +63,7 @@ otherwise prefers `host.params.databasePath`/`FLOW_DB_PATH`, then
 The `process.env` capability in `src/nsh.json` grants exactly
 `FLOW_DB_PATH`, `FLOW_PROJECTS_ROOT` and `FLOW_FPS`.
 
-The first `nsh` command writes `src/.nsh/types` (NSH's TypeScript
+The first `nshw` command writes `src/.nsh/types` (NSH's TypeScript
 declarations) and `src/.nsh/tsconfig.json`. They are generated, git-ignored and
 safe to delete. Build and installer output stay at `.nsh/out` in the
 repository root.
@@ -70,14 +72,14 @@ repository root.
 
 | Command              | What it does                                                                             |
 | -------------------- | ---------------------------------------------------------------------------------------- |
-| `bun run dev`        | Runs the app on this machine (`nsh run src`).                                            |
-| `bun run build`      | Builds the bundle for deployment (`nsh build src`, output in `.nsh/out`).                |
+| `bun run dev`        | Runs the app on this machine (`nshw run src`).                                           |
+| `bun run build`      | Builds the bundle for deployment (`nshw build src`, output in `.nsh/out`).               |
 | `bun run test`       | Runs Rust unit tests plus every app test (`*.test.ts(x)`) headless.                      |
 | `bun run test:host`  | Runs the platform tests (`*.host.test.tsx`) on this machine's host.                      |
 | `bun run test:lint`  | Runs the boundary and structure rule tests (`bun test lint scripts/structure.test.mjs`). |
 | `bun run test:bench` | Runs the ignored 100k SQLite/FTS5/RTree benchmark.                                       |
 | `bun run test:100k`  | Seeds 100k nodes and drives the real host UI against them.                               |
-| `bun run typecheck`  | Type-checks with NSH's compiler settings (`nsh check src`).                              |
+| `bun run typecheck`  | Type-checks with NSH's compiler settings (`nshw check src`).                             |
 | `bun run lint`       | Checks types, then lints with Oxlint; `lint:fix` applies fixes.                          |
 | `bun run fmt`        | Formats with Oxfmt (`vp fmt`); `fmt:rust` formats the native crate.                      |
 | `bun run check`      | Format, lint, type-check, Rust fmt/clippy and boundary/structure tests.                  |

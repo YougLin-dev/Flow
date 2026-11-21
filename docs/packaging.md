@@ -13,7 +13,7 @@ that output in a native installer with
 The script reads the name, id and version from `src/nsh.json`, so those stay
 the single source of truth; the generated packager config is written to
 `.nsh/out/packager.<platform>.json`. The app root is `src/`, so NSH is called
-as `nsh package --target <os> src`. `nsh package` also writes
+as `nshw package --target <os> src`. It also writes
 `capabilities.json` from `src/nsh.json`, so the packaged app keeps the same
 sandbox as development.
 
@@ -26,18 +26,16 @@ runtimes (`nsh-macos-app` and `nsh-linux-app` are host tools).
 
 To produce all three from one place, run the same command on a CI matrix
 (`windows-latest`, `macos-latest`, `ubuntu-24.04`) and upload
-`.nsh/out/installers` as the artifacts. Each runner needs Bun, NSH, a Rust
+`.nsh/out/installers` as the artifacts. Each runner needs Bun, `nshw`, a Rust
 toolchain and the platform build dependencies below; the mixed app's
-`src/native/` crate is compiled as part of `nsh package`.
+`src/native/` crate is compiled as part of `nshw package`.
 
 ## Requirements
 
-- **All hosts:** Bun, the `nsh` CLI and Rust/Cargo. The CLI is built from
-  `YougLin-dev/nsh` at commit `025650b0b3731533773d8a2188e3f2ef97469944`
-  (window-model v2), the commit `src/native/Cargo.lock` pins for `nsh-core`.
-  The installer workflow builds the CLI and this OS's runtime from that
-  checkout; a manual `bun run package` uses the `nsh` on `PATH`, which must
-  be that commit.
+- **All hosts:** Bun, [`nshw`](https://github.com/YougLin-dev/nshw) and
+  Rust/Cargo. `src/nsh.json` declares the NSH revision; `nshw` obtains the
+  matching CLI, host and app, and rejects a mismatch with
+  `src/native/Cargo.lock`.
 - **Windows:** Visual Studio Build Tools with the C++ workload and the Windows
   SDK (for the Rust runtime and bundled SQLite); the packager downloads NSIS
   itself.
