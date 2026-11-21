@@ -11,7 +11,7 @@
  * Rust benchmark still reads real persisted image assets.
  *
  * The run labels itself as a development-host profile. It is not the release
- * Rust benchmark: the host is `nsh test --target` (a development build) and
+ * Rust benchmark: the host is `nshw test --target` (a development build) and
  * the wall times include test-host setup, not release DB latency. The app reads
  * FLOW_DB_PATH (declared in nsh.json's capabilities); the dev and test hosts
  * would otherwise open their own document. The generated database and
@@ -68,11 +68,11 @@ console.log(
   `100k smoke seed elapsed=${Date.now() - seedStarted}ms path=${dbPath} bytes=${seededBytes}`,
 );
 console.log(
-  "100k smoke profile: release Rust fixture seed, then a development host via nsh test --target with --trace/--fps/--verbose; these are not release-host timings",
+  "100k smoke profile: release Rust fixture seed, then a development host via nshw test --target with --trace/--fps/--verbose; these are not release-host timings",
 );
 
 const result = spawnSync(
-  "nsh",
+  "nshw",
   ["test", "src/Smoke100k.host.test.tsx", "--target", target, "--trace", "--fps", "--verbose"],
   {
     stdio: "inherit",

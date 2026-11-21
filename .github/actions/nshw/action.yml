@@ -1,0 +1,23 @@
+name: Install nshw
+description: Installs nshw, which runs the NSH revision declared in src/nsh.json.
+
+runs:
+  using: composite
+  steps:
+    - name: Set up the Windows build
+      if: runner.os == 'Windows'
+      shell: bash
+      run: |
+        echo 'LIBCLANG_PATH=C:\Program Files\LLVM\bin' >> "$GITHUB_ENV"
+        echo 'RUST_MIN_STACK=268435456' >> "$GITHUB_ENV"
+
+    - name: Install nshw
+      shell: bash
+      env:
+        NSHW_REV: f6f5484c983cf22cc6e2fb5675587147e8c45cce
+        RUSTUP_TOOLCHAIN: stable
+      run: |
+        cargo install --git https://github.com/YougLin-dev/nshw --rev "$NSHW_REV" --locked
+        echo 'RUSTUP_TOOLCHAIN=stable' >> "$GITHUB_ENV"
+        echo 'NSH_TOOLCHAIN_ALLOW=YougLin-dev/nsh' >> "$GITHUB_ENV"
+        nshw toolchain version

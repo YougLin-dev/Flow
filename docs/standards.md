@@ -9,9 +9,9 @@ silently.
 **Language.** MUST and MUST NOT are mandatory; SHOULD is the expected default
 unless the PR states a reason and a reviewer accepts it; MAY is optional.
 **Enforcement tags.** **Lint** = Oxlint rules in `vite.config.ts` run by
-`bun run check`; **Type** = `nsh check src` and the `typeCheck` step;
+`bun run check`; **Type** = `nshw check src` and the `typeCheck` step;
 **Lint test** = `bun run test:lint` (inside `bun run check`); **Test** =
-`bun run test` (`nsh test src`); **Host** = `bun run test:host`;
+`bun run test` (`nshw test src`); **Host** = `bun run test:host`;
 **Review** = the checklist in section 11; **Manual** = light/dark, screen
 reader, profiling or target-OS evidence; **CI** = the workflows. A rule claimed
 as automated MUST have a fixture or test proving it can fail; for the boundary
@@ -33,7 +33,7 @@ that render it.
 Feature specifications, copy and roadmap are out of scope.
 
 **The gate.** A change is verified only by `bun run check` (which runs
-`nsh check src && vp check --deny-warnings && bun run test:lint && bun run
+`nshw check src && vp check --deny-warnings && bun run test:lint && bun run
 check:rust`) and `bun run test`. Warnings fail the gate. `bun run test:host`
 adds real desktop input and window evidence; `bun run test:bench` runs the
 ignored 100k SQLite/search benchmark; `bun run package` adds installer evidence
@@ -68,8 +68,8 @@ rules those documents explain and resolves their conflicts.
 ### 3.1 App root and NSH configuration
 
 `src/nsh.json`, `src/theme.json`, `src/App.tsx`, `src/assets/` and every app
-module MUST stay under `src/`. Every NSH command MUST pass `src` (`nsh run src`,
-`nsh build src`, `nsh test src`, `nsh check src`, `nsh package --target <os>
+module MUST stay under `src/`. Every NSH command MUST pass `src` (`nshw run src`,
+`nshw build src`, `nshw test src`, `nshw check src`, `nshw package --target <os>
 src`). `src/tsconfig.json` MUST extend `./.nsh/tsconfig.json`; the root
 `tsconfig.json` MUST extend `./src/tsconfig.json`. Generated `src/.nsh/` and
 root `.nsh/out` MUST NOT be edited or committed. Asset and theme paths in
@@ -625,9 +625,9 @@ formatting owned by Oxfmt is not a review topic. (Review)
 
 | Area                                                          | Enforced by                                                                                                                                                                                       | A finding is                                                                                              |
 | ------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------- |
-| App root and commands                                         | Scripts pass `src`; `nsh check src`; Review                                                                                                                                                       | A command without `src`, a moved config or an edited `.nsh/`                                              |
+| App root and commands                                         | Scripts pass `src`; `nshw check src`; Review                                                                                                                                                      | A command without `src`, a moved config or an edited `.nsh/`                                              |
 | Formatting                                                    | `bun run check` (`vp check --deny-warnings`)                                                                                                                                                      | Any diff or warning                                                                                       |
-| Types and strict flags                                        | `nsh check src`, `vp` typeCheck                                                                                                                                                                   | Type error, weakened flag, unexplained suppression                                                        |
+| Types and strict flags                                        | `nshw check src`, `vp` typeCheck                                                                                                                                                                  | Type error, weakened flag, unexplained suppression                                                        |
 | `any`, unsafe values, assertions, promises, exhaustive unions | Oxlint in `vite.config.ts`                                                                                                                                                                        | A lint error                                                                                              |
 | Names, default exports, 500-line cap                          | `unicorn/filename-case`, `import/no-default-export`, `max-lines`                                                                                                                                  | A lint error                                                                                              |
 | Layer direction and cycles                                    | `boundaries/no-upward-import`, `import/no-cycle`, `lint/boundaries.test.js`                                                                                                                       | A lint error, including bare directory and unclassified imports; a failing rule test                      |

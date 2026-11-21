@@ -33,15 +33,17 @@ jobs:
         with:
           workspaces: src/native -> target
 
-      # The pinned NSH is built from source: QuickJS is C, and bindgen needs
-      # libclang on Linux.
+      # nshw builds the declared NSH source: QuickJS is C, bindgen needs
+      # libclang, and the Linux desktop runtime links GTK 4 and GStreamer.
       - name: Install the NSH build dependencies (Linux)
         if: runner.os == 'Linux'
-        run: sudo apt-get update && sudo apt-get install -y clang libclang-dev
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y clang libclang-dev build-essential pkg-config \
+            libgtk-4-dev libwebkitgtk-6.0-dev \
+            libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev
 
-      # The window-model v2 APIs are not in an upstream release yet, so build
-      # the CLI from the same commit as the Rust core instead of the nightly.
-      - uses: ./.github/actions/nsh
+      - uses: ./.github/actions/nshw
 
       - run: bun install --frozen-lockfile
 

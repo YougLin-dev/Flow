@@ -26,7 +26,7 @@ if (legacyDb) {
   env.FLOW_PROJECTS_ROOT = projectsRoot;
 }
 
-const result = spawnSync("nsh", ["run", "src", ...process.argv.slice(2)], {
+const result = spawnSync("nshw", ["run", "src", ...process.argv.slice(2)], {
   stdio: "inherit",
   env,
 });
