@@ -11,6 +11,12 @@ runs:
         echo 'LIBCLANG_PATH=C:\Program Files\LLVM\bin' >> "$GITHUB_ENV"
         echo 'RUST_MIN_STACK=268435456' >> "$GITHUB_ENV"
 
+    - name: Cache the declared NSH toolchain
+      uses: actions/cache@v4
+      with:
+        path: ${{ runner.temp }}/nsh-cache/toolchains
+        key: nsh-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('src/nsh.json') }}
+
     - name: Install nshw
       shell: bash
       env:
@@ -18,6 +24,7 @@ runs:
         RUSTUP_TOOLCHAIN: stable
       run: |
         cargo install --git https://github.com/YougLin-dev/nshw --rev "$NSHW_REV" --locked
+        echo "NSH_CACHE=$RUNNER_TEMP/nsh-cache" >> "$GITHUB_ENV"
         echo 'RUSTUP_TOOLCHAIN=stable' >> "$GITHUB_ENV"
         echo 'NSH_TOOLCHAIN_ALLOW=YougLin-dev/nsh' >> "$GITHUB_ENV"
         nshw toolchain version
