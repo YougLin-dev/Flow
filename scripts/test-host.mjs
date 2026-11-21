@@ -8,7 +8,7 @@
  *
  * Everything else belongs to `bun run test`: pure unit tests, the mounted
  * app's headless tests, and `*.native.test.ts` files, which cannot load the
- * Rust module in a host test bundle. Extra arguments go to `nsh test`, e.g.
+ * Rust module in a host test bundle. Extra arguments go to `nshw test`, e.g.
  * `bun run test:host -- --filter composer`.
  */
 import { spawnSync } from "node:child_process";
@@ -47,7 +47,7 @@ if (files.length === 0) {
 let failed = false;
 for (const file of files) {
   console.log(`host: ${basename(file)}`);
-  const result = spawnSync("nsh", ["test", file, "--target", target, ...extra], {
+  const result = spawnSync("nshw", ["test", file, "--target", target, ...extra], {
     stdio: "inherit",
   });
   if (result.error) throw result.error;

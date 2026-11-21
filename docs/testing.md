@@ -1,7 +1,7 @@
 # Testing
 
 Tests under `src/` are `*.test.ts` / `*.test.tsx` files beside the code they
-test, run with `nsh test src` (the app root is `src/`). NSH opens each app on an
+test, run with `nshw test src` (the app root is `src/`). NSH opens each app on an
 engine of its own, headless by default, and `await`s the test callback, so tests
 can be `async`. The local structure rules have their own Bun tests,
 `lint/boundaries.test.js` and `scripts/structure.test.mjs`; they run without
@@ -10,9 +10,9 @@ NSH and prove the rule's reports.
 ```sh
 bun run test                       # every app test, headless
 bun run test -- --filter camera    # tests whose name contains "camera"
-nsh test src/flow/canvas/model/camera.test.ts   # one file
+nshw test src/flow/canvas/model/camera.test.ts  # one file
 bun run test:host                  # the *.host.test.tsx platform tests on this machine's host
-bun run test:host -- --filter zoom # one host behaviour (extra args go to nsh test)
+bun run test:host -- --filter zoom # one host behaviour (extra args go to nshw test)
 bun run test:lint                  # boundary and structure rule tests (part of check)
 bun run check:structure            # area/facade/root gate; part of check
 bun run test:bench                 # the ignored 100k SQLite/FTS5/RTree benchmark
@@ -20,7 +20,7 @@ bun run test:100k                  # seeds 100k nodes, then drives the real host
 bun run test:junit                 # also write src/.nsh/junit.xml for CI
 ```
 
-Rust tests live beside the native crate in `src/native/src/`. `nsh test src`
+Rust tests live beside the native crate in `src/native/src/`. `nshw test src`
 runs `cargo test` before the TSX tests; `bun run test:bench` runs the release
 benchmark that is ignored by the normal suite. The document and frozen v1
 schema/guard tests open real SeaORM/SQLite connections (in-memory plus a
@@ -58,7 +58,7 @@ The host target repeats only the platform tests (`*.host.test.tsx`) through
 the real input, window and desktop APIs; use it when changing title-bar
 geometry, window levels, appearance repainting, real pointer/keyboard plumbing
 or anything that only exists on a real desktop. `scripts/test-host.mjs` runs
-each host test file in its own `nsh test` process with `--target`, because the
+each host test file in its own `nshw test` process with `--target`, because the
 host loads a test bundle before an app registers its native module. That also
 means a test file that imports `@flow/native` at run time cannot run there:
 name it `*.native.test.ts` (for example `flow/document/session/node-session-run.native.test.ts`)
@@ -86,7 +86,7 @@ The smoke points the app at the database with `FLOW_DB_PATH` and runs
 pans, zooms, searches for the last node, reveals and selects it, closes that
 card's composer, fits the document (5%), zooms once more and saves screenshots
 (`flow-100k-reveal.png`, `flow-100k-overview.png`). Every wait reads probe
-state, not painted text; every other `nsh test` run skips the test because
+state, not painted text; every other `nshw test` run skips the test because
 the gate is the `flow-100k` bench path in `FLOW_DB_PATH`. That is a
 **development-host** profile, not the release Rust benchmark: it includes
 test-host setup and paint, and its wall times are observations, not
@@ -140,7 +140,7 @@ idle wakeups or comparing the app's unforced frame rate.
 Headless tracing is a separate mechanism:
 
 ```sh
-nsh test src/App.test.tsx --filter "clears the selection with Escape" --trace
+nshw test src/App.test.tsx --filter "clears the selection with Escape" --trace
 ```
 
 It prints mount batches with item counts under named steps, such as
@@ -153,12 +153,12 @@ Windows presentation and real-input/paint work: they provide engine work
 counts, not substitutes for release-host measurements.
 
 The real-host `bun run test:100k` smoke passes `--trace`, `--fps` and
-`--verbose` to `nsh test`; `--verbose` is required because the nonverbose
+`--verbose` to `nshw test`; `--verbose` is required because the nonverbose
 logger suppresses `nsh::fps` monitor records. Host `--trace` prints mount
 batches under the step they came in and the time of each commit. Treat commit
 and `event js` as separate `nsh::perf` records while the batches identify the
 steps; do not promise every composite under a step. `--fps` real-host
-frame/paint/canvas records supplement a headless `nsh test <file> --trace`
+frame/paint/canvas records supplement a headless `nshw test <file> --trace`
 trace. The smoke uses a development host and is a separate profile from the
 release Rust benchmark; use `bun run dev:release -- --fps -v` (above) for
 release-host measurements, and record the fixture revision with any

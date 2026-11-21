@@ -39,7 +39,7 @@ jobs:
             exit 1
           }
 
-      # The pinned NSH is built from source: QuickJS is C, and `nsh package`
+      # nshw builds the declared NSH source: QuickJS is C, and `nshw package`
       # also builds this OS's release runner, which links GTK 4 and GStreamer
       # on Linux.
       - name: Install the NSH build dependencies (Linux)
@@ -50,11 +50,12 @@ jobs:
             libgtk-4-dev libwebkitgtk-6.0-dev \
             libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev
 
-      # The installer embeds the runtime built from the same pinned checkout,
+      # The installer embeds the runtime built from the same declared checkout,
       # not a runtime downloaded from nsh.dev.
-      - uses: ./.github/actions/nsh
-        with:
-          release: "true"
+      - uses: ./.github/actions/nshw
+
+      # Build the declared CLI, host and app once, outside the gate step.
+      - run: nshw toolchain prefetch
 
       - run: bun install --frozen-lockfile
 
