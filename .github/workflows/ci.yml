@@ -45,6 +45,9 @@ jobs:
 
       - uses: ./.github/actions/nshw
 
+      # Build the declared CLI, host and app once, outside a gate step.
+      - run: nshw toolchain prefetch
+
       - run: bun install --frozen-lockfile
 
       # Format, lint, type-check and file names.

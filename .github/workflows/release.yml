@@ -54,6 +54,9 @@ jobs:
       # not a runtime downloaded from nsh.dev.
       - uses: ./.github/actions/nshw
 
+      # Build the declared CLI, host and app once, outside the gate step.
+      - run: nshw toolchain prefetch
+
       - run: bun install --frozen-lockfile
 
       # Never build an installer from a tree that fails the gate.
