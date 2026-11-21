@@ -1,12 +1,8 @@
 name: Build pinned NSH
 description: Builds the NSH CLI from the fork commit the app's Rust core pins.
 
-# NSH's window model v2 is merged on main but not in a release yet. CI and the
-# installer workflow build the CLI from the same commit as `nsh-core`
-# (`src/native/Cargo.toml`) instead of installing the nsh.dev nightly. The
-# fork's `main` is fetched at depth 1 and checked against the pin, so a moved
-# branch fails here rather than silently building another revision; sync the
-# fork's main and bump the pin to follow NSH.
+# The project declaration selects the exact fork revision. CI builds that
+# source instead of downloading a newer (or older) CLI.
 inputs:
   release:
     description: Build the release CLI (`true`) instead of the debug one
@@ -25,21 +21,25 @@ runs:
 
     - name: Fetch the pinned NSH commit
       shell: bash
-      env:
-        NSH_REPO: https://github.com/YougLin-dev/nsh
-        NSH_BRANCH: main
-        NSH_REV: e0ca503108f5f6aa8501e17d342fc06de64f1975
       run: |
-        rm -rf "$RUNNER_TEMP/nsh"
-        git init --quiet "$RUNNER_TEMP/nsh"
-        git -C "$RUNNER_TEMP/nsh" remote add origin "$NSH_REPO"
-        git -C "$RUNNER_TEMP/nsh" fetch --quiet --depth 1 origin "$NSH_BRANCH"
-        git -C "$RUNNER_TEMP/nsh" checkout --quiet --detach FETCH_HEAD
-        test "$(git -C "$RUNNER_TEMP/nsh" rev-parse HEAD)" = "$NSH_REV" || {
-          echo "NSH $NSH_BRANCH no longer points at the pin $NSH_REV" >&2
-          echo "Update the pin in .github/actions/nsh and src/native/Cargo.toml." >&2
+        NSH_REV=$(bun -e 'const pin = await Bun.file("src/nsh.json").json(); process.stdout.write(pin.toolchain.nsh.version.slice(4));')
+        NSH_REPOSITORY=$(bun -e 'const pin = await Bun.file("src/nsh.json").json(); console.log(pin.toolchain.nsh.repository);')
+        [[ "$NSH_REV" =~ ^[0-9a-f]{40}$ ]] || {
+          echo '$NSH_REV is not a full, lowercase Git revision' >&2
           exit 1
         }
+        [[ "$NSH_REPOSITORY" =~ ^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$ ]] || {
+          echo 'Invalid NSH repository in src/nsh.json' >&2
+          exit 1
+        }
+        echo "FLOW_NSH_REV=$NSH_REV" >> "$GITHUB_ENV"
+        rm -rf "$RUNNER_TEMP/nsh"
+        git init --quiet "$RUNNER_TEMP/nsh"
+        git -C "$RUNNER_TEMP/nsh" remote add origin "https://github.com/$NSH_REPOSITORY"
+        git -C "$RUNNER_TEMP/nsh" fetch --quiet --depth 1 origin "$NSH_REV"
+        git -C "$RUNNER_TEMP/nsh" checkout --quiet --detach FETCH_HEAD
+        test "$(git -C "$RUNNER_TEMP/nsh" rev-parse HEAD)" = "$NSH_REV"
+        git -C "$RUNNER_TEMP/nsh" remote get-url origin
 
     - name: Build the CLI
       shell: bash

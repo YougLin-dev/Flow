@@ -34,13 +34,16 @@ host to `capabilities.network` deliberately.
 ## Requirements
 
 - [Bun](https://bun.sh/) 1.4 or newer (`packageManager` pins the exact version)
-- The `nsh` CLI built from `YougLin-dev/nsh` at commit
-  `025650b0b3731533773d8a2188e3f2ef97469944` (the window-model v2 delivery).
-  The Rust core pins the same commit in `src/native/Cargo.toml`, and the CLI,
-  its generated types and the Rust core must all come from it. Upstream
-  nsh.dev releases do not contain the v2 window APIs yet. Build the CLI from
-  a checkout of that commit with `cargo build --release -p nsh-cli` and put
-  its `target/release` on `PATH`; CI does the same (`.github/actions/nsh`).
+- The [`nshw`](https://github.com/YougLin-dev/nshw) selector. `src/nsh.json`
+  declares the exact NSH revision and repository; the Rust core pins the same
+  commit in `src/native/Cargo.lock`. Keep those declarations synchronized.
+  Install the private release with
+  `gh api repos/YougLin-dev/nshw/contents/install.sh --jq .content | base64 --decode | sh -s -- --set-default`,
+  and put `~/.nshw/bin` first on PATH. Invoke commands through `nshw` or its
+  `nsh` alias, not an unrelated system `nsh`: the wrapper obtains the pinned
+  desktop CLI, host and app, and rejects a mismatch with the Cargo lock.
+  Fork selections additionally require
+  `NSH_TOOLCHAIN_ALLOW=YougLin-dev/nsh`.
 - A Rust toolchain with Cargo (for the `src/native/` mixed-app crate)
 
 ## Quick start

@@ -904,7 +904,7 @@ dependencies = [
 [[package]]
 name = "nsh-core"
 version = "0.6.0"
-source = "git+https://github.com/YougLin-dev/nsh?rev=e0ca503108f5f6aa8501e17d342fc06de64f1975#e0ca503108f5f6aa8501e17d342fc06de64f1975"
+source = "git+https://github.com/YougLin-dev/nsh?rev=c24505c146c8b7966d780c65879b5822d09beac5#c24505c146c8b7966d780c65879b5822d09beac5"
 dependencies = [
  "cap-std",
  "chrono",
@@ -934,7 +934,7 @@ dependencies = [
 [[package]]
 name = "nsh-macros"
 version = "0.6.0"
-source = "git+https://github.com/YougLin-dev/nsh?rev=e0ca503108f5f6aa8501e17d342fc06de64f1975#e0ca503108f5f6aa8501e17d342fc06de64f1975"
+source = "git+https://github.com/YougLin-dev/nsh?rev=c24505c146c8b7966d780c65879b5822d09beac5#c24505c146c8b7966d780c65879b5822d09beac5"
 dependencies = [
  "imagesize",
  "proc-macro2",

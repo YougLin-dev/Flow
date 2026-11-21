@@ -25,5 +25,11 @@
       "levels": ["floating"]
     },
     "picker": true
+  },
+  "toolchain": {
+    "nsh": {
+      "version": "rev=c24505c146c8b7966d780c65879b5822d09beac5",
+      "repository": "YougLin-dev/nsh"
+    }
   }
 }
