@@ -1,0 +1,6 @@
+# Cargo reads this from the app workspace and from NSH's generated
+# .nsh/rust workspace, so both resolve the same SeaQL adapter. The adapter
+# only raises rusqlite to 0.43, whose libsqlite3-sys 0.40 ships SQLite 3.54.1;
+# see src/native/vendor/sea-query-rusqlite/PATCH.md.
+[patch.crates-io]
+sea-query-rusqlite = { path = "src/native/vendor/sea-query-rusqlite" }

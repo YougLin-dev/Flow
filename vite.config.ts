@@ -1,6 +1,13 @@
 import { defineConfig } from "vite-plus";
 
-const generated = [".nsh/**", "src/.nsh/**", "target/**", "node_modules/**"];
+const generated = [
+  ".nsh/**",
+  "src/.nsh/**",
+  "target/**",
+  "node_modules/**",
+  // Keep the vendored SeaQL adapter out of formatting and lint traversal.
+  "src/native/vendor/**",
+];
 
 export default defineConfig({
   lint: {
