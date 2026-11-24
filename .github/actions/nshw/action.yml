@@ -20,7 +20,7 @@ runs:
     - name: Install nshw
       shell: bash
       env:
-        NSHW_TAG: v0.1.1
+        NSHW_TAG: v0.2.0
         RUSTUP_TOOLCHAIN: stable
       run: |
         cargo install --git https://github.com/YougLin-dev/nshw --tag "$NSHW_TAG" --locked
