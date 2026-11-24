@@ -51,16 +51,22 @@ toolchain and the platform build dependencies below; the mixed app's
 
 The icon comes from `src/assets/icon.svg`, rendered into:
 
-- `src/assets/icon.png` — 1024×1024, referenced by `src/nsh.json`. NSH embeds
-  it in the Windows executable and builds `AppIcon.icns` on macOS.
+- `src/assets/icon.png` — 1024×1024, edge to edge, the way Windows and Linux
+  draw an app icon. `src/nsh.json` names it for both.
+- `src/assets/icon-macos.png` — the same artwork inset to 824×824 and centered
+  on a transparent 1024×1024 canvas. macOS draws app icons inset (824 of
+  1024), so `src/nsh.json` names this one for macOS and the Dock icon matches
+  the size of the apps beside it.
 - `src/assets/icon.ico` — a 16–256 px multi-size icon used as the NSIS
   installer icon (the installer `.exe` and its window).
 - `src/assets/icons/<size>x<size>.png` — the hicolor sizes for the Linux
   `.deb` and AppImage.
 
-`bun run package` passes the macOS `.icns` and Linux PNGs to cargo-packager,
-and the `.ico` to NSIS. The app's own exe, shortcut and file icon come from the
-PNG that NSH embeds.
+`src/nsh.json`'s `icon` maps each platform to its PNG. NSH embeds the Windows
+icon in the executable, builds `AppIcon.icns` on macOS, and the development
+host sets the Dock icon from the macOS PNG too. `bun run package` passes the
+macOS `.icns` and Linux PNGs to cargo-packager, and the `.ico` to NSIS. The
+app's own exe, shortcut and file icon come from the PNG that NSH embeds.
 
 ## Code signing
 
@@ -80,8 +86,8 @@ PNG that NSH embeds.
 1. Keep the `id` in `src/nsh.json` unique. It is the reverse-DNS form of the
    developer's domain plus the app name — currently `studio.r4.flow` (from
    `r4.studio`). Apps that share an id also share their data.
-2. Replace `src/assets/icon.svg` (and re-render `icon.png`, `icon.ico` and
-   `icons/`) if the branding changes.
+2. Replace `src/assets/icon.svg` (and re-render `icon.png`, `icon-macos.png`,
+   `icon.ico` and `icons/`) if the branding changes.
 3. Bump `version` (and `build`) in `src/nsh.json`; the installer name follows
    it.
 

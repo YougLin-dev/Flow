@@ -414,3 +414,8 @@ All notable changes to Flow are recorded here. The format follows
   unclassified modules; Oxlint's import plugin is enabled.
 - The macOS installer reads NSH's real `.app` output path; the release
   workflow checks the tag against `src/nsh.json`; the packager is pinned.
+- The macOS Dock and app switcher show Flow's icon at the size of the apps
+  beside it: macOS draws app icons inset to 824 of 1024 pixels, while
+  `icon.png` fills its canvas. `src/nsh.json` names a new `icon-macos.png`
+  (the same artwork inset on a transparent canvas) for macOS and keeps the
+  full-bleed PNG for Windows and Linux.

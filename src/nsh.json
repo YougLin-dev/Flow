@@ -3,7 +3,11 @@
   "id": "studio.r4.flow",
   "version": "1.0.0",
   "build": 1,
-  "icon": "assets/icon.png",
+  "icon": {
+    "macos": "assets/icon-macos.png",
+    "windows": "assets/icon.png",
+    "linux": "assets/icon.png"
+  },
   "theme": "theme.json",
   "rust": "native",
   "window": {
