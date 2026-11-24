@@ -42,7 +42,9 @@ host to `capabilities.network` deliberately.
   Project scripts call `nshw`, not an unrelated system `nsh`: it obtains the
   declared desktop CLI, host and app and rejects a mismatch with the Cargo
   lock. A fork selection additionally requires
-  `NSH_TOOLCHAIN_ALLOW=YougLin-dev/nsh` (CI sets it).
+  `NSH_TOOLCHAIN_ALLOW=YougLin-dev/nsh` (CI sets it). The pinned NSH may warn
+  that it ignores the selector-owned `toolchain` key; that warning is
+  expected.
 - A Rust toolchain with Cargo (for the `src/native/` mixed-app crate)
 
 ## Quick start

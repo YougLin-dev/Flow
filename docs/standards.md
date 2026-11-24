@@ -472,8 +472,11 @@ Workflows MUST declare `permissions: contents: read` and elevate per job only.
 Secret-bearing actions SHOULD be pinned to a full commit SHA. Secrets MUST be
 available only to the release job through `env:` and MUST NOT be interpolated
 into `run:` or exposed to fork code. Installer scripts SHOULD be vendored or
-checksum-verified instead of piping a mutable remote script to a shell; the
-NSH version (`NSH_VERSION`) MUST be pinned. The release workflow MUST run
+checksum-verified instead of piping a mutable remote script to a shell; the NSH
+CLI revision MUST be pinned in `src/nsh.json` under
+`toolchain.nsh.version`. That key belongs to `nshw`, not to NSH's manifest
+schema; NSH may warn that it is unknown while the selector reads it first. The
+release workflow MUST run
 `bun run check` and `bun run test` before `bun run package`, and the release
 tag MUST equal `version` in `src/nsh.json` (the workflow checks this). `build`
 increments per release; `id` never changes. Installers SHOULD be
