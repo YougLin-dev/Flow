@@ -18,7 +18,7 @@ sea-orm-sync = { version = "2.0.4", default-features = false, features = [
   "macros",
   "rusqlite",
 ] }
-rusqlite = { version = "0.38", features = ["bundled"] }
+rusqlite = { version = "0.43", features = ["bundled"] }
 serde_json = "1.0"
 sha2 = "0.10"
 # The package importer reads a user-supplied .zip (ADR 0008). Only stored and

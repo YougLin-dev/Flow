@@ -32,6 +32,7 @@ mod search;
 mod seed;
 mod session;
 mod settings;
+mod sqlite_vfs;
 mod startup;
 mod verify;
 mod worker;
