@@ -304,18 +304,22 @@ test("a title bar control keeps no highlight after a press", async () => {
   // The bar's controls show the pointer's states and the keyboard's
   // focus-visible: state only, so the click leaves only the control's own
   // (pinned) paint, as the system's caption buttons keep no focus highlight.
+  const idle = app.viewStyle("id:pin-window")?.backgroundColor ?? null;
   await app.press(pin);
   await app.waitUntil(() => app.shows("label:Unpin window"));
-  // Off the control: the pointer's hover tint leaves with it, and one read
-  // shows what the press left (querying again could move the focus).
+  // Moving the pointer off the control clears its hover. A selected button
+  // keeps its own pinned paint; it is not a keyboard-focus highlight.
   await app.hover("id:title-bar");
   const pressed = app.viewStyle("id:pin-window")?.backgroundColor ?? null;
-  // Tab takes the focus to the window menu; the pin looks the same there as
-  // it did with the press's focus on it, so the focus paints nothing.
-  await app.keyboard.press("tab");
-  const unfocused = app.viewStyle("id:pin-window")?.backgroundColor ?? null;
-  expect(pressed).not.toBeNull();
-  expect(pressed).toBe(unfocused);
+  // The separate test below checks keyboard focus. Do not infer that focus
+  // from the selected background, or pin a platform's Tab traversal here.
+  expect(pressed).not.toBe(idle);
+  // Also isolate the unselected state: no pinned paint can hide a leftover
+  // focus background here.
+  await app.press("label:Unpin window");
+  await app.waitUntil(() => app.shows(pin));
+  await app.hover("id:title-bar");
+  expect(app.viewStyle("id:pin-window")?.backgroundColor ?? null).toBe(idle);
 });
 
 test("a title bar control shows the keyboard's focus", async () => {
