@@ -38,7 +38,7 @@ host to `capabilities.network` deliberately.
   declares the exact NSH revision and repository; the Rust core pins the same
   commit in `src/native/Cargo.lock`. Keep those declarations synchronized.
   Install it with
-  `cargo install --git https://github.com/YougLin-dev/nshw --tag v0.1.1 --locked`.
+  `cargo install --git https://github.com/YougLin-dev/nshw --tag v0.2.0 --locked`.
   Project scripts call `nshw`, not an unrelated system `nsh`: it obtains the
   declared desktop CLI, host and app and rejects a mismatch with the Cargo
   lock. A fork selection additionally requires
